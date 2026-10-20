@@ -75,6 +75,16 @@ public:
 	
 	virtual void doDrawModule(const Matrix3D* transformMtx) = 0;
 
+	/** LOGIC-THREAD.md phase 2, M4: what the constructor would do on the device, the asset manager or
+		the scene (render objects, textures, emitters).  The drawable calls it once, at the end of its
+		own constructor, or after the tick for a drawable logic makes inside one, so a module's
+		constructor touches none of that.  madeInTick is the second case. */
+	virtual void buildRenderObjects( Bool madeInTick ) { }
+
+	/** M7: a module the player's "extra animations" option leaves out below its MinLODRequired, one
+		above STATIC_GAME_LOD_LOW (0); the reads logic makes of the draw modules skip it everywhere. */
+	Bool isLODOptional() const { return (Int)getModuleData()->getMinimumRequiredGameLOD() > 0; }
+
 	virtual void setShadowsEnabled(Bool enable) = 0;
 	virtual void releaseShadows(void) = 0;	///< frees all shadow resources used by this module - used by Options screen.
 	virtual void allocateShadows(void) = 0; ///< create shadow resources if not already present. Used by Options screen.

@@ -40,6 +40,7 @@
 #include "Common/CRCDebug.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
+#include "Common/LatchRestore.h"
 #include "Common/PerfTimer.h"
 #include "Common/RandomValue.h"
 #include "Common/ThingTemplate.h"
@@ -98,10 +99,14 @@ static Bool s_headlightDrawn = FALSE;
 #endif
 
 //-------------------------------------------------------------------------------------------------
+/** W3DModelDraw::buildRenderObjects of a drawable logic made in a tick, run after it. */
+static Bool s_fillingLogicCaches = FALSE;
+
+//-------------------------------------------------------------------------------------------------
 static inline Bool isValidTimeToCalcLogicStuff()
 {
 	return (TheGameLogic && TheGameLogic->isInGameLogicUpdate()) ||
-		(TheGameState && TheGameState->isInLoadGame());
+		(TheGameState && TheGameState->isInLoadGame()) || s_fillingLogicCaches;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -371,6 +376,7 @@ HAnimClass* W3DAnimationInfo::getAnimHandle() const
 #ifdef RETAIN_ANIM_HANDLES
 	if (m_handle == NULL)
 	{
+		LOGIC_CENSUS( CENSUS_ASSET_LOAD );
 		// Get_HAnim addrefs it, so we'll have to release it in our dtor.
 		m_handle = W3DDisplay::m_assetManager->Get_HAnim(m_name.str());
 		DEBUG_ASSERTCRASH(m_handle, ("*** ASSET ERROR: animation %s not found\n",m_name.str()));
@@ -637,13 +643,16 @@ void ModelConditionInfo::validateCachedBones(RenderObjClass* robj, Real scale) c
 	Bool tossRobj = false;
 	if (robj == NULL)
 	{
-		if (m_modelName.isEmpty())
+		// the asset manager's built-in NULL object has no bones either, so it is not worth a trip there
+		// from the tick
+		if (m_modelName.isEmpty() || m_modelName.compareNoCase("NULL") == 0)
 		{
 			//BONEPOS_LOG(("Bailing: model name is empty\n"));
 			return;
 		}
 
-		robj = W3DDisplay::m_assetManager->Create_Render_Obj(m_modelName.str(), scale, 0);
+		LOGIC_CENSUS( CENSUS_ASSET_LOAD );
+		robj =W3DDisplay::m_assetManager->Create_Render_Obj(m_modelName.str(), scale, 0);
 		DEBUG_ASSERTCRASH(robj, ("*** ASSET ERROR: Model %s not found!\n",m_modelName.str()));
 		if (!robj)
 		{
@@ -1100,7 +1109,10 @@ void W3DModelDrawModuleData::validateStuffForTimeAndWeather(const Drawable* draw
 	ModelConditionVector::iterator c_it;	// VC6 leaked it out to the transition loop below
 	for (c_it = m_conditionStates.begin(); c_it != m_conditionStates.end(); ++c_it)
 	{
-		if (!c_it->matchesMode(false, false) && !c_it->matchesMode(night, snowy))
+		// a template with no state for both night and snow falls back on its night or its snow state,
+		// and logic asks that one's bones; validated here it is not loaded from inside a tick
+		if (!c_it->matchesMode(false, false) && !c_it->matchesMode(night, false) &&
+				!c_it->matchesMode(false, snowy) && !c_it->matchesMode(night, snowy))
 			continue;
 
 		c_it->validateStuff(NULL, draw->getScale(), m_extraPublicBones);
@@ -1782,11 +1794,6 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	m_groundMotionAngle = 0.0f;
 	m_groundMotionFrame = 0;
 
-	// only validate the current time-of-day and weather conditions by default.
-	getW3DModelDrawModuleData()->validateStuffForTimeAndWeather(getDrawable(), 
-											TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT, 
-											TheGlobalData->m_weather == WEATHER_SNOWY);
-
 	ModelConditionFlags emptyFlags;
 	const ModelConditionInfo* info = findBestInfo(emptyFlags);
 	if (!info)
@@ -1817,8 +1824,34 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 		  DEBUG_LOG(("setReceivesDynamicLights = FALSE: %s\n", draw->getTemplate()->getName().str()));
     }
   }
+}
 
-	setModelState(info);
+//-------------------------------------------------------------------------------------------------
+/** The pristine bone, turret and barrel caches are logic's, and filling them loads every state's
+	model.  A drawable logic makes in a tick fills them here after the tick, and one the map load makes
+	fills them here too, in a window where the caches count as logic's (isValidTimeToCalcLogicStuff),
+	so they take the same values from the same unanimated models as they did in the constructor.
+	Without that, the first fill could come from an on-demand setModelState inside a later tick with
+	this machine's live render object, or from a bone query loading the model inside the tick: a
+	campaign map loads outside GameLogic::update, and its garrisons and spawn points asked on frame 1.
+	A map object can also set its own night and snow flags once it is made (Object.cpp, objectTime
+	and objectWeather), so the map load validates the night and snow states as well. */
+void W3DModelDraw::buildRenderObjects( Bool madeInTick )
+{
+	{
+		const Bool loadingMap = TheGameLogic->isLoadingMap();
+		LatchRestore<Bool> forLogic( s_fillingLogicCaches, s_fillingLogicCaches || madeInTick || loadingMap );
+		// only validate the current time-of-day and weather conditions by default.
+		getW3DModelDrawModuleData()->validateStuffForTimeAndWeather(getDrawable(),
+												TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT,
+												TheGlobalData->m_weather == WEATHER_SNOWY);
+		// ponytail: loads every map object's night and snow models once; validate per object override if memory bites
+		if (loadingMap)
+			getW3DModelDrawModuleData()->validateStuffForTimeAndWeather(getDrawable(), TRUE, TRUE);
+	}
+
+	ModelConditionFlags emptyFlags;
+	setModelState(findBestInfo(emptyFlags));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -4031,9 +4064,11 @@ Int W3DModelDraw::getPristineBonePositionsForConditionState(
 	//BONEPOS_DUMPREAL(getDrawable()->getScale());
 	// we must call this every time we set m_nextState, to ensure cached bones are happy
 	stateToUse->validateStuff(
-		// if the state is the current state, pass in the current render object
-		// so that we don't have to re-create it!
-		stateToUse == m_curState ? m_renderObject : NULL, 
+		// never the current render object, the way getProjectileLaunchOffset and getBarrelCount ask:
+		// whether m_curState has caught up with the logic's state inside a tick depends on this
+		// machine's view (on-demand flushes behind visibility and ghosts), and a render object kept
+		// from the state before can carry that state's animation into the cached pristine bones
+		NULL,
 		getDrawable()->getScale(),
 		getW3DModelDrawModuleData()->m_extraPublicBones);
 
@@ -4267,7 +4302,9 @@ void W3DModelDraw::reactToTransformChange( const Matrix3D* oldMtx,
 		Object *obj = getDrawable()->getObject();
 		const Coord3D* pos = getDrawable()->getPosition();
 
-		if ( m_fullyObscuredByShroud || obj->testStatus( OBJECT_STATUS_STEALTHED ) == TRUE )
+		// no object for a tank the tick destroyed: its last move reaches the track after the tick, as a
+		// cap, since whether it was stealthed is gone with the object
+		if ( m_fullyObscuredByShroud || obj == NULL || obj->testStatus( OBJECT_STATUS_STEALTHED ) == TRUE )
 		{
 				m_trackRenderObject->addCapEdgeToTrack(pos->x, pos->y);
 		}
@@ -4594,17 +4631,10 @@ void W3DModelDraw::updateProjectileClipStatus( UnsignedInt shotsRemaining, Unsig
 }
 
 //-------------------------------------------------------------------------------------------------
-void W3DModelDraw::updateDrawModuleSupplyStatus( Int , Int currentSupply )
+void W3DModelDraw::updateDrawModuleSupplyStatus( Int , Int )
 {
-	// This level only cares if you have anything or not
-	if( currentSupply > 0 )
-	{
-		getDrawable()->setModelConditionState( MODELCONDITION_CARRYING );
-	}
-	else
-	{
-		getDrawable()->clearModelConditionState( MODELCONDITION_CARRYING );
-	}
+	// This level only cares if you have anything or not: the CARRYING condition, which
+	// Drawable::updateDrawableSupplyStatus sets at the call so that a logic tick sees it at once
 }
 
 //-------------------------------------------------------------------------------------------------

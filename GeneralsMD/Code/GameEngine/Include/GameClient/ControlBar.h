@@ -36,13 +36,17 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "Common/AudioEventRTS.h"
+#include "Common/CommandStore.h"
 #include "Common/GameType.h"
+#include "Common/LogicThread.h"
 #include "Common/Overridable.h"
 #include "Common/Science.h"
 #include "GameClient/Color.h"
 #include "Common/BitFlags.h"
 #include "GameLogic/WeaponBonusConditionFlags.h"
 #include "GameLogic/WeaponSetFlags.h"
+
+#include <functional>
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class Drawable;
@@ -368,7 +372,7 @@ public:
 	void copyButtonTextFrom( const CommandButton *button, Bool shortcutButton, Bool markUIDirtyIfChanged ) const;
 
 	// bleah. shouldn't be const, but is. sue me. (srj)
-	void setFlashCount(Int c) const { m_flashCount = c; }
+	void setFlashCount(Int c) const { LOGIC_CENSUS( CENSUS_CONTROLBAR ); m_flashCount = c; }
 	
 	// only for ControlBar!
 	void friend_addToList(CommandButton** list) {	m_next = *list;	*list = this; }
@@ -815,8 +819,14 @@ public:
 	void initWindows( void );
 	void shutdownWindows( void );
 
-	/// mark the UI as dirty so the context of everything is re-evaluated
+	/// mark the UI as dirty so the context of everything is re-evaluated; inside a tick it waits for the sync point
 	void markUIDirty( void );
+
+	/** LOGIC-THREAD.md phase 2, M2: a call the tick makes on the bar.  Inside GameLogic::update it is
+		kept and run by flushLogicCalls on the main thread right after the tick, at both -logicthread
+		settings; outside a tick it runs at once.  The map start calls in startNewGame stay direct. */
+	static void callFromLogic( const std::function<void()>& call );
+	static void flushLogicCalls( void );		///< LogicThread::runTick, after every tick
 	Bool selectionRepeatsUnit( const ThingTemplate *thing );	///< a selected factory of ours builds it on repeat
 	void toggleRepeatUnit( const ThingTemplate *thing );		///< Ctrl+Alt on a build button: repeat on or off
 
@@ -918,10 +928,8 @@ public:
 	// the command bar
 	//-----------------------------------------------------------------------------------------------
 
-	/// find existing command button if present
+	/// TheCommandStore's lookups, for the client; logic asks the store itself
 	const CommandButton *findCommandButton( const AsciiString& name );
-
-	/// find existing command set
 	const CommandSet *findCommandSet( const AsciiString& name );
 
 	/// whose promotion screen and skills are shown: your own while playing, the selected or
@@ -982,7 +990,7 @@ public:
 	// Initialize the Observer controls Must be called after we've already loaded the window
 	void initObserverControls( void );
 	void setObserverLookAtPlayer (Player *p) { m_observerLookAtPlayer = p;}
-	Player *getObserverLookAtPlayer (void ) { return m_observerLookAtPlayer;}
+	Player *getObserverLookAtPlayer (void ) { LOGIC_CENSUS( CENSUS_OBSERVER_LOOKAT ); return m_observerLookAtPlayer;}
 	void populateObserverInfoWindow ( void );
 	void populateObserverList( void );
 	Bool isObserverControlBarOn( void ) { return m_isObserverCommandBar;}
@@ -1006,10 +1014,6 @@ public:
 
 	void getForegroundMarkerPos(Int *x, Int *y);
 	void getBackgroundMarkerPos(Int *x, Int *y);
-
-
-	static void parseCommandSetDefinition( INI *ini );
-	static void parseCommandButtonDefinition( INI *ini );
 
 	void drawTransitionHandler( void );
 	const Image *getArrowImage( void ){ return m_genArrow;	}
@@ -1091,18 +1095,6 @@ protected:
 	void setSquishedControlBarConfig( void );
 	void setLowControlBarConfig( void );
 	void setHiddenControlBar( void );
-
-	/// find existing command button if present
-	CommandButton* findNonConstCommandButton( const AsciiString& name );
-	
-	/// allocate a new command button, link to list, initialize to default, and return
-	CommandButton *newCommandButton( const AsciiString& name );
-	CommandButton *newCommandButtonOverride( CommandButton *buttonToOverride );
-
-	/// allocate a new command set, link to list, initialize to default, and return it
-	CommandSet *newCommandSet( const AsciiString& name );
-	CommandSet *newCommandSetOverride( CommandSet *setToOverride );
-
 
 	/// evaluate what the user should see based on what selected drawables we have in our UI
 	void evaluateContextUI( void );
@@ -1216,10 +1208,10 @@ protected:
 	void setUpDownImages( void );
 		// methods for flashing cameos
 public:
-	void setFlash( Bool b ) { m_flash = b; }
+	void setFlash( Bool b ) { LOGIC_CENSUS( CENSUS_CONTROLBAR ); m_flash = b; }
 
 	// get method for list of commandbuttons
-	const CommandButton *getCommandButtons( void ) { return m_commandButtons; }
+	const CommandButton *getCommandButtons( void ) { return TheCommandStore->getCommandButtons(); }
 
 	Drawable *findStandInBuilder( Bool freeOnly );				///< with BuildWithoutWorker on, the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
 
@@ -1232,8 +1224,6 @@ protected:
 	ICoord2D m_panelOrigin;													///< where the frame was put, so the plates can follow it
 	Bool m_UIDirty;																///< the context UI must be re-evaluated
 
-	CommandButton *m_commandButtons;							///< list of possible commands to have
-	CommandSet *m_commandSets;										///< list of all command sets defined
 	ControlBarSchemeManager *m_controlBarSchemeManager;		///< The Scheme singleton
 
 	GameWindow *m_contextParent[ NUM_CONTEXT_PARENTS ];		///< "parent" window for buttons that are part of the context sensitive interface
@@ -1393,9 +1383,6 @@ public:
 	void updateCommanBarBorderColors(Color build, Color action, Color upgrade, Color system );
 
 private:
-
-	/// find existing command set
-	CommandSet *findNonConstCommandSet( const AsciiString& name );
 
 	const Image *m_genStarOn;
 	const Image *m_genStarOff;

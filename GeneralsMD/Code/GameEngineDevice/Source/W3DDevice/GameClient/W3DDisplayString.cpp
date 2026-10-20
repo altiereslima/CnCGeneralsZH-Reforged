@@ -184,6 +184,17 @@ void W3DDisplayString::draw( Int x, Int y, Color color, Color dropColor, Int xDr
 	if( getTextLength() == 0 )
 		return;  // nothing to draw
 
+	// an overlay drawn at the sync point (Display::beginRecording): the string is drawn with the
+	// text it holds now, which nothing changes before the replay
+	if( TheDisplay && TheDisplay->isRecording() )
+	{
+		TheDisplay->record( [=]() {
+			const ICoord2D &shift = TheDisplay->getReplayShift();
+			draw( x + shift.x, y + shift.y, color, dropColor, xDrop, yDrop );
+		} );
+		return;
+	}
+
 	//
 	// Text draws through its own renderer, so it goes to the device the moment it is asked for -
 	// while the display may still be holding 2D geometry that was handed over before it.  That

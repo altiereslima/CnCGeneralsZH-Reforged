@@ -91,11 +91,17 @@ W3DProjectileStreamDraw::~W3DProjectileStreamDraw()
 //-------------------------------------------------------------------------------------------------
 W3DProjectileStreamDraw::W3DProjectileStreamDraw( Thing *thing, const ModuleData* moduleData ) : DrawModule( thing, moduleData )
 {
-	const W3DProjectileStreamDrawModuleData* d = getW3DProjectileStreamDrawModuleData();
-	m_texture = WW3DAssetManager::Get_Instance()->Get_Texture( d->m_textureName.str() );
+	m_texture = NULL;
 	for( Int index = 0; index < MAX_PROJECTILE_STREAM; index++ )
 		m_allLines[index] = NULL;
 	m_linesValid = 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+void W3DProjectileStreamDraw::buildRenderObjects( Bool madeInTick )
+{
+	const W3DProjectileStreamDrawModuleData* d = getW3DProjectileStreamDrawModuleData();
+	m_texture = WW3DAssetManager::Get_Instance()->Get_Texture( d->m_textureName.str() );
 }
 
 void W3DProjectileStreamDraw::setFullyObscuredByShroud(Bool fullyObscured)

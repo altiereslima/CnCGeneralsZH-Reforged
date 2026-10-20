@@ -30,6 +30,9 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Common/LogicThread.h"
+
+#include <algorithm>
 
 #define DEFINE_PARTICLE_SYSTEM_NAMES
 
@@ -1419,6 +1422,7 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 
 	m_attachedToDrawableID = INVALID_DRAWABLE_ID;
 	m_attachedToObjectID = INVALID_ID;
+	m_attachedObjectDrawableForDraw = INVALID_DRAWABLE_ID;
 
 	m_isLocalIdentity = true;
 	m_localTransform.Make_Identity();
@@ -1478,9 +1482,11 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 
 	m_isOneShot = sysTemplate->m_isOneShot;
 
-	m_delayLeft = particleTimerFrames( sysTemplate->m_initialDelay.getValue() );
+	m_delayLeft = 0;					// buildClientPart
+	m_initialDelaySet = FALSE;
+	m_isShell = FALSE;
 
-	m_startTimestamp = TheGameClient->getFrame();
+	m_startTimestamp = 0;			// buildClientPart
 	m_systemLifetimeLeft = sysTemplate->m_systemLifetime;
 	if (sysTemplate->m_systemLifetime)
 		m_isForever = false;
@@ -1517,10 +1523,10 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	m_windMotionEndAngleMin = sysTemplate->m_windMotionEndAngleMin;
 	m_windMotionEndAngleMax = sysTemplate->m_windMotionEndAngleMax;
 	m_windMotionMovingToEndAngle = sysTemplate->m_windMotionMovingToEndAngle;
-	m_windMotionStartAngle = GameClientRandomValueReal( m_windMotionStartAngleMin, m_windMotionStartAngleMax );
-	m_windMotionEndAngle = GameClientRandomValueReal( m_windMotionEndAngleMin, m_windMotionEndAngleMax );
-	m_windAngle = GameClientRandomValueReal( m_windMotionStartAngle, m_windMotionEndAngle );
-			
+	m_windMotionStartAngle = 0.0f;		// buildClientPart
+	m_windMotionEndAngle = 0.0f;
+	m_windAngle = 0.0f;
+
 	m_shaderType = sysTemplate->m_shaderType;
 
 	m_particleType = sysTemplate->m_particleType;
@@ -1533,6 +1539,48 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	m_slaveSystemID = INVALID_PARTICLE_SYSTEM_ID;
 	m_masterSystem = NULL;
 	m_slaveSystem = NULL;
+
+	m_attachedSystemName = sysTemplate->m_attachedSystemName;
+	m_particleCount = 0;
+	m_personalityStore = 0;
+	m_controlParticle = NULL;
+	m_groundShadow = NULL;
+	m_inSunMap = FALSE;
+
+	// A system logic makes inside a tick is built after it (LOGIC-THREAD.md M5).  The load path's
+	// systems have no id yet and are never made in a tick.
+	if (m_systemID != INVALID_PARTICLE_SYSTEM_ID && LogicThread::defersEffects())
+	{
+		m_isShell = TRUE;
+		TheParticleSystemManager->friend_addShell(this, createSlaves);
+	}
+	else
+		buildClientPart(createSlaves);
+
+	//DEBUG_ASSERTLOG(!(m_totalParticleSystemCount % 10 == 0), ( "TotalParticleSystemCount = %d\n", m_totalParticleSystemCount ));
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The constructor's client half, in the order the constructor always ran it: the client stream's
+	* draws, the slave, the manager's list, the DebrisTrails option. */
+// ------------------------------------------------------------------------------------------------
+void ParticleSystem::buildClientPart( Bool createSlaves )
+{
+	LOGIC_CENSUS( CENSUS_PARTICLES );
+	m_isShell = FALSE;
+	const ParticleSystemTemplate *sysTemplate = m_template;
+
+	// drawn whether or not the tick set its own delay, as the constructor drew it before the call
+	const UnsignedInt delay = particleTimerFrames( sysTemplate->m_initialDelay.getValue() );
+	if (!m_initialDelaySet)
+		m_delayLeft = delay;
+
+	m_startTimestamp = TheGameClient->getFrame();
+
+	m_windMotionStartAngle = GameClientRandomValueReal( m_windMotionStartAngleMin, m_windMotionStartAngleMax );
+	m_windMotionEndAngle = GameClientRandomValueReal( m_windMotionEndAngleMin, m_windMotionEndAngleMax );
+	m_windAngle = GameClientRandomValueReal( m_windMotionStartAngle, m_windMotionEndAngle );
+
 	if( createSlaves )
 	{
 		ParticleSystem *slaveSystem = sysTemplate->createSlaveSystem();
@@ -1543,16 +1591,15 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 			setSlave( slaveSystem );
 			m_slaveSystem->setMaster( this );
 
+			// what the tick did to the shell that a built system passes to its slave
+			if( !m_isSaveable )
+				m_slaveSystem->setSaveable( FALSE );
+			if( m_isDestroyed )
+				m_slaveSystem->destroy();
+
 		}  // end if
 
 	}  // end if
-
-	m_attachedSystemName = sysTemplate->m_attachedSystemName;
-	m_particleCount = 0;
-	m_personalityStore = 0;
-	m_controlParticle = NULL;
-	m_groundShadow = NULL;
-	m_inSunMap = FALSE;
 
 	// A system built without an id yet - the load path does that, so it can restore the saved id
 	// first - registers itself once it has one, rather than here where the manager would file it
@@ -1565,8 +1612,6 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	// list and every caller holding the pointer go on exactly as they do with the option on.
 	if (sysTemplate->m_explosionDebrisTrail && !TheGlobalData->m_explosionDebrisTrails)
 		destroy();
-
-	//DEBUG_ASSERTLOG(!(m_totalParticleSystemCount % 10 == 0), ( "TotalParticleSystemCount = %d\n", m_totalParticleSystemCount ));
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1612,7 +1657,8 @@ ParticleSystem::~ParticleSystem()
 
 	m_controlParticle = NULL;
 
-	if (m_systemID != INVALID_PARTICLE_SYSTEM_ID)
+	// a shell a cleared game left was never filed
+	if (m_systemID != INVALID_PARTICLE_SYSTEM_ID && !m_isShell)
 		TheParticleSystemManager->friend_removeParticleSystem(this);
 	//DEBUG_ASSERTLOG(!(m_totalParticleSystemCount % 10 == 0), ( "TotalParticleSystemCount = %d\n", m_totalParticleSystemCount ));
 }
@@ -2305,6 +2351,7 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
 				isShrouded = (objectAttachedTo->getShroudedStatus(localPlayerIndex) >= OBJECTSHROUD_FOGGED);
  
       const Drawable * draw = objectAttachedTo->getDrawable();
+			m_attachedObjectDrawableForDraw = draw ? draw->getID() : INVALID_DRAWABLE_ID;
       if ( draw )
   			parentXfrm = draw->getTransformMatrix();
       else
@@ -2717,6 +2764,8 @@ Real ParticleSystem::getStealthFade( void ) const
 	const Drawable *draw = NULL;
 	if (sys->m_attachedToDrawableID != INVALID_DRAWABLE_ID)
 		draw = TheGameClient->findDrawableByID( sys->m_attachedToDrawableID );
+	else if (LogicThread::isInsideWindow())
+		draw = TheGameClient->findDrawableByID( sys->m_attachedObjectDrawableForDraw );
 	else if (sys->m_attachedToObjectID != INVALID_ID)
 	{
 		// gone since the last particle update, which then destroys the system
@@ -3682,6 +3731,11 @@ void ParticleSystemManager::init( void )
 // ------------------------------------------------------------------------------------------------
 void ParticleSystemManager::reset( void )
 {
+	// systems a tick made in a game it then cleared, never built
+	for (size_t i = 0; i < m_shells.size(); ++i)
+		m_shells[ i ]->deleteInstance();
+	m_shells.clear();
+
 	while (getParticleSystemCount()) {
 		if (m_allParticleSystemList.front()) {
 			m_allParticleSystemList.front()->deleteInstance();
@@ -3868,6 +3922,12 @@ ParticleSystem *ParticleSystemManager::findParticleSystem( ParticleSystemID id )
 	if (id == INVALID_PARTICLE_SYSTEM_ID)
 		return NULL;	// my, that was easy
 
+	// a system this tick made is the tick's own until it is built
+	for (size_t i = 0; i < m_shells.size(); ++i)
+		if (m_shells[ i ]->getSystemID() == id)
+			return m_shells[ i ];
+
+	LOGIC_CENSUS( CENSUS_PARTICLES );
 	ParticleSystemIDMap::const_iterator it = m_allParticleSystemMap.find( id );
 	return (it != m_allParticleSystemMap.end()) ? it->second : NULL;
 
@@ -3878,9 +3938,36 @@ ParticleSystem *ParticleSystemManager::findParticleSystem( ParticleSystemID id )
 // ------------------------------------------------------------------------------------------------
 void ParticleSystemManager::destroyParticleSystemByID(ParticleSystemID id)
 {
-	ParticleSystem* pSystem = findParticleSystem(id);
-	if( pSystem )
-		pSystem->destroy();
+	withSystem( id, []( ParticleSystem *pSystem ) { pSystem->destroy(); } );
+}
+
+// ------------------------------------------------------------------------------------------------
+void ParticleSystemManager::withSystem( ParticleSystemID id, const std::function<void( ParticleSystem * )> &work )
+{
+	if( id == INVALID_PARTICLE_SYSTEM_ID )
+		return;
+
+	// after the tick, in order with the systems it built (LOGIC-THREAD.md M5)
+	LogicThread::callAfterTick( [this, id, work]() {
+		ParticleSystem* pSystem = findParticleSystem(id);
+		if( pSystem )
+			work( pSystem );
+	} );
+}
+
+// ------------------------------------------------------------------------------------------------
+void ParticleSystemManager::friend_addShell( ParticleSystem *shell, Bool createSlaves )
+{
+	m_shells.push_back( shell );
+	const ParticleSystemID id = shell->getSystemID();
+	LogicThread::callAfterTick( [this, shell, id, createSlaves]() {
+		// gone if a reset inside the tick deleted it; by the ID, as a new shell can take its address
+		std::vector<ParticleSystem *>::iterator it = std::find( m_shells.begin(), m_shells.end(), shell );
+		if( it == m_shells.end() || shell->getSystemID() != id )
+			return;
+		m_shells.erase( it );
+		shell->buildClientPart( createSlaves );
+	} );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3954,22 +4041,28 @@ void ParticleSystemManager::destroyAttachedSystems( Object *obj )
 	if( obj == NULL )
 		return;
 
-	// iterate through all systems
-	ParticleSystem *system = NULL;
+	// after the tick, so the systems it attached to the object are built and among them (M5)
+	const ObjectID objID = obj->getID();
+	LogicThread::callAfterTick( [this, objID]() {
+		LOGIC_CENSUS( CENSUS_PARTICLES );
 
-	for( ParticleSystemListIt it = m_allParticleSystemList.begin(); 
-			 it != m_allParticleSystemList.end(); 
-			 ++it ) 
-	{
+		// iterate through all systems
+		ParticleSystem *system = NULL;
 
-		system = *it;
-		if( system == NULL )
-			continue;
-		
-		if( system->getAttachedObject() == obj->getID() )
-			system->destroy();
+		for( ParticleSystemListIt it = m_allParticleSystemList.begin();
+				 it != m_allParticleSystemList.end();
+				 ++it )
+		{
 
-	}
+			system = *it;
+			if( system == NULL )
+				continue;
+
+			if( system->getAttachedObject() == objID )
+				system->destroy();
+
+		}
+	} );
 
 }
 

@@ -68,6 +68,9 @@
 #include "GameClient/MessageBox.h"
 #include "GameNetwork/GameInfo.h"
 #include "GameNetwork/GUIUtil.h"
+#include "GameClient/Display.h"
+#include "GameClient/Image.h"
+#include "GameClient/GameFont.h"
 #include "GameNetwork/IPEnumeration.h"
 #include "WWDownload/Registry.h"
 
@@ -118,7 +121,7 @@ static NameKeyType buttonStartID = NAMEKEY_INVALID;
 static NameKeyType buttonSelectMapID = NAMEKEY_INVALID;
 static NameKeyType buttonResetID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
-static NameKeyType comboBoxGameSpeedID = NAMEKEY_INVALID;
+static NameKeyType checkBoxTurboID = NAMEKEY_INVALID;
 static NameKeyType comboBoxSuperweaponsID = NAMEKEY_INVALID;
 static NameKeyType comboBoxStartingCashID = NAMEKEY_INVALID;
 static NameKeyType checkBoxUnitLimitID = NAMEKEY_INVALID;
@@ -129,6 +132,43 @@ static NameKeyType comboBoxSupplyPileLimitID = NAMEKEY_INVALID;
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *parentSkirmishGameOptions = NULL;
 static GameWindow *buttonExit = NULL;
+// the battle honours and career record, opened over the seats by the Record button, over a veil
+// that dims the rest of the room
+static GameWindow *recordPopover = NULL;
+static GameWindow *recordVeil = NULL;
+static NameKeyType buttonRecordID = NAMEKEY_INVALID;
+static NameKeyType buttonRecordCloseID = NAMEKEY_INVALID;
+
+static void showRecord( Bool show )
+{
+	// A combo box that has dropped its list moves itself to the front of the seat table for good
+	// (GadgetComboBox's bringComboToFront), past the veil and the record declared after it, so they
+	// come back to the front each time they open.
+	if ( show )
+	{
+		recordVeil->winBringToTop();
+		recordPopover->winBringToTop();
+	}
+	recordVeil->winHide( !show );
+	recordPopover->winHide( !show );
+}
+
+// The open record is modal: a click on it never reaches the room under it.  Keys still go up to the
+// room, so Escape closes it.
+static WindowMsgHandledType recordPopoverInput( GameWindow *window, UnsignedInt msg, WindowMsgData mData1, WindowMsgData mData2 )
+{
+	return msg == GWM_CHAR ? MSG_IGNORED : MSG_HANDLED;
+}
+
+// a click on the dimmed room beside the record closes it, and goes no further
+static WindowMsgHandledType recordVeilInput( GameWindow *window, UnsignedInt msg, WindowMsgData mData1, WindowMsgData mData2 )
+{
+	if ( msg == GWM_CHAR )
+		return MSG_IGNORED;
+	if ( msg == GWM_LEFT_UP )
+		showRecord( FALSE );
+	return MSG_HANDLED;
+}
 static GameWindow *buttonStart = NULL;
 static GameWindow *buttonSelectMap = NULL;
 static GameWindow *textEntryMapDisplay = NULL;
@@ -153,6 +193,13 @@ static GameWindow *comboBoxPlayerTemplate[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 static GameWindow *comboBoxTeam[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 																								NULL,NULL,NULL,NULL };
 
+static GameWindow *comboBoxAIPersona[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
+																								NULL,NULL,NULL,NULL };
+static NameKeyType comboBoxAIPersonaID[MAX_SLOTS] = { NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID };
+
 //static GameWindow *buttonStartPosition[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 //																								NULL,NULL,NULL,NULL };
 //
@@ -168,33 +215,13 @@ static Bool buttonPushed = FALSE;
 static Bool stillNeedsToSetOptions = FALSE;
 void skirmishUpdateSlotList( void );
 static void populateSkirmishBattleHonors( void );
-// The game speed dropdown, as logic frames a second against the normal LOGICFRAMES_PER_SECOND.  Half
-// speed to normal (ClampPlayerGameSpeed), nothing faster.  The preference keeps the frame rate in
-// retail 30 Hz frames, as it always did, so one saved by an older build, the old 15 to 60 slider or
-// the x1.5 and x2 entries this list used to have, lands on the nearest entry.
-static const Int SKIRMISH_GAME_SPEEDS[] = { PLAYER_GAME_SPEED_MIN_FPS, LOGICFRAMES_PER_SECOND * 3 / 4,
-	PLAYER_GAME_SPEED_MAX_FPS };
-static const WideChar *SKIRMISH_GAME_SPEED_CAPTIONS[] = { u"x0.5", u"x0.75", u"x1" };
-static const Int SKIRMISH_GAME_SPEED_COUNT = sizeof( SKIRMISH_GAME_SPEEDS ) / sizeof( SKIRMISH_GAME_SPEEDS[ 0 ] );
-
-static Int nearestGameSpeedIndex( Int framesPerSecond )
+// The turbo mode box, the only speed a skirmish has besides normal.  It is the fork's control, so a
+// stock or modded SkirmishGameOptionsMenu.wnd that wins over Run/Window has none and plays at normal
+// speed.  The old game speed dropdown's "FPS" preference is left in the file and never read.
+static Bool turboBoxChecked( void )
 {
-	Int nearest = 0;
-	for( Int i = 1; i < SKIRMISH_GAME_SPEED_COUNT; ++i )
-	{
-		if( abs( SKIRMISH_GAME_SPEEDS[ i ] - framesPerSecond ) < abs( SKIRMISH_GAME_SPEEDS[ nearest ] - framesPerSecond ) )
-			nearest = i;
-	}
-	return nearest;
-}
-
-static Int selectedGameSpeed( void )
-{
-	GameWindow *comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxGameSpeedID );
-	// a layout without the dropdown plays at x1, not at the first entry's x0.5
-	Int selected = nearestGameSpeedIndex( LOGICFRAMES_PER_SECOND );
-	GadgetComboBoxGetSelectedPos( comboBoxGameSpeed, &selected );
-	return SKIRMISH_GAME_SPEEDS[ selected ];
+	GameWindow *checkBoxTurbo = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, checkBoxTurboID );
+	return checkBoxTurbo != NULL && GadgetCheckBoxIsChecked( checkBoxTurbo );
 }
 Bool doUpdateSlotList = TRUE;
 
@@ -402,7 +429,7 @@ Bool SkirmishPreferences::write(void)
 
 	setSlotList();
 
-	setInt("FPS", selectedGameSpeed() / LOGICFRAMES_PER_RETAIL_FRAME);
+	setInt("TurboMode", turboBoxChecked() ? 1 : 0);
 
 	return UserPreferences::write();
 }
@@ -436,8 +463,10 @@ void reallyDoStart( void )
 	if (TheGameLogic->isInGame())
 		TheGameLogic->clearGameData(FALSE);
 
-	const Int maxFPS = selectedGameSpeed();
-	DEBUG_LOG(("Game speed dropdown is at %d logic frames a second\n", maxFPS));
+	// on the game, so the replay's header carries it as a network lobby's does
+	TheSkirmishGameInfo->setTurbo( turboBoxChecked() );
+	const Int maxFPS = GameEngine_matchFramesPerSecond( TheSkirmishGameInfo->getTurbo() );
+	DEBUG_LOG(("Turbo mode %s: %d logic frames a second\n", TheSkirmishGameInfo->getTurbo() ? "on" : "off", maxFPS));
 
   TheWritableGlobalData->m_mapName = TheSkirmishGameInfo->getMap();
   TheSkirmishGameInfo->startGame(0);
@@ -847,6 +876,62 @@ void positionStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[]
 	positionStartSpots(localMapFname, buttonMapStartPositions, mapWindow);	
 }
 
+// A start spot draws as the button it is; a taken one then has its dark middle filled with its team's
+// colour, the blue ring left as it was, and the seat's number on it in black or white, whichever reads
+// better on that colour.  The colour is
+// kept here by window, not in the button's user data, which the push button's own draw reads as its
+// PushButtonData.  The skirmish, LAN or online room and the load screen each own one set of spots,
+// so two sets cover every screen that shows them.
+struct StartSpotFill
+{
+	GameWindow *spot;
+	Color fill;	// 0 for an open spot
+};
+static StartSpotFill theStartSpotFills[MAX_SLOTS * 2];
+static GameWinDrawFunc theStartSpotButtonDraw = NULL;
+
+static StartSpotFill *startSpotFill( GameWindow *spot )
+{
+	StartSpotFill *freeEntry = NULL;
+	for ( Int i = 0; i < (Int)ARRAY_SIZE(theStartSpotFills); ++i )
+	{
+		if ( theStartSpotFills[i].spot == spot )
+			return &theStartSpotFills[i];
+		if ( freeEntry == NULL && theStartSpotFills[i].spot == NULL )
+			freeEntry = &theStartSpotFills[i];
+	}
+	// a full table means a third set of spots is alive: start the table over for the newest one
+	if ( freeEntry == NULL )
+	{
+		memset( theStartSpotFills, 0, sizeof( theStartSpotFills ) );
+		freeEntry = &theStartSpotFills[0];
+	}
+	freeEntry->spot = spot;
+	freeEntry->fill = 0;
+	return freeEntry;
+}
+
+static void drawStartSpot( GameWindow *window, WinInstanceData *instData )
+{
+	theStartSpotButtonDraw( window, instData );
+	const Color fill = startSpotFill( window )->fill;
+	if ( fill == 0 )
+		return;
+	Int x, y, width, height;
+	window->winGetScreenPosition( &x, &y );
+	window->winGetSize( &width, &height );
+	// colour only the stock spot's dark middle, inside its blue ring
+	LobbyStartSpotFill( x, y, width, height, fill );
+	DisplayString *number = instData->getTextDisplayString();
+	// the number in the bold of the button's own face, so it holds up on a bright disc
+	GameFont *font = number->getFont();
+	if ( !font->bold )
+		number->setFont( TheFontLibrary->getFont( font->nameString, font->pointSize, TRUE ) );
+	Int textWidth, textHeight;
+	number->getSize( &textWidth, &textHeight );
+	number->draw( x + (width - textWidth) / 2, y + (height - textHeight) / 2, LobbyTextColorOn( fill ), 0 );
+}
+
 void updateMapStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[], Bool onLoadScreen )
 {
 	AsciiString lowerMap = myGame->getMap();
@@ -870,6 +955,12 @@ void updateMapStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[
     if ( buttonMapStartPositions[i] != NULL )
     {
 		  GadgetButtonSetText(buttonMapStartPositions[i], UnicodeString::TheEmptyString);
+		  if ( buttonMapStartPositions[i]->winGetDrawFunc() != drawStartSpot )
+		  {
+			  theStartSpotButtonDraw = buttonMapStartPositions[i]->winGetDrawFunc();
+			  buttonMapStartPositions[i]->winSetDrawFunc( drawStartSpot );
+		  }
+		  startSpotFill( buttonMapStartPositions[i] )->fill = 0;
 		  if (!onLoadScreen)
 		  {
 			  buttonMapStartPositions[i]->winSetTooltip(TheGameText->fetch("TOOLTIP:StartPosition"));
@@ -882,6 +973,12 @@ void updateMapStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[
       continue;
 
 		GameSlot *gs =myGame->getSlot(i);
+		// a taken spot is filled with its team's colour, or the player's without a team; the number
+		// stays for whoever cannot tell the colours apart
+		const Int spot = onLoadScreen ? gs->getApparentStartPos() : gs->getStartPos();
+		if (spot >= 0 && spot < mmd.m_numPlayers && gs->getPlayerTemplate() > PLAYERTEMPLATE_MIN)
+			startSpotFill(buttonMapStartPositions[spot])->fill =
+				gs->getTeamNumber() >= 0 ? LobbyTeamColor(gs->getTeamNumber()) : LobbySeatColor(gs);
 		if(onLoadScreen)
 		{
 			if(gs->getApparentStartPos() >=0 && gs->getApparentStartPos() < mmd.m_numPlayers && gs->getPlayerTemplate() > PLAYERTEMPLATE_MIN )
@@ -1127,7 +1224,17 @@ void InitSkirmishGameGadgets( void )
 	DEBUG_ASSERTCRASH(buttonStart, ("Could not find the buttonStart"));
 	buttonExit = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions,  buttonExitID);
 	DEBUG_ASSERTCRASH(buttonExit, ("Could not find the buttonExit"));
-	textEntryMapDisplay = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, textEntryMapDisplayID );
+	buttonRecordID = NAMEKEY( "SkirmishGameOptionsMenu.wnd:ButtonRecord" );
+	buttonRecordCloseID = NAMEKEY( "SkirmishGameOptionsMenu.wnd:ButtonRecordClose" );
+	recordPopover = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, NAMEKEY( "SkirmishGameOptionsMenu.wnd:RecordPopover" ) );
+	recordVeil = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, NAMEKEY( "SkirmishGameOptionsMenu.wnd:RecordVeil" ) );
+	recordPopover->winSetInputFunc( recordPopoverInput );
+	// Close's press goes to its parent, the record, which hands it up to the room; the layout gives
+	// the record no system callback, and the press died there
+	recordPopover->winSetSystemFunc( PassMessagesToParentSystem );
+	recordVeil->winSetInputFunc( recordVeilInput );
+	showRecord( FALSE );
+	textEntryMapDisplay =TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, textEntryMapDisplayID );
 	DEBUG_ASSERTCRASH(textEntryMapDisplay, ("Could not find the textEntryMapDisplay"));
 	buttonReset = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, buttonResetID );
 	DEBUG_ASSERTCRASH(buttonReset, ("Could not find the buttonReset"));
@@ -1231,6 +1338,9 @@ void InitSkirmishGameGadgets( void )
 //			buttonStartPosition[i]->winHide(TRUE); // not using these right now
 	}
 	
+	InitAIPersonaComboBoxes( parentSkirmishGameOptions, "SkirmishGameOptionsMenu.wnd", comboBoxAIPersona, comboBoxAIPersonaID );
+	InitLobbySeatVisuals( parentSkirmishGameOptions, "SkirmishGameOptionsMenu.wnd" );
+
 	populateSkirmishBattleHonors();
 
 	// the settings page and the map info list share one rectangle; this opens on the info list
@@ -1254,6 +1364,8 @@ void skirmishUpdateSlotList( void )
     UpdateSlotList( TheSkirmishGameInfo, comboBoxPlayer,
 										comboBoxColor, comboBoxPlayerTemplate,
 									  comboBoxTeam, NULL, buttonStart, buttonMapStartPosition );
+		UpdateAIPersonaComboBoxes( TheSkirmishGameInfo, comboBoxAIPersona );
+		UpdateLobbySeatVisuals( TheSkirmishGameInfo );
 		updateMapStartSpots(TheSkirmishGameInfo, buttonMapStartPosition, FALSE);
     doUpdateSlotList = TRUE;
   }
@@ -1290,6 +1402,7 @@ static const char *perPlayerGadgetsToHide[] =
 	"ComboBoxTeam",
 	"ComboBoxColor",
 	"ComboBoxPlayerTemplate",
+	"ComboBoxAIPersona",
 	NULL // keep this last
 };
 
@@ -1315,6 +1428,8 @@ void updateSkirmishGameOptions( void )
 	if (isSkirmish)
 	{
 		ShowUnderlyingGUIElements(TRUE, layoutFilename, parentName, gadgetsToHide, perPlayerGadgetsToHide );
+		UpdateAIPersonaComboBoxes( TheSkirmishGameInfo, comboBoxAIPersona );	// a human seat has none
+		UpdateLobbySeatVisuals( TheSkirmishGameInfo );
 	}
 	else
 	{
@@ -1362,7 +1477,7 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 
 	stillNeedsToSetOptions = FALSE;
 
-	comboBoxGameSpeedID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxGameSpeed" ) );
+	checkBoxTurboID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:CheckBoxTurbo" ) );
 	
 	sandboxOk = FALSE;
   doUpdateSlotList = FALSE;
@@ -1455,17 +1570,10 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 	//updateSkirmishGameOptions();
 	//initSkirmishGameOptions();
 
-	// set up the game speed dropdown. It is the fork's control, so a stock or modded
-	// SkirmishGameOptionsMenu.wnd that wins over Run/Window has none, like the combo boxes in
-	// InitSkirmishGameGadgets
-	GameWindow *comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxGameSpeedID );
-	if ( comboBoxGameSpeed )
-	{
-		GadgetComboBoxReset( comboBoxGameSpeed );
-		for( Int i = 0; i < SKIRMISH_GAME_SPEED_COUNT; ++i )
-			GadgetComboBoxAddEntry( comboBoxGameSpeed, UnicodeString( SKIRMISH_GAME_SPEED_CAPTIONS[ i ] ), comboBoxGameSpeed->winGetEnabledTextColor() );
-		GadgetComboBoxSetSelectedPos( comboBoxGameSpeed, nearestGameSpeedIndex( ConvertRetailFrames( prefs.getInt( "FPS", RETAIL_LOGICFRAMES_PER_SECOND ) ) ) );
-	}
+	// the turbo box, which a stock or modded layout does not have (turboBoxChecked)
+	GameWindow *checkBoxTurbo = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, checkBoxTurboID );
+	if ( checkBoxTurbo )
+		GadgetCheckBoxSetChecked( checkBoxTurbo, prefs.getInt( "TurboMode", 0 ) != 0 );
 	buttonStart->winSetText(TheGameText->fetch("GUI:Start"));
 	/* hey, for now we're also going to disable the map select button until it doesn't crash */
 	//buttonSelectMap->winEnable( FALSE );
@@ -1530,6 +1638,7 @@ void SkirmishGameOptionsMenuShutdown( WindowLayout *layout, void *userData )
 	SignalUIInteraction(SHELL_SCRIPT_HOOK_SKIRMISH_CLOSED);
 
 	ShutdownLobbyTabs();
+	ShutdownLobbySeatVisuals();
 
 	TheMouse->setCursor(Mouse::ARROW);
 	TheMouse->setMouseText(UnicodeString::TheEmptyString,NULL,NULL);
@@ -1613,9 +1722,12 @@ WindowMsgHandledType SkirmishGameOptionsMenuInput( GameWindow *window, UnsignedI
 					// send a simulated selected event to the parent window of the
 					// back/exit button
 					//
-					if( BitTest( state, KEY_STATE_UP ) )
+					// an open record closes first
+					if( BitTest( state, KEY_STATE_UP ) && !recordPopover->winIsHidden() )
+						showRecord( FALSE );
+					else if( BitTest( state, KEY_STATE_UP ) )
 					{
-						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED, 
+						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED,
 																							(WindowMsgData)buttonExit, buttonExitID );
 					}  // end if
 					// don't let key fall through anywhere else
@@ -1682,6 +1794,10 @@ WindowMsgHandledType SkirmishGameOptionsMenuSystem( GameWindow *window, Unsigned
         {
           handleSupplyPileLimitSelection();
         }
+        else if ( HandleAIPersonaSelection( TheSkirmishGameInfo, comboBoxAIPersona, comboBoxAIPersonaID, (NameKeyType)controlID ) )
+        {
+          // the slot has it; Skirmish.ini keeps it with the rest of the slot list
+        }
         else
         {
 				  for (Int i = 0; i < MAX_SLOTS; i++)
@@ -1724,6 +1840,11 @@ WindowMsgHandledType SkirmishGameOptionsMenuSystem( GameWindow *window, Unsigned
 				}
 				if ( LobbyTabClicked( (NameKeyType)controlID ) )
 					break;
+				if ( controlID == buttonRecordID || controlID == buttonRecordCloseID )
+				{
+					showRecord( controlID == buttonRecordID );
+					break;
+				}
 				if ( controlID == buttonExitID )
 				{
 					buttonPushed = TRUE;

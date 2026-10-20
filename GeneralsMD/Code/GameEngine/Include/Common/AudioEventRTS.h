@@ -82,12 +82,14 @@ public:
 	// generateFilename is separate from generatePlayInfo because generatePlayInfo should only be called once
 	// per triggered event. generateFilename will be called once per loop, or once to get each filename if 'all' is 
 	// specified.
-	void generateFilename( void );
+	// forPlaying FALSE: only the file names, as AudioManager::getAudioLengthMS measures them from the tick,
+	// with no draw from the audio stream for the delay, pitch and volume it does not need (LOGIC-THREAD.md M7)
+	void generateFilename( Bool forPlaying = TRUE );
 	AsciiString getFilename( void );
 
 	// The attack and decay sounds are generated in generatePlayInfo, because they will never be played more
 	// than once during a given sound event.
-	void generatePlayInfo( void );
+	void generatePlayInfo( Bool forPlaying = TRUE );
 	Real getPitchShift( void ) const;
 	Real getVolumeShift( void ) const;
 	AsciiString getAttackFilename( void ) const;
@@ -151,6 +153,16 @@ public:
 	Bool getUninterruptable( ) const { return m_uninterruptable; }
 	void setUninterruptable( Bool uninterruptable ) { m_uninterruptable = uninterruptable; }
 	void setSkipAttack( Bool skipAttack ) { m_skipAttack = skipAttack; }	///< start on the loop itself, for a loop picked up again mid-way
+
+	/** LOGIC-THREAD.md M5.  A random list remembers its last pick in the caller's event so it does not
+		* play one variant twice running, and a sound a tick asks for picks after the tick.  The caller is
+		* held here until then: the pick reads its memory and writes the new pick back, as an immediate
+		* add did, unless the caller died first.  holdCallerForPick returns a slot, or -1 when the table is
+		* full; heldCaller answers NULL for a slot whose event was destroyed.  forgetHeldCallers runs once
+		* the tick's effects ran or were dropped. */
+	static Int holdCallerForPick( AudioEventRTS *caller );
+	static AudioEventRTS *heldCaller( Int slot );
+	static void forgetHeldCallers( void );
 
 
 	// This will retrieve the appropriate position based on type.	

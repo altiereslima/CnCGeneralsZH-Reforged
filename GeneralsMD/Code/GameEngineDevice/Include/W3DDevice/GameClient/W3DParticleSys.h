@@ -56,6 +56,8 @@ public:
 	virtual void queueParticleRender();
 	///< returns the number of particles shown on screen per frame
 	virtual Int getOnScreenParticleCount() { return m_onScreenParticleCount; }
+	/// at the render's sync point: the systems' stealth fades and the fields' fades, which read the logic
+	void takeReadsForRender( void );
 
 private:
 	enum { MAX_POINTS_PER_GROUP = 512 };
@@ -85,8 +87,48 @@ public:
 		Bool																		glow;							///< written by the job: the fire's glow is in the normals, not the colour
 	};
 
+	/// One particle the sun's smoke map can take, as the last particle update left it.
+	struct SunMapCaster
+	{
+		Real							x, y, z, radius, opticalDepth;
+		ParticleSystem *	system;
+	};
+
+	/// Every particle of a billboarded alpha system that is drawn at all, with the optical depth its
+	/// alpha and its system's stealth fade give it, in system list order.  Walked once a particle
+	/// update; fillSmokeMap culls it to its own sun every pass.
+	const std::vector<SunMapCaster> &getSunMapCasters( void );
+
 private:
+	/// A system with particles that the local player sees at all, and how much of it.
+	struct SystemView
+	{
+		ParticleSystem *	system;
+		Real							fade;				///< ParticleSystem::getStealthFade, above zero
+	};
+
+	void refreshFrameView( void );
+
 	std::vector<BillboardFill> m_billboardFills;	///< kept across frames so the fill does not allocate
+
+	/// Nothing moves a particle between two particle updates and nothing but the logic changes a
+	/// stealth fade, and both run once a logic frame, so the walk over every system is taken once a
+	/// logic frame and every pass drawn until the next one reads this.  The counts and the next system
+	/// id catch anything that adds or takes a system or a particle away in between; a reset clears it.
+	/// That only holds while every add and remove of a system or a particle moves m_particleCount,
+	/// m_particleSystemCount or m_uniqueSystemID, and while the stealth look, the opacity and the
+	/// attachment that decide a fade change in the logic alone, or in doDrawModule before a pass's first
+	/// refresh.  Anything else that changes one of them mid-frame is not seen until the next logic frame.
+	std::vector<SystemView>		m_frameView;
+	std::vector<ParticleSystem *>	m_fieldSystems;		///< the contamination fields' systems, empty ones too
+	std::vector<SunMapCaster>	m_sunMapCasters;
+	Bool											m_frameViewValid;
+	Bool											m_sunMapCastersValid;
+	UnsignedInt								m_frameViewLogicFrame;
+	UnsignedInt								m_frameViewFrame;
+	UnsignedInt								m_frameViewParticles;
+	UnsignedInt								m_frameViewSystems;
+	ParticleSystemID					m_frameViewNextID;
 };
 
 #endif  // end __W3DParticleSys_H_

@@ -46,6 +46,8 @@
 #include "GameClient/GUICallbacks.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/LanguageFilter.h"
+#include "GameClient/View.h"
+#include "GameLogic/AI.h"
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/GameInfo.h"
 #include "GameNetwork/NetworkInterface.h"
@@ -248,6 +250,29 @@ Bool handleInGameSlashCommands(UnicodeString uText)
 }
 
 // ------------------------------------------------------------------------------------------------
+/** help / attack / money, or yardim / saldir / para, as the whole line: a request to the computer
+	* allies (MSG_TEAM_REQUEST) at where the camera looks.  The line still goes out as chat. */
+// ------------------------------------------------------------------------------------------------
+static void sendTeamRequest( const UnicodeString &line )
+{
+	static const struct { const WideChar *word; Int kind; } COMMANDS[] = {
+		{ u"help", AIREQ_HELP }, { u"yardim", AIREQ_HELP }, { u"yardım", AIREQ_HELP },
+		{ u"attack", AIREQ_ATTACK }, { u"saldir", AIREQ_ATTACK }, { u"saldır", AIREQ_ATTACK },
+		{ u"money", AIREQ_MONEY }, { u"para", AIREQ_MONEY } };
+	for( Int c = 0; c < (Int)( sizeof( COMMANDS ) / sizeof( COMMANDS[ 0 ] ) ); ++c )
+	{
+		if( line.compareNoCase( COMMANDS[ c ].word ) != 0 )
+			continue;
+		Coord3D pos;
+		TheTacticalView->getPosition( &pos );
+		GameMessage *request = TheMessageStream->appendMessage( GameMessage::MSG_TEAM_REQUEST );
+		request->appendIntegerArgument( COMMANDS[ c ].kind );
+		request->appendLocationArgument( pos );
+		return;
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 void ToggleInGameChat( Bool immediate )
 {
@@ -278,6 +303,8 @@ void ToggleInGameChat( Bool immediate )
 				// Send what is there, clear it out, and hide the window
 				UnicodeString msg = GadgetTextEntryGetText( chatTextEntry );
 				msg.trim();
+				if (!msg.isEmpty())
+					sendTeamRequest(msg);
 				if (!msg.isEmpty() && !handleInGameSlashCommands(msg))
 				{
 					const Player *localPlayer = ThePlayerList->getLocalPlayer();

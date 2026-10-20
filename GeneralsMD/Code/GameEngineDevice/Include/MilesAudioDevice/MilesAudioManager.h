@@ -198,9 +198,11 @@ class MilesAudioManager : public AudioManager
 
 		virtual void killAudioEventImmediately( AudioHandle audioEvent );
 
-		///< Return whether the current audio is playing or not. 
+		///< Return whether the current audio is playing or not.
 		///< NOTE NOTE NOTE !!DO NOT USE THIS IN FOR GAMELOGIC PURPOSES!! NOTE NOTE NOTE
 		virtual Bool isCurrentlyPlaying( AudioHandle handle );
+
+		virtual void captureForLogic( void );
 
 		virtual void notifyOfAudioCompletion( UnsignedIntPtr audioCompleted, UnsignedInt flags );
 		virtual PlayingAudio *findPlayingAudioFrom( UnsignedIntPtr audioCompleted, UnsignedInt flags );
@@ -322,6 +324,10 @@ class MilesAudioManager : public AudioManager
 		HDIGDRIVER m_digitalHandle;
 		H3DPOBJECT m_listener;
 		HPROVIDER m_delayFilter;
+
+		// LOGIC-THREAD.md M7: what the tick asks, as captureForLogic found it at the sync point
+		std::vector<AudioHandle> m_playingAtSync;											///< every handle isCurrentlyPlaying said yes to, sorted
+		std::vector< std::pair<AsciiString, Int> > m_musicLoopsAtSync;	///< each music stream and the loops it has finished
 
 		// This is a list of all handles that are forcibly played. They always play as UI sounds.
 		std::list<HAUDIO> m_audioForcePlayed;

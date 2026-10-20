@@ -962,20 +962,25 @@ protected:
 		
 		if (!m_nameAreObjects)
 		{
-			for (DrawModule** dm = obj->getDrawable()->getDrawModules(); *dm; ++dm)
-			{
-				DebrisDrawInterface* di = (*dm)->getDebrisDrawInterface();
-				if (di)
+			// the model and its animation only reach the draw module: after the tick for debris a tick
+			// throws (LOGIC-THREAD.md M5), with the client stream's draw that picks the animation
+			Drawable *draw = obj->getDrawable();
+			const Color color = m_okToChangeModelColor ? obj->getIndicatorColor() : 0;
+			draw->doClientWork( [this, draw, modelName, color]() {
+				for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm)
 				{
-					di->setModelName(modelName, m_okToChangeModelColor ? obj->getIndicatorColor() : 0, m_shadowType);
-					if (m_animSets.size() > 0)
+					DebrisDrawInterface* di = (*dm)->getDebrisDrawInterface();
+					if (di)
 					{
-						// the animation names only reach the draw module, so the client stream
-						Int which = GameClientRandomValue(0, m_animSets.size()-1);
-						di->setAnimNames(m_animSets[which].m_animInitial, m_animSets[which].m_animFlying, m_animSets[which].m_animFinal, m_fxFinal);
+						di->setModelName(modelName, color, m_shadowType);
+						if (m_animSets.size() > 0)
+						{
+							Int which = GameClientRandomValue(0, m_animSets.size()-1);
+							di->setAnimNames(m_animSets[which].m_animInitial, m_animSets[which].m_animFlying, m_animSets[which].m_animFinal, m_fxFinal);
+						}
 					}
 				}
-			}
+			}, Drawable::WORK_AFTER_FLUSH );
 		}
 
 		Coord3D offset = m_offset;

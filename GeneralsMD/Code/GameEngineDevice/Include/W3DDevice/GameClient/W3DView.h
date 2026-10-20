@@ -42,7 +42,9 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////////////////////////
 
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
+#include "Common/LogicThread.h"
 #include "Common/STLTypedefs.h"
+#include "GameClient/Display.h"
 #include "GameClient/ParabolicEase.h"
 #include "GameClient/View.h"
 #include "GameClient/CameraScrollClock.h"
@@ -145,6 +147,13 @@ public:
 	virtual void updateView(void);	///<called once per frame to determine the final camera and object transforms
 
 	virtual void draw( );  ///< draw this view
+	void recordPostDraw( void );	///< the post draw over the world, recorded at the sync point for draw to replay
+	/** LOGIC-THREAD.md phase 4: the camera of a picture drawn again while a tick runs on, built from what the
+		* scroll moved; the lock, the scripted moves, the shake and the height settle wait for the next update. */
+	void updateCameraBesideTick( void );
+	/// how far the ground under the camera moved on the screen since recordPostDraw; 0 unless a
+	/// picture drawn again beside the tick scrolled, for the world-anchored overlays recorded there
+	ICoord2D overlayShift( void );
 	virtual void update( );	///<called once per frame to determine the final camera and object transforms
 
 	virtual Drawable *pickDrawable( const ICoord2D *screen, Bool forceAttack, PickType pickType );  ///< pick drawable given the screen pixel coords.  If force attack, picks bridges.
@@ -171,6 +180,8 @@ public:
 	virtual void moveCameraTo(const Coord3D *o, Int miliseconds,  Int shutter, Bool orient, Real easeIn, Real easeOut);
 	virtual void moveCameraAlongWaypointPath(Waypoint *pWay, Int frames, Int shutter, Bool orient, Real easeIn, Real easeOut);
 	virtual Bool isCameraMovementFinished(void);
+	virtual Bool isCameraMoving(void) { return m_doingMoveCameraOnWaypointPath || m_doingRotateCamera || m_doingPitchCamera || m_doingZoomCamera; }
+	virtual Bool isCameraMotionBlurring(void);
 	virtual Bool isCameraMovementAtWaypointAlongPath(void);
  	virtual void resetCamera(const Coord3D *location, Int frames, Real easeIn, Real easeOut);	///< Move camera to location, and reset to default angle & zoom.
  	virtual void rotateCamera(Real rotations, Int frames, Real easeIn, Real easeOut);					///< Rotate camera about current viewpoint.
@@ -178,7 +189,7 @@ public:
 	virtual void rotateCameraTowardPosition(const Coord3D *pLoc, Int milliseconds, Real easeIn, Real easeOut, Bool reverseRotation);	///< Rotate camera to face a location.
 	virtual void cameraModFreezeTime(void){ m_freezeTimeForCameraMovement = true;}					///< Freezes time during the next camera movement.
 	virtual void cameraModFreezeAngle(void);												///< Freezes time during the next camera movement.
-	virtual Bool isTimeFrozen(void){ return m_freezeTimeForCameraMovement;}					///< Freezes time during the next camera movement.
+	virtual Bool isTimeFrozen(void){ LOGIC_CENSUS( CENSUS_CLIENT_READ ); return m_freezeTimeForCameraMovement;}					///< Freezes time during the next camera movement.
 	virtual void cameraModFinalZoom(Real finalZoom, Real easeIn, Real easeOut);	///< Final zoom for current camera movement.
 	virtual void cameraModRollingAverage(Int framesToAverage);			///< Number of frames to average movement for current camera movement.
 	virtual void cameraModFinalTimeMultiplier(Int finalMultiplier); ///< Final time multiplier for current camera movement.
@@ -352,6 +363,12 @@ private:
 	Bool				m_useRealZoomCam;
 	AsciiString		m_cameraSlaveObjectName;
 	AsciiString		m_cameraSlaveObjectBoneName;
+
+	Display::DrawCalls m_postDraw;	///< recordPostDraw's calls, replayed by draw
+	Coord3D m_postDrawAnchor = { 0, 0, 0 };		///< the ground under the camera when recordPostDraw ran
+	ICoord2D m_postDrawAnchorAt = { 0, 0 };		///< where m_postDrawAnchor was on the screen then
+	Bool m_postDrawAnchorProjected = FALSE;		///< m_postDrawAnchorAt holds a projection, not WTS_INVALID's zero
+	Drawable *m_cameraLockDrawForDraw = NULL;	///< the camera lock's drawable, looked up by recordPostDraw for a filtered draw
 };  // end class W3DView
 
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////

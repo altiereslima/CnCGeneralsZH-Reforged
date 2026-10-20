@@ -95,6 +95,8 @@ Display::~Display()
 	stopMovie();
 	// delete all our views if present
 	deleteViews();
+	// before the string manager goes (GameClient's destructor deletes this first)
+	freeDeferred();
 
 }
 
@@ -121,6 +123,16 @@ void Display::attachView( View *view )
 {
 	// prepend to head of list
 	m_viewList = view->prependViewToList( m_viewList );
+}
+
+/**
+ * The strings a recorded overlay freed (beginRecording), once nothing recorded can draw them
+ */
+void Display::freeDeferred( void )
+{
+	for( size_t i = 0; i < m_deferredFrees.size(); ++i )
+		TheDisplayStringManager->freeDisplayString( m_deferredFrees[ i ] );
+	m_deferredFrees.clear();
 }
 
 /**
@@ -365,6 +377,7 @@ void Display::reset()
 	m_letterBoxFadeLevel = 0;
 	m_letterBoxEnabled = FALSE;
 	stopMovie();
+	freeDeferred();
 
 	// Reset all views that need resetting
 	for( View *v = m_viewList; v; v = v->getNextView() )

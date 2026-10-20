@@ -39,6 +39,7 @@
 #define __W3DSCENE_H_
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
+#include <vector>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "WW3D2/scene.h"
@@ -112,8 +113,11 @@ protected:
 	void flushOccludedObjectsIntoStencil(RenderInfoClass & rinfo);
 	void updatePlayerColorPasses(void);
 
+	void				parkSpentDynamicLights(void);
+
 protected:
 	RefRenderObjListClass	m_dynamicLightList;
+	std::vector<W3DDynamicLight *>	m_spentDynamicLights;	///< out of both lists, one reference each, for getADynamicLight to hand out again
 	Bool									m_drawTerrainOnly;
 	LightClass						*m_globalLight[LightEnvironmentClass::MAX_LIGHTS];				///< The global directional light (sun, moon) Applies to objects.
 	LightClass						*m_scratchLight; ///< a workspace for copying global lights and modifying // MLorenzen

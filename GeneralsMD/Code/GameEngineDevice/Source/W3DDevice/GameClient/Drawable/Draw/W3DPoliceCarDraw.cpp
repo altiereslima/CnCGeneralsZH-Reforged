@@ -78,10 +78,17 @@ W3DDynamicLight *W3DPoliceCarDraw::createDynamicLight( void )
 W3DPoliceCarDraw::W3DPoliceCarDraw( Thing *thing, const ModuleData* moduleData ) : W3DTruckDraw( thing, moduleData )
 {
 	m_light = NULL;
-	m_curFrame = GameClientRandomValueReal(0, 10 );
+	m_curFrame = 0.0f;
 	m_lastAnimFrame = 0;
 
-} 
+}
+
+//-------------------------------------------------------------------------------------------------
+void W3DPoliceCarDraw::buildRenderObjects( Bool madeInTick )
+{
+	W3DTruckDraw::buildRenderObjects( madeInTick );
+	m_curFrame = GameClientRandomValueReal(0, 10 );
+}
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------

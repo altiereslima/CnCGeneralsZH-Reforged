@@ -80,6 +80,7 @@ static const Real TREAD_PIVOT_SHARE = 0.5f;						// share of TurnRate a tank piv
 static const Real TREAD_PIVOT_COS = -0.17f;						// cos 100 degrees: further round than this a tank stops and pivots
 static const Real VEHICLE_CORNER_GRIP = 0.5f;					// share of its braking a car can pull sideways on its tightest arc
 static const Real WHEEL_MIN_RADIUS_BODY_LENGTHS = 1.5f;	// a car turns no tighter than this, unless that arc cannot reach the goal
+static const Real JET_TAXI_MIN_RADIUS_BODY_LENGTHS = 0.75f;	// a taxiing jet steers its nose wheel this tight: an airfield's taxiway corners are a jet's length apart
 static const Real WHEEL_TIGHT_RADIUS_BODY_LENGTHS = 0.3f;	// and then crawls round this, at its turn speed
 
 // Infantry on two legs (moveTowardsPositionLegs, maintainCurrentPositionLegs).
@@ -312,6 +313,18 @@ static Bool Locomotor_projectileChasesStraight(Object* obj, const Vector3& toGoa
 		return TRUE;
 
 	return Vector3::Dot_Product(obj->getTransformMatrix()->Get_X_Vector(), toGoal) <= 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+// A missile that holds its cruise height until it has locked keeps EA's whole flight: level at the
+// preferred height, then the cheat straight down onto the goal. Its data can count on that.
+// ShockWave's cluster missile holds 500 until 0.01 from its goal and splits into warheads where it
+// passes 420 over the ground coming down. The cruise curve split it 180 to 270 short of the aim;
+// held level, the arc after the lock looped it 230 past, the goal lying almost straight under a
+// level nose. A Scud or a Tomahawk dives before its lock and keeps the curve.
+Bool Locomotor::holdsHeightToLock() const
+{
+	return m_diveDistance > 0.0f && m_preferredHeight != 0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -809,7 +822,8 @@ Locomotor::Locomotor(const LocomotorTemplate* tmpl)
 #endif
 	m_preferredHeight = m_template->m_preferredHeight;
 	m_preferredHeightDamping = m_template->m_preferredHeightDamping;
-	m_sineDescentDistance = 0.0f;
+	m_diveDistance = 0.0f;
+	m_chaseOffset.zero();
 
 	m_angleOffset = GameLogicRandomValueReal(-PI/6, PI/6);
 	m_offsetIncrement = (PI/40) * (GameLogicRandomValueReal(0.8f, 1.2f)/m_template->m_wanderLengthFactor);
@@ -846,7 +860,8 @@ Locomotor::Locomotor(const Locomotor& that)
 #endif
 	m_preferredHeight = that.m_preferredHeight;
 	m_preferredHeightDamping = that.m_preferredHeightDamping;
-	m_sineDescentDistance = that.m_sineDescentDistance;
+	m_diveDistance = that.m_diveDistance;
+	m_chaseOffset = that.m_chaseOffset;
 	m_angleOffset = that.m_angleOffset;
 	m_offsetIncrement = that.m_offsetIncrement;
 	m_yawRate = that.m_yawRate;
@@ -875,7 +890,8 @@ Locomotor& Locomotor::operator=(const Locomotor& that)
 #endif
 		m_preferredHeight = that.m_preferredHeight;
 		m_preferredHeightDamping = that.m_preferredHeightDamping;
-		m_sineDescentDistance = that.m_sineDescentDistance;
+		m_diveDistance = that.m_diveDistance;
+		m_chaseOffset = that.m_chaseOffset;
 		m_yawRate = that.m_yawRate;
 		m_driveAccelX = that.m_driveAccelX;
 		m_driveAccelY = that.m_driveAccelY;
@@ -902,7 +918,7 @@ void Locomotor::crc( Xfer *xfer )
 /** Xfer method
 	* Version Info:
 	* 1: Initial version
-	* 3: m_sineDescentDistance
+	* 3: m_diveDistance
 	* 4: m_yawRate, m_driveAccelX, m_driveAccelY
 	* 5: m_driveSpeed, m_driveFrame */
 // ------------------------------------------------------------------------------------------------
@@ -935,7 +951,7 @@ void Locomotor::xfer( Xfer *xfer )
 	xfer->xferReal(&m_offsetIncrement);
 
 	if (version >= 3)
-		xfer->xferReal(&m_sineDescentDistance);
+		xfer->xferReal(&m_diveDistance);
 
 	if (version >= 4)
 	{
@@ -1075,9 +1091,12 @@ void Locomotor::locoUpdate_moveTowardsAngle(Object* obj, Real goalAngle)
 	if (minSpeed > 0)
 	{
 		// can't stay in one place; move in the desired direction at min speed.
+		// a jet is sent far down that bearing: a point this close beside it is inside its turn and it
+		// would fly straight on (moveTowardsPositionJet)
+		Real probe = isJet(obj) ? 1000.0f : minSpeed * 2;
 		Coord3D desiredPos = *obj->getPosition();
-		desiredPos.x += Cos(goalAngle) * minSpeed * 2;
-		desiredPos.y += Sin(goalAngle) * minSpeed * 2;
+		desiredPos.x += Cos(goalAngle) * probe;
+		desiredPos.y += Sin(goalAngle) * probe;
 		// pass a huge num for "dist to goal", so that we don't think we're nearing
 		// our destination and thus slow down...
 		const Real onPathDistToGoal = 99999.0f;
@@ -1093,7 +1112,10 @@ void Locomotor::locoUpdate_moveTowardsAngle(Object* obj, Real goalAngle)
 		Coord3D desiredPos = *obj->getPosition();
 		desiredPos.x += Cos(goalAngle) * 1000.0f;
 		desiredPos.y += Sin(goalAngle) * 1000.0f;
-		PhysicsTurningType rotating = rotateTowardsPosition(obj, desiredPos);
+		// a jet on its wheels swings round its parking spot or onto the runway with the turn eased in
+		// and out, as a helicopter's nose does, where rotateTowardsPosition starts and stops dead
+		Bool taxiingJet = obj->isKindOf(KINDOF_AIRCRAFT) && isGroundVehicle(obj);
+		PhysicsTurningType rotating = taxiingJet ? turnHelicopter(obj, &desiredPos, 1.0f) : rotateTowardsPosition(obj, desiredPos);
 		physics->setTurning(rotating);
 		// a helicopter turning in place has no sideways friction to stop a slide it came in with
 		if (isHelicopter(obj))
@@ -1136,8 +1158,10 @@ void Locomotor::setPhysicsOptions(Object* obj)
 	physics->setAllowAirborneFriction(getApply2DFrictionWhenAirborne());	// you'd think we wouldn't want friction in the air, but it's needed for realistic behavior.
 	physics->setStickToGround(getStickToGround()); // walking guys aren't allowed to catch huge (or even small) air.
 	Bool helicopter = isHelicopter(obj);
-	physics->setMotiveSteersSideways(helicopter);
-	if (!helicopter && !isGroundVehicle(obj) && m_template->m_appearance != LOCO_LEGS_TWO)
+	Bool jet = isJet(obj);
+	// a jet's locomotor carries its velocity round with the nose itself, so there is no slip for friction to take
+	physics->setMotiveSteersSideways(helicopter || jet);
+	if (!helicopter && !jet && !isGroundVehicle(obj) && m_template->m_appearance != LOCO_LEGS_TWO)
 	{
 		// landed, taxiing or dying: whatever it was pulling or swinging when it last flew or drove is over
 		m_yawRate = 0.0f;
@@ -1156,19 +1180,43 @@ Bool Locomotor::isHelicopter(const Object* obj) const
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool Locomotor::isGroundVehicle(const Object* obj) const
+Bool Locomotor::isJet(const Object* obj) const
 {
-	LocomotorAppearance appearance = m_template->m_appearance;
-	return (appearance == LOCO_TREADS || appearance == LOCO_WHEELS_FOUR || appearance == LOCO_MOTORCYCLE)
-		&& !obj->isKindOf(KINDOF_AIRCRAFT)	// a jet or a landed helicopter taxiing keeps EA's drive
-		&& !getFlag(ULTRA_ACCURATE);				// and so does a dozer or a POW truck lining up on its spot
+	if (m_template->m_appearance != LOCO_WINGS || !obj->isKindOf(KINDOF_AIRCRAFT) || obj->isEffectivelyDead())
+		return FALSE;	// a dying one falls on JetSlowDeathBehavior's forces and the old friction
+	const AIUpdateInterface *ai = obj->getAI();
+	return ai != NULL && ai->getJetAIUpdate() != NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
-void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& goalPos,
+Bool Locomotor::isGroundVehicle(const Object* obj) const
+{
+	LocomotorAppearance appearance = m_template->m_appearance;
+	// a jet taxis on its nose wheel (BasicJetTaxiLocomotor in BalanceReforged.ini), with the precision
+	// its taxi asks for; a landed helicopter keeps EA's drive
+	if (obj->isKindOf(KINDOF_AIRCRAFT))
+		return appearance == LOCO_WHEELS_FOUR;
+	return (appearance == LOCO_TREADS || appearance == LOCO_WHEELS_FOUR || appearance == LOCO_MOTORCYCLE)
+		&& !getFlag(ULTRA_ACCURATE);	// a dozer or a POW truck lining up on its spot keeps EA's drive
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Locomotor::calcWheelTurnRadius(const Object* obj) const
+{
+	Real bodyLength = 2.0f * obj->getGeometryInfo().getMajorRadius();
+	return (obj->isKindOf(KINDOF_AIRCRAFT) ? JET_TAXI_MIN_RADIUS_BODY_LENGTHS : WHEEL_MIN_RADIUS_BODY_LENGTHS) * bodyLength;
+}
+
+//-------------------------------------------------------------------------------------------------
+void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& chasedPos,
 																							 Real onPathDistToGoal, Real desiredSpeed, Bool *blocked,
 																							 const Coord3D *faceTarget, Bool fighting, Real bendDist, Real bendCos)
 {
+	// spent by this move, so a locomotor the set switches away from carries none into a later one
+	Coord3D goalPos = chasedPos;
+	goalPos.add(&m_chaseOffset);
+	m_chaseOffset.zero();
+
 	setFlag(MAINTAIN_POS_IS_VALID, false);
 
 	BodyDamageType bdt = obj->getBodyModule()->getDamageState();
@@ -1360,7 +1408,7 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& goalP
 				vel = MIN_VEL;
 			if (vel > dist)
 				vel = dist;	// do not overcompensate!
-			if (dist > 0.001f && Locomotor_projectileChasesStraight(obj, Vector3(dx, dy, dz)))
+			if (dist > 0.001f && (holdsHeightToLock() || Locomotor_projectileChasesStraight(obj, Vector3(dx, dy, dz))))
 			{
 				pos.x += dx / dist * vel;
 				pos.y += dy / dist * vel;
@@ -1942,7 +1990,7 @@ void Locomotor::moveTowardsPositionVehicle(Object* obj, PhysicsBehavior *physics
 	Real arcRadius = BIGNUM;
 	if (fabs(leadSin) > 0.01f)
 		arcRadius = dist / (2.0f * fabs(leadSin));
-	Real minRadius = WHEEL_MIN_RADIUS_BODY_LENGTHS * bodyLength;
+	Real minRadius = calcWheelTurnRadius(obj);
 
 	Bool tight = FALSE;
 	if (!treads && !backing)
@@ -2184,6 +2232,90 @@ Real Locomotor::calcMinTurnRadius(BodyDamageType condition, Real* timeToTravelTh
 	return minTurnRadius;
 }
 
+//-------------------------------------------------------------------------------------------------
+/*
+	A jet banks into a turn instead of swinging its nose round a point. Its wings pull no harder than
+	they do with the full TurnRate at JET_CORNER_SHARE of its top speed, so above that speed the turn
+	rate falls off as 1/speed and the circle grows with the square of the speed: at top speed it is
+	twice EA's radius, at the corner speed and below it is EA's. The rate winds up and down over
+	JET_BANK_EASE_FRAMES, which is the roll into and out of the bank, so a reversal rolls through
+	level. A turn bleeds speed, up to JET_TURN_SPEED_LOSS of it at the full rate, which tightens a long
+	turn as it goes; the throttle brings it back after. The velocity follows the nose, with no slip.
+
+	Measured with Scenarios/jetturn.txt (a 180 degree reversal at cruise), width of the U before and
+	after: see that file.
+*/
+static const Real JET_CORNER_SHARE = 0.5f;
+static const Real JET_BANK_EASE_FRAMES = LOGICFRAMES_PER_SECOND * 0.5f;	// from wings level to the full bank
+static const Real JET_TURN_SPEED_LOSS = 0.2f;
+static const Real JET_AIRBRAKE_SHARE = 0.25f;	// a jet slows at this share of its Acceleration, or at Braking if that is more
+static const Real JET_ORBIT_CORRECTION = PI / 3.0f;	// circling, a radius off the circle heads this far in from the tangent
+
+//-------------------------------------------------------------------------------------------------
+Real Locomotor::getJetCornerSpeed(BodyDamageType condition) const
+{
+	Bool healthy = IS_CONDITION_BETTER( condition, TheGlobalData->m_movementPenaltyDamageState );
+	return JET_CORNER_SHARE * (healthy ? m_template->m_maxSpeed : m_template->m_maxSpeedDamaged);
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Locomotor::getJetMaxYawRate(BodyDamageType condition, Real speed) const
+{
+	// not getMaxTurnRate: its ULTRA_ACCURATE doubling would whip a jet round its landing pattern
+	Bool healthy = IS_CONDITION_BETTER( condition, TheGlobalData->m_movementPenaltyDamageState );
+	Real turnRate = healthy ? m_template->m_maxTurnRate : m_template->m_maxTurnRateDamaged;
+	if (turnRate > m_maxTurnRate)
+		turnRate = m_maxTurnRate;
+	Real cornerSpeed = getJetCornerSpeed(condition);
+	if (speed > cornerSpeed)
+		turnRate *= cornerSpeed / speed;
+	return turnRate;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Locomotor::getJetPull(BodyDamageType condition) const
+{
+	Real cornerSpeed = getJetCornerSpeed(condition);
+	return getJetMaxYawRate(condition, cornerSpeed) * cornerSpeed;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Locomotor::getJetBraking(BodyDamageType condition) const
+{
+	Real braking = getMaxAcceleration(condition) * JET_AIRBRAKE_SHARE;
+	if (braking < getBraking())
+		braking = getBraking();
+	return braking;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Locomotor::calcTurnCircle(const Object* obj, Real* entryDist) const
+{
+	BodyDamageType bdt = obj->getBodyModule()->getDamageState();
+	Real minSpeed = getMinSpeed();
+	Real speed = obj->getPhysics()->getForwardSpeed2D();
+	if (speed < minSpeed)
+		speed = minSpeed;
+
+	if (!isJet(obj))
+	{
+		// a hard turn bleeds speed toward the locomotor's minimum, so the circle tightens as it goes
+		if (entryDist)
+			*entryDist = 0.0f;
+		Real turnRate = getMaxTurnRate(bdt);
+		return (turnRate > 0.0f) ? 0.5f * (speed + minSpeed) / turnRate : BIGNUM;
+	}
+
+	// the turn bleeds up to JET_TURN_SPEED_LOSS of the speed: take the circle at half of that
+	if (entryDist)
+		*entryDist = speed * JET_BANK_EASE_FRAMES * 0.5f;
+	Real turnSpeed = speed * (1.0f - 0.5f * JET_TURN_SPEED_LOSS);
+	if (turnSpeed < minSpeed)
+		turnSpeed = minSpeed;
+	Real turnRate = getJetMaxYawRate(bdt, turnSpeed);
+	return (turnRate > 0.0f) ? turnSpeed / turnRate : BIGNUM;
+}
+
 
 //-------------------------------------------------------------------------------------------------
 void Locomotor::moveTowardsPositionLegs(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed)
@@ -2421,6 +2553,12 @@ void Locomotor::moveTowardsPositionClimb(Object* obj, PhysicsBehavior *physics, 
 //-------------------------------------------------------------------------------------------------
 void Locomotor::moveTowardsPositionWings(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed)
 {
+	if (isJet(obj))
+	{
+		moveTowardsPositionJet(obj, physics, goalPos, onPathDistToGoal, desiredSpeed);
+		return;
+	}
+
 #ifdef CIRCLE_FOR_LANDING
 	if (m_circleThresh > 0.0f)
 	{
@@ -2458,6 +2596,117 @@ void Locomotor::moveTowardsPositionWings(Object* obj, PhysicsBehavior *physics, 
 
 	// handle the 2D component.
 	moveTowardsPositionOther(obj, physics, goalPos, onPathDistToGoal, desiredSpeed);
+}
+
+//-------------------------------------------------------------------------------------------------
+/*
+	Turn towards the goal and keep the speed asked for, the way moveTowardsPositionOther does, but on a
+	jet's terms (flyJet). A goal inside the circle the jet would turn on cannot be reached by turning
+	towards it, and chasing it is the orbit round a point a jet used to fly; the jet holds its wings
+	level instead until the goal is outside the circle, and then comes round onto it.
+*/
+void Locomotor::moveTowardsPositionJet(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed)
+{
+	BodyDamageType bdt = obj->getBodyModule()->getDamageState();
+	Real maxSpeed = getMaxSpeedForCondition(bdt);
+	if (desiredSpeed > maxSpeed)
+		desiredSpeed = maxSpeed;
+
+	const Coord3D *pos = obj->getPosition();
+	Real dx = goalPos.x - pos->x;
+	Real dy = goalPos.y - pos->y;
+	Real error = 0.0f;
+	if (fabs(dx) > 0.1f || fabs(dy) > 0.1f)
+		error = stdAngleDiff(ATan2(dy, dx), obj->getOrientation());
+
+	const Coord3D *vel = physics->getVelocity();
+	Real speed = sqrt(sqr(vel->x) + sqr(vel->y));
+	Real maxRate = getJetMaxYawRate(bdt, speed);
+	if (error != 0.0f && maxRate > 0.0f)
+	{
+		Real radius = speed / maxRate;
+		Real side = (error > 0.0f) ? 1.0f : -1.0f;
+		const Coord3D *dir = obj->getUnitDirectionVector2D();
+		Real centreX = pos->x - dir->y * radius * side;
+		Real centreY = pos->y + dir->x * radius * side;
+		if (sqr(goalPos.x - centreX) + sqr(goalPos.y - centreY) < sqr(radius))
+			error = 0.0f;
+	}
+
+	Real goalSpeed = desiredSpeed;
+	if (!getFlag(NO_SLOW_DOWN_AS_APPROACHING_DEST))
+	{
+		Real slowDownDist = calcSlowDownDist(speed, m_template->m_minSpeed, getJetBraking(bdt));
+		if (onPathDistToGoal < slowDownDist && goalSpeed > m_template->m_minSpeed)
+			goalSpeed = m_template->m_minSpeed;
+	}
+
+	flyJet(obj, physics, error, goalSpeed);
+}
+
+//-------------------------------------------------------------------------------------------------
+/**
+	Fly a jet for one frame: turn its nose towards a heading headingError radians away, the turn
+	eased in and out and no faster than its speed allows (getJetMaxYawRate), and carry its whole 2D
+	velocity round with the nose at a speed eased towards goalSpeed. Acceleration takes it up,
+	getJetBraking or the pull of the turn takes it down.
+*/
+void Locomotor::flyJet(Object* obj, PhysicsBehavior *physics, Real headingError, Real goalSpeed)
+{
+	BodyDamageType bdt = obj->getBodyModule()->getDamageState();
+	const Coord3D *vel = physics->getVelocity();
+	Real speed = sqrt(sqr(vel->x) + sqr(vel->y));
+	Real maxRate = getJetMaxYawRate(bdt, speed);
+
+	Real rate = easeYaw(headingError, maxRate, maxRate / JET_BANK_EASE_FRAMES);
+	if (rate != 0.0f)
+	{
+		obj->setOrientation(normalizeAngle(obj->getOrientation() + rate));
+		physics->setTurning(rate > 0.0f ? TURN_POSITIVE : TURN_NEGATIVE);
+	}
+	else
+	{
+		physics->setTurning(TURN_NONE);
+	}
+
+	Real minSpeed = m_template->m_minSpeed;
+	Real decel = getJetBraking(bdt);
+	if (rate != 0.0f && maxRate > 0.0f)
+	{
+		Real share = fabs(rate) / maxRate;
+		if (share > 1.0f)
+			share = 1.0f;
+		Real turnSpeed = goalSpeed * (1.0f - JET_TURN_SPEED_LOSS * share);
+		if (turnSpeed < minSpeed)
+			turnSpeed = minSpeed;
+		if (turnSpeed < goalSpeed)
+			goalSpeed = turnSpeed;
+		Real pull = speed * fabs(rate);
+		if (decel < pull)
+			decel = pull;
+	}
+
+	Real newSpeed = speed;
+	if (goalSpeed > speed)
+	{
+		newSpeed += getMaxAcceleration(bdt);
+		if (newSpeed > goalSpeed)
+			newSpeed = goalSpeed;
+	}
+	else
+	{
+		newSpeed -= decel;
+		if (newSpeed < goalSpeed)
+			newSpeed = goalSpeed;
+	}
+
+	const Coord3D *dir = obj->getUnitDirectionVector2D();
+	Real mass = physics->getMass();
+	Coord3D force;
+	force.x = mass * (dir->x * newSpeed - vel->x);
+	force.y = mass * (dir->y * newSpeed - vel->y);
+	force.z = 0.0f;
+	physics->applyMotiveForce(&force);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2746,7 +2995,8 @@ void Locomotor::moveTowardsPositionThrust(Object* obj, PhysicsBehavior *physics,
 	//out of the handleBehaviorZ() function
 	Coord3D pos = *obj->getPosition();
 	Real distToGoal2D = sqrt(sqr(goalPos.x - pos.x) + sqr(goalPos.y - pos.y));
-	if( m_preferredHeight != 0.0f && !getFlag(PRECISE_Z_POS) && obj->isKindOf(KINDOF_PROJECTILE) )
+	const Bool heldToLock = holdsHeightToLock();
+	if( m_preferredHeight != 0.0f && !getFlag(PRECISE_Z_POS) && obj->isKindOf(KINDOF_PROJECTILE) && !heldToLock )
 	{
 		// A cruise missile flies one smooth curve from where it is, leaving along the way it is going and
 		// arriving in a sixty degree dive, aiming a few frames ahead on it. The curve is drawn again every
@@ -2772,7 +3022,7 @@ void Locomotor::moveTowardsPositionThrust(Object* obj, PhysicsBehavior *physics,
 			localGoalPos.z = b0 * pos.z + b1 * (pos.z + leave.z * hLeave) + b2 * (goalPos.z - arrive.z * hArrive) + b3 * goalPos.z;
 		}
 	}
-	else if( m_preferredHeight != 0.0f && !getFlag(PRECISE_Z_POS) )
+	else if( m_preferredHeight != 0.0f && !getFlag(PRECISE_Z_POS) && !(heldToLock && distToGoal2D < m_diveDistance) )
 	{
 		// If we have a preferred flight height, and we haven't been told explicitly to ignore it...
 		Real surfaceHt =  getSurfaceHtAtPt(pos.x, pos.y);
@@ -2825,7 +3075,7 @@ void Locomotor::moveTowardsPositionThrust(Object* obj, PhysicsBehavior *physics,
 				// we are at target.
 				adjust = false;
 			}
-			else if (obj->isKindOf(KINDOF_PROJECTILE) && !Locomotor_projectileChasesStraight(obj, vel))
+			else if (obj->isKindOf(KINDOF_PROJECTILE) && !holdsHeightToLock() && !Locomotor_projectileChasesStraight(obj, vel))
 			{
 				// the projectile cheat moves along the nose, so this turn is the path it flies. It bends
 				// towards where a moving victim will be when the missile gets there rather than where the
@@ -3416,7 +3666,35 @@ void Locomotor::maintainCurrentPositionWings(Object* obj, PhysicsBehavior *physi
 {
 	DEBUG_ASSERTCRASH(getFlag(MAINTAIN_POS_IS_VALID), ("invalid maintain pos"));
 	physics->setTurning(TURN_NONE);
-	if (physics->isMotive() && obj->isAboveTerrain())	// no need to stop something that isn't moving (or is just sitting on the ground)
+	if (physics->isMotive() && obj->isAboveTerrain() && isJet(obj))
+	{
+		/* A jet flies a true circle round the spot at CirclingRadius, steering for the tangent and
+			 a share of JET_ORBIT_CORRECTION in towards the circle or out from it, so it banks once and
+			 holds the bank; chasing a point across the circle swung it in and out of the turn. */
+		Real radius = m_template->m_circlingRadius;
+		if (radius == 0.0f)
+			radius = calcMinTurnRadius(obj->getBodyModule()->getDamageState(), NULL);
+		Real side = (radius > 0.0f) ? -1.0f : 1.0f;	// a positive radius circles clockwise
+		radius = fabs(radius);
+
+		const Coord3D* pos = obj->getPosition();
+		Real dx = pos->x - m_maintainPos.x;
+		Real dy = pos->y - m_maintainPos.y;
+		Real dist = sqrt(dx*dx + dy*dy);
+		Real error = 0.0f;
+		if (dist > 1.0f && radius > 0.0f)
+		{
+			Real off = (dist - radius) / radius;
+			if (off > 1.0f)
+				off = 1.0f;
+			else if (off < -1.0f)
+				off = -1.0f;
+			Real heading = ATan2(dy, dx) + side * (PI / 2.0f + JET_ORBIT_CORRECTION * off);
+			error = stdAngleDiff(heading, obj->getOrientation());
+		}
+		flyJet(obj, physics, error, m_template->m_minSpeed);
+	}
+	else if (physics->isMotive() && obj->isAboveTerrain())	// no need to stop something that isn't moving (or is just sitting on the ground)
 	{
 
 			// aim for the spot on the opposite side of the circle.

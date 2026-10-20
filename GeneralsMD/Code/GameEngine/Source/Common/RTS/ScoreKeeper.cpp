@@ -170,6 +170,25 @@ Int ScoreKeeper::getTotalUnitsBuilt( KindOfMaskType validMask, KindOfMaskType in
 	return count;
 }
 
+Int ScoreKeeper::getTotalUnitsBuilt( KindOfMaskType validMask, KindOfMaskType invalidMask, Bool (*accept)( const ThingTemplate * ) ) const
+{
+	Int count = 0;
+	for (ObjectCountMap::const_iterator it = m_objectsBuilt.begin(); it != m_objectsBuilt.end(); ++it)
+		if (it->first && it->first->isKindOfMulti(validMask, invalidMask) && accept(it->first))
+			count += it->second;
+	return count;
+}
+
+Int ScoreKeeper::getTotalObjectsDestroyed( KindOfMaskType validMask, KindOfMaskType invalidMask ) const
+{
+	Int count = 0;
+	for (Int i = 0; i < MAX_PLAYER_COUNT; ++i)
+		for (ObjectCountMap::const_iterator it = m_objectsDestroyed[i].begin(); it != m_objectsDestroyed[i].end(); ++it)
+			if (it->first->isKindOfMulti(validMask, invalidMask))
+				count += it->second;
+	return count;
+}
+
 Int ScoreKeeper::getTotalObjectsBuilt( const ThingTemplate *pTemplate )
 {
 	Int count = 0;

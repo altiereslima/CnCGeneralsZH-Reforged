@@ -48,6 +48,7 @@
 class VideoBuffer;
 class VideoStreamInterface;
 class WindowVideoManager;
+class LoadScreenBoard;
 
 
 
@@ -115,6 +116,7 @@ private:
 
 	VideoBuffer *m_videoBuffer;
 	VideoStreamInterface *m_videoStream;
+	LoadScreenBoard *m_board;					///< the mission's name, briefing and tip, over the picture once the movie is done
 
 	void moveWindows( Int frame );
 
@@ -220,6 +222,7 @@ public:
 
 private:
 	GameWindow *m_progressBar	;				///< Pointer to the Progress Bar on the window
+	LoadScreenBoard *m_board;					///< a replay's players, map and tip; NULL for a boot or a saved game
 
 };
 
@@ -243,15 +246,7 @@ public:
 	void processProgress(Int playerId, Int percentage);
 	virtual void setProgressRange( Int min, Int max ) { }
 private:
-	GameWindow *m_progressBars[MAX_SLOTS];	///< pointer array to all the progress bars on the window
-	GameWindow *m_playerNames[MAX_SLOTS];		///< pointer array to all the static text player names on the window
-	GameWindow *m_playerSide[MAX_SLOTS];		///< pointer array to all the static text player sides
-	Int m_playerLookup[MAX_SLOTS];					///< lookup table to translate network slot info screen slot (to account for holes in the slot list)
-	GameWindow *m_mapPreview;
-	GameWindow *m_buttonMapStartPosition[MAX_SLOTS];
-	GameWindow *m_portraitLocalGeneral;
-	GameWindow *m_featuresLocalGeneral;
-	GameWindow *m_nameLocalGeneral;
+	LoadScreenBoard *m_board;
 
 };
 
@@ -274,23 +269,7 @@ public:
 	void processProgress(Int playerId, Int percentage);
 	virtual void setProgressRange( Int min, Int max ) { }
 private:
-	GameWindow *m_progressBars[MAX_SLOTS];	///< pointer array to all the progress bars on the window
-	GameWindow *m_playerNames[MAX_SLOTS];		///< pointer array to all the static text player names on the window
-	GameWindow *m_playerSide[MAX_SLOTS];		///< pointer array to all the static text player sides
-	GameWindow *m_playerFavoriteFactions[MAX_SLOTS];		///< pointer array to all the static text player sides
-	GameWindow *m_playerTotalDisconnects[MAX_SLOTS];		///< pointer array to all the static text player sides
-	GameWindow *m_playerWin[MAX_SLOTS];		///< pointer array to all the static text player sides
-	GameWindow *m_playerWinLosses[MAX_SLOTS];		///< pointer array to all the static text player sides
-	GameWindow *m_playerRank[MAX_SLOTS];		///< pointer array to all the static text player sides
-	GameWindow *m_playerOfficerMedal[MAX_SLOTS];		///< pointer array to all the static text player munkees
-	GameWindow *m_mapPreview;
-	GameWindow *m_buttonMapStartPosition[MAX_SLOTS];
-
-	Int m_playerLookup[MAX_SLOTS];					///< lookup table to translate network slot info screen slot (to account for holes in the slot list)
-
-	GameWindow *m_portraitLocalGeneral;
-	GameWindow *m_featuresLocalGeneral;
-	GameWindow *m_nameLocalGeneral;
+	LoadScreenBoard *m_board;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

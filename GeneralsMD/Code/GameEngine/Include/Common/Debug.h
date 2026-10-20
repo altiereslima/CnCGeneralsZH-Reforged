@@ -182,6 +182,12 @@ class AsciiString;
 	#define DEBUG_LOG_DEV(m)				((void)0)
 #endif
 
+/// The debug log's cap (Debug.cpp): cut the open, flushed log at path down to its first headEnd
+/// bytes, a line saying what went, and the whole lines in its last keep bytes; it stays open at
+/// its new end, which is returned.  Here rather than static so test_gameengine can call it.
+#include <stdio.h>
+DEBUG_EXTERN_C long DebugCutLogFile(FILE *file, const char *path, long headEnd, long keep);
+
 #ifdef DEBUG_CRASHING
 
 	DEBUG_EXTERN_C void DebugCrash(const char *format, ...);

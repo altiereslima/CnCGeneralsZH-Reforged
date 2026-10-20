@@ -20,6 +20,8 @@
 #include "dx11runtime.h"
 
 #include <map>
+#include <stdio.h>
+#include <string.h>
 #include <string>
 
 #include "dx11backend.h"
@@ -72,6 +74,275 @@ static const EngineShaderRecord & engine_shader_record(const void * shader)
 	return (entry != EngineShaders.end()) ? entry->second : UNKNOWN;
 }
 
+// The GPU's own clock over every presented frame, read back without ever waiting for it.  A ring of
+// GPU_TIMING_SLOTS disjoint brackets, each around four timestamps: the frame's first Begin_Scene since
+// the last flip (so the water's reflection pass, which comes before the shadow map, counts as
+// shadow), the end of the sun's depth map, the entry to Finish_Scene (the world is drawn, the post
+// chain and the interface are not) and the last thing before Present.  Once a frame the oldest closed
+// bracket is asked for its answer with DONOTFLUSH; one still unanswered when its slot comes round
+// again is dropped, and so is one the driver says the clock jumped in.  Five queries a frame, cheap
+// enough for every build; Direct3D11_Take_GPU_Report sums them.
+enum GpuStamp { GPU_FRAME_BEGIN, GPU_SHADOW_END, GPU_SCENE_END, GPU_FRAME_END, GPU_STAMPS };
+enum { GPU_TIMING_SLOTS = 4 };
+
+struct GpuTimingSlot
+{
+	ID3D11Query * Clock;					// D3D11_QUERY_TIMESTAMP_DISJOINT around the stamps
+	ID3D11Query * Stamps[GPU_STAMPS];
+	bool Issued[GPU_STAMPS];
+	bool Pending;							// closed, not read back yet
+	unsigned Frame;
+};
+static GpuTimingSlot GpuSlots[GPU_TIMING_SLOTS];
+static bool GpuTiming = false;
+static bool FrameOpen = false;				// a Begin_Scene since the last flip
+static unsigned FrameNumber = 0;			// flips so far; frame n writes slot n % GPU_TIMING_SLOTS
+
+// What the frames read back since the last report add up to.
+struct GpuTotals
+{
+	unsigned Frames;
+	unsigned Samples;
+	unsigned DroppedBusy;
+	unsigned DroppedDisjoint;
+	unsigned BubblePairs;
+	unsigned WaitTimeouts;
+	unsigned long long ConstantWrites;
+	unsigned long long ConstantRenames;
+	double FrameMs;
+	double FrameMaxMs;
+	double ShadowMs;
+	double SceneMs;
+	double PostMs;
+	double BubbleMs;
+	double WaitMs;
+};
+static GpuTotals GpuWindow;
+static LARGE_INTEGER GpuWindowStart;
+// The last frame read back, for the gap between its end and the next one's start.
+static bool HaveLastGpuFrame = false;
+static unsigned LastGpuFrame = 0;
+static UINT64 LastGpuFrameEnd = 0;
+
+static const double GPU_REPORT_INTERVAL_MS = 1000.0;
+// The longest the top of a frame waits for room in the swap chain's queue.  Two queued frames at
+// 20 Hz fit in it; anything past it is a queue that will not drain (a window the compositor stopped
+// taking frames from), and the frame goes ahead rather than holding the logic with it.
+static const unsigned FRAME_WAIT_LIMIT_MS = 100;
+
+static double elapsed_ms(const LARGE_INTEGER & from, const LARGE_INTEGER & to)
+{
+	static LARGE_INTEGER frequency = { 0 };
+	if (frequency.QuadPart == 0) {
+		QueryPerformanceFrequency(&frequency);
+	}
+	return (double)(to.QuadPart - from.QuadPart) * 1000.0 / (double)frequency.QuadPart;
+}
+
+static void release_query(ID3D11Query *& query)
+{
+	if (query != NULL) {
+		query->Release();
+		query = NULL;
+	}
+}
+
+static void release_gpu_timing()
+{
+	for (unsigned slot = 0; slot < GPU_TIMING_SLOTS; ++slot) {
+		release_query(GpuSlots[slot].Clock);
+		for (unsigned stamp = 0; stamp < GPU_STAMPS; ++stamp) {
+			release_query(GpuSlots[slot].Stamps[stamp]);
+		}
+		GpuSlots[slot].Pending = false;
+	}
+	GpuTiming = false;
+	FrameOpen = false;
+	HaveLastGpuFrame = false;
+}
+
+// A driver that refuses a timestamp query leaves the frame untimed and nothing else.
+static void create_gpu_timing()
+{
+	ID3D11Device * device = Device.Get_Device();
+	const D3D11_QUERY_DESC clock = { D3D11_QUERY_TIMESTAMP_DISJOINT, 0 };
+	const D3D11_QUERY_DESC stamp = { D3D11_QUERY_TIMESTAMP, 0 };
+	GpuTiming = true;
+	for (unsigned slot = 0; slot < GPU_TIMING_SLOTS && GpuTiming; ++slot) {
+		GpuTiming = SUCCEEDED(device->CreateQuery(&clock, &GpuSlots[slot].Clock));
+		for (unsigned index = 0; index < GPU_STAMPS && GpuTiming; ++index) {
+			GpuTiming = SUCCEEDED(device->CreateQuery(&stamp, &GpuSlots[slot].Stamps[index]));
+		}
+	}
+	if (!GpuTiming) {
+		release_gpu_timing();
+	}
+}
+
+// The oldest closed bracket, if the GPU has answered it.  Never waits and never flushes: an answer
+// that is not there yet is asked for again next frame.
+static void read_oldest_gpu_frame()
+{
+	ID3D11DeviceContext * context = Device.Get_Context();
+	for (unsigned age = GPU_TIMING_SLOTS; age > 0; --age) {
+		GpuTimingSlot & slot = GpuSlots[(FrameNumber - age) % GPU_TIMING_SLOTS];
+		if (!slot.Pending) {
+			continue;
+		}
+		D3D11_QUERY_DATA_TIMESTAMP_DISJOINT clock;
+		if (context->GetData(slot.Clock, &clock, sizeof(clock), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) {
+			return;
+		}
+		UINT64 stamps[GPU_STAMPS];
+		for (unsigned index = 0; index < GPU_STAMPS; ++index) {
+			if (slot.Issued[index] && context->GetData(slot.Stamps[index], &stamps[index],
+					sizeof(stamps[index]), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) {
+				return;
+			}
+		}
+		slot.Pending = false;
+		if (clock.Disjoint) {
+			GpuWindow.DroppedDisjoint++;
+			HaveLastGpuFrame = false;
+			return;
+		}
+		// A frame with no shadow map spent nothing on one, and a frame that never reached
+		// Finish_Scene (a menu, a loading screen) was scene to the end.
+		if (!slot.Issued[GPU_SHADOW_END]) {
+			stamps[GPU_SHADOW_END] = stamps[GPU_FRAME_BEGIN];
+		}
+		if (!slot.Issued[GPU_SCENE_END]) {
+			stamps[GPU_SCENE_END] = stamps[GPU_FRAME_END];
+		}
+		const double ms_per_tick = 1000.0 / (double)clock.Frequency;
+		const double frame_ms = (double)(stamps[GPU_FRAME_END] - stamps[GPU_FRAME_BEGIN]) * ms_per_tick;
+		GpuWindow.Samples++;
+		GpuWindow.FrameMs += frame_ms;
+		if (frame_ms > GpuWindow.FrameMaxMs) {
+			GpuWindow.FrameMaxMs = frame_ms;
+		}
+		GpuWindow.ShadowMs += (double)(stamps[GPU_SHADOW_END] - stamps[GPU_FRAME_BEGIN]) * ms_per_tick;
+		GpuWindow.SceneMs += (double)(stamps[GPU_SCENE_END] - stamps[GPU_SHADOW_END]) * ms_per_tick;
+		GpuWindow.PostMs += (double)(stamps[GPU_FRAME_END] - stamps[GPU_SCENE_END]) * ms_per_tick;
+		// The GPU sat idle from the last frame's end to this one's start: the frame it had to wait for.
+		if (HaveLastGpuFrame && slot.Frame == LastGpuFrame + 1 && stamps[GPU_FRAME_BEGIN] >= LastGpuFrameEnd) {
+			GpuWindow.BubbleMs += (double)(stamps[GPU_FRAME_BEGIN] - LastGpuFrameEnd) * ms_per_tick;
+			GpuWindow.BubblePairs++;
+		}
+		HaveLastGpuFrame = true;
+		LastGpuFrame = slot.Frame;
+		LastGpuFrameEnd = stamps[GPU_FRAME_END];
+		return;
+	}
+}
+
+static void stamp_gpu_frame(GpuStamp stamp)
+{
+	if (!GpuTiming || !FrameOpen) {
+		return;
+	}
+	GpuTimingSlot & slot = GpuSlots[FrameNumber % GPU_TIMING_SLOTS];
+	// The first of each per frame: a second view (the observer's split) draws its own shadow map and
+	// finishes its own scene, and those count with what follows them.
+	if (!slot.Issued[stamp]) {
+		Device.Get_Context()->End(slot.Stamps[stamp]);
+		slot.Issued[stamp] = true;
+	}
+}
+
+// The top of a presented frame, its first Begin_Scene since the last flip.  The swap chain's queue is
+// waited on here, before the frame is built, and the GPU's clock starts.
+static void begin_frame()
+{
+	if (PresentRequested) {
+		LARGE_INTEGER before;
+		LARGE_INTEGER after;
+		QueryPerformanceCounter(&before);
+		if (!Device.Wait_For_Frame(FRAME_WAIT_LIMIT_MS)) {
+			GpuWindow.WaitTimeouts++;
+		}
+		QueryPerformanceCounter(&after);
+		GpuWindow.WaitMs += elapsed_ms(before, after);
+	}
+	FrameOpen = true;
+	if (!GpuTiming) {
+		return;
+	}
+	read_oldest_gpu_frame();
+	GpuTimingSlot & slot = GpuSlots[FrameNumber % GPU_TIMING_SLOTS];
+	if (slot.Pending) {
+		slot.Pending = false;
+		GpuWindow.DroppedBusy++;
+	}
+	ID3D11DeviceContext * context = Device.Get_Context();
+	context->Begin(slot.Clock);
+	context->End(slot.Stamps[GPU_FRAME_BEGIN]);
+	for (unsigned index = 0; index < GPU_STAMPS; ++index) {
+		slot.Issued[index] = (index == GPU_FRAME_BEGIN);
+	}
+	slot.Frame = FrameNumber;
+}
+
+// The flip: the last stamp and the bracket close, and the next Begin_Scene opens a new frame.
+static void end_frame()
+{
+	if (GpuTiming && FrameOpen) {
+		stamp_gpu_frame(GPU_FRAME_END);
+		GpuTimingSlot & slot = GpuSlots[FrameNumber % GPU_TIMING_SLOTS];
+		Device.Get_Context()->End(slot.Clock);
+		slot.Pending = true;
+	}
+	FrameOpen = false;
+	FrameNumber++;
+	GpuWindow.Frames++;
+}
+
+const char * Direct3D11_Take_GPU_Report()
+{
+	if (!Active) {
+		return NULL;
+	}
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	if (GpuWindowStart.QuadPart == 0) {
+		GpuWindowStart = now;
+		return NULL;
+	}
+	const double wall_ms = elapsed_ms(GpuWindowStart, now);
+	if (wall_ms < GPU_REPORT_INTERVAL_MS) {
+		return NULL;
+	}
+
+	const GpuTotals & window = GpuWindow;
+	const double samples = (window.Samples > 0) ? (double)window.Samples : 1.0;
+	const double frames = (window.Frames > 0) ? (double)window.Frames : 1.0;
+	const double seconds = wall_ms / 1000.0;
+	static char line[512];
+	snprintf(line, sizeof(line),
+		"%.1f fps | gpu frame avg %.2f max %.2f ms | shadow %.2f scene %.2f post+ui %.2f ms | bubble %.2f ms"
+		" | busy %.0f%% | %u samples, dropped %u busy %u disjoint | latency wait %.2f ms a frame, %u timed out"
+		" | %.0f constant writes/s, %.0f renames/s",
+		window.Frames / seconds, window.FrameMs / samples, window.FrameMaxMs,
+		window.ShadowMs / samples, window.SceneMs / samples, window.PostMs / samples,
+		(window.BubblePairs > 0) ? window.BubbleMs / window.BubblePairs : 0.0,
+		100.0 * window.FrameMs / wall_ms, window.Samples, window.DroppedBusy, window.DroppedDisjoint,
+		window.WaitMs / frames, window.WaitTimeouts,
+		(double)window.ConstantWrites / seconds, (double)window.ConstantRenames / seconds);
+	memset(&GpuWindow, 0, sizeof(GpuWindow));
+	GpuWindowStart = now;
+	return line;
+}
+
+bool Direct3D11_Has_Frame_Wait()
+{
+	return Active && Device.Has_Frame_Wait();
+}
+
+const char * Direct3D11_Constant_Path()
+{
+	return Active ? Backend.Constant_Path() : "";
+}
+
 void Direct3D11_Enable(bool enabled)
 {
 	Requested = enabled;
@@ -111,6 +382,7 @@ bool Direct3D11_Create(HWND window, unsigned width, unsigned height)
 		Post.Set_Chain(PostChain, PostChainLength);
 	}
 
+	create_gpu_timing();
 	Active = true;
 	return true;
 }
@@ -120,6 +392,7 @@ void Direct3D11_Release()
 	if (!Active) {
 		return;
 	}
+	release_gpu_timing();
 	Post.Shutdown();
 	Device.Set_Scene_View(NULL);
 	Backend.Shutdown();
@@ -311,6 +584,7 @@ void Direct3D11_End_Shadow_Map()
 {
 	if (Active) {
 		Backend.End_Shadow_Map();
+		stamp_gpu_frame(GPU_SHADOW_END);
 	}
 }
 
@@ -360,6 +634,27 @@ void Direct3D11_Set_Draw_Effect(unsigned effect, const float parameters[4])
 bool Direct3D11_Draw_Effects()
 {
 	return Active && DrawEffectsAllowed;
+}
+
+bool Direct3D11_Takes_Draw_Effect(unsigned effect)
+{
+	return Active && DrawEffectsAllowed && Backend.Takes_Draw_Effect(effect);
+}
+
+unsigned Direct3D11_Requested_Draw_Effect(float parameters[4])
+{
+	if (Active && DrawEffectsAllowed) {
+		return Backend.Requested_Draw_Effect(parameters);
+	}
+	parameters[0] = parameters[1] = parameters[2] = parameters[3] = 0.0f;
+	return 0;
+}
+
+void Direct3D11_Occlude_Scene()
+{
+	if (Active && Backend.Draws_Into_Scene() && Post.Occlude_Scene(Device.Get_Depth_Texture())) {
+		Backend.Resume_Scene();
+	}
 }
 
 void Direct3D11_Allow_Draw_Effects(bool allowed)
@@ -509,6 +804,9 @@ static void take_the_frame_to_the_screen()
 // The chain binds its own shaders, states and views on the context the backend's draws use.
 void Direct3D11_Finish_Scene()
 {
+	if (Active) {
+		stamp_gpu_frame(GPU_SCENE_END);
+	}
 	if (Active && Post.Run_Chain()) {
 		take_the_frame_to_the_screen();
 	}
@@ -526,6 +824,12 @@ void Direct3D11_Finish_Frame()
 void Direct3D11_Begin_Scene()
 {
 	if (Active) {
+		// A frame draws the water's reflection and then itself, a Begin_Scene each, and only the
+		// first of them is the top of the frame.
+		if (!FrameOpen) {
+			begin_frame();
+			Post.Open_Frame();
+		}
 		// Before the backend binds anything: the scene goes wherever this says it goes, and a frame
 		// that asked for a chain and could not have one falls back to the swap chain here rather
 		// than half way through.
@@ -688,15 +992,17 @@ void Direct3D11_Release_Frame_Copies()
 
 void Direct3D11_End_Scene(bool flip_frames)
 {
-	if (Active && flip_frames && PresentRequested) {
+	if (!Active || !flip_frames) {
+		return;
+	}
+	if (PresentRequested) {
 		Direct3D11_Finish_Frame();
-		if (!Device.Present(VSyncRequested ? 1 : 0) && PresentFailure == S_OK) {
-			PresentFailure = Device.Last_Present_Result();
-		}
 	}
-	if (Active && flip_frames) {
-		Backend.Save_Shader_Cache_If_Due();
+	end_frame();
+	if (PresentRequested && !Device.Present(VSyncRequested ? 1 : 0) && PresentFailure == S_OK) {
+		PresentFailure = Device.Last_Present_Result();
 	}
+	Backend.Save_Shader_Cache_If_Due();
 }
 
 bool Direct3D11_Take_Present_Failure(long & result)
@@ -897,14 +1203,21 @@ void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held)
 }
 
 void Direct3D11_Take_Frame_Cost(double & pipeline_milliseconds, unsigned & pipelines,
-	double & texture_milliseconds, unsigned & textures, unsigned & depth_copies)
+	double & texture_milliseconds, unsigned & textures, unsigned & depth_copies,
+	unsigned & constant_writes, unsigned & constant_renames)
 {
 	pipeline_milliseconds = 0.0;
 	pipelines = 0;
 	depth_copies = 0;
+	constant_writes = 0;
+	constant_renames = 0;
 	if (Active) {
 		Backend.Take_Frame_Build_Cost(pipeline_milliseconds, pipelines);
 		depth_copies = Backend.Take_Frame_Depth_Copies();
+		Backend.Take_Frame_Constant_Writes(constant_writes, constant_renames);
+		// the frame cost line prints only past its threshold; the once a second line takes every frame
+		GpuWindow.ConstantWrites += constant_writes;
+		GpuWindow.ConstantRenames += constant_renames;
 	}
 	DX11Texture_Take_Frame_Cost(texture_milliseconds, textures);
 }

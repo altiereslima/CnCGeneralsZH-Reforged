@@ -45,6 +45,8 @@
 #include "GameLogic/WaterGridMotion.h"
 #include "Platform/RenderTypes.h"
 
+#include <vector>
+
 #define INVALID_WATER_HEIGHT 0.0f	///water height guaranteed to be below all terrain.
 
 #define NUM_BUMP_FRAMES 32	///number of animation frames in bump map
@@ -65,9 +67,8 @@ with rectangular planar surfaces and was tuned with an emphasis on water.
 Since skies are only visible in reflections, this code will also
 render clouds and sky bodies.
 */
-class WaterRenderObjClass : public Snapshot,
-														public RenderObjClass
-{	
+class WaterRenderObjClass : public RenderObjClass
+{
 
 public:
 
@@ -108,8 +109,7 @@ public:
 	void reset( void );  ///< reset any resources we need to
 	void load(void);	///< load/setup any map dependent features
 	void update( void ); ///< update phase of the water
-	void updateMeshMotion( UnsignedInt logicFrame );	///< the grid's motion, once per logic frame (WaterGridMotion.h)
-	void enableWaterGrid(Bool state);	///< used to active custom water for special maps. (i.e DAM).
+	void enableWaterGrid(Bool state);	///< used to active custom water for special maps. (i.e DAM).  The grid is TerrainLogic's WaterGrid; this builds its buffers
 	void updateMapOverrides(void);	///< used to update any map specific map overrides for water appearance.
 	void setTimeOfDay(TimeOfDay tod); ///<change sky/water for time of day
 	void toggleCloudLayer(Bool state)	{	m_useCloudLayer=state;}	///<enables/disables the cloud layer
@@ -117,19 +117,6 @@ public:
 	void ReleaseResources(void);	///< Release all dx8 resources so the device can be reset.
 	void ReAcquireResources(void);  ///< Reacquire all resources after device reset.
 	Real getWaterHeight(Real x, Real y);	///<return water height at given point - for use by WB.
-	void setGridHeightClamps(Real minz, Real maxz);	///<set min/max height values alllowed in grid
-	void addVelocity( Real worldX, Real worldY, Real zVelocity, Real preferredHeight );	///< add velocity value
-	void changeGridHeight(Real x, Real y, Real delta);	///<change height of grid at world point including neighbors within falloff.
-	void setGridChangeAttenuationFactors(Real a, Real b, Real c, Real range);	///<adjust falloff parameters for grid change method.
-	void setGridTransform(Real angle, Real x, Real y, Real z);	///<positoin/orientation of grid in space
-	void setGridTransform(const Matrix3D *transform);	///< set transform by matrix
-	void getGridTransform(Matrix3D *transform);	///< get grid transform matrix
-	void setGridResolution(Real gridCellsX, Real gridCellsY, Real cellSize);	///<grid resolution and spacing
-	void getGridResolution(Real *gridCellsX, Real *gridCellsY, Real *cellSize);  ///<get grid resolution params
-	inline void setGridVertexHeight(Int x, Int y, Real value); 
-	inline void getGridVertexHeight(Int x, Int y, Real *value)
-	{	if (m_meshData)	*value=m_meshData[(y+1)*(m_gridCellsX+1+2)+x+1].height+ Get_Position().Z;}
-	inline Bool worldToGridSpace(Real worldX, Real worldY, Real &gridX, Real &gridY);	///<convert from world coordinates to grid's local coordinate system.
 
 	void replaceSkyboxTexture(const AsciiString& oldTexName, const AsciiString& newTextName);
 
@@ -187,31 +174,21 @@ protected:
 	RenderObjClass	*m_skyBox;		///<box around level
 	WaterTracksRenderSystem *m_waterTrackSystem;	///<object responsible for rendering water wakes
 
-	enum WaterMeshStatus
-	{
-		AT_REST = 0x00,
-		IN_MOTION = WaterGridMotion::IN_MOTION	///< 0x01, as it always was
-	};
+	/* The grid mesh and its settings are TerrainLogic's WaterGrid (LOGIC-THREAD M7).  The draw reads a
+		 copy of it, taken in update() at the sync point (phase 3), so a tick stepping the grid beside the
+		 draw changes nothing the draw is reading: the mesh, its size, the two flags and the transform,
+		 which syncGridTransform copies into this object's own. */
 	typedef WaterGridMotion::MeshPoint WaterMeshData;	///< moved, unchanged, with the step that moves it (T1c)
-	WaterMeshData *m_meshData;  ///< heightmap data for 3D Mesh based water.
-	UnsignedInt m_meshDataSize;	///< size of m_meshData 
-	Bool m_meshInMotion;				///< TRUE once we've messed with velocities and are in motion
-	Bool m_doWaterGrid;	///< allows/prevents water grid rendering.
-
-	Vector2	m_gridDirectionX;			///<vector along water grid's x-axis (scaled to world-space)
-	Vector2	m_gridDirectionY;			///<vector along water grid's y-axis (scaled to world-space)
-	Vector2	m_gridOrigin;				///<unit vector along water grid's x-axis
-	Real m_gridWidth;					///<object-space width of water grid
-	Real m_gridHeight;					///<object-space width of water grid
-	Real m_minGridHeight;				///<minimum height value allowed for water mesh
-	Real m_maxGridHeight;				///<maximum height value allowed for water mesh
-	Real m_gridChangeMaxRange;			///<maximum range of changeGridHeight() method
-	Real m_gridChangeAtt0;
-	Real m_gridChangeAtt1;
-	Real m_gridChangeAtt2;
-	Real m_gridCellSize;				///<world-space width/height of each cell.
-	Int  m_gridCellsX;					///<number of cells along width
-	Int  m_gridCellsY;					///<number of cells along height
+	UnsignedInt m_meshGeneration;	///< the grid allocation the mesh buffers were built for
+	void syncGridTransform(void);	///< take the grid's transform, as the grid setters once set ours
+	void takeGridForDraw(void);		///< the copy below, from TerrainLogic's grid
+	std::vector<WaterMeshData> m_drawnMesh;
+	Int m_drawnCellsX;
+	Int m_drawnCellsY;
+	Real m_drawnCellSize;
+	Bool m_drawnMotionEnabled;
+	Bool m_drawnPushed;
+	Matrix3D m_drawnTransform;
 
 	Real m_riverVOrigin;
 	TextureClass *m_riverTexture;
@@ -225,7 +202,6 @@ protected:
 	Real m_riverXOffset;
 	Real m_riverYOffset;
 	Bool m_drawingRiver;
-	Bool m_disableRiver;
 	TextureClass *m_riverAlphaEdge;
 
 	TimeOfDay m_tod;	///<time of day setting for reflected cloud layer
@@ -269,35 +245,7 @@ protected:
 	RenderResult generateIndexBuffer(int sizeX, int sizeY);	///<Generate static index buufer
 	RenderResult generateVertexBuffer( Int sizeX, Int sizeY, Int vertexSize, Bool doFill);///<Generate static vertex buffer
 
-	// snapshot methods for save/load
-	virtual void crc( Xfer *xfer );
-	virtual void xfer( Xfer *xfer );
-	virtual void loadPostProcess( void );
-
 };
-
-//Public inline function declerations
-inline Bool WaterRenderObjClass::worldToGridSpace(Real worldX, Real worldY, Real &gridX, Real &gridY)
-{
-	Real dx,dy;
-	Real ooGridCellSize = 1.0f/m_gridCellSize;
-
-	dx=worldX - m_gridOrigin.X;
-	dy=worldY - m_gridOrigin.Y;
-	gridX = ooGridCellSize * (dx * m_gridDirectionX.X + dy * m_gridDirectionX.Y);
-	gridY = ooGridCellSize * (dx * m_gridDirectionY.X + dy * m_gridDirectionY.Y);
-	
-	if (gridX < 0)
-		return FALSE;
-	if (gridX > m_gridCellsX-1 )
-		return FALSE;
-	if (gridY < 0)
-		return FALSE;
-	if (gridY > m_gridCellsY-1 )
-		return FALSE;
-
-	return TRUE;
-}
 
 extern WaterRenderObjClass *TheWaterRenderObj; ///<global water rendering object
 

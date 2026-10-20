@@ -34,6 +34,7 @@
 
 #include "Common/INI.h"
 #include "Common/SpecialPower.h"
+#include "Common/CommandStore.h"
 #include "GameClient/ControlBar.h"
 
 //-------------------------------------------------------------------------------------------------
@@ -41,23 +42,23 @@
 //-------------------------------------------------------------------------------------------------
 void INI::parseCommandButtonDefinition( INI *ini )
 {
-	ControlBar::parseCommandButtonDefinition(ini);
+	CommandStore::parseCommandButtonDefinition(ini);
 }
 
 //-------------------------------------------------------------------------------------------------
 /** Parse a command button */
 //-------------------------------------------------------------------------------------------------
-void ControlBar::parseCommandButtonDefinition( INI *ini )
+void CommandStore::parseCommandButtonDefinition( INI *ini )
 {
 	// read the name
 	AsciiString name = ini->getNextToken();
 
 	// find existing item if present
-	CommandButton *button = TheControlBar->findNonConstCommandButton( name );
+	CommandButton *button = TheCommandStore->findNonConstCommandButton( name );
 	if( button == NULL )
 	{
 		// allocate a new item
-		button = TheControlBar->newCommandButton( name );
+		button = TheCommandStore->newCommandButton( name );
 		if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES) 
 		{
 			button->markAsOverride();
@@ -73,7 +74,7 @@ void ControlBar::parseCommandButtonDefinition( INI *ini )
 	}
 	else
 	{
-		button = TheControlBar->newCommandButtonOverride( button );
+		button = TheCommandStore->newCommandButtonOverride( button );
 	}
 
 	// parse the ini definition

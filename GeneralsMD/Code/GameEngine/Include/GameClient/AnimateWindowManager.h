@@ -171,6 +171,7 @@ public:
 	Bool isFinished( void );										///< Are all the animations that need to be finished, finished?
 	void reverseAnimateWindow( void );					///< tell each animation type to setup the windows to run in reverse
 	void resetToRestPosition( void );						///< Reset all windows to their rest position
+	void finish( void );												///< put every window where its animation ends, now
 	Bool isReversed( void );										///< Returns whether or not we're in our reversed state.
 	Bool isEmpty( void );
 private:

@@ -55,6 +55,7 @@
 #include "Common/GameType.h"
 #include "Common/Handicap.h"
 #include "Common/KindOf.h"
+#include "Common/LogicThread.h"
 #include "Common/MissionStats.h"
 #include "Common/Money.h"
 #include "Common/Science.h"
@@ -153,14 +154,14 @@ Int UnitLimitPerPlayer( Int nonObserverPlayers );
 // Whether a build that adds unitsItAdds (a transport and its payload) goes past the share.  0 is no cap.
 Bool UnitCapRefuses( Int unitsTowardCap, Int unitsItAdds, UnsignedInt unitCap );
 
-// A computer player's superweapons are paid for in base defences: every DEFENSES_PER_SUPERWEAPON
-// finished defences it stands allow it one superweapon, counted across every type (four until
-// the owner raised it to twelve).  A human is held
-// only by the lobby's rule and Pro Rules.  Whether one more is refused,
-// given the finished defences and the superweapons he already has, foundations included.  It sits
-// on top of the lobby's rule and never loosens it.
+// A computer player's superweapons are paid for in base defences: every defensesPerSuperweapon
+// finished defences it stands allow it one superweapon, counted across every type.  The number is
+// the rung's (AIDifficultyProfile::m_superweaponDefenses), DEFENSES_PER_SUPERWEAPON on Hard, and
+// 0 asks for none.  A human is held only by the lobby's rule and Pro Rules.  Whether one more is
+// refused, given the finished defences and the superweapons he already has, foundations included.
+// It sits on top of the lobby's rule and never loosens it.
 enum { DEFENSES_PER_SUPERWEAPON = 12 };
-Bool SuperweaponDefenseCapRefuses( Int finishedDefenses, Int superweapons );
+Bool SuperweaponDefenseCapRefuses( Int finishedDefenses, Int superweapons, Int defensesPerSuperweapon );
 // Only a defence somebody paid for counts.  The Sneak Attack tunnel, its Start and every general's
 // copy are the only FS_BASE_DEFENSE templates with no BuildCost: a power drops them for free.
 Bool DefenseCountsForSuperweapons( Int buildCost );
@@ -401,8 +402,8 @@ public:
 
 	UnsignedInt getSupplyBoxValue();///< Many things can affect the alue of a crate, but at heart it is a GlobalData ratio.
 
-	inline Energy *getEnergy() { return &m_energy; }
-	inline const Energy *getEnergy() const { return &m_energy; }
+	inline Energy *getEnergy() { LOGIC_WINDOW_READ( WINDOW_PLAYER_STATE ); return &m_energy; }
+	inline const Energy *getEnergy() const { LOGIC_WINDOW_READ( WINDOW_PLAYER_STATE ); return &m_energy; }
 
 	// adds a power bonus to this player because of energy upgrade at his power plants
 	inline void addPowerBonus(Object *obj) { m_energy.addPowerBonus(obj); }
@@ -610,6 +611,7 @@ public:
 
 	/// Get the enemy an ai player is currently focused on.  NOTE - Can be NULL.
 	Player  *getCurrentEnemy( void );
+	void noteTeamRequest( Int kind, Int from, Int enemy, const Coord3D *pos );	///< an ally's request, for this player's AI if it has one (aiPostTeamRequest)
 
 	/// Is this player a skirmish ai player?
 	Bool isSkirmishAIPlayer( void );
@@ -883,6 +885,7 @@ public:
 	/// divide by that difference.
 	Int getRankProgressPercent() const
 	{
+		LOGIC_WINDOW_READ( WINDOW_PLAYER_STATE );
 		const Int span = m_levelUp - m_levelDown;
 		if( span <= 0 )
 			return 100;
@@ -932,6 +935,8 @@ public:
 		* have to ask.  Both answer their neutral value for a human seat. */
 	AISkillLevel getAISkillLevel(void) const;
 	AIRole getAIRole(void) const;
+	AIPersonality getAIPersonality(void) const;
+	void logAIPersonaSummary(void);		///< HEADLESS PERSONA for a computer seat, nothing for a human one
 
 protected:
 

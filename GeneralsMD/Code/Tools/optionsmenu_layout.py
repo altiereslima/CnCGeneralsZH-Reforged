@@ -219,6 +219,7 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxHealthBarColors", None),
     (LABEL,  "LabelMenuTransitionSpeed", "GUI:MenuTransitionSpeed"),
     (SLIDER, "SliderMenuTransitionSpeed", None),
+    (CHECK,  "CheckTurboModeMissions", "GUI:TurboModeMissions"),
 ]
 
 # EA's check boxes that shipped HIDDEN off the panel's right edge with working code behind them in
@@ -253,9 +254,10 @@ NOTE_HEIGHTS = {"ResolutionNote": 20}
 def note_height(name):
     return NOTE_HEIGHTS.get(name, NOTE_HEIGHT)
 NOTE_FONT = 'NAME: "Arial", SIZE: 10, BOLD: 0'
-NOTE_COLOR = ("ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, "
-              "DISABLED: 192 192 192 255, DISABLEDBORDER: 0 0 0 255, "
-              "HILITE:   192 192 192 255, HILITEBORDER:   0 0 0 255")
+# UIStyle's MUTED, the front end's colour for a second line
+NOTE_COLOR = ("ENABLED:  164 170 190 255, ENABLEDBORDER:  0 0 0 255, "
+              "DISABLED: 164 170 190 255, DISABLEDBORDER: 0 0 0 255, "
+              "HILITE:   164 170 190 255, HILITEBORDER:   0 0 0 255")
 
 # a cloned slider keeps its template's range unless it is given one; selfcheck holds these to the
 # catalog row's own bounds
@@ -393,6 +395,8 @@ GROUP_LAYOUT = [
             ("check", "CheckNetBox")]),
         ("GUI:OptionsGroupMenus", [
             setting("LabelMenuTransitionSpeed", "SliderMenuTransitionSpeed", "ValueMenuTransitionSpeed")]),
+        ("GUI:OptionsGroupSpeed", [
+            ("check", "CheckTurboModeMissions")]),
         ("GUI:OptionsGroupBattlefield", [
             setting("LabelHealthBars", "ComboBoxHealthBars"),
             setting("LabelHealthBarColors", "ComboBoxHealthBarColors"),
@@ -599,7 +603,8 @@ def make_list(templates, spec, columns):
     walk it, and keeps no more rows than it is given."""
     name, left, top, width, height = spec
     listbox = clone(templates[HOTKEY_LIST_SOURCE], _named(name))
-    listbox.place(left, top, width, height)
+    # the lobby room is laid out at 1920x1080 now, and this page is 800x600
+    listbox.rect = (left, top, left + width, top + height, 800, 600)
     listbox.set_prop("STATUS", "ENABLED")
     widths = "".join("COLUMNSWIDTH: %d, " % share for share in columns)
     listbox.set_prop("LISTBOXDATA", "LENGTH: 300, AUTOSCROLL: 0, SCROLLIFATEND: 0, AUTOPURGE: 0, SCROLLBAR: 1, "
@@ -630,6 +635,7 @@ def build_hotkeys_page(page, templates):
         button.place(left, HOTKEY_BUTTON_TOP, HOTKEY_BUTTON_WIDTH, ROW_HEIGHT)
         button.put_prop("TEXT", '"%s"' % key)
         button.put_prop("TOOLTIPTEXT", '"TOOLTIP:%s"' % name[len("Button"):])
+        restyle(button, templates["ButtonDefaults"])
         page.children.append(button)
 
 
@@ -717,7 +723,9 @@ def build(layout):
                     elif item[0] == "note":
                         put(page_name, item[1], left - TEXT_NUDGE, top, COLUMN_WIDTH, note_height(item[1]))
                     else:
-                        put(page_name, item[1], left, top, 160, ROW_HEIGHT)
+                        # a button on a page is lettered like the ones under the pages, the
+                        # Generals face in capitals, not EA's 10 point Arial
+                        put(page_name, item[1], left, top, 160, ROW_HEIGHT, "ButtonDefaults")
                     top += item_height(item)
                 if top > page_bottom:
                     raise ValueError("%s column %d runs to %d, past the page's %d"

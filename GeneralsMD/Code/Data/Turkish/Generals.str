@@ -930,7 +930,7 @@ GUI:SendDelay
 END
 
 GUI:FirewallRefresh
-"NAT'ı Yenile"
+"NAT'I YENİLE"
 END
 
 GUI:Exit
@@ -15417,6 +15417,22 @@ TOOLTIP:ProRules
 "Turnuva listesi. Süper Silah Generalinin tek topu dışında Parçacık Topu ya da SCUD Fırtınası yok. Nükleer Füze silosu kurulur ama asla ateşlemez. Aurora yok, Taktik Nükleer MiG yok; patlayıcılı motor, intihar bombası, Nötron Mermileri ya da Hayalet Comanche de yok; 3. rütbeden önce Halı Bombardımanı yok. Mikrodalga Tankı hâlâ inşa edilen bir binayı devre dışı bırakamaz, kimse bir düşman binasının 300 birim yakınına bina kuramaz ve kimse bir grup petrol kuyusunun çevresine ikiden fazla Patriot, Gatling Topu ya da Stinger Mevzii koyamaz."
 END
 
+GUI:TurboMode
+"Turbo Modu"
+END
+
+TOOLTIP:TurboMode
+"Maç iki kat hızlı oynanır: her saniyede oyunun iki saniyesi geçer, başka hiçbir şey değişmez. Ağ oyununda bunu herkes için kurucu seçer."
+END
+
+GUI:TurboModeMissions
+"Görevlerde Turbo Modu"
+END
+
+TOOLTIP:TurboModeMissions
+"Kampanya ve General Meydan Okuması görevleri iki kat hızlı oynanır; süren bir görev de hemen hızlanır. Çatışma ve çok oyunculu oyunların lobide kendi kutusu vardır."
+END
+
 GUI:CantBuildTooCloseToEnemy
 "Bir düşman binasına bu kadar yakın inşa edemezsiniz."
 END
@@ -15590,7 +15606,11 @@ CONTROLBAR:Demo_ToolTipGLAScienceRebelAmbush
 END
 
 GUI:SaveFromOlderGame
-"Bu kayıt orijinal oyunla ya da Reforged'ın eski bir sürümüyle yapılmış, yüklenemez."
+"Bu kayıt orijinal oyunla ya da Reforged'ın eski bir sürümüyle yapılmış, yüklenemez. O sürümün \"Görev Başlangıcı\" kayıtları yine yüklenir ve kampanyayı o görevin başından sürdürür; her kampanya görevi kampanya menüsünden de seçilebilir."
+END
+
+GUI:CampaignMission
+"GÖREV %d"
 END
 
 GUI:MapCorrupt
@@ -15729,6 +15749,10 @@ GUI:OptionsGroupMenus
 "Menüler"
 END
 
+GUI:OptionsGroupSpeed
+"Oyun Hızı"
+END
+
 GUI:OptionsGroupReplays
 "Tekrarlar"
 END
@@ -15762,15 +15786,15 @@ GUI:HotkeysCommandBar
 END
 
 GUI:HotkeysChange
-"Değiştir"
+"DEĞİŞTİR"
 END
 
 GUI:HotkeysClear
-"Tuş yok"
+"TUŞ YOK"
 END
 
 GUI:HotkeysDefault
-"Oyunun tuşu"
+"OYUNUN TUŞU"
 END
 
 TOOLTIP:HotkeyChange
@@ -15801,8 +15825,12 @@ GUI:HotkeysPressForceAttack
 "Bir tuşa ya da tek başına Ctrl veya Alt tuşuna basın. Shift basılı tutma tuşu olamaz. Esc vazgeçer."
 END
 
+GUI:HotkeysPressHold
+"Bir tuşa ya da tek başına Ctrl, Alt veya Shift tuşuna basın. Esc vazgeçer."
+END
+
 GUI:HotkeysClash
-"%s: %s aynı tuşu kullanıyor. Oyunda tuş yalnızca birinde çalışır, sabit emir kendi tuşunu korur."
+"%s: %s aynı tuşu kullanıyor. Oyunda tuş yalnızca birinde çalışır: sabit emir kendi tuşunu korur, senin verdiğin harf oyununkinden önce gelir."
 END
 
 GUI:HotkeysAlsoOn
@@ -15810,7 +15838,7 @@ GUI:HotkeysAlsoOn
 END
 
 GUI:HotkeysFixed
-"Her çubukta sabit tuş: A saldırarak ilerle, S dur, G koru, Y toplanma noktası, V boşalt, C çatışma inişi, N sat, H mayın, kamuflaj ağı ve sahte bina geçişi."
+"Her çubukta aynı varsayılan tuş: A saldırarak ilerle, S dur, G koru, Y toplanma noktası, V boşalt, C çatışma inişi, N sat, H mayın, kamuflaj ağı ve sahte bina geçişi. Değiştir ile taşınır."
 END
 
 GUI:HotkeysGameKey
@@ -15954,7 +15982,7 @@ GUI:HotkeysCommandSELECT_ALL
 END
 
 GUI:HotkeysCommandSELECT_ALL_MILITARY
-"Bütün savaşan birlikleri seç"
+"Bütün piyadeleri seç"
 END
 
 GUI:HotkeysCommandSELECT_ALL_VEHICLES
@@ -15985,6 +16013,30 @@ GUI:HotkeysCommandSELECT_NEXT_IDLE_UNIT
 "Sıradaki boştaki birlik"
 END
 
+GUI:HotkeysCommandSELECT_NEXT_IDLE_AIRCRAFT
+"Sıradaki boştaki hava aracı"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_VEHICLE
+"Sıradaki boştaki araç"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_INFANTRY
+"Sıradaki boştaki piyade"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_UNITS
+"Bütün boştaki birlikleri seç"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_AIRCRAFT
+"Bütün boştaki hava araçlarını seç"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_VEHICLES
+"Bütün boştaki araçları seç"
+END
+
 GUI:HotkeysCommandTOGGLE_PAUSE
 "Duraklat (tek oyunculu ve tekrarlar)"
 END
@@ -16003,4 +16055,509 @@ END
 
 GUI:HotkeysCommandSIGNAL_ATTENTION
 "İşaret: buraya bak"
+END
+
+GUI:HotkeysCommandBEGIN_WAYPOINTS
+"Emirleri sıraya koy (basılı tut)"
+END
+
+GUI:HotkeysCommandBEGIN_PREFER_SELECTION
+"Seçime ekle (basılı tut)"
+END
+
+// Maç yükleme ekranı (LoadScreen.cpp içindeki LoadScreenBoard)
+GUI:LoadModeSkirmish
+"Çatışma"
+END
+
+GUI:LoadModeLAN
+"LAN oyunu"
+END
+
+GUI:LoadModeOnline
+"Çevrimiçi oyun"
+END
+
+GUI:LoadModeReplay
+"Tekrar"
+END
+
+GUI:LoadMission
+"Görev %d"
+END
+
+GUI:LoadBriefing
+"BRİFİNG"
+END
+
+GUI:LoadFreeForAll
+"Herkes herkese karşı"
+END
+
+GUI:LoadObservers
+"Gözlemciler:"
+END
+
+GUI:LoadTeam
+"Takım %d"
+END
+
+GUI:LoadWaiting
+"Diğer oyuncular bekleniyor"
+END
+
+GUI:LoadTip
+"İPUCU"
+END
+
+GUI:LoadTip1
+"Emir verirken Shift'i basılı tutun, grup listeyi kendi başına sırayla yapar: yürü, saldır, ele geçir, koru."
+END
+
+GUI:LoadTip2
+"Shift ve bir rakam seçtiklerinizi o kontrol grubuna ekler, gruptakiler de yerinde kalır."
+END
+
+GUI:LoadTip3
+"Ctrl+D seçtiğiniz türlerden ekrandaki bütün birlikleri seçer. İki kez basarsanız bütün haritadakileri alır."
+END
+
+GUI:LoadTip4
+"Shift'i basılı tutup sürükleyerek bir çizgi çizin. Seçtikleriniz onun boyunca ateş hattı olarak dizilir."
+END
+
+GUI:LoadTip5
+"Bir üretim düğmesinde Shift beş, Ctrl yirmi birliği sıraya koyar."
+END
+
+GUI:LoadTip6
+"Bir birliğin düğmesine Ctrl ve Alt ile basın, fabrika onu durmadan üretir."
+END
+
+GUI:LoadTip7
+"Koyduğunuz bir işaret, bilgisayar müttefiklerinizden oraya saldırmalarını ister."
+END
+
+GUI:LoadTip8
+"Sohbete yardim, saldir ya da para yazın: bilgisayar müttefikleriniz yardıma gelir, oraya saldırır ya da para gönderir."
+END
+
+GUI:LoadTip9
+"Bina yerleştirirken Ctrl'yi basılı tutun, tuş basılı kaldıkça ızgaraya oturtma tersine döner."
+END
+
+GUI:LoadTip10
+"Bir binaya çift tıklayın, ekrandaki aynı türden bütün binalar seçilir."
+END
+
+// Bilgisayar oyuncusu kişilikleri, lobide koltuk başına seçilir (AIPersonality)
+GUI:AIPersonaNormal
+"Normal"
+END
+
+GUI:AIPersonaAttacker
+"Saldırgan"
+END
+
+GUI:AIPersonaTurtle
+"Kaplumbağa"
+END
+
+GUI:AIPersonaEconomist
+"Ekonomist"
+END
+
+GUI:AIPersonaAir
+"Hava Kuvvetleri"
+END
+
+GUI:AIPersonaRusher
+"Baskıncı"
+END
+
+GUI:AIPersonaRaider
+"Akıncı"
+END
+
+GUI:AIPersonaTech
+"Teknoloji"
+END
+
+GUI:AIPersonaInfantry
+"Piyade"
+END
+
+GUI:AIPersonaArmor
+"Zırhlı"
+END
+
+GUI:AIPersonaSneaky
+"Sinsi"
+END
+
+GUI:AIPersonaOpportunist
+"Fırsatçı"
+END
+
+GUI:AIPersonaSupporter
+"Destekçi"
+END
+
+GUI:AIPersonaCounter
+"Karşı Hamle"
+END
+
+GUI:AIPersonaRandom
+"Rastgele"
+END
+
+GUI:AIPersonaTooltip
+"Zorluğu ne olursa olsun bu bilgisayar oyuncusunun nasıl oynadığı"
+END
+
+GUI:AIPersona
+"Kişilik"
+END
+
+// Kişilikli bir bilgisayar oyuncusunun sohbete yazdıkları: bir dalga çıkarken (iki satır), üssü
+// vurulunca ve bir düşman silinince (AIPlayer::personaChat)
+GUI:AIChatAttackerWave1
+"Geliyoruz. Yine."
+END
+
+GUI:AIChatAttackerWave2
+"Bugün sana dinlenmek yok."
+END
+
+GUI:AIChatAttackerHit1
+"Karşılık mı veriyorsun? Ne tatlı."
+END
+
+GUI:AIChatAttackerWin1
+"Sıradaki!"
+END
+
+GUI:AIChatTurtleWave1
+"Surlar bitti. Şimdi yürüyoruz."
+END
+
+GUI:AIChatTurtleWave2
+"Yavaş ama emin adımlarla geliyoruz."
+END
+
+GUI:AIChatTurtleHit1
+"Kapıyı istediğin kadar çal, açan olmaz."
+END
+
+GUI:AIChatTurtleWin1
+"Sabreden kazanır."
+END
+
+GUI:AIChatEconomistWave1
+"Bunu bir yatırım say."
+END
+
+GUI:AIChatEconomistWave2
+"Parası peşin ödendi, teslimat geliyor."
+END
+
+GUI:AIChatEconomistHit1
+"O binanın kaça mal olduğunu biliyor musun?"
+END
+
+GUI:AIChatEconomistWin1
+"İflas. Hesap kapatıldı."
+END
+
+GUI:AIChatAirWave1
+"Yukarı bak."
+END
+
+GUI:AIChatAirWave2
+"Tekerlekler yerden kesildi, silahlar hazır."
+END
+
+GUI:AIChatAirHit1
+"Kara birlikleri mi? Ne kadar eski moda."
+END
+
+GUI:AIChatAirWin1
+"Hava hakimiyeti bizde."
+END
+
+GUI:AIChatRusherWave1
+"Neyim varsa, hemen şimdi!"
+END
+
+GUI:AIChatRusherWave2
+"Daha hızlı, daha hızlı!"
+END
+
+GUI:AIChatRusherHit1
+"Sen şimdiye kadar çoktan bitmiş olmalıydın."
+END
+
+GUI:AIChatRusherWin1
+"Çok yavaştın."
+END
+
+GUI:AIChatRaiderWave1
+"Kamyonların pek yalnız görünüyor."
+END
+
+GUI:AIChatRaiderWave2
+"Vur ve kaybol."
+END
+
+GUI:AIChatRaiderHit1
+"Demek sen de benim üssümün yolunu buldun."
+END
+
+GUI:AIChatRaiderWin1
+"Erzak yoksa ordu da yok."
+END
+
+GUI:AIChatTechWave1
+"Saha testi, gerçek hedeflerle."
+END
+
+GUI:AIChatTechWave2
+"Prototipler hazır."
+END
+
+GUI:AIChatTechHit1
+"Laboratuvara dikkat, o cihazlar pahalı."
+END
+
+GUI:AIChatTechWin1
+"Deney tamamlandı."
+END
+
+GUI:AIChatInfantryWave1
+"Piyade sahada!"
+END
+
+GUI:AIChatInfantryWave2
+"Her sokak, her pencere."
+END
+
+GUI:AIChatInfantryHit1
+"Binalara girin, hattı tutun!"
+END
+
+GUI:AIChatInfantryWin1
+"Şehir artık bizim."
+END
+
+GUI:AIChatArmorWave1
+"Çelik yürüyor."
+END
+
+GUI:AIChatArmorWave2
+"Paletleri duyuyor musun? Biziz."
+END
+
+GUI:AIChatArmorHit1
+"Boyamı çizdin."
+END
+
+GUI:AIChatArmorWin1
+"Ezildi."
+END
+
+GUI:AIChatSneakyWave1
+"Bunun geldiğini görmedin."
+END
+
+GUI:AIChatSneakyWave2
+"Arkana bak."
+END
+
+GUI:AIChatSneakyHit1
+"Beni buldun mu? Şans eseri."
+END
+
+GUI:AIChatSneakyWin1
+"İz bile kalmadı."
+END
+
+GUI:AIChatOpportunistWave1
+"Meşgul görünüyorsun. Güzel."
+END
+
+GUI:AIChatOpportunistWave2
+"Zayıf nokta bulundu."
+END
+
+GUI:AIChatOpportunistHit1
+"Bana mı sataşıyorsun? Yanlış seçim."
+END
+
+GUI:AIChatOpportunistWin1
+"Onu benim için yumuşattığın için sağ ol."
+END
+
+GUI:AIChatSupporterWave1
+"Hemen arkandayım, ortak."
+END
+
+GUI:AIChatSupporterWave2
+"Senin hedefin benim hedefim."
+END
+
+GUI:AIChatSupporterHit1
+"Koru beni, ateş altındayım!"
+END
+
+GUI:AIChatSupporterWin1
+"Güzel takım işi."
+END
+
+GUI:AIChatCounterWave1
+"Ordunu okudum. Cevabı bu."
+END
+
+GUI:AIChatCounterWave2
+"Özellikle senin için yapıldı."
+END
+
+GUI:AIChatCounterHit1
+"Tahmin edilebilir."
+END
+
+GUI:AIChatCounterWin1
+"Karşılık verildi."
+END
+
+// Takım panosuna cevap veren bilgisayar müttefiki (AIPlayer::coopChat)
+GUI:AICoopHelp
+"Dayan, geliyorum."
+END
+
+GUI:AICoopMoney
+"Al, biraz para gönderiyorum."
+END
+
+GUI:AICoopJoin
+"Bu saldırıda seninleyim."
+END
+
+GUI:MoneyTransferTitle
+"Para gönder"
+END
+
+GUI:MoneyTransferSend
+"Gönder"
+END
+
+GUI:MoneyTransferAmount
+"$%d"
+END
+
+GUI:MoneyTransferSent
+"Gönderdiğin $%d, %ls oyuncusuna ulaştı."
+END
+
+GUI:MoneyTransferReceived
+"%ls sana $%d gönderdi."
+END
+
+TOOLTIP:MoneyTransfer
+"Miktarı tekerlekle ya da - ve + ile seç: adım 100, Ctrl ile 1.000, Shift ile 10.000, ikisiyle 100.000. Gönder parayı oyuncuya verir."
+END
+
+GUI:LobbyRecord
+"Kariyer"
+END
+
+GUI:LobbyRecordButton
+"KARİYER"
+END
+
+GUI:LobbyRecordClose
+"KAPAT"
+END
+
+GUI:SummaryUnits
+"Birlikler"
+END
+
+GUI:SummaryMoney
+"Para"
+END
+
+GUI:SummaryUnitsBuilt
+"Üretilen"
+END
+
+GUI:SummaryBuildingsBuilt
+"İnşa edilen"
+END
+
+GUI:SummaryLost
+"Kaybedilen"
+END
+
+GUI:SummaryDestroyed
+"Yok edilen"
+END
+
+GUI:SummaryEarned
+"Kazanılan"
+END
+
+GUI:SummaryWinner
+"Kazanan"
+END
+
+GUI:BuildOrderEvery
+"Her inşayı göster"
+END
+
+GUI:BuildOrderFirsts
+"Her şeyin ilkini göster"
+END
+
+GUI:GraphSummary
+"Özet"
+END
+
+GUI:GraphEarned
+"Kazanılan para"
+END
+
+GUI:GraphArmy
+"Ordu"
+END
+
+GUI:GraphBuildings
+"Binalar"
+END
+
+GUI:GraphBuildOrder
+"İnşa sırası"
+END
+
+GUI:GraphSuperweaponBuilt
+"Süper silah kuruldu"
+END
+
+GUI:GraphSuperweaponFired
+"Süper silah ateşlendi"
+END
+
+GUI:GraphGeneralPower
+"General Gücü"
+END
+
+GUI:GraphPromotion
+"Terfi"
+END
+
+GUI:GraphRank
+"Rütbe %d"
+END
+
+GUI:GraphNoData
+"Bu maçta hiçbir şey kaydedilmedi."
 END

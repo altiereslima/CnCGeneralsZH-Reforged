@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include "Lib/Clock.h"
 
+#include "Common/BuildAssistant.h"
 #include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
@@ -43,7 +44,9 @@
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GhostObject.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameClient/CinemaDirector.h"
@@ -64,6 +67,7 @@
 #include "W3DDevice/GameClient/W3DInGameUI.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
+#include "W3DDevice/GameClient/W3DView.h"
 #include "W3DDevice/Common/W3DConvert.h"
 #include "WW3D2/ww3d.h"
 #include "WW3D2/hanim.h"
@@ -303,6 +307,10 @@ W3DInGameUI::W3DInGameUI()
 		m_moveHintAnim[ i ] = NULL;
 	}
 
+	m_buildGridCellX = 0;
+	m_buildGridCellY = 0;
+	memset( m_buildGridBlocked, 0, sizeof( m_buildGridBlocked ) );
+
 }  // end W3DInGameUI
 
 //-------------------------------------------------------------------------------------------------
@@ -399,6 +407,11 @@ void W3DInGameUI::reset( void )
 
 	// call base
 	InGameUI::reset();
+	// the recordings outlive their replays now (Display::replay); their strings go with Display::reset
+	m_overWorldDraw.clear();
+	m_dragBoxDraw.clear();
+	m_postDrawCalls.clear();
+	m_hudOverlayDraw.clear();
 
 }  // end reset
 
@@ -507,6 +520,58 @@ static void fillAround( const IRegion2D &window, Int outside, Color color )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** LOGIC-THREAD.md phase 3.  The parts of draw that ask logic what to show (the superweapon clocks,
+	* the guard markers, the world animations' fog, the production list) run here, at the sync point
+	* before the render, and record what they draw; draw replays each list where the part used to run.
+	* Under -cinema draw takes its own branch and none of this is drawn. */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::recordDraw( void )
+{
+	m_overWorldDraw.clear();
+	m_dragBoxDraw.clear();
+	m_postDrawCalls.clear();
+	m_hudOverlayDraw.clear();
+	takeMoveHintTransforms();
+	if( CinemaDirector_hidesHud() )
+		return;
+
+	// the drag box is the pointer's, so a picture drawn again beside the tick keeps it where it is
+	// while the rest of this list moves with a scrolled camera; it draws after the guard markers now
+	TheDisplay->beginRecording( &m_dragBoxDraw );
+	if( m_isDragSelecting )
+		drawSelectionRegion();
+	TheDisplay->endRecording();
+
+	TheDisplay->beginRecording( &m_overWorldDraw );
+	preDraw();
+	takeBuildGrid();	// after preDraw, which puts the ghost where the patch is centred
+
+	// draw the formation line if one is being dragged out
+	if( m_isFormationDragging )
+		drawFormationLine();
+
+	// the attack circle, while the left button is still sweeping it out
+	if( isAttackCircling() )
+		drawAttackCircle();
+
+	// which of the local player's units are holding a guard
+	drawGuardMarkers();
+	TheDisplay->endRecording();
+
+	// While the map loads the display calls this every pass to paint the load screen's windows, and
+	// the match is already "in game" with its peace time set: the truce plate, the corner readout and
+	// the lists drew over the load screen.  Only the windows belong there.
+	if( TheGlobalData->m_loadScreenRender )
+		return;
+	TheDisplay->beginRecording( &m_postDrawCalls );
+	postDraw();
+	TheDisplay->endRecording();
+	TheDisplay->beginRecording( &m_hudOverlayDraw );
+	drawHudOverlay();
+	TheDisplay->endRecording();
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Draw member for the W3D implemenation of the game user interface */
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::draw( void )
@@ -587,22 +652,11 @@ void W3DInGameUI::draw( void )
 		return;
 	}
 
-	preDraw();
-
-	// draw selection region if drag selecting
-	if( m_isDragSelecting )
-		drawSelectionRegion();
-
-	// draw the formation line if one is being dragged out
-	if( m_isFormationDragging )
-		drawFormationLine();
-
-	// the attack circle, while the left button is still sweeping it out
-	if( isAttackCircling() )
-		drawAttackCircle();
-
-	// which of the local player's units are holding a guard
-	drawGuardMarkers();
+	// preDraw, the formation line, the attack circle, the guard markers and the drag box, which
+	// recordDraw ran at the sync point; the world's part moves with a camera scrolled since
+	const ICoord2D shift = static_cast<W3DView *>( TheTacticalView )->overlayShift();
+	TheDisplay->replayShifted( m_overWorldDraw, shift.x, shift.y );
+	Display::replay( m_dragBoxDraw );
 
 	// for each view draw hints
 	/// @todo should the UI be iterating through views like this?
@@ -651,12 +705,8 @@ void W3DInGameUI::draw( void )
 	tPostStart = Clock_Ticks();
 #endif
 
-	// While the map loads the display calls this every pass to paint the load screen's windows, and
-	// the match is already "in game" with its peace time set: the truce plate, the corner readout and
-	// the lists drew over the load screen.  Only the windows belong there.
-	const Bool matchOnScreen = !TheGlobalData->m_loadScreenRender;
-	if( matchOnScreen )
-		postDraw();
+	// postDraw, as recordDraw ran it
+	Display::replay( m_postDrawCalls );
 
 #ifdef DEBUG_LOGGING
 	tPostEnd = Clock_Ticks();
@@ -679,8 +729,7 @@ void W3DInGameUI::draw( void )
 	// painted: drawn before the window manager, a dialog, the menu or the control bar's own art
 	// covered it.
 	//
-	if( matchOnScreen )
-		drawHudOverlay();
+	Display::replay( m_hudOverlayDraw );
 
 #ifdef EXTENDED_STATS
 	}
@@ -839,7 +888,10 @@ static void setGroundOverlayState( void )
 	* structure, plain impassable.  It deliberately does not run the full isLocationLegalToBuild for
 	* every cell - that is a per-structure query (build radius, shroud, supply proximity) and a
 	* couple of hundred of them a frame is not worth it.  The ghost's own red tint already answers
-	* that question for the one spot the cursor is actually on. */
+	* that question for the one spot the cursor is actually on.
+	*
+	* The cells are read at the sync point (takeBuildGrid), not here: this runs in the terrain pass,
+	* beside the tick. */
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawBuildGrid( void )
 {
@@ -850,20 +902,12 @@ void W3DInGameUI::drawBuildGrid( void )
 	const Bool drawLines = gridPlacementOn();
 	if( m_placeIcon == NULL || m_placeIcon[ 0 ] == NULL )
 		return;
-	if( TheTerrainLogic == NULL || TheAI == NULL )
-		return;
-
-	Pathfinder *pathfinder = TheAI->pathfinder();
-	if( pathfinder == NULL )
-		return;
-
-	const Coord3D *center = m_placeIcon[ 0 ]->getPosition();
-	if( center == NULL )
+	if( TheTerrainLogic == NULL )
 		return;
 
 	// how many cells each way around the cursor we light up
-	enum { GRID_RADIUS = 28 };
-	enum { GRID_CELLS = GRID_RADIUS * 2 + 1, GRID_POINTS = GRID_CELLS + 1 };
+	enum { GRID_RADIUS = BUILD_GRID_RADIUS };
+	enum { GRID_CELLS = BUILD_GRID_CELLS, GRID_POINTS = GRID_CELLS + 1 };
 
 	// half the width of a painted line, in world units - a cell is PLACEMENT_CELL (10) across
 	const Real LINE_HALF_WIDTH = 0.3f;
@@ -872,8 +916,8 @@ void W3DInGameUI::drawBuildGrid( void )
 	const Real GRID_LIFT = 0.35f;
 
 	// the pathfinder's own cell indexing, so the lines drawn are the lines it reasons about
-	const Int cellX = REAL_TO_INT_FLOOR( (center->x + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
-	const Int cellY = REAL_TO_INT_FLOOR( (center->y + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
+	const Int cellX = m_buildGridCellX;
+	const Int cellY = m_buildGridCellY;
 
 	// sample the terrain once per grid corner, rather than once per quad corner.  Static, not
 	// automatic: at this radius the two square tables are ~27k together, which is more than a
@@ -949,8 +993,7 @@ void W3DInGameUI::drawBuildGrid( void )
 	{
 		for( ix = 0; ix < GRID_CELLS; ++ix )
 		{
-			PathfindCell *cell = pathfinder->getCell( LAYER_GROUND, cellX + ix, cellY + iy );
-			if( cell == NULL || cell->getType() == PathfindCell::CELL_CLEAR )
+			if( !m_buildGridBlocked[ iy ][ ix ] )
 				continue;
 
 			if( fade[ iy ][ ix ] <= 0.0f && fade[ iy + 1 ][ ix + 1 ] <= 0.0f )
@@ -970,6 +1013,79 @@ void W3DInGameUI::drawBuildGrid( void )
 	quads.flush();
 
 }  // end drawBuildGrid
+
+//-------------------------------------------------------------------------------------------------
+/** Which cells of the patch round the ghost drawBuildGrid washes red, read from the pathfinder at
+	* the sync point.  The pathfinder marks every structure the moment it is placed, the enemy's in the
+	* shroud included, so its cells alone drew enemy foundations into the dark: a cell held by
+	* something the local player has no picture of stays clear here, and so does rubble under the
+	* shroud, while a building he still sees standing in the fog after it died is washed from its
+	* ghost.  Water, cliffs and plain impassable ground are the map's own and always show. */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::takeBuildGrid( void )
+{
+	if( m_pendingPlaceType == NULL || m_placeIcon == NULL || m_placeIcon[ 0 ] == NULL )
+		return;
+
+	const Coord3D *center = m_placeIcon[ 0 ]->getPosition();
+	m_buildGridCellX = REAL_TO_INT_FLOOR( (center->x + 0.5f) / PATHFIND_CELL_SIZE_F ) - BUILD_GRID_RADIUS;
+	m_buildGridCellY = REAL_TO_INT_FLOOR( (center->y + 0.5f) / PATHFIND_CELL_SIZE_F ) - BUILD_GRID_RADIUS;
+
+	Pathfinder *pathfinder = TheAI->pathfinder();
+	const Int me = ThePlayerList->getLocalPlayer()->getPlayerIndex();
+
+	for( Int iy = 0; iy < BUILD_GRID_CELLS; ++iy )
+	{
+		for( Int ix = 0; ix < BUILD_GRID_CELLS; ++ix )
+		{
+			const PathfindCell *cell = pathfinder->getCell( LAYER_GROUND, m_buildGridCellX + ix, m_buildGridCellY + iy );
+			Bool blocked = cell != NULL && cell->getType() != PathfindCell::CELL_CLEAR;
+
+			if( blocked && cell->getType() == PathfindCell::CELL_OBSTACLE )
+			{
+				blocked = !BuildAssistant_isHiddenFromLocalPlayer( TheGameLogic->findObjectByID( cell->getObstacleID() ) );
+			}
+			else if( blocked && cell->getType() == PathfindCell::CELL_RUBBLE )
+			{
+				Coord3D at;
+				at.x = ( (Real)( m_buildGridCellX + ix ) + 0.5f ) * PATHFIND_CELL_SIZE_F;
+				at.y = ( (Real)( m_buildGridCellY + iy ) + 0.5f ) * PATHFIND_CELL_SIZE_F;
+				at.z = 0.0f;
+				blocked = ThePartitionManager->getShroudStatusForPlayer( me, &at ) != CELLSHROUD_SHROUDED;
+			}
+
+			m_buildGridBlocked[ iy ][ ix ] = blocked;
+		}
+	}
+
+	// A building that died in his fog still stands there for him, drawn from its ghost, but the
+	// pathfinder let go of its cells the moment it died: wash the footprint the ghost remembers, or
+	// bare ground under the ghost tells him it is gone.
+	enum { MAX_GHOSTS = 16 };
+	const GhostObject *ghosts[ MAX_GHOSTS ];
+	const Int ghostCount = BuildAssistant_findDeadGhostsInFog( center, BUILD_GRID_RADIUS * PATHFIND_CELL_SIZE_F,
+																														 ghosts, MAX_GHOSTS );
+	for( Int g = 0; g < ghostCount; ++g )
+	{
+		const Coord3D *at = ghosts[ g ]->getParentPosition();
+		const Real reach = ghosts[ g ]->getGeometryMajorRadius() + ghosts[ g ]->getGeometryMinorRadius() +
+											 PATHFIND_CELL_SIZE_F;	// a round one reaches four tenths of a cell past its radius
+		const Int loX = max( 0, REAL_TO_INT_FLOOR( (at->x - reach) / PATHFIND_CELL_SIZE_F ) - m_buildGridCellX );
+		const Int loY = max( 0, REAL_TO_INT_FLOOR( (at->y - reach) / PATHFIND_CELL_SIZE_F ) - m_buildGridCellY );
+		const Int hiX = min( BUILD_GRID_CELLS - 1, REAL_TO_INT_FLOOR( (at->x + reach) / PATHFIND_CELL_SIZE_F ) - m_buildGridCellX );
+		const Int hiY = min( BUILD_GRID_CELLS - 1, REAL_TO_INT_FLOOR( (at->y + reach) / PATHFIND_CELL_SIZE_F ) - m_buildGridCellY );
+
+		for( Int iy = loY; iy <= hiY; ++iy )
+		{
+			for( Int ix = loX; ix <= hiX; ++ix )
+			{
+				if( BuildAssistant_ghostCoversCell( ghosts[ g ], m_buildGridCellX + ix, m_buildGridCellY + iy ) )
+					m_buildGridBlocked[ iy ][ ix ] = TRUE;
+			}
+		}
+	}
+
+}  // end takeBuildGrid
 
 //-------------------------------------------------------------------------------------------------
 /** The wash inside the circle a left drag is sweeping targets out of.  The rim is a screen space
@@ -1062,7 +1178,7 @@ void W3DInGameUI::drawFormationLine( void )
 	const Real width = 2.0f;
 	// the line says which order it is about to be, in the colours the order hints already use
 	const UnsignedInt color = isInAttackMoveToMode() ? 0xCCFF66CC
-											: isForceAttackArmed() ? 0xCCFF5555
+											: ( isForceAttackArmed() || isForceLineHeld() ) ? 0xCCFF5555
 											: isGuardArmed() ? 0xCC55CCFF
 											: 0xCC33FF33;  //0xAARRGGBB
 	const std::vector<ICoord2D>& curve = m_formationDragPoints;
@@ -1070,9 +1186,65 @@ void W3DInGameUI::drawFormationLine( void )
 	if( points < 2 )
 		return;
 
+	// the kept points are a dozen pixels apart or more, and joined straight they read as a jagged
+	// polyline.  A Catmull-Rom spline through them draws the same curve smooth and still passes
+	// through every point the order carries, so the picture and the order agree where it matters.
+	// Centripetal (knots spaced by the square root of the distance): the spacing is uneven, since the
+	// last point rides the cursor and the spacing doubles when the curve is thinned, and the uniform
+	// spline looped at the cursor and bulged out of sharp corners on that
+	const Int STEPS = 8;
+	const Real MIN_KNOT = 0.01f;		// two points on the same pixel would make a zero knot interval
+	TheDisplay->beginBatch2D();
+	Real lastX = (Real)curve[ 0 ].x;
+	Real lastY = (Real)curve[ 0 ].y;
 	for( Int i = 1; i < points; ++i )
-		TheDisplay->drawLine( curve[ i - 1 ].x, curve[ i - 1 ].y, curve[ i ].x, curve[ i ].y,
-													width, color );
+	{
+		Real px[ 4 ], py[ 4 ];
+		px[ 1 ] = (Real)curve[ i - 1 ].x;		py[ 1 ] = (Real)curve[ i - 1 ].y;
+		px[ 2 ] = (Real)curve[ i ].x;				py[ 2 ] = (Real)curve[ i ].y;
+		// the ends get a point mirrored through them, so the curve leaves and arrives straight
+		if( i > 1 )			{ px[ 0 ] = (Real)curve[ i - 2 ].x;	py[ 0 ] = (Real)curve[ i - 2 ].y; }
+		else						{ px[ 0 ] = 2.0f * px[ 1 ] - px[ 2 ];	py[ 0 ] = 2.0f * py[ 1 ] - py[ 2 ]; }
+		if( i + 1 < points ) { px[ 3 ] = (Real)curve[ i + 1 ].x;	py[ 3 ] = (Real)curve[ i + 1 ].y; }
+		else						{ px[ 3 ] = 2.0f * px[ 2 ] - px[ 1 ];	py[ 3 ] = 2.0f * py[ 2 ] - py[ 1 ]; }
+
+		Real knot[ 4 ];
+		knot[ 0 ] = 0.0f;
+		for( Int k = 1; k < 4; ++k )
+		{
+			const Real dx = px[ k ] - px[ k - 1 ];
+			const Real dy = py[ k ] - py[ k - 1 ];
+			knot[ k ] = knot[ k - 1 ] + max( MIN_KNOT, (Real)sqrt( sqrt( dx * dx + dy * dy ) ) );
+		}
+
+		for( Int s = 1; s <= STEPS; ++s )
+		{
+			// Barry and Goldman's pyramid, which is the spline for any knot spacing
+			const Real t = knot[ 1 ] + ( knot[ 2 ] - knot[ 1 ] ) * (Real)s / (Real)STEPS;
+			Real ax[ 3 ], ay[ 3 ];
+			for( Int k = 0; k < 3; ++k )
+			{
+				const Real w = ( t - knot[ k ] ) / ( knot[ k + 1 ] - knot[ k ] );
+				ax[ k ] = px[ k ] + ( px[ k + 1 ] - px[ k ] ) * w;
+				ay[ k ] = py[ k ] + ( py[ k + 1 ] - py[ k ] ) * w;
+			}
+			Real bx[ 2 ], by[ 2 ];
+			for( Int k = 0; k < 2; ++k )
+			{
+				const Real w = ( t - knot[ k ] ) / ( knot[ k + 2 ] - knot[ k ] );
+				bx[ k ] = ax[ k ] + ( ax[ k + 1 ] - ax[ k ] ) * w;
+				by[ k ] = ay[ k ] + ( ay[ k + 1 ] - ay[ k ] ) * w;
+			}
+			const Real w = ( t - knot[ 1 ] ) / ( knot[ 2 ] - knot[ 1 ] );
+			const Real x = bx[ 0 ] + ( bx[ 1 ] - bx[ 0 ] ) * w;
+			const Real y = by[ 0 ] + ( by[ 1 ] - by[ 0 ] ) * w;
+			TheDisplay->drawLine( (Int)floorf( lastX + 0.5f ), (Int)floorf( lastY + 0.5f ),
+														(Int)floorf( x + 0.5f ), (Int)floorf( y + 0.5f ), width, color );
+			lastX = x;
+			lastY = y;
+		}
+	}
+	TheDisplay->endBatch2D();
 
 }  // end drawFormationLine
 
@@ -1229,6 +1401,35 @@ void W3DInGameUI::drawGuardMarkers( void )
 }  // end drawGuardMarkers
 
 //-------------------------------------------------------------------------------------------------
+/** Each live move ring aligned on logic's terrain, at the sync point: the ground and water heights
+	* are logic's, and drawMoveHints runs inside the overlap window. */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::takeMoveHintTransforms( void )
+{
+	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
+	{
+		Int elapsed = TheGameClient->getFrame() - m_moveHint[i].frame;
+		if( m_moveHint[ i ].frame == 0 || elapsed > ConvertRetailFrames( 40 ) )
+			continue;
+
+		Matrix3D &transform = m_moveHintTransform[ i ];
+		PathfindLayerEnum layer = TheTerrainLogic->alignOnTerrain( 0, m_moveHint[ i ].pos, true, transform );
+
+		Real waterZ;
+		if (layer == LAYER_GROUND && TheTerrainLogic->isUnderwater(m_moveHint[ i ].pos.x, m_moveHint[ i ].pos.y, &waterZ))
+		{
+			Coord3D tmp = m_moveHint[ i ].pos;
+			tmp.z = waterZ;
+			Coord3D normal;
+			normal.x = 0;
+			normal.y = 0;
+			normal.z = 1;
+			makeAlignToNormalMatrix(0, tmp, normal, transform);
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** EA's animated ring on the ground where a move order landed, 40 client frames each.  EA's own
 	* code, deleted by fec052cc and brought back (InGameUI::createMoveHint fills it). */
 //-------------------------------------------------------------------------------------------------
@@ -1272,23 +1473,8 @@ void W3DInGameUI::drawMoveHints( View *view )
 					m_moveHintRenderObj[i]->Set_Animation(m_moveHintAnim[i], 0, RenderObjClass::ANIM_MODE_ONCE);
 			}
 
-			// move this hint render object to the position and align with terrain
-			Matrix3D transform;
-			PathfindLayerEnum layer = TheTerrainLogic->alignOnTerrain( 0, m_moveHint[ i ].pos, true, transform );
-
-			Real waterZ;
-			if (layer == LAYER_GROUND && TheTerrainLogic->isUnderwater(m_moveHint[ i ].pos.x, m_moveHint[ i ].pos.y, &waterZ))
-			{
-				Coord3D tmp = m_moveHint[ i ].pos;
-				tmp.z = waterZ;
-				Coord3D normal;
-				normal.x = 0;
-				normal.y = 0;
-				normal.z = 1;
-				makeAlignToNormalMatrix(0, tmp, normal, transform);
-			}
-
-			m_moveHintRenderObj[ i ]->Set_Transform( transform );
+			// move this hint render object to where takeMoveHintTransforms laid it on the terrain
+			m_moveHintRenderObj[ i ]->Set_Transform( m_moveHintTransform[ i ] );
 		}
 		else if( m_moveHintRenderObj[ i ] && m_moveHintRenderObj[ i ]->Is_Hidden() == 0 )
 		{

@@ -128,6 +128,7 @@ DumbProjectileBehavior::DumbProjectileBehavior( Thing *thing, const ModuleData* 
 	m_launchSlope = 0;
 	m_flightPathStart.zero();
 	m_flightPathEnd.zero();
+	m_aimOffset.zero();
 	m_currentFlightPathStep = 0;
 	m_extraBonusFlags = 0;
 
@@ -368,12 +369,17 @@ void DumbProjectileBehavior::projectileFireAtObjectOrPosition( const Object *vic
 	Real weaponSpeed = detWeap ? detWeap->getWeaponSpeed() : 0.0f;
 	Real minWeaponSpeed = detWeap ? detWeap->getMinWeaponSpeed() : 0.0f;
 
-	// if an object, aim at the center, not the ground part
-	Coord3D victimPosToUse;
+	// At an object, the weapon has picked the shot's point on its body (Weapon::randomPointOnBody) and
+	// the shell flies there. A bridge's attack point is not on it, so a shell at a bridge aims at its
+	// center, not the ground part.
+	Coord3D victimPosToUse = *victimPos;
+	m_aimOffset.zero();
 	if (victim)
-		victim->getGeometryInfo().getCenterPosition(*victim->getPosition(), victimPosToUse);
-	else
-		victimPosToUse = *victimPos;
+	{
+		if (victim->isKindOf(KINDOF_BRIDGE))
+			victim->getGeometryInfo().getCenterPosition(*victim->getPosition(), victimPosToUse);
+		Weapon::bodyOffsetFromPoint(victim, victimPosToUse, m_aimOffset);
+	}
 
 	if( detWeap  &&  detWeap->isScaleWeaponSpeed() )
 	{
@@ -668,7 +674,7 @@ UpdateSleepTime DumbProjectileBehavior::update()
 		if (victim)
 		{
 			Coord3D newVictimPos;
-			victim->getGeometryInfo().getCenterPosition(*victim->getPosition(), newVictimPos);
+			Weapon::pointFromBodyOffset(victim, m_aimOffset, newVictimPos);
 			Coord3D delta;
 			delta.x = newVictimPos.x - m_flightPathEnd.x;
 			delta.y = newVictimPos.y - m_flightPathEnd.y;
@@ -805,7 +811,8 @@ void DumbProjectileBehavior::xfer( Xfer *xfer )
 	// without veterancy or horde bonus, and the detonated flag, so a DetonateCallsKill shell cannot
 	// go off a second time
 	// version 4 adds the barrel's slope at launch, which a lobbed shell's path starts along
-	XferVersion currentVersion = 4;
+	// version 5 adds the shot's point on its victim, which a shell following the victim keeps to
+	XferVersion currentVersion = 5;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -867,6 +874,9 @@ void DumbProjectileBehavior::xfer( Xfer *xfer )
 
 	if( version >= 4 )
 		xfer->xferReal( &m_launchSlope );
+
+	if( version >= 5 )
+		xfer->xferCoord3D( &m_aimOffset );
 
 	// the path itself is a vector of points that is not saved; rebuild it from the start, end and
 	// segment count that are, so the step we just read means something

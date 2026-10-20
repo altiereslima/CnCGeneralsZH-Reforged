@@ -330,16 +330,20 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 					break;
 				}
 
-				// No drawables, or a left press, is a look at, and leaves an armed key armed the way a
-				// pan of the main view does.  A right press with drawables is an order.
+				// No drawables, or a press of the look button, is a look at, and leaves an armed key armed
+				// the way a pan of the main view does.  The other button with drawables is an order.
 
 				const DrawableList *drawableList = TheInGameUI->getAllSelectedLocalDrawables(); // locally-owned only
-				
+
 				// see if the user wants to move the tactical view
 				// Left on the radar looks and right orders, the same division the world has.  Classic
 				// divides the world the other way round, and so did the radar in the game as shipped,
-				// except under EA's Alternate Mouse Setup, which looked with the left.
-				const UnsignedInt lookButton = TheGlobalData->leftButtonOrders() ? GWM_RIGHT_DOWN : GWM_LEFT_DOWN;
+				// except under EA's Alternate Mouse Setup, which looked with the left.  An armed key or a
+				// command waiting for its target is aimed with the left button in every mouse, as it is in
+				// the world, so the right one looks then.
+				const Bool leftAims = TheGlobalData->leftButtonOrders() || TheInGameUI->isOrderKeyArmed()
+					|| TheInGameUI->getGUICommand() != NULL;
+				const UnsignedInt lookButton = leftAims ? GWM_RIGHT_DOWN : GWM_LEFT_DOWN;
 				// that look button held on the radar keeps the camera under the cursor, Classic included
 				if( drawableList->empty() || msg == lookButton )
 				{
@@ -480,7 +484,9 @@ WindowMsgHandledType ControlBarSystem( GameWindow *window, UnsignedInt msg,
 			else if( controlID == buttonIdleWorker)
 			{
 				HideQuitMenu( );
-				TheInGameUI->selectNextIdleWorker();
+				Object *worker = TheInGameUI->selectNextIdleWorker();
+				if( worker )	// every worker busy: nothing was selected
+					TheTacticalView->lookAt( worker->getPosition() );
 			}
 			else
 			{

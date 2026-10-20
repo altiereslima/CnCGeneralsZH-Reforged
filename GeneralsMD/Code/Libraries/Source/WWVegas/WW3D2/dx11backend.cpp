@@ -203,9 +203,10 @@ DX11BackendClass::DX11BackendClass()
 	, IndexBuffer(NULL)
 	, IndexFormat(DXGI_FORMAT_R16_UINT)
 	, MaterialPower(0.0f)
-	, VertexConstantBuffer(NULL)
-	, PixelConstantBuffer(NULL)
-	, EngineConstantBuffer(NULL)
+	, OffsetContext(NULL)
+	, FrameConstantWrites(0)
+	, FrameConstantRenames(0)
+	, ConstantPath("")
 	, VertexProgram(ENGINE_SHADER_NONE)
 	, PixelProgram(ENGINE_SHADER_NONE)
 	, UserBuffer(NULL)
@@ -262,6 +263,9 @@ DX11BackendClass::DX11BackendClass()
 	memset(Memos, 0, sizeof(Memos));
 	LastMemo = 0;
 	NextMemo = 0;
+	memset(&VertexConstantRing, 0, sizeof(VertexConstantRing));
+	memset(&PixelConstantRing, 0, sizeof(PixelConstantRing));
+	memset(&EngineConstantRing, 0, sizeof(EngineConstantRing));
 	Forget_Last_State_Objects();
 	memset(&HeldVertexConstants, 0, sizeof(HeldVertexConstants));
 	memset(&HeldPixelConstants, 0, sizeof(HeldPixelConstants));
@@ -360,24 +364,97 @@ bool DX11BackendClass::Initialise(DX11DeviceClass * device)
 	PixelConstantsHeld = false;
 	EngineConstantsHeld = false;
 
+	// The rings want both halves of 11.1: binding at an offset, and a constant buffer mapped without
+	// a discard.  The 11.0 runtime refuses the question, and an old driver answers no to either.
+	D3D11_FEATURE_DATA_D3D11_OPTIONS options;
+	memset(&options, 0, sizeof(options));
+	ConstantPath = "one entry a kind, a discard every write: no 11.1 offset binding";
+	if (SUCCEEDED(Device->Get_Device()->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &options,
+			sizeof(options)))
+		&& options.ConstantBufferOffsetting && options.MapNoOverwriteOnDynamicConstantBuffer) {
+		Device->Get_Context()->QueryInterface(__uuidof(ID3D11DeviceContext1),
+			reinterpret_cast<void **>(&OffsetContext));
+	}
+
+	auto create_rings = [this]() {
+		return Create_Constant_Ring(VertexConstantRing, sizeof(VertexConstantBlock))
+			&& Create_Constant_Ring(PixelConstantRing, sizeof(PixelConstantBlock))
+			&& Create_Constant_Ring(EngineConstantRing, sizeof(EngineConstants));
+	};
+	if (OffsetContext != NULL) {
+		if (create_rings()) {
+			ConstantPath = "a 4 MB ring a kind, written NO_OVERWRITE and bound at offsets";
+			return true;
+		}
+		// A driver that says yes to offsets can still refuse a constant buffer this large, and
+		// losing the Direct3D 11 frame over it would be the wrong trade: the one-entry rings below
+		// are how every write went before the rings.
+		Release_Constant_Ring(VertexConstantRing);
+		Release_Constant_Ring(PixelConstantRing);
+		Release_Constant_Ring(EngineConstantRing);
+		OffsetContext->Release();
+		OffsetContext = NULL;
+		ConstantPath = "one entry a kind, a discard every write: the device refused a 4 MB ring";
+	}
+	return create_rings();
+}
+
+// A ring's size.  A heavy frame writes about three thousand blocks across the three rings, a
+// kilobyte to two and a half each, so four megabytes a ring holds most of a frame and wraps about
+// once a frame where every write used to discard.
+static const unsigned CONSTANT_RING_BYTES = 4u << 20;
+// An offset and a count are both in whole sixteen-constant steps of sixteen bytes a constant.
+static const unsigned CONSTANT_BYTES = 16;
+static const unsigned CONSTANT_ENTRY_ALIGNMENT = 16 * CONSTANT_BYTES;
+
+bool DX11BackendClass::Create_Constant_Ring(ConstantRing & ring, unsigned block_bytes)
+{
+	ring.EntryBytes = (block_bytes + CONSTANT_ENTRY_ALIGNMENT - 1) & ~(CONSTANT_ENTRY_ALIGNMENT - 1);
+	ring.Bytes = (OffsetContext != NULL)
+		? (CONSTANT_RING_BYTES / ring.EntryBytes) * ring.EntryBytes : ring.EntryBytes;
+	// Full, so the first write discards: the buffer has never been mapped.
+	ring.Next = ring.Bytes;
+	ring.Current = 0;
+
 	D3D11_BUFFER_DESC description;
 	memset(&description, 0, sizeof(description));
-	description.ByteWidth = sizeof(VertexConstantBlock);
+	description.ByteWidth = ring.Bytes;
 	description.Usage = D3D11_USAGE_DYNAMIC;
 	description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	description.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	return SUCCEEDED(Device->Get_Device()->CreateBuffer(&description, NULL, &ring.Buffer));
+}
 
-	if (FAILED(Device->Get_Device()->CreateBuffer(&description, NULL, &VertexConstantBuffer))) {
+// NO_OVERWRITE is the promise that nothing a queued draw reads is written, which holds because a
+// write only ever lands past every entry written since the last discard.  A failed Map leaves the
+// ring where it was, so a retry neither skips a discard nor writes over an entry in flight.
+bool DX11BackendClass::Write_Constants(ConstantRing & ring, const void * block, unsigned bytes)
+{
+	const bool wraps = ring.Next + ring.EntryBytes > ring.Bytes;
+	const unsigned offset = wraps ? 0 : ring.Next;
+	ID3D11DeviceContext * context = Device->Get_Context();
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (FAILED(context->Map(ring.Buffer, 0,
+			wraps ? D3D11_MAP_WRITE_DISCARD : D3D11_MAP_WRITE_NO_OVERWRITE, 0, &mapped))) {
 		return false;
 	}
-
-	description.ByteWidth = sizeof(PixelConstantBlock);
-	if (FAILED(Device->Get_Device()->CreateBuffer(&description, NULL, &PixelConstantBuffer))) {
-		return false;
+	memcpy(static_cast<unsigned char *>(mapped.pData) + offset, block, bytes);
+	context->Unmap(ring.Buffer, 0);
+	ring.Current = offset;
+	ring.Next = offset + ring.EntryBytes;
+	++FrameConstantWrites;
+	if (wraps) {
+		++FrameConstantRenames;
 	}
+	return true;
+}
 
-	description.ByteWidth = sizeof(EngineConstants);
-	return SUCCEEDED(Device->Get_Device()->CreateBuffer(&description, NULL, &EngineConstantBuffer));
+void DX11BackendClass::Release_Constant_Ring(ConstantRing & ring)
+{
+	if (ring.Buffer != NULL) {
+		ring.Buffer->Release();
+	}
+	memset(&ring, 0, sizeof(ring));
 }
 
 void DX11BackendClass::Release_Cached()
@@ -443,17 +520,12 @@ void DX11BackendClass::Shutdown()
 	}
 	Release_Cached();
 
-	if (EngineConstantBuffer != NULL) {
-		EngineConstantBuffer->Release();
-		EngineConstantBuffer = NULL;
-	}
-	if (PixelConstantBuffer != NULL) {
-		PixelConstantBuffer->Release();
-		PixelConstantBuffer = NULL;
-	}
-	if (VertexConstantBuffer != NULL) {
-		VertexConstantBuffer->Release();
-		VertexConstantBuffer = NULL;
+	Release_Constant_Ring(EngineConstantRing);
+	Release_Constant_Ring(PixelConstantRing);
+	Release_Constant_Ring(VertexConstantRing);
+	if (OffsetContext != NULL) {
+		OffsetContext->Release();
+		OffsetContext = NULL;
 	}
 	if (UserBuffer != NULL) {
 		UserBuffer->Release();
@@ -1009,6 +1081,40 @@ void DX11BackendClass::Set_Draw_Effect(unsigned effect, const float parameters[4
 	}
 }
 
+unsigned DX11BackendClass::Requested_Draw_Effect(float parameters[4]) const
+{
+	if (DrawEffect == DRAW_EFFECT_NONE) {
+		memset(parameters, 0, sizeof(DrawEffectNumbers));
+	} else {
+		memcpy(parameters, DrawEffectNumbers, sizeof(DrawEffectNumbers));
+	}
+	return DrawEffect;
+}
+
+bool DX11BackendClass::Draws_Into_Scene() const
+{
+	return CurrentTarget == NULL && !ShadowMapBound;
+}
+
+/** The black and white view, the motion blur and the cross fade draw the whole scene into a target
+		of their own, and Draw_Effect refuses every look there; asked first, the scene keeps the heat
+		vision and the disabled tint for those frames instead of drawing the object plain. */
+bool DX11BackendClass::Takes_Draw_Effect(unsigned effect)
+{
+	if (!Draws_Into_Scene()) {
+		return false;
+	}
+	return effect != DRAW_EFFECT_CLOAK || Make_Scene_Colour();
+}
+
+void DX11BackendClass::Resume_Scene()
+{
+	const unsigned width = ViewportWidth;
+	const unsigned height = ViewportHeight;
+	Set_Render_Target(NULL);
+	Set_Viewport(0, 0, width, height);
+}
+
 /** Which look the current draw takes.  Only the scene's own world draws, and in the sun's map only
 		the cloak's thinned shadow: not a mirror or a filter target, not a screen space quad and not a transcribed program.  A draw
 		adding light (ONE as either factor) takes the outage alone, which puts a building's glow cards
@@ -1055,16 +1161,15 @@ void DX11BackendClass::Release_Scene_Colour()
 	SceneColourStale = true;
 }
 
-/** The scene's colour for the cloak, copied once a frame at the first cloaked draw: made at the
-		scene target's own size and format and made again when a resize changes either.  A multisampled
-		target cannot be copied into a texture that is read by pixel, so that refuses the cloak. */
-bool DX11BackendClass::Take_Scene_Colour()
+/** The texture the cloak's copy of the scene goes into, made at the scene target's own size and
+		format and made again when a resize changes either.  A multisampled target cannot be copied
+		into a texture that is read by pixel, so that refuses the cloak.  Asked by the scene for each
+		cloaked object before it decides on the look (Takes_Draw_Effect), so a refusal is known
+		before the first such object goes without its heat vision. */
+bool DX11BackendClass::Make_Scene_Colour()
 {
 	if (SceneColourRefused) {
 		return false;
-	}
-	if (!SceneColourStale) {
-		return true;
 	}
 	ID3D11Resource * source = NULL;
 	Device->Get_Scene_View()->GetResource(&source);
@@ -1102,6 +1207,21 @@ bool DX11BackendClass::Take_Scene_Colour()
 			return false;
 		}
 	}
+	source->Release();
+	return true;
+}
+
+/** The scene's colour for the cloak, copied once a frame at the first cloaked draw. */
+bool DX11BackendClass::Take_Scene_Colour()
+{
+	if (!Make_Scene_Colour()) {
+		return false;
+	}
+	if (!SceneColourStale) {
+		return true;
+	}
+	ID3D11Resource * source = NULL;
+	Device->Get_Scene_View()->GetResource(&source);
 	Device->Get_Context()->CopyResource(SceneColourCopy, source);
 	SceneColourStale = false;
 	++FrameDepthCopies;		// counted with the depth copies, so DX11 FRAME COST sees it
@@ -2376,17 +2496,12 @@ const char * DX11BackendClass::Pipeline_Report(unsigned index)
 
 void DX11BackendClass::Upload_Constants()
 {
-	ID3D11DeviceContext * context = Device->Get_Context();
-	D3D11_MAPPED_SUBRESOURCE mapped;
-
 	// A transcribed program reads the engine's own register bank instead of the block below, so
 	// that bank goes up only on the draws that take one.
 	if (VertexProgram != ENGINE_SHADER_NONE
 		&& (!EngineConstantsHeld
 			|| memcmp(HeldEngineConstants, EngineConstants, sizeof(EngineConstants)) != 0)
-		&& SUCCEEDED(context->Map(EngineConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-		memcpy(mapped.pData, EngineConstants, sizeof(EngineConstants));
-		context->Unmap(EngineConstantBuffer, 0);
+		&& Write_Constants(EngineConstantRing, EngineConstants, sizeof(EngineConstants))) {
 		memcpy(HeldEngineConstants, EngineConstants, sizeof(EngineConstants));
 		EngineConstantsHeld = true;
 	}
@@ -2408,9 +2523,6 @@ void DX11BackendClass::Upload_Constants()
 
 void DX11BackendClass::Upload_Vertex_Constants()
 {
-	ID3D11DeviceContext * context = Device->Get_Context();
-	D3D11_MAPPED_SUBRESOURCE mapped;
-
 	VertexConstantBlock vertex_block;
 	memset(&vertex_block, 0, sizeof(vertex_block));
 
@@ -2468,9 +2580,7 @@ void DX11BackendClass::Upload_Vertex_Constants()
 	if (!VertexConstantsHeld
 			|| memcmp(&HeldVertexConstants, &vertex_block, sizeof(vertex_block)) != 0) {
 		VertexConstantsHeld = false;
-		if (SUCCEEDED(context->Map(VertexConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-			memcpy(mapped.pData, &vertex_block, sizeof(vertex_block));
-			context->Unmap(VertexConstantBuffer, 0);
+		if (Write_Constants(VertexConstantRing, &vertex_block, sizeof(vertex_block))) {
 			HeldVertexConstants = vertex_block;
 			VertexConstantsHeld = true;
 		}
@@ -2479,9 +2589,6 @@ void DX11BackendClass::Upload_Vertex_Constants()
 
 void DX11BackendClass::Upload_Pixel_Constants()
 {
-	ID3D11DeviceContext * context = Device->Get_Context();
-	D3D11_MAPPED_SUBRESOURCE mapped;
-
 	PixelConstantBlock pixel_block;
 	memset(&pixel_block, 0, sizeof(pixel_block));
 	RenderStates.Get_Texture_Factor(pixel_block.TextureFactor);
@@ -2584,9 +2691,7 @@ void DX11BackendClass::Upload_Pixel_Constants()
 	if (!PixelConstantsHeld
 			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0) {
 		PixelConstantsHeld = false;
-		if (SUCCEEDED(context->Map(PixelConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-			memcpy(mapped.pData, &pixel_block, sizeof(pixel_block));
-			context->Unmap(PixelConstantBuffer, 0);
+		if (Write_Constants(PixelConstantRing, &pixel_block, sizeof(pixel_block))) {
 			HeldPixelConstants = pixel_block;
 			PixelConstantsHeld = true;
 		}
@@ -2733,9 +2838,9 @@ ID3D11SamplerState * DX11BackendClass::Sampler_State(unsigned sampler)
 	return state;
 }
 
-ID3D11Buffer * DX11BackendClass::Vertex_Constants() const
+const DX11BackendClass::ConstantRing & DX11BackendClass::Vertex_Constants() const
 {
-	return (VertexProgram != ENGINE_SHADER_NONE) ? EngineConstantBuffer : VertexConstantBuffer;
+	return (VertexProgram != ENGINE_SHADER_NONE) ? EngineConstantRing : VertexConstantRing;
 }
 
 void DX11BackendClass::Forget_Bindings()
@@ -2899,18 +3004,36 @@ void DX11BackendClass::Bind_Pipeline(const Pipeline & pipeline, ID3D11Buffer * v
 		context->VSSetShader(pipeline.VertexShader, NULL, 0);
 		Bound.VertexShader = pipeline.VertexShader;
 	}
-	ID3D11Buffer * vertex_constants = Vertex_Constants();
-	if (!known || vertex_constants != Bound.VertexConstants) {
-		context->VSSetConstantBuffers(0, 1, &vertex_constants);
-		Bound.VertexConstants = vertex_constants;
+	// Each block at the entry its last write went to, which a draw that wrote nothing still reads.
+	// The window is the entry: a program declares at most the block, which the entry holds.
+	const ConstantRing & vertex_constants = Vertex_Constants();
+	if (!known || vertex_constants.Buffer != Bound.VertexConstants
+			|| vertex_constants.Current != Bound.VertexConstantsOffset) {
+		if (OffsetContext != NULL) {
+			const UINT first = vertex_constants.Current / CONSTANT_BYTES;
+			const UINT count = vertex_constants.EntryBytes / CONSTANT_BYTES;
+			OffsetContext->VSSetConstantBuffers1(0, 1, &vertex_constants.Buffer, &first, &count);
+		} else {
+			context->VSSetConstantBuffers(0, 1, &vertex_constants.Buffer);
+		}
+		Bound.VertexConstants = vertex_constants.Buffer;
+		Bound.VertexConstantsOffset = vertex_constants.Current;
 	}
 	if (!known || pipeline.PixelShader != Bound.PixelShader) {
 		context->PSSetShader(pipeline.PixelShader, NULL, 0);
 		Bound.PixelShader = pipeline.PixelShader;
 	}
-	if (!known || PixelConstantBuffer != Bound.PixelConstants) {
-		context->PSSetConstantBuffers(0, 1, &PixelConstantBuffer);
-		Bound.PixelConstants = PixelConstantBuffer;
+	if (!known || PixelConstantRing.Buffer != Bound.PixelConstants
+			|| PixelConstantRing.Current != Bound.PixelConstantsOffset) {
+		if (OffsetContext != NULL) {
+			const UINT first = PixelConstantRing.Current / CONSTANT_BYTES;
+			const UINT count = PixelConstantRing.EntryBytes / CONSTANT_BYTES;
+			OffsetContext->PSSetConstantBuffers1(0, 1, &PixelConstantRing.Buffer, &first, &count);
+		} else {
+			context->PSSetConstantBuffers(0, 1, &PixelConstantRing.Buffer);
+		}
+		Bound.PixelConstants = PixelConstantRing.Buffer;
+		Bound.PixelConstantsOffset = PixelConstantRing.Current;
 	}
 	Bound.Known = true;
 }
@@ -3338,4 +3461,12 @@ void DX11BackendClass::Take_Frame_Build_Cost(double & milliseconds, unsigned & p
 	pipelines = FrameBuildCount;
 	FrameBuildMilliseconds = 0.0;
 	FrameBuildCount = 0;
+}
+
+void DX11BackendClass::Take_Frame_Constant_Writes(unsigned & writes, unsigned & renames)
+{
+	writes = FrameConstantWrites;
+	renames = FrameConstantRenames;
+	FrameConstantWrites = 0;
+	FrameConstantRenames = 0;
 }

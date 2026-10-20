@@ -34,6 +34,7 @@
 #include "Common/INIException.h"
 #include "Common/STLTypedefs.h"
 #include "Common/DataChunk.h"
+#include "Common/FileWriteQueue.h"
 #include "Common/MapObject.h"
 #include "Common/RandomMapGenerator.h"
 #include "Common/StackDump.h"
@@ -183,9 +184,11 @@ static int GetSystemMetrics( int which )
 #include "Common/BuildAssistant.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Weapon.h"
+#include "GameLogic/ObjectCreationList.h"
 #include "GameClient/CommandXlat.h"
 #include "Common/ActionManager.h"
 #include "GameLogic/PartitionManager.h"
+#include "GameLogic/GhostObject.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1095,6 +1098,94 @@ TEST(patch_module_with_a_missing_special_power_is_skipped)
 	}
 }
 
+/* Under Contra FixesReforged.ini gave the Laser Turret's anti-air weapon Zero Hour's
+	 Lazr_PatriotLaserBeam, which Contra does not have, so the beam vanished, and gave the Emperor an
+	 upgrade naming Tank_OCL_OverlordGattlingCannon, which it does not have either.  A patch naming
+	 something the loaded data lacks keeps what was there: the weapon its own beam, and a replaced
+	 module the module it replaced. */
+TEST(patch_naming_a_missing_laser_or_list_keeps_the_mods_own)
+{
+	CHECK( bootOnce() );
+
+	GlobalData *savedGlobals = TheWritableGlobalData;
+	if( savedGlobals == NULL )
+		TheWritableGlobalData = NEW GlobalData;
+	if( TheModuleFactory == NULL )
+	{
+		TheModuleFactory = NEW ModuleFactory;
+		TheModuleFactory->init();
+	}
+	if( TheThingFactory == NULL )
+		TheThingFactory = NEW ThingFactory;
+	if( TheWeaponStore == NULL )
+		TheWeaponStore = NEW WeaponStore;
+	if( TheObjectCreationListStore == NULL )
+		TheObjectCreationListStore = NEW ObjectCreationListStore;
+
+	writeFile( TEST_INI,
+		"Object MissingLaserProbeBeam\r\n"
+		"End\r\n"
+		"Weapon MissingLaserProbeGun\r\n"
+		"  LaserName = MissingLaserProbeBeam\r\n"
+		"End\r\n"
+		"Object MissingListProbe\r\n"
+		"  Behavior = DestroyDie ModuleTag_07\r\n"
+		"  End\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Weapon MissingLaserProbeGun\r\n"
+		"  LaserName = MissingLaserProbeAbsentBeam\r\n"
+		"End\r\n"
+		"Object MissingListProbe\r\n"
+		"  ReplaceModule ModuleTag_07\r\n"
+		"    Behavior = ObjectCreationUpgrade ModuleTag_07_Fix\r\n"
+		"      UpgradeObject = MissingListProbeAbsentList\r\n"
+		"      TriggeredBy   = Upgrade_MissingListProbe\r\n"
+		"    End\r\n"
+		"  End\r\n"
+		"  BuildCost = 700\r\n"
+		"End\r\n" );
+	Bool threw = FALSE;
+	try
+	{
+		INI patch;
+		patch.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+
+	const WeaponTemplate *gun = TheWeaponStore->findWeaponTemplate( "MissingLaserProbeGun" );
+	CHECK( gun != NULL );
+	if( gun != NULL )
+		CHECK_STR( gun->getLaserName().str(), "MissingLaserProbeBeam" );
+
+	const ThingTemplate *probe = TheThingFactory->findTemplate( "MissingListProbe" );
+	CHECK( probe != NULL );
+	if( probe != NULL )
+	{
+		const ModuleInfo &modules = probe->getBehaviorModuleInfo();
+		CHECK_EQ( modules.getCount(), 1 );
+		if( modules.getCount() == 1 )
+		{
+			CHECK( modules.getNthTag( 0 ) == "ModuleTag_07" );
+			CHECK( modules.getNthName( 0 ) == "DestroyDie" );
+		}
+		CHECK_EQ( probe->friend_getBuildCost(), 700 );
+	}
+
+	remove( TEST_INI );
+	if( savedGlobals == NULL )
+	{
+		delete TheWritableGlobalData;
+		TheWritableGlobalData = NULL;
+	}
+}
+
 /* The Power of the West's Armor.ini has "Armor = INFANTRY_MISSIL 100%".  EA's parse let it through,
 	 264e2180 made it throw and the mod stopped at start.  An unknown damage type skips its line; a
 	 line with no percentage is still a syntax error. */
@@ -1807,6 +1898,29 @@ TEST(hotkeys_file_reads_the_launchers_rows_and_leaves_its_defaults_out)
 	CHECK( mine.launcherPart.empty() );
 }
 
+// the name lookup CommandMap.ini and Hotkeys.ini go through on their way to a message
+struct MetaNameProbe : public MetaMap
+{
+	using MetaMap::findGameMessageMetaType;
+};
+
+TEST(hotkeys_every_row_the_page_lists_is_a_command_the_game_knows)
+{
+	static const char *const IDLE[] = { "SELECT_NEXT_IDLE_AIRCRAFT", "SELECT_NEXT_IDLE_VEHICLE", "SELECT_NEXT_IDLE_INFANTRY",
+		"SELECT_ALL_IDLE_UNITS", "SELECT_ALL_IDLE_AIRCRAFT", "SELECT_ALL_IDLE_VEHICLES" };
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	MetaNameProbe names;
+	Int idle = 0;
+	for( size_t each = 0; each < rows.size(); each++ )
+	{
+		CHECK( names.findGameMessageMetaType( rows[ each ].id.c_str() ) != GameMessage::MSG_INVALID );
+		for( size_t name = 0; name < sizeof( IDLE ) / sizeof( IDLE[ 0 ] ); name++ )
+			if( rows[ each ].id == IDLE[ name ] && rows[ each ].category == "SELECTION" && rows[ each ].binding.key.empty() )
+				idle++;
+	}
+	CHECK_EQ( idle, 6 );
+}
+
 TEST(hotkeys_file_the_launcher_wrote_comes_back_byte_for_byte)
 {
 	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
@@ -1875,6 +1989,69 @@ TEST(hotkeys_names_sort_and_chords_read_as_the_launcher_has_them)
 	CHECK_STR( Hotkeys_chordText( HotkeyBinding( "KEY_LBRACKET", "NONE" ) ).c_str(), "[" );
 	CHECK_STR( Hotkeys_chordText( HotkeyBinding( "", "NONE" ) ).c_str(), "" );
 	CHECK( Hotkeys_isKeyName( "KEY_PGDN" ) && !Hotkeys_isKeyName( "KEY_NONE" ) && !Hotkeys_isKeyName( "KEY_LCTRL" ) );
+}
+
+/* HotKey.cpp, Hotkeys_commandRows: the waypoint and prefer-selection holds are KEY_NONE and a modifier
+   in the shipped file, so the rows read from it dropped them and the Hotkeys tab had no line for them.
+   They are rows of their own now, and a key set on one writes the END_ half too: without it the mode
+   that the press switched on stays on. */
+TEST(hotkeys_waypoint_and_selection_holds_are_rows_and_keep_their_end)
+{
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	const HotkeyCommandRow *waypoints = NULL, *prefer = NULL, *force = NULL;
+	for( size_t each = 0; each < rows.size(); each++ )
+	{
+		waypoints = rows[ each ].id == "BEGIN_WAYPOINTS" ? &rows[ each ] : waypoints;
+		prefer = rows[ each ].id == "BEGIN_PREFER_SELECTION" ? &rows[ each ] : prefer;
+		force = rows[ each ].id == "BEGIN_FORCEATTACK" ? &rows[ each ] : force;
+	}
+	CHECK( waypoints != NULL && waypoints->hold && !waypoints->barOnly && waypoints->binding == HotkeyBinding( "", "ALT" )
+		&& waypoints->pair == "END_WAYPOINTS" && waypoints->category == "CONTROL" );
+	CHECK( prefer != NULL && prefer->hold && !prefer->barOnly && prefer->binding == HotkeyBinding( "", "SHIFT" )
+		&& prefer->pair == "END_PREFER_SELECTION" );
+	CHECK( force != NULL && force->hold && force->barOnly );
+
+	// Alt's hold moved to Q, and Shift's to Ctrl alone: both halves of each in the file
+	HotkeysFile file = Hotkeys_parse( "", rows );
+	file.commands[ "BEGIN_WAYPOINTS" ] = HotkeyBinding( "KEY_Q", "NONE" );
+	file.commands[ "BEGIN_PREFER_SELECTION" ] = HotkeyBinding( "", "CTRL" );
+	const std::string text = Hotkeys_format( file, rows );
+	CHECK( text.find( "CommandMap END_WAYPOINTS\r\n  Key = KEY_Q\r\n  Transition = UP\r\n  Modifiers = NONE\r\n  UseableIn = GAME\r\n" ) != std::string::npos );
+	CHECK( text.find( "CommandMap END_PREFER_SELECTION\r\n  Key = KEY_NONE\r\n  Transition = UP\r\n  Modifiers = CTRL\r\n  UseableIn = GAME\r\n" ) != std::string::npos );
+	const HotkeysFile back = Hotkeys_parse( text, rows );
+	CHECK( back.commands.find( "BEGIN_WAYPOINTS" )->second == HotkeyBinding( "KEY_Q", "NONE" ) );
+	CHECK( back.commands.find( "BEGIN_PREFER_SELECTION" )->second == HotkeyBinding( "", "CTRL" ) );
+	CHECK( back.commands.find( "END_WAYPOINTS" ) == back.commands.end() );
+}
+
+/* HotKey.cpp: a fixed order's letter is its default, not a lock.  Players could not move Sell off N:
+   the fixed letter was returned before Hotkeys.ini was asked, and the Hotkeys tab refused the capture. */
+TEST(hotkeys_every_fixed_order_takes_the_players_letter)
+{
+	static const struct { const char *button; Int type; WideChar fixed; } ORDERS[] =
+	{
+		{ "Command_AttackMove", GUI_COMMAND_ATTACK_MOVE, 'A' }, { "Command_Stop", GUI_COMMAND_STOP, 'S' },
+		{ "Command_Guard", GUI_COMMAND_GUARD, 'G' }, { "Command_SetRallyPoint", GUI_COMMAND_SET_RALLY_POINT, 'Y' },
+		{ "Command_Evacuate", GUI_COMMAND_EVACUATE, 'V' }, { "Command_Sell", GUI_COMMAND_SELL, 'N' },
+		{ "Command_CombatDrop", GUI_COMMAND_COMBATDROP, 'C' },
+		{ "Command_UpgradeChinaMines", GUI_COMMAND_PLAYER_UPGRADE, 'H' }, { "Command_UpgradeEMPMines", GUI_COMMAND_PLAYER_UPGRADE, 'H' },
+		{ "Command_UpgradeCamoNetting", GUI_COMMAND_PLAYER_UPGRADE, 'H' }, { "Command_UpgradeGLACamoNetting", GUI_COMMAND_PLAYER_UPGRADE, 'H' },
+		{ "Command_UpgradeGLAWorkerFakeCommandSet", GUI_COMMAND_OBJECT_UPGRADE, 'H' },
+		{ "Command_UpgradeGLAWorkerRealCommandSet", GUI_COMMAND_OBJECT_UPGRADE, 'H' },
+		{ "Command_BecomeRealGLABarracks", GUI_COMMAND_OBJECT_UPGRADE, 'H' },
+	};
+	for( size_t each = 0; each < sizeof( ORDERS ) / sizeof( ORDERS[ 0 ] ); each++ )
+	{
+		const AsciiString name( ORDERS[ each ].button );
+		AsciiString lower = name;
+		lower.toLower();
+		std::map< std::string, WideChar > keys;
+		CHECK_EQ( HotKeyManager::buttonKeyIn( name, 'Q', ORDERS[ each ].type, keys ), ORDERS[ each ].fixed );
+		keys[ lower.str() ] = 'K';
+		CHECK_EQ( HotKeyManager::buttonKeyIn( name, 'Q', ORDERS[ each ].type, keys ), (WideChar)'K' );
+		keys[ lower.str() ] = 0;	// Key = NONE in Hotkeys.ini
+		CHECK_EQ( HotKeyManager::buttonKeyIn( name, 'Q', ORDERS[ each ].type, keys ), 0 );
+	}
 }
 
 /* GlobalData.h: which button orders.  The classic mouse is 1.04's left button, or the right under EA's
@@ -2484,6 +2661,72 @@ TEST(jet_runs_out_from_a_target_it_cannot_turn_onto)
 	   weapons have to run out for. */
 	CHECK(  AIAttackAim_needsRunOut( 60.0f,   60.0f, R, COS30, 0.0f ) );
 	CHECK( !AIAttackAim_needsRunOut( 60.0f,   60.0f, R, 0.7071068f, 0.0f ) );
+}
+
+/* JetAIUpdate.cpp: the glide down to a touchdown and the climb from a liftoff are one shape, a
+   straight slope that rounds out to level at the runway and stops at the approach height. */
+extern Real JetRunway_slopeHeight( Real dist, Real maxHeight, Real slope, Real roundDist );
+
+TEST(jet_glide_rounds_out_to_a_level_touchdown)
+{
+	const Real SLOPE = 0.176f;
+	const Real ROUND = 50.0f;
+
+	/* on and past the threshold it is on the runway */
+	CHECK_NEAR( JetRunway_slopeHeight( 0.0f,   50.0f, SLOPE, ROUND ), 0.0f, 1e-6f );
+	CHECK_NEAR( JetRunway_slopeHeight( -30.0f, 50.0f, SLOPE, ROUND ), 0.0f, 1e-6f );
+
+	/* the round-out meets the slope with the same height and the same steepness, so the sink rate
+	   eases off instead of stepping */
+	const Real atJoin = JetRunway_slopeHeight( ROUND, 50.0f, SLOPE, ROUND );
+	CHECK_NEAR( atJoin, SLOPE * ROUND * 0.5f, 1e-4f );
+	CHECK_NEAR( JetRunway_slopeHeight( ROUND + 10.0f, 50.0f, SLOPE, ROUND ) - atJoin, SLOPE * 10.0f, 1e-4f );
+	CHECK( JetRunway_slopeHeight( 5.0f, 50.0f, SLOPE, ROUND ) < SLOPE * 5.0f * 0.1f );
+
+	/* far out it holds the approach height */
+	CHECK_NEAR( JetRunway_slopeHeight( 2000.0f, 50.0f, SLOPE, ROUND ), 50.0f, 1e-6f );
+}
+
+/* JetAIUpdate.cpp: a taxi route's corners become arcs a jet on its wheels can drive round. */
+extern void JetTaxi_roundCorners( std::vector<Coord3D>& route, Real radius );
+
+TEST(jet_taxi_corner_becomes_an_arc)
+{
+	std::vector<Coord3D> route(3);
+	route[0].set( 0.0f, 0.0f, 0.0f );
+	route[1].set( 100.0f, 0.0f, 0.0f );
+	route[2].set( 100.0f, 100.0f, 0.0f );
+	JetTaxi_roundCorners( route, 20.0f );
+
+	/* the ends stay put, and everything between lies on the circle round (80, 20), from where it
+	   leaves the leg in to where it joins the leg out */
+	CHECK( route.size() > 3 );
+	CHECK_NEAR( route.front().x, 0.0f, 1e-4f );
+	CHECK_NEAR( route.back().y, 100.0f, 1e-4f );
+	for (size_t i = 1; i + 1 < route.size(); ++i)
+	{
+		Real dx = route[i].x - 80.0f;
+		Real dy = route[i].y - 20.0f;
+		CHECK_NEAR( sqrt(dx*dx + dy*dy), 20.0f, 0.01f );
+	}
+	CHECK_NEAR( route[1].x, 80.0f, 0.01f );
+	CHECK_NEAR( route[route.size() - 2].y, 20.0f, 0.01f );
+
+	/* a leg too short for the radius shrinks the arc to fit in under half of it */
+	std::vector<Coord3D> tight(3);
+	tight[0].set( 0.0f, 0.0f, 0.0f );
+	tight[1].set( 10.0f, 0.0f, 0.0f );
+	tight[2].set( 10.0f, 100.0f, 0.0f );
+	JetTaxi_roundCorners( tight, 20.0f );
+	CHECK_NEAR( tight[1].x, 5.5f, 0.01f );
+
+	/* a straight route is left alone */
+	std::vector<Coord3D> straight(3);
+	straight[0].set( 0.0f, 0.0f, 0.0f );
+	straight[1].set( 50.0f, 0.0f, 0.0f );
+	straight[2].set( 100.0f, 0.0f, 0.0f );
+	JetTaxi_roundCorners( straight, 20.0f );
+	CHECK_EQ( straight.size(), (size_t)3 );
 }
 
 /* AIStates.cpp: telling a firing pass from a failed approach when the attack move
@@ -4539,16 +4782,43 @@ TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
 	CHECK_EQ( ControlBar_secondsFromFrames( 1.0f ), 1 );
 }
 
-TEST(player_game_speed_is_half_to_normal)
+TEST(player_game_speed_is_normal_or_turbo)
 {
-	/* A skirmish or mission runs from half speed to normal and never faster: the menu, the console,
-	   a saved game and a map script all clamp to this. An old x2 preference or save comes back at x1. */
-	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 2 ), LOGICFRAMES_PER_SECOND );
-	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 3 / 2 ), LOGICFRAMES_PER_SECOND );
+	/* A match someone plays runs at normal speed or in turbo mode at twice that, nothing between: a
+	   saved game and the console land on the nearer one, so a save from the old half-speed settings
+	   comes back at normal. */
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 3 ), LOGICFRAMES_PER_SECOND * 2 );
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 2 ), LOGICFRAMES_PER_SECOND * 2 );
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 3 / 2 ), LOGICFRAMES_PER_SECOND * 2 );
 	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND ), LOGICFRAMES_PER_SECOND );
-	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 3 / 4 ), LOGICFRAMES_PER_SECOND * 3 / 4 );
-	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND / 2 ), LOGICFRAMES_PER_SECOND / 2 );
-	CHECK_EQ( ClampPlayerGameSpeed( ConvertRetailFrames( 5 ) ), LOGICFRAMES_PER_SECOND / 2 );
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND / 2 ), LOGICFRAMES_PER_SECOND );
+	CHECK_EQ( ClampPlayerGameSpeed( ConvertRetailFrames( 5 ) ), LOGICFRAMES_PER_SECOND );
+}
+
+TEST(match_speed_is_frames_per_second_limit_doubled_by_turbo)
+{
+	/* Every MSG_NEW_GAME a player starts passes this: GameData.ini's normal speed, or -fps for a test,
+	   twice that in turbo mode, inside the 1..1000 MSG_NEW_GAME takes. */
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	TheWritableGlobalData->m_framesPerSecondLimit = LOGICFRAMES_PER_SECOND;
+	CHECK_EQ( GameEngine_matchFramesPerSecond( FALSE ), LOGICFRAMES_PER_SECOND );
+	CHECK_EQ( GameEngine_matchFramesPerSecond( TRUE ), LOGICFRAMES_PER_SECOND * 2 );
+	TheWritableGlobalData->m_framesPerSecondLimit = 0;	// no FramesPerSecondLimit at all
+	CHECK_EQ( GameEngine_matchFramesPerSecond( TRUE ), LOGICFRAMES_PER_SECOND * 2 );
+	TheWritableGlobalData->m_framesPerSecondLimit = 800;
+	CHECK_EQ( GameEngine_matchFramesPerSecond( TRUE ), 1000 );
+
+	SkirmishGameInfo game;
+	game.init();
+	CHECK( !game.getTurbo() );
+	game.setTurbo( TRUE );
+	game.reset();
+	CHECK( !game.getTurbo() );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
 }
 
 TEST(controlbar_seconds_are_real_seconds_at_the_current_game_speed)
@@ -8321,6 +8591,63 @@ TEST(a_base_can_be_planned_into_fog_but_not_into_shroud)
 	CHECK( BuildAssistant_shroudBlocksBuilding( CELLSHROUD_SHROUDED ) == TRUE );
 }
 
+/** A ghost with nothing behind it but its remembered footprint, the shape a building that died in
+	 the fog leaves in the partition manager. */
+class FootprintOnlyGhost : public GhostObject
+{
+public:
+	FootprintOnlyGhost( GeometryType type, Real major, Real minor, Real x, Real y, Real angle )
+	{
+		m_parentGeometryType = type;
+		m_parentGeometryIsSmall = FALSE;
+		m_parentGeometryMajorRadius = major;
+		m_parentGeometryminorRadius = minor;
+		m_parentAngle = angle;
+		m_parentPosition.x = x;
+		m_parentPosition.y = y;
+	}
+	virtual void snapShot( int ) {}
+	virtual void updateParentObject( Object *, PartitionData * ) {}
+	virtual void freeSnapShot( int ) {}
+	virtual Bool hasSnapShot( int ) const { return TRUE; }
+};
+
+/** A building that died in the player's fog still stands there for him, drawn from its ghost, and
+	 the placement grid washes the cells under that ghost red as it did while the building stood:
+	 bare ground there told him it was gone.  A pathfinder cell spans [10x - 0.5, 10x + 9.5), and the
+	 pathfinder's own footprint takes a cell the near edge reaches and leaves one the far edge only
+	 grazes, so a 60 by 40 box from x 70 to 130 covers cells 7 to 12 and not 13. */
+TEST(a_building_dead_in_the_fog_keeps_its_cells_on_the_placement_grid)
+{
+	ThePartitionManager = NEW PartitionManager;	// only for its geometry test
+
+	const FootprintOnlyGhost box( GEOMETRY_BOX, 30.0f, 20.0f, 100.0f, 100.0f, 0.0f );	// x 70..130, y 80..120
+	CHECK( BuildAssistant_ghostCoversCell( &box, 7, 8 ) == TRUE );
+	CHECK( BuildAssistant_ghostCoversCell( &box, 12, 11 ) == TRUE );
+	CHECK( BuildAssistant_ghostCoversCell( &box, 6, 10 ) == FALSE );
+	CHECK( BuildAssistant_ghostCoversCell( &box, 13, 10 ) == FALSE );
+	CHECK( BuildAssistant_ghostCoversCell( &box, 10, 7 ) == FALSE );
+	CHECK( BuildAssistant_ghostCoversCell( &box, 10, 12 ) == FALSE );
+
+	// the same box turned a quarter: x 80..120, y 70..130
+	const FootprintOnlyGhost turned( GEOMETRY_BOX, 30.0f, 20.0f, 100.0f, 100.0f, PI / 2.0f );
+	CHECK( BuildAssistant_ghostCoversCell( &turned, 7, 10 ) == FALSE );
+	CHECK( BuildAssistant_ghostCoversCell( &turned, 10, 7 ) == TRUE );
+	CHECK( BuildAssistant_ghostCoversCell( &turned, 10, 12 ) == TRUE );
+
+	// a round one of radius 25 round 200, 200 is the pathfinder's circle, a cell centre within 29
+	// of it, not the square the collision test makes of a circle: the corner cell 17,17 is out
+	const FootprintOnlyGhost round( GEOMETRY_CYLINDER, 25.0f, 25.0f, 200.0f, 200.0f, 0.0f );
+	CHECK( BuildAssistant_ghostCoversCell( &round, 19, 19 ) == TRUE );
+	CHECK( BuildAssistant_ghostCoversCell( &round, 22, 19 ) == TRUE );
+	CHECK( BuildAssistant_ghostCoversCell( &round, 17, 19 ) == TRUE );
+	CHECK( BuildAssistant_ghostCoversCell( &round, 23, 19 ) == FALSE );
+	CHECK( BuildAssistant_ghostCoversCell( &round, 17, 17 ) == FALSE );
+
+	delete ThePartitionManager;	// its shutdown asks the global
+	ThePartitionManager = NULL;
+}
+
 /** A plan is not a scout.  A structure that has been placed but not started opens no shroud at all,
 	 so drawing a base out into the fog cannot be used to see what is standing there.  Once the
 	 builder arrives the structure sees as far as its template says, finished or not. */
@@ -10016,6 +10343,127 @@ TEST(a_town_is_rolled_rather_than_stamped)
 }
 
 //-------------------------------------------------------------------------------------------------
+/** W3DRoadBuffer only builds a junction where segments share an end point exactly: three ends on
+	one point are a tee, four a crossroads, two at an angle a curve. Two streets that cross half way
+	along are drawn as two strips of tarmac laid over each other. So a town's streets are split at
+	every crossing, nothing touches another street anywhere but at a shared end, and the water no
+	longer leaves a few cells of street lying on their own: a street that reaches the bank keeps the
+	run from its crossing, and only if that run is long enough to read as a street. */
+//-------------------------------------------------------------------------------------------------
+TEST(town_streets_meet_only_at_shared_ends_so_the_renderer_builds_junctions)
+{
+	CHECK( bootOnce() );
+
+	const Real shortestStreet = 12.0f * MAP_XY_FACTOR;	// RMG_ROAD_MIN_RUN
+	Int tees = 0, crossroads = 0, bends = 0, crossings = 0, stubs = 0, loose = 0, segmentsSeen = 0;
+
+	static const Int thePlayers[] = { 2, 4, 8 };
+	for( Int p = 0; p < 3; p++ )
+	{
+		for( Int seed = 1; seed <= 3; seed++ )
+		{
+			RandomMapSettings settings;
+			settings.m_seed = seed;
+			settings.m_numPlayers = thePlayers[p];
+			settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, thePlayers[p] );
+
+			std::vector<char> bytes;
+			RandomMapGenerator::generate( settings, bytes );
+			parseGeneratedMap( bytes );
+
+			std::vector<Coord3D> from, to;
+			for( Int i = 0; i + 1 < (Int)theRMGParse.m_objectNames.size(); i++ )
+			{
+				if( (theRMGParse.m_objectFlags[i] & FLAG_ROAD_POINT1) == 0 )
+					continue;
+				CHECK( (theRMGParse.m_objectFlags[i + 1] & FLAG_ROAD_POINT2) != 0 );
+				from.push_back( theRMGParse.m_objectPositions[i] );
+				to.push_back( theRMGParse.m_objectPositions[i + 1] );
+			}
+			segmentsSeen += (Int)from.size();
+
+			std::map< std::pair<Real, Real>, std::vector<Int> > ends;	// end point to the segments there
+			for( Int s = 0; s < (Int)from.size(); s++ )
+			{
+				ends[std::make_pair( from[s].x, from[s].y )].push_back( s );
+				ends[std::make_pair( to[s].x, to[s].y )].push_back( s );
+
+				Real dx = to[s].x - from[s].x, dy = to[s].y - from[s].y;
+				if( sqrtf( dx * dx + dy * dy ) < shortestStreet - 1.0f )
+					stubs++;
+			}
+
+			// a piece of street that shares neither end with another lies on its own
+			for( Int s = 0; s < (Int)from.size(); s++ )
+			{
+				if( ends[std::make_pair( from[s].x, from[s].y )].size() == 1 &&
+						ends[std::make_pair( to[s].x, to[s].y )].size() == 1 )
+					loose++;
+			}
+
+			for( std::map< std::pair<Real, Real>, std::vector<Int> >::const_iterator it = ends.begin(); it != ends.end(); ++it )
+			{
+				const Int degree = (Int)it->second.size();
+				if( degree == 3 )
+					tees++;
+				else if( degree == 4 )
+					crossroads++;
+				else if( degree == 2 )
+				{
+					// the two ways out of the point; a turn of 30 degrees or more gets a curve
+					Real way[2][2];
+					for( Int k = 0; k < 2; k++ )
+					{
+						const Int s = it->second[k];
+						const Bool atFrom = from[s].x == it->first.first && from[s].y == it->first.second;
+						const Coord3D& away = atFrom ? to[s] : from[s];
+						Real dx = away.x - it->first.first, dy = away.y - it->first.second;
+						Real length = sqrtf( dx * dx + dy * dy );
+						way[k][0] = dx / length;
+						way[k][1] = dy / length;
+					}
+					if( way[0][0] * way[1][0] + way[0][1] * way[1][1] > -0.866f )
+						bends++;
+				}
+			}
+
+			// any touch away from an end both segments share is a crossing the renderer cannot join
+			for( Int a = 0; a < (Int)from.size(); a++ )
+			{
+				for( Int b = a + 1; b < (Int)from.size(); b++ )
+				{
+					Real rx = to[a].x - from[a].x, ry = to[a].y - from[a].y;
+					Real sx = to[b].x - from[b].x, sy = to[b].y - from[b].y;
+					Real denom = rx * sy - ry * sx;
+					if( fabsf( denom ) < 1.0e-3f )
+						continue;
+					Real qx = from[b].x - from[a].x, qy = from[b].y - from[a].y;
+					Real t = (qx * sy - qy * sx) / denom;
+					Real u = (qx * ry - qy * rx) / denom;
+					if( t < -1.0e-4f || t > 1.0f + 1.0e-4f || u < -1.0e-4f || u > 1.0f + 1.0e-4f )
+						continue;
+					const Bool shared =
+						( from[a].x == from[b].x && from[a].y == from[b].y ) || ( from[a].x == to[b].x && from[a].y == to[b].y ) ||
+						( to[a].x == from[b].x && to[a].y == from[b].y ) || ( to[a].x == to[b].x && to[a].y == to[b].y );
+					if( !shared )
+						crossings++;
+				}
+			}
+		}
+	}
+
+	printf( "  town streets: %d segments, %d tees, %d crossroads, %d bends, %d crossings, %d stubs, %d loose\n",
+		segmentsSeen, tees, crossroads, bends, crossings, stubs, loose );
+	CHECK( segmentsSeen > 0 );
+	CHECK_EQ( crossings, 0 );
+	CHECK_EQ( stubs, 0 );
+	CHECK_EQ( loose, 0 );
+	CHECK( tees > 0 );
+	CHECK( crossroads > 0 );
+	CHECK( bends > 0 );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** A map has to hold the players it is generated for.  The three sizes are three different maps
 	for the same game, and every one of them grows with the number of players rather than packing
 	eight bases into a duel map. */
@@ -10559,14 +11007,14 @@ TEST(the_generator_still_turns_a_seed_into_the_bytes_it_used_to)
 {
 	CHECK( bootOnce() );
 
-	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 14 );
+	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 15 );
 
 	struct RMGFingerprint { Int m_seed, m_players, m_cells; UnsignedInt m_crc; };
 	static const RMGFingerprint theFingerprints[] =
 	{
-		{ 0, 2, 64, 0x47855C63 },
-		{ 12345, 4, 96, 0x2863C7C9 },
-		{ 7, 8, 128, 0x297288D3 },
+		{ 0, 2, 64, 0x47856063 },
+		{ 12345, 4, 96, 0x2863C7D9 },
+		{ 7, 8, 128, 0x2D7288D3 },
 	};
 	const Int numFingerprints = sizeof(theFingerprints) / sizeof(theFingerprints[0]);
 
@@ -11542,10 +11990,11 @@ TEST(frames_to_kill_counts_shots_delays_and_reloads)
 	crusaderGun.m_delayFrames = 60.0f;
 	CHECK_NEAR( 480.0f, aiFramesToKill( 480.0f, crusaderGun ), 0.001f );
 
-	// the same shell through HumanArmor's 10% on a 120-health Rebel: twenty shells, not two
+	// the same shell through HumanArmor on a 120-health Rebel. Armor-piercing lands in full
+	// now, so two shells. At the old 10% it was 6 a shell and twenty of them.
 	AIShotPattern crusaderOnInfantry = crusaderGun;
-	crusaderOnInfantry.m_damagePerShot = 6.0f;
-	CHECK_NEAR( 1200.0f, aiFramesToKill( 120.0f, crusaderOnInfantry ), 0.001f );
+	crusaderOnInfantry.m_damagePerShot = 60.0f;
+	CHECK_NEAR( 120.0f, aiFramesToKill( 120.0f, crusaderOnInfantry ), 0.001f );
 
 	// a clip of two with a long reload: the third shot waits for the reload, not the delay
 	AIShotPattern clip;
@@ -12135,30 +12584,68 @@ TEST(ai_base_defenses_rotate_through_the_sides_types)
 	}
 }
 
-/** Another factory when the queue is backing up, and another tech building until three are standing.
-	 Easy and Normal never reach the caller: economy buildings stay off below Brutal. */
+/** A 7x5 grid split by a wall in column 3 with one gap at the bottom row. */
+static Bool groundFloodTestWalkable( Int x, Int y, void * )
+{
+	return x != 3 || y == 4;
+}
+
+/** The ground flood walks round a wall instead of through it, hands cells out nearest first, and
+	 stops at its cap. */
+TEST(ground_flood_goes_round_the_wall_nearest_first)
+{
+	AIGroundFlood flood( 7, 5, groundFloodTestWalkable, NULL );
+	flood.addSource( 0, 0 );
+	Int x, y, d, last = 0, count = 0;
+	while( flood.next( &x, &y, &d ) )
+	{
+		CHECK( d >= last );
+		last = d;
+		++count;
+	}
+	CHECK_EQ( count, 7 * 5 - 4 );		// the wall's four cells are never entered
+	const std::vector<UnsignedShort> &field = flood.field();
+	CHECK_EQ( (Int)field[ 0 * 7 + 1 ], AI_GROUND_STEP );
+	CHECK_EQ( (Int)field[ 1 * 7 + 1 ], AI_GROUND_DIAGONAL );
+	CHECK_EQ( (Int)field[ 0 * 7 + 3 ], (Int)AI_GROUND_UNREACHED );
+	// (4,0) is one cell past the wall: down to the gap at (3,4) and back up, 3 diagonals and 1 step
+	// to the gap, then 1 diagonal and 3 steps
+	CHECK_EQ( (Int)field[ 0 * 7 + 4 ], 4 * AI_GROUND_DIAGONAL + 4 * AI_GROUND_STEP );
+
+	AIGroundFlood capped( 7, 5, groundFloodTestWalkable, NULL );
+	capped.addSource( 0, 0 );
+	capped.setMaxDistance( AI_GROUND_STEP );
+	count = 0;
+	while( capped.next( &x, &y, &d ) )
+		++count;
+	CHECK_EQ( count, 3 );		// the source and its two side neighbours
+}
+
+/** Another factory only when every one standing has kept a unit waiting for AI_FACTORY_BACKLOG_SECONDS,
+	 and another tech building until three are standing. */
 TEST(extra_factory_follows_the_queue_and_tech_stops_at_three)
 {
+	const UnsignedInt BACKLOG = AI_FACTORY_BACKLOG_SECONDS * LOGICFRAMES_PER_SECOND;
+
 	// nothing left standing: put one back
-	CHECK( aiWantsAnotherFactory( 0, 0, 0, 0, FALSE ) );
+	CHECK( aiWantsAnotherFactory( 0, 0, 0, 0 ) );
 
 	// one already going up is the building this would ask for
-	CHECK( !aiWantsAnotherFactory( 0, 1, 0, 0, FALSE ) );
-	CHECK( !aiWantsAnotherFactory( 2, 1, 0, 4, FALSE ) );
+	CHECK( !aiWantsAnotherFactory( 0, 1, 0, 0 ) );
+	CHECK( !aiWantsAnotherFactory( 2, 1, 4, BACKLOG ) );
 
-	// a factory with an empty queue is the spare
-	CHECK( !aiWantsAnotherFactory( 2, 0, 1, 3, FALSE ) );
+	// one with an empty queue, or only the unit it is building, has room
+	CHECK( !aiWantsAnotherFactory( 2, 0, 0, BACKLOG ) );
+	CHECK( !aiWantsAnotherFactory( 1, 0, 1, BACKLOG ) );
 
-	// every finished factory is busy, and a unit is waiting behind the one being built
-	CHECK( aiWantsAnotherFactory( 2, 0, 0, 2, FALSE ) );
+	// a team landing in the queue all at once is a batch, not a factory falling behind: the
+	// opening's training no longer buys a second barracks
+	CHECK( !aiWantsAnotherFactory( 1, 0, 5, 0 ) );
+	CHECK( !aiWantsAnotherFactory( 1, 0, 5, BACKLOG - 1 ) );
 
-	// busy, but the queue is only the unit under construction
-	CHECK( !aiWantsAnotherFactory( 1, 0, 0, 1, FALSE ) );
-
-	// airfields and the income buildings: another whenever one is not already going up,
-	// even while a finished one sits idle
-	CHECK( aiWantsAnotherFactory( 3, 0, 2, 0, TRUE ) );
-	CHECK( !aiWantsAnotherFactory( 3, 1, 0, 5, TRUE ) );
+	// every finished one has kept a unit waiting the whole time
+	CHECK( aiWantsAnotherFactory( 1, 0, 2, BACKLOG ) );
+	CHECK( aiWantsAnotherFactory( 3, 0, 2, BACKLOG + 600 ) );
 
 	CHECK( aiWantsAnotherTechBuilding( 0, 0 ) );
 	CHECK( aiWantsAnotherTechBuilding( AI_TECH_BUILDING_COPIES - 1, 0 ) );
@@ -12225,6 +12712,131 @@ TEST(enemy_choice_prefers_the_weak_the_rich_and_the_near)
 				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
 }
 
+
+/** Personalities: a Normal seat must play exactly as before, and each lean goes the way its name says. */
+TEST(ai_persona_normal_row_is_neutral)
+{
+	const AIPersonaWeights &normal = aiPersonaWeights( AIPERSONA_NORMAL );
+	CHECK_EQ( normal.m_role, -1 );
+	CHECK( normal.m_firstPush == 1.0f && normal.m_attackPower == 1.0f && normal.m_wavePower == 1.0f && normal.m_waveHold == 1.0f );
+	CHECK( normal.m_bank == 1.0f && normal.m_hoard == 1.0f && normal.m_surplus == 1.0f && normal.m_retreat == 1.0f );
+	CHECK( normal.m_counter == 1.0f && normal.m_counterAdd == 0.0f && normal.m_defenses == 1.0f && normal.m_upgradeStart == 1.0f );
+	CHECK_EQ( aiPersonaTeamBias( normal, TRUE, 0.3f, 0.3f, 0.3f, 0.1f ), 0.0f );
+	for( Int k = 0; k < AIBUY_KIND_COUNT; ++k )
+		CHECK_EQ( normal.m_buy[ k ], 0 );
+	CHECK_EQ( aiPersonaEnemyCost( AIPERSONA_NORMAL, 12345.0f, 0.7f, TRUE ), 12345.0f );
+	// an unknown value plays Normal rather than reading past the table
+	CHECK( &aiPersonaWeights( (AIPersonality)99 ) == &normal );
+}
+
+TEST(ai_persona_names_round_trip)
+{
+	for( Int i = 0; i < AIPERSONA_COUNT; ++i )
+		CHECK_EQ( (Int)aiPersonalityFromName( aiPersonalityName( (AIPersonality)i ) ), i );
+	CHECK_EQ( (Int)aiPersonalityFromName( "turtle" ), (Int)AIPERSONA_TURTLE );
+	CHECK_EQ( (Int)aiPersonalityFromName( "nobody" ), (Int)AIPERSONA_NORMAL );
+}
+
+TEST(ai_persona_leans_the_way_its_name_says)
+{
+	const AIPersonaWeights &attacker = aiPersonaWeights( AIPERSONA_ATTACKER );
+	const AIPersonaWeights &turtle = aiPersonaWeights( AIPERSONA_TURTLE );
+	CHECK( attacker.m_firstPush < 1.0f && attacker.m_wavePower < 1.0f && attacker.m_bank < 1.0f );
+	CHECK( turtle.m_firstPush > 1.0f && turtle.m_wavePower > 1.0f && turtle.m_retreat > 1.0f && turtle.m_defenses > 1.0f );
+	CHECK( turtle.m_buy[ AIBUY_DEFENSE ] > 0 && aiPersonaWeights( AIPERSONA_ECONOMIST ).m_buy[ AIBUY_ECONOMY ] > 0 );
+	CHECK( aiPersonaWeights( AIPERSONA_TECH ).m_buy[ AIBUY_SUPERWEAPON ] > 0 );
+	CHECK( aiPersonaWeights( AIPERSONA_COUNTER ).m_counterAdd > 0.0f );
+	CHECK_EQ( aiPersonaWeights( AIPERSONA_SUPPORTER ).m_role, (Int)AIROLE_SUPPORTIVE );
+	// the unit mix: an all-infantry team is what the Infantry one likes and the Armor one does not
+	CHECK( aiPersonaTeamBias( aiPersonaWeights( AIPERSONA_INFANTRY ), FALSE, 0.0f, 1.0f, 0.0f, 0.0f ) > 0.0f );
+	CHECK( aiPersonaTeamBias( aiPersonaWeights( AIPERSONA_ARMOR ), FALSE, 0.0f, 1.0f, 0.0f, 0.0f ) < 0.0f );
+	CHECK( aiPersonaTeamBias( aiPersonaWeights( AIPERSONA_AIR ), FALSE, 1.0f, 0.0f, 0.0f, 0.0f ) > 0.0f );
+	CHECK( aiPersonaTeamBias( aiPersonaWeights( AIPERSONA_SNEAKY ), FALSE, 0.0f, 0.5f, 0.5f, 1.0f ) > 0.0f );
+	CHECK( aiPersonaTeamBias( turtle, TRUE, 0.0f, 0.0f, 0.0f, 0.0f ) > 0.0f );
+	// no personality changes a cheat: there is no column for one, and none leaves the bank empty for ever
+	for( Int i = 0; i < AIPERSONA_COUNT; ++i )
+		CHECK( aiPersonaWeights( (AIPersonality)i ).m_bank > 0.0f );
+}
+
+TEST(ai_persona_air_wants_less_against_anti_air)
+{
+	CHECK_EQ( aiPersonaAirBias( 25.0f, 0.0f ), 25.0f );
+	CHECK( aiPersonaAirBias( 25.0f, 0.3f ) < 25.0f );
+	CHECK( aiPersonaAirBias( 25.0f, 0.3f ) > 0.0f );
+	CHECK( aiPersonaAirBias( 25.0f, 0.9f ) < 0.0f );
+	CHECK_EQ( aiPersonaAirBias( 25.0f, 1.0f ), -12.5f );		// a dislike, and no worse
+}
+
+TEST(ai_persona_opportunist_goes_for_the_thin_and_the_busy)
+{
+	const Real cost = 200.0f * 200.0f;
+	CHECK( aiPersonaEnemyCost( AIPERSONA_OPPORTUNIST, cost, 0.1f, FALSE ) < aiPersonaEnemyCost( AIPERSONA_OPPORTUNIST, cost, 0.6f, FALSE ) );
+	CHECK( aiPersonaEnemyCost( AIPERSONA_OPPORTUNIST, cost, 0.4f, TRUE ) < aiPersonaEnemyCost( AIPERSONA_OPPORTUNIST, cost, 0.4f, FALSE ) );
+	CHECK_EQ( aiPersonaEnemyCost( AIPERSONA_TURTLE, cost, 0.1f, TRUE ), cost );
+}
+
+TEST(ai_persona_economist_shares_only_a_real_surplus)
+{
+	CHECK_EQ( aiPersonaShareAmount( 3000, 2000, 3000 ), 0 );			// under twice the target
+	CHECK_EQ( aiPersonaShareAmount( 4800, 2000, 3000 ), 0 );			// 400 over: under the minimum
+	CHECK_EQ( aiPersonaShareAmount( 6150, 2000, 3000 ), 1000 );		// half of 2,150, in hundreds
+	CHECK_EQ( aiPersonaShareAmount( 50000, 2000, 2000 ), 2000 );	// the rung's cap
+}
+
+TEST(ai_persona_chat_waits_between_lines)
+{
+	CHECK( aiPersonaChatAllowed( 100, 0 ) );
+	CHECK( !aiPersonaChatAllowed( 100 + AI_CHAT_GAP_FRAMES - 1, 100 ) );
+	CHECK( aiPersonaChatAllowed( 100 + AI_CHAT_GAP_FRAMES, 100 ) );
+}
+
+/** A 40 by 41 field from a base at the middle of the left edge to an enemy at the middle of the
+	* right, walled down column 13 except rows 19 to 21 when walled is set. */
+static const Int CHOKE_TEST_WIDTH = 40;
+static const Int CHOKE_TEST_HEIGHT = 41;
+static const Int CHOKE_TEST_ROW = 20;
+static const Int CHOKE_TEST_WALL = 13;
+
+static Bool chokeTestWalkable( Int x, Int y, void *userData )
+{
+	const Bool walled = *(const Bool *)userData;
+	return !walled || x != CHOKE_TEST_WALL || ( y >= CHOKE_TEST_ROW - 1 && y <= CHOKE_TEST_ROW + 1 );
+}
+
+static Int chokeTestCell( Bool walled, Int *roadCells )
+{
+	std::vector<UnsignedShort> fields[ 2 ];
+	const Int sourceX[ 2 ] = { 0, CHOKE_TEST_WIDTH - 1 };
+	for( Int f = 0; f < 2; ++f )
+	{
+		AIGroundFlood flood( CHOKE_TEST_WIDTH, CHOKE_TEST_HEIGHT, chokeTestWalkable, &walled );
+		flood.addSource( sourceX[ f ], CHOKE_TEST_ROW );
+		Int x, y, d;
+		while( flood.next( &x, &y, &d ) )
+			;
+		fields[ f ].swap( flood.field() );
+	}
+	const Int route = fields[ 1 ][ CHOKE_TEST_ROW * CHOKE_TEST_WIDTH ];
+	return aiFindChoke( &fields[ 0 ][ 0 ], &fields[ 1 ][ 0 ], CHOKE_TEST_WIDTH, CHOKE_TEST_WIDTH * CHOKE_TEST_HEIGHT, route,
+		4 * AI_GROUND_STEP, 17 * AI_GROUND_STEP, roadCells );
+}
+
+TEST(ai_persona_turtle_finds_the_gap_in_the_wall)
+{
+	Int roadCells = 0;
+	const Int gap = chokeTestCell( TRUE, &roadCells );
+	CHECK( gap >= 0 );
+	CHECK( gap % CHOKE_TEST_WIDTH >= CHOKE_TEST_WALL - 3 && gap % CHOKE_TEST_WIDTH <= CHOKE_TEST_WALL + 1 );	// at the wall
+	CHECK( gap / CHOKE_TEST_WIDTH >= CHOKE_TEST_ROW - 1 && gap / CHOKE_TEST_WIDTH <= CHOKE_TEST_ROW + 1 );	// in the gap
+	CHECK( roadCells > 0 );
+
+	// open ground has no gap to find: the choke is still a cell on the straight road
+	const Int open = chokeTestCell( FALSE, &roadCells );
+	CHECK( open >= 0 );
+	CHECK( open / CHOKE_TEST_WIDTH >= CHOKE_TEST_ROW - 1 && open / CHOKE_TEST_WIDTH <= CHOKE_TEST_ROW + 1 );
+
+	CHECK_EQ( aiFindChoke( NULL, NULL, 40, 0, 10, 20, 10, &roadCells ), -1 );		// no band at all
+}
 
 /** B6: the classic AI disease is sitting on twenty thousand cash while trickling out one unit at a
 	 time.  The existing delays move with wealth, but only one step - past the Wealthy threshold a
@@ -12501,6 +13113,18 @@ TEST(the_bank_target_and_the_upgrade_the_army_pays_for)
 	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_beamSteerSeconds );
 	CHECK( data.m_skill[ AISKILL_MEDIUM ].m_beamSteerSeconds > data.m_skill[ AISKILL_BRUTAL ].m_beamSteerSeconds );
 	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_beamSteerSeconds > 0.0f && data.m_skill[ AISKILL_BRUTAL ].m_beamSteerSeconds < 0.5f );
+	// strikes: the higher the rung, the more a strike looks for his base over his army, and the fewer
+	// guns a lower rung needs before a superweapon, so Easy and Medium can reach one at all
+	for( Int s = 1; s < AISKILL_COUNT; ++s )
+	{
+		const AIDifficultyProfile &lower = data.m_skill[ s - 1 ];
+		const AIDifficultyProfile &upper = data.m_skill[ s ];
+		CHECK( upper.m_strikeEconomyWeight > lower.m_strikeEconomyWeight );
+		CHECK( upper.m_strikeThreatWeight < lower.m_strikeThreatWeight );
+		CHECK( upper.m_superweaponDefenses >= lower.m_superweaponDefenses );
+	}
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_BRUTAL ].m_strikeThreatWeight );
+	CHECK_EQ( (Int)DEFENSES_PER_SUPERWEAPON, data.m_skill[ AISKILL_BRUTAL ].m_superweaponDefenses );
 }
 
 
@@ -15845,10 +16469,6 @@ TEST(the_bars_windows_can_be_torn_down_twice_without_taking_the_bar_with_them)
 	// again, on a bar that is already holding nothing - which is what the destructor does
 	bar.shutdownWindows();
 	CHECK( !bar.getShowBuildTooltipLayout() );
-
-	// the command buttons are not window state and are not touched by any of it
-	CHECK( bar.getCommandButtons() == NULL );
-	CHECK( bar.findCommandButton( AsciiString( "NoSuchCommandButton" ) ) == NULL );
 }
 
 /* CommandSetReforged.ini names EA's Early_Command_ChinaCarpetBomb in slot 2 of a China command center
@@ -15858,9 +16478,9 @@ TEST(command_set_slot_naming_an_unknown_button_is_skipped)
 {
 	CHECK( bootOnce() );
 
-	ControlBar bar;
-	ControlBar *savedBar = TheControlBar;
-	TheControlBar = &bar;
+	CommandStore store;
+	CommandStore *savedStore = TheCommandStore;
+	TheCommandStore = &store;
 
 	writeFile( TEST_INI,
 		"CommandButton ProbeButton\r\n"
@@ -15872,8 +16492,8 @@ TEST(command_set_slot_naming_an_unknown_button_is_skipped)
 		"End\r\n" );
 	CHECK( loadIni( TEST_INI ) );
 
-	const CommandButton *probe = bar.findCommandButton( AsciiString( "ProbeButton" ) );
-	const CommandSet *set = bar.findCommandSet( AsciiString( "ProbeCommandSet" ) );
+	const CommandButton *probe = store.findCommandButton( AsciiString( "ProbeButton" ) );
+	const CommandSet *set = store.findCommandSet( AsciiString( "ProbeCommandSet" ) );
 	CHECK( probe != NULL );
 	CHECK( set != NULL );
 	if( set != NULL )
@@ -15884,7 +16504,7 @@ TEST(command_set_slot_naming_an_unknown_button_is_skipped)
 	}
 
 	remove( TEST_INI );
-	TheControlBar = savedBar;
+	TheCommandStore = savedStore;
 }
 
 /* Mouse.cpp: the tooltip box was placed by two flips and nothing else, under EA's own note that
@@ -15988,29 +16608,37 @@ TEST(an_open_dropdown_owns_the_rows_that_hang_past_its_panel)
 	CHECK( !OpenWindowOwnsPoint( TRUE, boxX, boxY, boxWidth, boxHeightOpen, 900, 660 ) );
 }
 
-/* Twelve finished base defences buy one superweapon, twenty-four buy two, whatever mix of silo,
-	 uplink and storm they go to.  Player::canBuildMoreOfType counts and asks this; the lobby's cap is
-	 checked beside it and still refuses on its own. */
+/* On Hard twelve finished base defences buy one superweapon, twenty-four buy two, whatever mix of
+	 silo, uplink and storm they go to; the lower rungs ask for fewer, from their skill profile.
+	 Player::canBuildMoreOfType counts and asks this; the lobby's cap is checked beside it and still
+	 refuses on its own. */
 TEST(twelve_finished_defenses_pay_for_each_superweapon)
 {
-	CHECK_EQ( (Int)DEFENSES_PER_SUPERWEAPON, 12 );
+	const Int H = DEFENSES_PER_SUPERWEAPON;
+	CHECK_EQ( H, 12 );
 
 	// fewer than twelve buys nothing, four included, which bought one before
-	CHECK( SuperweaponDefenseCapRefuses( 0, 0 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 4, 0 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 11, 0 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 0, 0, H ) );
+	CHECK( SuperweaponDefenseCapRefuses( 4, 0, H ) );
+	CHECK( SuperweaponDefenseCapRefuses( 11, 0, H ) );
 
 	// twelve buy the first, and a foundation already down spends it
-	CHECK( !SuperweaponDefenseCapRefuses( 12, 0 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 12, 1 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 23, 1 ) );
+	CHECK( !SuperweaponDefenseCapRefuses( 12, 0, H ) );
+	CHECK( SuperweaponDefenseCapRefuses( 12, 1, H ) );
+	CHECK( SuperweaponDefenseCapRefuses( 23, 1, H ) );
 
 	// twenty-four the second
-	CHECK( !SuperweaponDefenseCapRefuses( 24, 1 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 24, 2 ) );
+	CHECK( !SuperweaponDefenseCapRefuses( 24, 1, H ) );
+	CHECK( SuperweaponDefenseCapRefuses( 24, 2, H ) );
 
 	// losing defences never pulls a standing superweapon down, it only stops the next one
-	CHECK( SuperweaponDefenseCapRefuses( 12, 2 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 12, 2, H ) );
+
+	// a smaller ration buys sooner, and none asks for nothing
+	CHECK( !SuperweaponDefenseCapRefuses( 4, 0, 4 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 4, 1, 4 ) );
+	CHECK( !SuperweaponDefenseCapRefuses( 0, 0, 0 ) );
+	CHECK( !SuperweaponDefenseCapRefuses( 0, 5, 0 ) );
 
 	// a Sneak Attack tunnel costs nothing and buys nothing; a Tunnel Network at 800 does
 	CHECK( !DefenseCountsForSuperweapons( 0 ) );
@@ -16048,8 +16676,8 @@ TEST(superweapon_defense_allowance_binds_computer_players_only)
 	CHECK( SuperweaponNeedsDefenses( AsciiString( "AmericaParticleCannonUplink" ), FALSE, SUPERWEAPONS_LIMIT, TRUE ) );
 
 	// and for a computer a storm's waiting hole still spends the twelve towers it stood on
-	CHECK( SuperweaponDefenseCapRefuses( 12, RebuildHoleHoldsSuperweapon( TRUE, FALSE ) ? 1 : 0 ) );
-	CHECK( !SuperweaponDefenseCapRefuses( 12, RebuildHoleHoldsSuperweapon( FALSE, FALSE ) ? 1 : 0 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 12, RebuildHoleHoldsSuperweapon( TRUE, FALSE ) ? 1 : 0, DEFENSES_PER_SUPERWEAPON ) );
+	CHECK( !SuperweaponDefenseCapRefuses( 12, RebuildHoleHoldsSuperweapon( FALSE, FALSE ) ? 1 : 0, DEFENSES_PER_SUPERWEAPON ) );
 }
 
 /* The superweapon rule is a mode, and what a mode leaves you depends on who you are playing.  The
@@ -17346,6 +17974,47 @@ TEST(modfactions_prefix_only_the_mods_own_names)
 	CHECK_EQ( key, NAMEKEY( "Upgrade_Retail" ) );
 }
 
+// Shockwave Chaos's BlackMarketTank.ini has a 1019-character BuildVariations line of 43 of its own
+// tanks. It fits the file reader, but three characters of "M2~" on each name took it past a buffer of
+// that size, and the game stopped at startup whenever Chaos ran beside another full mod.
+TEST(modfactions_prefixed_line_outgrows_the_raw_line)
+{
+	bootOnce();
+	ModNamespace names;
+	std::string line = "  BuildVariations =";
+	for (Int i = 0; i < 43; ++i)
+	{
+		char name[ 32 ];
+		snprintf( name, sizeof( name ), "ChaosVariationTank_X%02d", i );
+		names.scanLine( 1, (std::string( "Object " ) + name).c_str() );
+		line += " ";
+		line += name;
+	}
+	names.finishScan( 1 );
+	names.setActive( 1 );
+	CHECK( (Int)line.size() < INI_MAX_CHARS_PER_LINE );
+
+	char buffer[ INI_MAX_CHARS_PER_PREFIXED_LINE + 1 ];
+	strcpy( buffer, line.c_str() );
+	CHECK( !names.rewriteLine( buffer, INI_MAX_CHARS_PER_LINE + 1 ) );		// the old buffer
+	CHECK( names.rewriteLine( buffer, sizeof( buffer ) ) );
+	CHECK_EQ( (Int)strlen( buffer ), (Int)line.size() + 43 * 3 );
+	CHECK( (Int)strlen( buffer ) > INI_MAX_CHARS_PER_LINE );
+	CHECK( strstr( buffer, " M2~ChaosVariationTank_X00 " ) != NULL );
+	CHECK( strstr( buffer, " M2~ChaosVariationTank_X42" ) != NULL );
+
+	// the worst a full line can do: a one-letter name in every other character, mod 99's prefix on each
+	ModNamespace worst;
+	worst.scanLine( 98, "Object A" );
+	worst.finishScan( 98 );
+	worst.setActive( 98 );
+	std::string full = "X";
+	while ((Int)full.size() + 2 < INI_MAX_CHARS_PER_LINE)
+		full += " A";
+	strcpy( buffer, full.c_str() );
+	CHECK( worst.rewriteLine( buffer, sizeof( buffer ) ) );
+}
+
 // The Power of the West defines "FXList No", and -modfactions made every "IsGrantable = No" an
 // "M2~No" that parseBool refused: a word the parser reads for itself is never the mod's name.
 TEST(modfactions_never_prefix_a_reserved_word)
@@ -17636,6 +18305,25 @@ TEST(modfactions_prefix_the_last_part_of_a_file_path)
 	TheWritableGlobalData = saved;
 }
 
+#include "Common/GameState.h"
+
+// A save from before 60 Hz logic is refused, except a mission save (the GameState and campaign
+// blocks only, no frame counts), which carries a campaign over from any earlier build or retail.
+TEST(save_older_than_60hz_loads_only_as_mission_save)
+{
+	SaveGameInfo info;
+	info.version = 4;
+	CHECK( info.isLoadable() );
+	info.version = 3;
+	CHECK( !info.isLoadable() );
+	info.saveFileType = SAVE_FILE_TYPE_MISSION;
+	CHECK( info.isLoadable() );
+	info.version = 2;
+	CHECK( info.isLoadable() );
+	info.version = 1;		// no file type recorded, so no way to tell it is a mission save
+	CHECK( !info.isLoadable() );
+}
+
 #include "test_minimap_input.inc"
 #include "test_selection_priority.inc"
 #include "test_widechar_width.inc"
@@ -17644,3 +18332,157 @@ TEST(modfactions_prefix_the_last_part_of_a_file_path)
 #include "test_game_results.inc"
 #include "test_map_ini_rollback.inc"
 #include "test_hostile_map.inc"
+
+#include "GameLogic/AI.h"
+
+/* An AI seat's personality rides on its slot entry as an optional sixth field.  The whole options
+	 string needs TheGameState, TheMapCache and the player templates to build or parse, so this checks
+	 the field and the slot that carry it: Normal writes nothing, so a Normal string is byte for byte
+	 the old one; every personality comes back as itself; an old five-field entry, and a value no
+	 build wrote, read as Normal; the slot keeps its pick while it stays an AI seat and loses it when a
+	 human takes it; and the -aipersona switches resolve per seat. */
+TEST(ai_persona_rides_the_slot_entry_and_normal_leaves_it_unchanged)
+{
+	CHECK_STR( AIPersonaSlotField( AIPERSONA_NORMAL ).str(), "" );
+	AsciiString entry;
+	entry.format( "CH,%d,%d,%d,%d%s:", 2, 3, -1, 0, AIPersonaSlotField( AIPERSONA_NORMAL ).str() );
+	CHECK_STR( entry.str(), "CH,2,3,-1,0:" );
+
+	for( Int p = AIPERSONA_NORMAL; p < AIPERSONA_COUNT; ++p )
+	{
+		AsciiString field = AIPersonaSlotField( p );
+		// the parser hands over what follows the team's comma, or nothing at all
+		CHECK_EQ( AIPersonaFromSlotField( field.isEmpty() ? NULL : field.str() + 1 ), p );
+	}
+	CHECK_STR( AIPersonaSlotField( AIPERSONA_RANDOM ).str(), ",14" );
+	CHECK_EQ( AIPersonaFromSlotField( "14" ), (Int)AIPERSONA_RANDOM );	// Random stays Random on the wire
+
+	CHECK_EQ( AIPersonaFromSlotField( NULL ), (Int)AIPERSONA_NORMAL );	// a five-field entry
+	CHECK_EQ( AIPersonaFromSlotField( "" ), (Int)AIPERSONA_NORMAL );
+	CHECK_EQ( AIPersonaFromSlotField( "99" ), (Int)AIPERSONA_NORMAL );
+	CHECK_EQ( AIPersonaFromSlotField( "-3" ), (Int)AIPERSONA_NORMAL );
+	CHECK_EQ( AIPersonaFromSlotField( "x" ), (Int)AIPERSONA_NORMAL );
+
+	GameSlot slot;
+	CHECK_EQ( slot.getAIPersonality(), (Int)AIPERSONA_NORMAL );
+	slot.setState( SLOT_MED_AI );
+	slot.setAIPersonality( AIPERSONA_TURTLE );
+	slot.setState( SLOT_BRUTAL_AI );		// another rung keeps it, as it keeps the faction
+	CHECK_EQ( slot.getAIPersonality(), (Int)AIPERSONA_TURTLE );
+	GameSlot copy = slot;								// GameInfo::setSlot copies the parsed slot in whole
+	CHECK_EQ( copy.getAIPersonality(), (Int)AIPERSONA_TURTLE );
+	UnicodeString name;
+	name.translate( AsciiString( "Player" ) );
+	slot.setState( SLOT_PLAYER, name );
+	CHECK_EQ( slot.getAIPersonality(), (Int)AIPERSONA_NORMAL );
+
+	CHECK_EQ( (Int)aiPersonalityFromName( "turtle" ), (Int)AIPERSONA_TURTLE );
+	CHECK_EQ( (Int)aiPersonalityFromName( "nonsense" ), (Int)AIPERSONA_NORMAL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	CHECK_EQ( TheGlobalData->autoSkirmishPersona( 1 ), (Int)AIPERSONA_NORMAL );
+	TheWritableGlobalData->m_autoSkirmishPersonaAll = AIPERSONA_ECONOMIST;
+	TheWritableGlobalData->m_autoSkirmishPersonaOdd = AIPERSONA_RUSHER;
+	TheWritableGlobalData->m_autoSkirmishPersona[ 2 ] = AIPERSONA_AIR;
+	CHECK_EQ( TheGlobalData->autoSkirmishPersona( 0 ), (Int)AIPERSONA_ECONOMIST );
+	CHECK_EQ( TheGlobalData->autoSkirmishPersona( 1 ), (Int)AIPERSONA_RUSHER );
+	CHECK_EQ( TheGlobalData->autoSkirmishPersona( 2 ), (Int)AIPERSONA_AIR );
+	CHECK_EQ( TheGlobalData->autoSkirmishPersona( 3 ), (Int)AIPERSONA_RUSHER );
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
+// The debug log's cap: the head and the last whole lines survive, in one file still open for writing.
+TEST(debug_log_cut_keeps_the_head_and_the_last_whole_lines)
+{
+	const std::string path = (std::filesystem::temp_directory_path() / "zh_logcut_test.txt").string();
+	FILE *log = fopen( path.c_str(), "w" );		// text mode, as the game opens it
+	fputs( "head one\nhead two\n", log );
+	fflush( log );
+	const long headEnd = ftell( log );
+	char line[ 32 ];
+	for( Int i = 0; i < 1000; ++i )
+	{
+		snprintf( line, sizeof( line ), "line %04d\n", i );
+		fputs( line, log );
+	}
+	const long before = ftell( log );
+	const long after = DebugCutLogFile( log, path.c_str(), headEnd, 100 );
+	fputs( "written after the cut\n", log );
+	fclose( log );
+
+	FILE *in = fopen( path.c_str(), "r" );
+	std::string text;
+	char buffer[ 4096 ];
+	size_t got;
+	while( (got = fread( buffer, 1, sizeof( buffer ), in )) > 0 )
+		text.append( buffer, got );
+	fclose( in );
+	std::filesystem::remove( path );
+
+	CHECK( after < before );
+	CHECK( text.compare( 0, 18, "head one\nhead two\n" ) == 0 );
+	CHECK( text.find( "cut here" ) != std::string::npos );
+	CHECK( text.find( "line 0989" ) == std::string::npos );
+	CHECK( text.find( "\nline 0991\n" ) != std::string::npos );		// a whole line, never half of one
+	CHECK( text.find( '\r' ) == std::string::npos );						// no \r\r\n from the text-mode rewrite
+	const std::string ending = "line 0999\nwritten after the cut\n";
+	CHECK( text.compare( text.size() - ending.size(), ending.size(), ending ) == 0 );
+}
+
+// The replay's writer: appends and header patches through the queue leave the bytes the same calls
+// made straight on the FILE did, the way RecorderClass makes them.
+TEST(file_write_queue_writes_what_the_file_calls_wrote)
+{
+	const std::string queued = (std::filesystem::temp_directory_path() / "zh_fwq_queued.bin").string();
+	const std::string direct = (std::filesystem::temp_directory_path() / "zh_fwq_direct.bin").string();
+
+	FILE *d = fopen( direct.c_str(), "wb" );
+	FileWriteQueue queue;
+	FILE *q = fopen( queued.c_str(), "wb" );
+	queue.start( q );
+	const char head[] = "GENREP\0\0\0\0";
+	fwrite( head, 1, 10, d );
+	queue.write( head, 10 );
+	const UnsignedInt patch = 0x11223344;
+	long end = ftell( d );		// a patch before the first flush, as logGameStart's
+	fseek( d, 6, SEEK_SET );
+	fwrite( &patch, sizeof( patch ), 1, d );
+	fseek( d, end, SEEK_SET );
+	queue.writeAt( 6, &patch, sizeof( patch ) );
+	for( UnsignedInt frame = 0; frame < 5000; ++frame )
+	{
+		fwrite( &frame, sizeof( frame ), 1, d );
+		queue.write( &frame, sizeof( frame ) );
+		if( frame == 2500 )
+			queue.flush();		// a batch boundary in the middle
+	}
+	const unsigned char flag = 1;
+	end = ftell( d );
+	fseek( d, 9, SEEK_SET );
+	fwrite( &flag, 1, 1, d );
+	fseek( d, end, SEEK_SET );
+	queue.writeAt( 9, &flag, 1 );
+	fwrite( "tail", 1, 4, d );
+	queue.write( "tail", 4 );
+	queue.stop();
+	queue.write( "dropped", 7 );		// a stopped queue takes nothing
+	fclose( q );
+	fclose( d );
+
+	CHECK( std::filesystem::file_size( queued ) == std::filesystem::file_size( direct ) );
+	FILE *a = fopen( queued.c_str(), "rb" );
+	FILE *b = fopen( direct.c_str(), "rb" );
+	Int ca, cb;
+	do
+	{
+		ca = fgetc( a );
+		cb = fgetc( b );
+	} while( ca == cb && ca != EOF );
+	fclose( a );
+	fclose( b );
+	std::filesystem::remove( queued );
+	std::filesystem::remove( direct );
+	CHECK( ca == cb );
+}

@@ -300,10 +300,10 @@ void W3DGadgetTextEntryDraw( GameWindow *window, WinInstanceData *instData )
 
 	width = size.x - (2 * startOffset);
 	start.x = origin.x + startOffset;  // offset a little bit into the entry
-	if( BitTest( window->winGetStatus(), WIN_STATUS_ONE_LINE ) )
-		start.y = size.y / 2 - fontHeight / 2;
-	else
-		start.y = origin.y + startOffset;  // offset a little bit into the entry
+	// the line of text centred in the box.  EA put it 5 pixels under the top, which only suited the
+	// box heights it drew at 800x600: in a box scaled with its lettering the descenders ran into the
+	// bottom border.  (EA's one-line case centred it without the window's own y, off the screen top.)
+	start.y = origin.y + max( 1, (size.y - fontHeight) / 2 );
 
 	// draw the edit text
 	drawTextEntryText( window, instData, textColor, textBorder, compositeColor, compositeBorder,
@@ -379,11 +379,13 @@ void W3DGadgetTextEntryImageDraw( GameWindow *window, WinInstanceData *instData 
 	}  // end else, just enabled
 
 	// get image sizes for the ends
+	// The ends are stretched to the box's height, so they are widened by the same ratio: at their own
+	// width a box scaled up to 1080 kept a hairline left edge beside a combo arrow drawn at full scale.
 	ICoord2D leftSize, rightSize;
-	leftSize.x = leftImage->getImageWidth();
 	leftSize.y = leftImage->getImageHeight();
-	rightSize.x = rightImage->getImageWidth();
 	rightSize.y = rightImage->getImageHeight();
+	leftSize.x = max( 1, leftImage->getImageWidth() * size.y / max( 1, leftSize.y ) );
+	rightSize.x = max( 1, rightImage->getImageWidth() * size.y / max( 1, rightSize.y ) );
 
 	// get two key points used in the end drawing
 	ICoord2D leftEnd, rightStart;
@@ -454,10 +456,10 @@ void W3DGadgetTextEntryImageDraw( GameWindow *window, WinInstanceData *instData 
 
 	width = size.x - (2 * startOffset);
 	start.x = origin.x + startOffset;  // offset a little bit into the entry
-		if( BitTest( window->winGetStatus(), WIN_STATUS_ONE_LINE ) )
-		start.y = size.y / 2 - fontHeight / 2;
-	else
-		start.y = origin.y + startOffset;  // offset a little bit into the entry
+		// the line of text centred in the box.  EA put it 5 pixels under the top, which only suited the
+	// box heights it drew at 800x600: in a box scaled with its lettering the descenders ran into the
+	// bottom border.  (EA's one-line case centred it without the window's own y, off the screen top.)
+	start.y = origin.y + max( 1, (size.y - fontHeight) / 2 );
 
 	// draw the edit text
 	drawTextEntryText( window, instData, textColor, textBorder, compositeColor, compositeBorder,

@@ -154,6 +154,21 @@ static void parseAllVetLevelsAsciiString( INI* ini, void* /*instance*/, void * s
 }
 
 //-------------------------------------------------------------------------------------------------
+/* The laser object is looked up when the weapon fires, so a name nothing defines draws no beam.  A
+	 patch file loads after every object: one naming a laser the loaded data lacks (FixesReforged.ini's
+	 Lazr_PatriotLaserBeam under Contra) leaves the weapon the beam it had. */
+static void parseLaserName( INI* ini, void* /*instance*/, void * store, const void* /*userData*/ )
+{
+	AsciiString name = ini->getNextAsciiString();
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE && name.isNotEmpty() && TheThingFactory->findTemplate(name, FALSE) == NULL)
+	{
+		DEBUG_LOG(("[LINE: %d in '%s'] laser '%s' does not exist; the weapon keeps its own.\n", ini->getLineNum(), ini->getFilename().str(), name.str()));
+		return;
+	}
+	*(AsciiString*)store = name;
+}
+
+//-------------------------------------------------------------------------------------------------
 static void parsePerVetLevelFXList( INI* ini, void* /*instance*/, void * store, const void* /*userData*/ )
 {
 	typedef const FXList* ConstFXListPtr;
@@ -267,7 +282,7 @@ const FieldParse WeaponTemplate::TheWeaponTemplateFieldParseTable[] =
 	{ "AntiBallisticMissile",			INI::parseBitInInt32,										(void*)WEAPON_ANTI_BALLISTIC_MISSILE, offsetof(WeaponTemplate, m_antiMask) },
 	{ "AutoReloadsClip",					INI::parseIndexList,										TheWeaponReloadNames,							offsetof(WeaponTemplate, m_reloadType) },		
 	{ "ProjectileStreamName",			INI::parseAsciiString,									NULL,							offsetof(WeaponTemplate, m_projectileStreamName) },
-	{ "LaserName",								INI::parseAsciiString,									NULL,							offsetof(WeaponTemplate, m_laserName) },
+	{ "LaserName",								parseLaserName,													NULL,						offsetof(WeaponTemplate, m_laserName) },
 	{ "LaserBoneName",						INI::parseAsciiString,									NULL,							offsetof(WeaponTemplate, m_laserBoneName) },
 	{ "WeaponBonus",							WeaponTemplate::parseWeaponBonusSet,		NULL,							0 },		
 	{ "HistoricBonusTime",				INI::parseDurationUnsignedInt,					NULL,							offsetof(WeaponTemplate, m_historicBonusTime) },		
@@ -971,11 +986,22 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 		}
 	}
 
+	// where on the victim this shot lands (Weapon::randomPointOnBody); a bridge keeps its attack point.
+	// Drawn whether or not anything is drawn, as it comes from the logic stream.
+	Coord3D aimPos;
+	const Bool aimsOnBody = victimObj != NULL && !victimObj->isKindOf( KINDOF_BRIDGE );
+	if( aimsOnBody )
+		Weapon::randomPointOnBody( victimObj, aimPos );
+
 	// call this even if FXList is null, because this also handles stuff like Gun Barrel Recoil
 	if (sourceObj && sourceObj->getDrawable())
 	{
 		Coord3D targetPos;
-		if( victimObj )
+		if( aimsOnBody )
+		{
+			targetPos = aimPos;
+		}
+		else if( victimObj )
 		{
 			victimObj->getGeometryInfo().getCenterPosition( *victimObj->getPosition(), targetPos );
 		}
@@ -991,8 +1017,6 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 		if ( TheGameLogic->getFrame() < firingWeapon->getSuspendFXFrame() )
 			fx = NULL;
 
-		Bool handled;
-		
 		// Whether the muzzle flash shows is simply whether this watcher can see the firer.  The rule
 		// used to be spelled out as "not mine, and stealthed, and not detected, and not disguised",
 		// which reads the same for a player but hid the shot from an ally who shares your sight and
@@ -1000,32 +1024,22 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 		// And it asks about stealth rather than about a drawable's hidden flag: a unit that has just
 		// left a tunnel has a visible drawable while it is still stealthed, and used to give itself
 		// away with its own muzzle flash.
-		if(!sourceObj->isLogicallyVisible()									// if the watcher cannot see us
-			&& !sourceObj->isKindOf(KINDOF_MINE)								// and not a mine (which always do the FX, even if hidden)...
-			&& !isPlayFXWhenStealthed()													// and not a weapon marked to playwhenstealthed
+		if(sourceObj->isLogicallyVisible()									// the watcher can see us
+			|| sourceObj->isKindOf(KINDOF_MINE)								// or a mine (which always do the FX, even if hidden)...
+			|| isPlayFXWhenStealthed()													// or a weapon marked to playwhenstealthed
 			)
 		{
-			handled = TRUE;		// then let's just pretend like we did the fx by returning true
-		}
-		else
-		{
-			handled = sourceObj->getDrawable()->handleWeaponFireFX(wslot, 
-																															specificBarrelToUse, 
-																															fx, 
-																															getWeaponSpeed(), 
-																															reAngle, 
-																															reDir, 
-																															&targetPos,
-																															getPrimaryDamageRadius(bonus)
-																															);
-		}
-
-		if (handled == false && fx != NULL)
-		{
-			// bah. just play it at the drawable's pos.
-			//DEBUG_LOG(("*** WeaponFireFX not fully handled by the client\n"));
-			const Coord3D* where = isContactWeapon() ? &targetPos : sourceObj->getDrawable()->getPosition();
-			FXList::doFXPos(fx, where, sourceObj->getDrawable()->getTransformMatrix(), getWeaponSpeed(), &targetPos, getPrimaryDamageRadius(bonus));
+			// the barrel's FX bone, or the drawable's (the victim's for a contact weapon) when it has none
+			sourceObj->getDrawable()->handleWeaponFireFX(wslot,
+																										specificBarrelToUse,
+																										fx,
+																										getWeaponSpeed(),
+																										reAngle,
+																										reDir,
+																										&targetPos,
+																										getPrimaryDamageRadius(bonus),
+																										isContactWeapon()
+																										);
 		}
 	}
 
@@ -1220,7 +1234,8 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 			}
 			else
 			{
-				pui->projectileLaunchAtObjectOrPosition(victimObj, &projectileDestination, sourceObj, wslot, specificBarrelToUse, this, m_projectileExhausts[v]);
+				// a projectile that follows its victim flies to the shot's point on it
+				pui->projectileLaunchAtObjectOrPosition(victimObj, aimsOnBody ? &aimPos : &projectileDestination, sourceObj, wslot, specificBarrelToUse, this, m_projectileExhausts[v]);
 			}
 			if( victimObj )
 				pui->projectileLeadVictim( victimObj );
@@ -2195,8 +2210,8 @@ void Weapon::reloadWithBonus(const Object *sourceObj, const WeaponBonus& bonus, 
 			// go through other weapons in weapon set
 			// set their m_whenWeCanFireAgain to this guy's delay	
 			// set their m_status to this guy's status
-	if (sourceObj->isReloadTimeShared())
-	{	
+	if (sourceObj->isReloadTimeShared() && sourceObj->getWeaponInWeaponSlot( m_wslot ) == this)	// a weapon of the set, as in privateFireWeapon
+	{
 		for (Int wt = 0; wt<WEAPONSLOT_COUNT; wt++)
 		{
 			Weapon *weapon = sourceObj->getWeaponInWeaponSlot((WeaponSlotType)wt);
@@ -2998,9 +3013,11 @@ Bool Weapon::privateFireWeapon(
 			// go through other weapons in weapon set
 			// set their m_whenWeCanFireAgain to this guy's delay
 			// set their m_status to this guy's status
+			// Only a weapon of the set itself: a FireWeaponUpdate gun is not one, and ShockWave's EMP Patriot
+			// emitter firing every 750 ms held the battery's missiles in their wait for good.
 
-			if ( sourceObj->isReloadTimeShared() )
-			{	
+			if ( sourceObj->isReloadTimeShared() && sourceObj->getWeaponInWeaponSlot( m_wslot ) == this )
+			{
 				for (Int wt = 0; wt<WEAPONSLOT_COUNT; wt++)
 				{
 					Weapon *weapon = sourceObj->getWeaponInWeaponSlot((WeaponSlotType)wt);
@@ -3379,6 +3396,51 @@ void Weapon::processRequestAssistance( const Object *requestingObject, Object *v
 		launcherPhys->transferVelocityTo(missilePhys);
 		missilePhys->setIgnoreCollisionsWith(launcher);
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+// A shot at an object used to aim at one spot of it, its foot or its middle, so every rocket, shell
+// and tracer at a tank met it in the same place. Each shot now picks a point of its own inside the
+// object's geometry, kept off the box's edges and corners, which are mostly air round a real model:
+// seven tenths of the footprint and the middle seven tenths of the height. Only where it lands moves.
+// A small object spreads its shots over a small body.
+//-------------------------------------------------------------------------------------------------
+/*static*/ void Weapon::randomPointOnBody(const Object* victim, Coord3D& point)
+{
+	const Real FOOTPRINT_SHARE = 0.7f;
+	const Real HEIGHT_MARGIN = 0.15f;
+	const GeometryInfo& geom = victim->getGeometryInfo();
+	Coord3D local;
+	geom.makeRandomOffsetWithinFootprint(local);
+	local.x *= FOOTPRINT_SHARE;
+	local.y *= FOOTPRINT_SHARE;
+	Real low = -geom.getMaxHeightBelowPosition();
+	Real high = geom.getMaxHeightAbovePosition();
+	local.z = GameLogicRandomValueReal(low + (high - low) * HEIGHT_MARGIN, high - (high - low) * HEIGHT_MARGIN);
+	pointFromBodyOffset(victim, local, point);
+}
+
+//-------------------------------------------------------------------------------------------------
+/*static*/ void Weapon::bodyOffsetFromPoint(const Object* victim, const Coord3D& point, Coord3D& offset)
+{
+	Real c = Cos(victim->getOrientation());
+	Real s = Sin(victim->getOrientation());
+	Real dx = point.x - victim->getPosition()->x;
+	Real dy = point.y - victim->getPosition()->y;
+	offset.x = dx * c + dy * s;
+	offset.y = dy * c - dx * s;
+	offset.z = point.z - victim->getPosition()->z;
+}
+
+//-------------------------------------------------------------------------------------------------
+/*static*/ void Weapon::pointFromBodyOffset(const Object* victim, const Coord3D& offset, Coord3D& point)
+{
+	Real c = Cos(victim->getOrientation());
+	Real s = Sin(victim->getOrientation());
+	point = *victim->getPosition();
+	point.x += offset.x * c - offset.y * s;
+	point.y += offset.x * s + offset.y * c;
+	point.z += offset.z;
 }
 
 //-------------------------------------------------------------------------------------------------

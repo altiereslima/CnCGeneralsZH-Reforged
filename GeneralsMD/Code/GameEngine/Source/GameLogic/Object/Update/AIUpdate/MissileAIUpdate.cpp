@@ -53,6 +53,16 @@
 
 const Real BIGNUM = 99999.0f;
 
+// How far past DistanceToTravelBeforeTurning a missile goes while its turn eases in: half the climb,
+// and no more than this. A missile that climbs a few units before turning barely eases at all.
+const Real MAX_TURN_EASE_DIST = 40.0f;
+
+static Real turnEaseDistance(const MissileAIUpdateModuleData* d)
+{
+	Real dist = d->m_initialDist * 0.5f;
+	return dist < MAX_TURN_EASE_DIST ? dist : MAX_TURN_EASE_DIST;
+}
+
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -132,6 +142,7 @@ MissileAIUpdate::MissileAIUpdate( Thing *thing, const ModuleData* moduleData ) :
 	m_fuelExpirationDate = 0;
 	m_noTurnDistLeft = d->m_initialDist;
 	m_prevPos = *getObject()->getPosition();
+	m_aimOffset.zero();
 	m_maxAccel = BIGNUM;
 	m_detonationWeaponTmpl = NULL;
 	m_exhaustSysTmpl = NULL;
@@ -288,9 +299,12 @@ void MissileAIUpdate::projectileFireAtObjectOrPosition( const Object *victim, co
 		// ick. const-cast is evil. fix. (srj)
  		aiMoveToObject(const_cast<Object*>(victim), CMD_FROM_AI );
 		m_originalTargetPos = *victim->getPosition();
-		m_isTrackingTarget = TRUE;// Remember that I was originally shot at a moving object, so if the 
+		m_isTrackingTarget = TRUE;// Remember that I was originally shot at a moving object, so if the
 		// target dies I can do something cool.
 		m_victimID = victim->getID();
+		// the weapon's point on the victim (Weapon::randomPointOnBody); a bridge's attack point is not on it
+		if (!victim->isKindOf(KINDOF_BRIDGE))
+			Weapon::bodyOffsetFromPoint(victim, *victimPos, m_aimOffset);
 	}
 	else
 	{
@@ -574,8 +588,31 @@ void MissileAIUpdate::doAttackState(Bool turnOK)
 		{
 			curLoco->setMaxAcceleration(m_maxAccel);
 			curLoco->setMaxTurnRate(turnOK ? BIGNUM : 0);
+			// The turn after the no-turn climb comes in over a short distance. A missile turns by
+			// thrusting across its velocity, so its turn per frame is in proportion to its acceleration,
+			// and its top speed does not move with it. The nose, which the climb held still while the
+			// flight drifted a degree or two off it, comes round with the turn rate. Given both whole
+			// the frame the climb ended, a Scud went from flying straight to 2.2 degrees a frame and a
+			// Tomahawk's nose jumped 2 degrees at once.
+			const Real easeDist = turnEaseDistance(d);
+			if (turnOK && easeDist > 0.0f && -m_noTurnDistLeft < easeDist)
+			{
+				Real s = -m_noTurnDistLeft / easeDist;
+				if (s < 0.0f)
+					s = 0.0f;
+				s = s * s * (3.0f - 2.0f * s);
+				BodyDamageType damage = getObject()->getBodyModule()->getDamageState();
+				curLoco->setMaxAcceleration(curLoco->getMaxAcceleration(damage) * s);
+				curLoco->setMaxTurnRate(curLoco->getMaxTurnRate(damage) * s);
+			}
 		}
 	}
+
+	// a missile that would not dive before its lock flies EA's flight, not the cruise curve; the lock
+	// distance is halved for a ground position, as below
+	Real effectiveLockDistance = m_isTrackingTarget ? d->m_lockDistance : d->m_lockDistance * 0.5f;
+	if (curLoco)
+		curLoco->setDiveDistance(d->m_diveDistance < effectiveLockDistance ? d->m_diveDistance : 0.0f);
 
 	if (d->m_lockDistance > 0)
 	{
@@ -643,6 +680,25 @@ void MissileAIUpdate::doKillState(void)
 		curLoco->setMaxAcceleration(m_maxAccel);
 		curLoco->setMaxTurnRate(BIGNUM);
 	}
+	// At its point on the victim the missile goes off. The move it was given is to the victim's own
+	// position, its foot, which a point up on the body never reaches, so it would never go idle, and
+	// it came to rest there touching nothing: Rocket Buggies at supply trucks hung over a third of
+	// their rockets on the trucks' roofs.
+	if (getGoalObject() != NULL)
+	{
+		Coord3D aim;
+		Weapon::pointFromBodyOffset(getGoalObject(), m_aimOffset, aim);
+		Real closeEnough = curLoco->getMaxSpeedForCondition(BODY_PRISTINE);
+		const Coord3D* pos = obj->getPosition();
+		// over the point and on the body: the height the locomotor holds over a goal is its own
+		if (sqr(aim.x - pos->x) + sqr(aim.y - pos->y) < sqr(closeEnough)
+			&& ThePartitionManager->getDistanceSquared(obj, getGoalObject(), FROM_BOUNDINGSPHERE_3D) < sqr(closeEnough))
+		{
+			obj->setPosition(&aim);
+			detonate();
+			return;
+		}
+	}
 	if (isIdle()) {
 		// we finished the move
 		if (getGoalObject()!=NULL) {
@@ -655,7 +711,8 @@ void MissileAIUpdate::doKillState(void)
 			Real distanceToTargetSq = ThePartitionManager->getDistanceSquared( getObject(), getGoalObject(), FROM_BOUNDINGSPHERE_3D);
 			//DEBUG_LOG(("Distance to target %f, closeEnough %f\n", sqrt(distanceToTargetSq), closeEnough));
 			if (distanceToTargetSq < closeEnough*closeEnough) {
-				Coord3D pos = *getGoalObject()->getPosition();
+				Coord3D pos;
+				Weapon::pointFromBodyOffset(getGoalObject(), m_aimOffset, pos);
 				getObject()->setPosition(&pos);
 				detonate();
 			}	else{
@@ -683,13 +740,66 @@ void MissileAIUpdate::doDeadState()
 }
 
 //-------------------------------------------------------------------------------------------------
+// Where the locomotor steers this frame, as an offset from the goal: the shot's point on the victim,
+// turned with it, and a light sway. The sway swings the aim from side to side by a few degrees, so
+// its sideways offset grows with the distance to the goal; the missile's own turning smooths it into
+// a gentle weave about a unit or two wide. It fades in over half a second of the attack, so it never
+// kicks the turn off the climb, and out from SWAY_FADE_FAR to SWAY_FADE_NEAR of the goal, so the
+// end of the flight and the lock are the same as before. Each missile starts the swing at its own
+// point of it, so a salvo does not sway in step. A missile at an aircraft flies the straight chase.
+//-------------------------------------------------------------------------------------------------
+void MissileAIUpdate::updateChaseOffset()
+{
+	const Real SWAY_ANGLE = 0.08f;					// radians of aim either side, between four and five degrees
+	const Real SWAY_PERIOD = 60.0f;					// logic frames for one swing and back
+	const Real SWAY_FADE_IN = 30.0f;				// logic frames from the start of the attack
+	const Real SWAY_FADE_FAR = 150.0f;
+	const Real SWAY_FADE_NEAR = 60.0f;
+
+	Coord3D offset;
+	offset.zero();
+	Object* victim = m_isTrackingTarget ? getGoalObject() : NULL;
+	Coord3D goal = victim ? *victim->getPosition() : *getGoalPosition();
+	if (victim)
+	{
+		Coord3D aim;
+		Weapon::pointFromBodyOffset(victim, m_aimOffset, aim);
+		offset.set(aim.x - goal.x, aim.y - goal.y, aim.z - goal.z);
+	}
+
+	if (m_state == ATTACK && !(victim && victim->isAboveTerrain()))
+	{
+		const Coord3D* pos = getObject()->getPosition();
+		Real dx = goal.x - pos->x;
+		Real dy = goal.y - pos->y;
+		Real dist = sqrtf(dx*dx + dy*dy);
+		Real fadeIn = (Real)(TheGameLogic->getFrame() - m_stateTimestamp) / SWAY_FADE_IN;
+		Real fadeOut = (dist - SWAY_FADE_NEAR) / (SWAY_FADE_FAR - SWAY_FADE_NEAR);
+		Real fade = clamp(0.0f, fadeIn, 1.0f) * clamp(0.0f, fadeOut, 1.0f);
+		if (fade > 0.0f)
+		{
+			fade = fade * fade * (3.0f - 2.0f * fade);
+			// in turns, the golden angle apart from one object ID to the next
+			Real turns = (Real)(TheGameLogic->getFrame() % (UnsignedInt)SWAY_PERIOD) / SWAY_PERIOD + 0.381966f * (Real)(getObject()->getID() % 1024);
+			turns -= floorf(turns);
+			Real side = SWAY_ANGLE * fade * Sin(2.0f * PI * turns);
+			offset.x -= dy * side;
+			offset.y += dx * side;
+		}
+	}
+
+	getCurLocomotor()->setChaseOffset(offset);
+}
+
+//-------------------------------------------------------------------------------------------------
 /**
  * Simulate one frame of a missile's behavior
  */
 UpdateSleepTime MissileAIUpdate::update()
 {
 	Coord3D newPos = *getObject()->getPosition();
-	if (m_noTurnDistLeft > 0.0f && m_state >= IGNITION)
+	// counted on past the climb, below zero, while the turn eases in
+	if (m_noTurnDistLeft > -turnEaseDistance(getMissileAIUpdateModuleData()) && m_state >= IGNITION)
 	{
 		Real distThisTurn = sqrtf(sqr(newPos.x-m_prevPos.x) + sqr(newPos.y-m_prevPos.y) + sqr(newPos.z-m_prevPos.z));
 		m_noTurnDistLeft -= distThisTurn;
@@ -714,9 +824,10 @@ UpdateSleepTime MissileAIUpdate::update()
 				// ick. const-cast is evil. fix. (srj)
  				aiMoveToObject(const_cast<Object*>(victim), CMD_FROM_AI );
 				m_originalTargetPos = *victim->getPosition();
-				m_isTrackingTarget = TRUE;// Remember that I was originally shot at a moving object, so if the 
+				m_isTrackingTarget = TRUE;// Remember that I was originally shot at a moving object, so if the
 				// target dies I can do something cool.
 				m_victimID = victim->getID();
+				m_aimOffset.zero();
 			}
 		}
 	}
@@ -769,6 +880,7 @@ UpdateSleepTime MissileAIUpdate::update()
 			break;
 	}
 
+	updateChaseOffset();
 	/*UpdateSleepTime ret =*/ AIUpdateInterface::update();
 
 #if 1
@@ -887,7 +999,8 @@ void MissileAIUpdate::crc( Xfer *xfer )
 void MissileAIUpdate::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 6;
+  // 7: m_aimOffset
+  const XferVersion currentVersion = 7;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -951,6 +1064,9 @@ void MissileAIUpdate::xfer( Xfer *xfer )
 
 	if( version>= 6 )
 		xfer->xferBool( &m_isJammed );
+
+	if( version >= 7 )
+		xfer->xferCoord3D( &m_aimOffset );
 
 }  // end xfer
 

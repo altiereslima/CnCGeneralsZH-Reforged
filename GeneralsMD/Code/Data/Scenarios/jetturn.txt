@@ -1,0 +1,33 @@
+# Four jets at cruise turned round: each flies east, and at frame 150 is sent back to the x it started
+# from on its own line, a 180 degree reversal at full speed. The width of the U is twice the turn
+# radius the jet flies at cruise, and the time from the order to the heading settling on west is the
+# time the reversal takes.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 700
+#     -scenario jetturn -logPrefix jetturn_
+#
+# Measured 2026-10-16 with a temporary per-frame trace, EA's flight against the banked one
+# (Locomotor::getJetMaxYawRate): reversal time, width of the U, and the tightest radius flown.
+#   Raptor   1.68 s  168  83   ->  3.22 s  217  103
+#   MiG      1.67 s  157  76   ->  3.22 s  198   94
+#   Aurora   1.08 s  102  57   ->  2.25 s  152   73
+#   Stealth  0.93 s   91  56   ->  2.03 s  160   71
+# EA's yaw rate jumped to full in a frame or two (4 to 6 degrees a frame squared); the banked one
+# winds up over half a second (0.2).
+#
+# For a film, swap -headless for -win -fps 120 and follow one jet; the Raptor is on 3000.
+
+30    spawn      0  AmericaJetRaptor             1   1000 3000
+30    spawn      0  ChinaJetMIG                  1   1000 3600
+30    spawn      0  AmericaJetAurora             1   1000 4200
+30    spawn      0  AmericaJetStealthFighter     1   1000 4800
+31    move       0  AmericaJetRaptor                 4400 3000
+31    move       0  ChinaJetMIG                      4400 3600
+31    move       0  AmericaJetAurora                 4400 4200
+31    move       0  AmericaJetStealthFighter         4400 4800
+150   move       0  AmericaJetRaptor                 1000 3000
+150   move       0  ChinaJetMIG                      1000 3600
+150   move       0  AmericaJetAurora                 1000 4200
+150   move       0  AmericaJetStealthFighter         1000 4800

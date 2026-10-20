@@ -1,0 +1,12 @@
+# The attack passes of Scenarios/jetpass.txt on Twilight Flame, side on and wide: looking north
+# (heading 0) over the Overlord's lane, so the Raptor comes in from the left, fires, runs out to
+# the right, banks round and comes back, with the MiG on the Battle Master behind it. Wide enough
+# to hold the whole loop; the close takes are cut against it.
+#
+#   generals.exe -win -xres 1280 -yres 720 -fps 120 -noFPSLimit -particlecap 2500 -quickstart
+#     -noshellmap -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario jetpass -cinema jetfilm_passwide -video 360 1680 jf_passwide -maxframes 1690
+
+0.0   cut     2450 3250 1.3 0 -8
+1.0   shot

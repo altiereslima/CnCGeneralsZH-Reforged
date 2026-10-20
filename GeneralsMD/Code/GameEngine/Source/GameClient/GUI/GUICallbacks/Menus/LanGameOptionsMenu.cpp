@@ -125,6 +125,7 @@ static NameKeyType comboBoxStartingCashID = NAMEKEY_INVALID;
 static NameKeyType comboBoxPeaceTimeID = NAMEKEY_INVALID;
 static NameKeyType checkBoxUnitLimitID = NAMEKEY_INVALID;
 static NameKeyType checkBoxProRulesID = NAMEKEY_INVALID;
+static NameKeyType checkBoxTurboID = NAMEKEY_INVALID;
 static NameKeyType comboBoxIncomeSharingID = NAMEKEY_INVALID;
 static NameKeyType comboBoxTechRespawnID = NAMEKEY_INVALID;
 static NameKeyType comboBoxSupplyPileLimitID = NAMEKEY_INVALID;
@@ -142,6 +143,7 @@ static GameWindow *comboBoxStartingCash = NULL;
 static GameWindow *comboBoxPeaceTime = NULL;
 static GameWindow *checkBoxUnitLimit = NULL;
 static GameWindow *checkBoxProRules = NULL;
+static GameWindow *checkBoxTurbo = NULL;
 static GameWindow *comboBoxIncomeSharing = NULL;
 static GameWindow *comboBoxTechRespawn = NULL;
 static GameWindow *comboBoxSupplyPileLimit = NULL;
@@ -160,6 +162,13 @@ static GameWindow *comboBoxPlayerTemplate[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 
 static GameWindow *comboBoxTeam[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 																								NULL,NULL,NULL,NULL };
+
+static GameWindow *comboBoxAIPersona[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
+																								NULL,NULL,NULL,NULL };
+static NameKeyType comboBoxAIPersonaID[MAX_SLOTS] = { NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID };
 
 //static GameWindow *buttonStartPosition[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 //																								NULL,NULL,NULL,NULL };
@@ -430,7 +439,7 @@ void LANDisableButtons()
 	comboBoxStartingCash->winEnable(false);
 
 	GameWindow *optionalGadgets[] = { comboBoxSuperweapons, comboBoxPeaceTime, checkBoxUnitLimit,
-		checkBoxProRules, comboBoxIncomeSharing, comboBoxTechRespawn, comboBoxSupplyPileLimit };
+		checkBoxProRules, comboBoxIncomeSharing, comboBoxTechRespawn, comboBoxSupplyPileLimit, checkBoxTurbo };
 	for (Int i = 0; i < (Int)ARRAY_SIZE(optionalGadgets); ++i)
 	{
 		if (optionalGadgets[i])
@@ -773,6 +782,32 @@ static void handleProRulesSelection()
   }
 }
 
+static void handleTurboSelection()
+{
+  LANGameInfo *myGame = TheLAN->GetMyGame();
+
+  // the same guard as the Pro Rules box above
+  if (myGame == NULL || checkBoxTurbo == NULL || myGame->getTurbo() == GadgetCheckBoxIsChecked( checkBoxTurbo ))
+    return;
+
+  myGame->setTurbo( GadgetCheckBoxIsChecked( checkBoxTurbo ) );
+  myGame->resetAccepted();
+
+  if (myGame->amIHost() && !s_isIniting)
+  {
+    TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+    lanUpdateSlotList(); // Update the accepted button UI
+  }
+}
+
+// the host's to change, everyone's to see
+static void updateTurboCheckBox( GameInfo *game, Bool hostMayEdit )
+{
+  checkBoxTurbo->winEnable( hostMayEdit );
+  if ( GadgetCheckBoxIsChecked( checkBoxTurbo ) != game->getTurbo() )
+    GadgetCheckBoxSetChecked( checkBoxTurbo, game->getTurbo() );
+}
+
 static void handleUnitLimitSelection()
 {
   LANGameInfo *myGame = TheLAN->GetMyGame();
@@ -818,7 +853,9 @@ void lanUpdateSlotList( void )
 		return;
 	UpdateSlotList( TheLAN->GetMyGame(), comboBoxPlayer, comboBoxColor,
 		comboBoxPlayerTemplate, comboBoxTeam, buttonAccept, buttonStart, buttonMapStartPosition);
-	
+	UpdateAIPersonaComboBoxes( TheLAN->GetMyGame(), comboBoxAIPersona );
+	UpdateLobbySeatVisuals( TheLAN->GetMyGame() );
+
 	updateMapStartSpots(TheLAN->GetMyGame(), buttonMapStartPosition);
 }
 
@@ -841,6 +878,7 @@ void InitLanGameGadgets( void )
   comboBoxPeaceTimeID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxPeaceTime" ) );
   checkBoxUnitLimitID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:CheckBoxUnitLimit" ) );
   checkBoxProRulesID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:CheckBoxProRules" ) );
+  checkBoxTurboID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:CheckBoxTurbo" ) );
   comboBoxIncomeSharingID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxIncomeSharing" ) );
   comboBoxTechRespawnID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxTechRespawn" ) );
   comboBoxSupplyPileLimitID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxSupplyPileLimit" ) );
@@ -886,6 +924,10 @@ void InitLanGameGadgets( void )
   DEBUG_ASSERTCRASH(checkBoxProRules, ("Could not find the checkBoxProRules"));
 	if (checkBoxProRules)
 		UpdateProRulesCheckBox(checkBoxProRules, TheLAN->GetMyGame(), TheLAN->AmIHost());
+  // the fork's box, which a stock or modded layout does not have
+  checkBoxTurbo = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkBoxTurboID );
+	if (checkBoxTurbo)
+		updateTurboCheckBox(TheLAN->GetMyGame(), TheLAN->AmIHost());
   comboBoxIncomeSharing = TheWindowManager->winGetWindowFromId( parentLanGameOptions, comboBoxIncomeSharingID );
   DEBUG_ASSERTCRASH(comboBoxIncomeSharing, ("Could not find the comboBoxIncomeSharing"));
 	if (comboBoxIncomeSharing)
@@ -982,6 +1024,9 @@ void InitLanGameGadgets( void )
 	if( buttonAccept[0] )
 		GadgetButtonSetEnabledColor(buttonAccept[0], acceptTrueColor );
 
+	InitAIPersonaComboBoxes( parentLanGameOptions, "LanGameOptionsMenu.wnd", comboBoxAIPersona, comboBoxAIPersonaID );
+	InitLobbySeatVisuals( parentLanGameOptions, "LanGameOptionsMenu.wnd" );
+
 	// the settings page and the chat log share one rectangle; this opens on the chat log
 	InitLobbyTabs( parentLanGameOptions, "LanGameOptionsMenu.wnd", "TabChat", "ListboxChatWindowLanGame" );
 }
@@ -989,6 +1034,7 @@ void InitLanGameGadgets( void )
 void DeinitLanGameGadgets( void )
 {
 	ShutdownLobbyTabs();
+	ShutdownLobbySeatVisuals();
 	parentLanGameOptions = NULL;
 	buttonEmote = NULL;
 	buttonSelectMap = NULL;
@@ -1002,6 +1048,7 @@ void DeinitLanGameGadgets( void )
   comboBoxPeaceTime = NULL;
   checkBoxUnitLimit = NULL;
   checkBoxProRules = NULL;
+  checkBoxTurbo = NULL;
   comboBoxIncomeSharing = NULL;
   comboBoxTechRespawn = NULL;
   comboBoxSupplyPileLimit = NULL;
@@ -1065,6 +1112,7 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
     game->setIncomeSharing( pref.getInt( "IncomeSharing", INCOME_SHARING_OFF ) );
     game->setTechRespawn( pref.getInt( "TechRespawn", 0 ) );
     game->setSupplyPileLimit( pref.getInt( "SupplyPileLimit", 0 ) );
+    game->setTurbo( pref.getInt( "TurboMode", 0 ) != 0 );
 		AsciiString lowerMap = pref.getPreferredMap();
 		lowerMap.toLower();
 		std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->find(lowerMap);
@@ -1192,6 +1240,8 @@ void updateGameOptions( void )
 			UpdateUnitLimitCheckBox( checkBoxUnitLimit, theGame, TheLAN->AmIHost() );
 		if (checkBoxProRules)
 			UpdateProRulesCheckBox( checkBoxProRules, theGame, TheLAN->AmIHost() );
+		if (checkBoxTurbo)
+			updateTurboCheckBox( theGame, TheLAN->AmIHost() );
 		if (comboBoxIncomeSharing)
 			UpdateIncomeSharingComboBox( comboBoxIncomeSharing, theGame, TheLAN->AmIHost() );
 		if (comboBoxTechRespawn)
@@ -1376,6 +1426,15 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
         {
           handleSupplyPileLimitSelection();
         }
+        else if ( HandleAIPersonaSelection( myGame, comboBoxAIPersona, comboBoxAIPersonaID, (NameKeyType)controlID ) )
+        {
+          if (!s_isIniting)
+          {
+            myGame->resetAccepted();
+            TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+            lanUpdateSlotList();
+          }
+        }
         else
         {
 				  for (Int i = 0; i < MAX_SLOTS; i++)
@@ -1449,6 +1508,12 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 				if ( controlID == checkBoxProRulesID )
 				{
 					handleProRulesSelection();
+					break;
+				}
+
+				if ( controlID == checkBoxTurboID )
+				{
+					handleTurboSelection();
 					break;
 				}
 

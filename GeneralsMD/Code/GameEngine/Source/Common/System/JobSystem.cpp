@@ -23,6 +23,7 @@
 
 #include "PreRTS.h"
 #include "Common/JobSystem.h"
+#include "Common/LogicThread.h"
 #include "Common/EarlyCommandLine.h"
 #include "GameLogic/FPUControl.h"
 
@@ -324,6 +325,9 @@ void JobSystem::noteWorkerAllocation( void )
 //-------------------------------------------------------------------------------------------------
 void JobSystem::parallel_for( Int count, Int granularity, JobFunc fn, void *context )
 {
+	// The fork state above is one global: only the main thread may fork (LOGIC-THREAD.md hazard 14).
+	LOGIC_CENSUS( CENSUS_JOBS );
+
 	if( count <= 0 || fn == NULL )
 		return;
 

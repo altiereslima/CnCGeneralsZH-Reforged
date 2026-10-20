@@ -176,6 +176,39 @@ enum AIRole
 Real aiRoleMassFraction( AIRole role );
 
 //-------------------------------------------------------------------------------------------------
+/** The personality a lobby seat picked for a computer player: a third axis beside the rung and
+	* the role, saying how it plays rather than how well.  Chosen per seat, carried in the slot
+	* string and the replay header, and NORMAL is today's AI to the bit.  RANDOM is only ever a
+	* lobby value: the AI turns it into one of the others from the logic random stream at the start
+	* of the match.  The order is the lobby's and the slot string's; append, never reorder. */
+//-------------------------------------------------------------------------------------------------
+enum AIPersonality
+{
+	AIPERSONA_NORMAL = 0,
+	AIPERSONA_ATTACKER,			///< early, frequent smaller waves, never banks
+	AIPERSONA_TURTLE,				///< defences and walls first, few late big waves, retreats on losses
+	AIPERSONA_ECONOMIST,		///< income and its upgrades first, surplus money to allies
+	AIPERSONA_AIR,					///< airfields and aircraft, less of it against heavy anti-air
+	AIPERSONA_RUSHER,				///< everything into one attack in the first minutes
+	AIPERSONA_RAIDER,				///< fast units at gatherers, workers and depots, around the main army
+	AIPERSONA_TECH,					///< tech, general powers and the superweapon first, defends until then
+	AIPERSONA_INFANTRY,			///< cheap mass infantry, garrisons buildings
+	AIPERSONA_ARMOR,				///< a slow tank-heavy army
+	AIPERSONA_SNEAKY,				///< stealth, sabotage and hacking, flank routes
+	AIPERSONA_OPPORTUNIST,	///< the weakest enemy, and whoever is already in a fight
+	AIPERSONA_SUPPORTER,		///< the ally's target, the ally's base when it is hit
+	AIPERSONA_COUNTER,			///< builds the answer to what the enemy fields
+	AIPERSONA_RANDOM,				///< one of the above, drawn at the start of the match
+
+	AIPERSONA_COUNT
+};
+
+/** The name a personality goes by in logs, the -aipersona switch and its string labels
+	* ("GUI:AIPersona<Name>"), and the reverse; AIPERSONA_NORMAL for a name it does not know. */
+const char *aiPersonalityName( AIPersonality persona );
+AIPersonality aiPersonalityFromName( const char *name );
+
+//-------------------------------------------------------------------------------------------------
 /** One rung of the ladder.  Every new AI behaviour adds a field here rather than a
 	* switch(difficulty) somewhere, so the whole ladder can be read, tuned and measured in one place.
 	*
@@ -233,7 +266,9 @@ struct AIDifficultyProfile
 
 	// Superweapons
 	Real	m_beamSteerSeconds;							///< how often a firing Particle Cannon's beam is driven onto the richest ground near it; 0 = the retail S curve
-	Real	m_strikeEconomyWeight;					///< what a supply centre, black market, hacker or strategy centre is worth to a strike on top of its price, in prices; 0 = price alone
+	Real	m_strikeEconomyWeight;					///< what a factory, power plant, superweapon, supply centre, black market, hacker or strategy centre is worth to a strike on top of its price, in prices; 0 = price alone
+	Real	m_strikeThreatWeight;						///< what an armed unit or gun is worth to a strike on top of its price, in combat power; 0 = price alone, and his army is a candidate only when none of his buildings is
+	Int		m_superweaponDefenses;					///< finished base defences each superweapon asks for (Player::canBuildMoreOfType); 0 = none
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -352,14 +387,19 @@ AIFallbackDecision aiRetreatHoldDecision( Bool arrived, UnsignedInt heldFrames, 
 Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
 									 Bool timeExpired, Bool baseUnderAttack );
 
+/** How long every finished factory of a kind has to keep a unit waiting behind the one it is building
+	* before the computer buys another.  A script's team lands in the queue all at once, so a backlog
+	* the moment it appears is a batch, not a factory falling behind. */
+static const Int AI_FACTORY_BACKLOG_SECONDS = 45;
+
 /** Another factory of this kind.  finished are standing and done, constructing are already on the
-	* way, idle are finished factories with an empty queue, deepest is the longest queue among them.
+	* way, shallowest is the shortest queue among the finished ones, and backedUpFor is how many frames
+	* every one of them has had a unit waiting behind the one it is building.
 	*
-	* A queue-gated kind (tanks, infantry) gets another when every finished factory is busy and one of
-	* them has a unit waiting behind the one under construction, and a replacement when none are left.
-	* An unlimited kind (airfields, and the income buildings that follow the same rule) gets another
-	* whenever one is not already going up.  One already on the way is the building this would ask for. */
-Bool aiWantsAnotherFactory( Int finished, Int constructing, Int idle, Int deepest, Bool unlimited );
+	* Another goes up only when every finished factory has had a unit waiting for
+	* AI_FACTORY_BACKLOG_SECONDS, and a replacement when none are left.  One already on the way is the
+	* building this would ask for. */
+Bool aiWantsAnotherFactory( Int finished, Int constructing, Int shallowest, UnsignedInt backedUpFor );
 
 /** How many copies of the faction tech building (strategy center, propaganda center, palace) to
 	* keep up so one of them blowing up does not take the tree with it. */
@@ -388,6 +428,56 @@ Int aiDefenseAllowance( Int army, UnsignedInt frame );
 	* zero, plus a tenth for lying outside the base.  Ground behind the base counts only that tenth,
 	* so a spot at the back scores a fraction of one at the front, and none inside the base. */
 Real aiFireSampleWeight( Real baseToThreat, Real sampleToThreat, Real reach, Bool outsideBase );
+
+/** Ground distance over the pathfind grid, handed out nearest first.  A step to a side neighbour
+	* costs AI_GROUND_STEP and a diagonal one AI_GROUND_DIAGONAL, a 1.5 standing in for 1.41 so every
+	* distance is a small integer: the cells wait in four buckets that wrap (Dial's algorithm), with
+	* no heap and no tie broken by anything but the order the cells were reached, which is the same
+	* on every machine.  Whether a cell may be entered is asked once, of the callback; a source is
+	* handed out even when it may not be entered itself, so a flood seeded on a cliff edge still
+	* reaches the ground beside it. */
+static const Int AI_GROUND_STEP = 2;
+static const Int AI_GROUND_DIAGONAL = 3;
+static const UnsignedShort AI_GROUND_UNREACHED = 0xFFFF;
+
+class AIGroundFlood
+{
+public:
+	typedef Bool (*WalkableFunc)( Int x, Int y, void *userData );
+	AIGroundFlood( Int width, Int height, WalkableFunc walkable, void *userData );
+	void addSource( Int x, Int y );						///< distance 0; every source goes in before the first next()
+	void setMaxDistance( Int maxDistance ) { m_max = maxDistance; }	///< nothing further is entered
+	Bool next( Int *x, Int *y, Int *distance );	///< the nearest cell not yet handed out, FALSE when none is left
+	std::vector<UnsignedShort> &field( void ) { return m_dist; }	///< y * width + x; final once next() has said FALSE
+
+private:
+	Bool walkable( Int x, Int y, Int index );
+	Int m_width;
+	Int m_height;
+	WalkableFunc m_walkable;
+	void *m_userData;
+	std::vector<UnsignedShort> m_dist;
+	std::vector<UnsignedByte> m_walk;			///< 0 not asked yet, 1 may be entered, 2 may not
+	std::vector<Int> m_bucket[ 4 ];
+	Int m_at;
+	Int m_cursor;
+	Int m_pending;
+	Int m_max;
+};
+
+/** The narrowest place on an enemy's road in, for the Turtle's line.  fromBase and fromThreat are
+	* ground fields over a grid width cells wide and cells long; a cell is on the road when the drive
+	* from the threat through it to the base is at most AI_CHOKE_SLACK_PERCENT of routeLength, and on
+	* our half of it.  The road between minDistance and maxDistance from the base is cut into bands
+	* AI_CHOKE_BAND deep, and each band's count of road cells is divided by the width an open field's
+	* road has at that distance, which grows as the square root of the distance from both ends: on open
+	* ground every band ties and the nearest one wins, and a pass between cliffs is narrower than that.
+	* Returns the road cell of the narrowest band nearest the band's middle, or -1 when no band holds a
+	* road cell; *roadCells gets that band's count. */
+static const Int AI_CHOKE_SLACK_PERCENT = 115;
+static const Int AI_CHOKE_BAND = 4 * AI_GROUND_STEP;
+Int aiFindChoke( const UnsignedShort *fromBase, const UnsignedShort *fromThreat, Int width, Int cells, Int routeLength,
+								 Int minDistance, Int maxDistance, Int *roadCells );
 
 static const Int AI_SUPPORT_DEFENSE_WEIGHT = 3;
 Int aiPickBaseDefense( const Int *standing, const Bool *armed, Int count );
@@ -494,6 +584,90 @@ const UnsignedInt AI_PURCHASE_EARLY_FRAMES = 6 * 60 * LOGICFRAMES_PER_SECOND;
 	* match income and power come before the army, which is how a Hard AI kept attacking with two
 	* gatherers and no drop zone. */
 Int aiPurchaseScore( AIPurchaseKind kind, Bool earlyGame );
+
+//-------------------------------------------------------------------------------------------------
+/** How a personality leans on the rung it plays at: multipliers on the rung's own knobs, so a Turtle
+	* on Easy is still an Easy Turtle, and offsets on the scores the AI already ranks by.  A preference,
+	* never a cheat: nothing here touches income, build rate, vision or a unit.  The Normal row is 1 and
+	* 0 throughout, and every caller skips it besides, so a Normal seat plays as it always did. */
+//-------------------------------------------------------------------------------------------------
+struct AIPersonaWeights
+{
+	Int  m_role;						///< the AIRole it plays, or -1 for the one the match rolled
+	Real m_firstPush;				///< times the rung's m_firstPushSeconds
+	Real m_attackPower;			///< times the rung's m_minAttackPower
+	Real m_wavePower;				///< times the power a parked wave waits for
+	Real m_waveHold;				///< times the longest a parked team waits for the rest of its wave
+	Real m_bank;						///< times the rung's bank target, its seconds and its floor
+	Real m_hoard;						///< times the rung's cash hoard threshold
+	Real m_surplus;					///< times the rung's surplus share, never past all of it
+	Real m_retreat;					///< times the rung's retreat ratio: a rung that never retreats still does not
+	Real m_counter;					///< times the rung's counter weight ...
+	Real m_counterAdd;			///< ... and this on top, so Easy reads the enemy at all
+	Real m_defenses;				///< times the base defences aiDefenseAllowance lets stand
+	Real m_upgradeStart;		///< times the rung's m_upgradeStartSeconds
+	Real m_defenceTeams;		///< added to a base or perimeter defence team's score, in production priority
+	Real m_air;							///< added to a team's score at its share of aircraft, by cost
+	Real m_infantry;				///< ... of infantry
+	Real m_vehicle;					///< ... of ground vehicles
+	Real m_stealth;					///< ... of units that can go invisible
+	Int  m_buy[ AIBUY_KIND_COUNT ];	///< added to aiPurchaseScore, by kind
+};
+
+/** The row a personality plays by.  A Rusher's is the one it rushes by; once the rush is out it plays
+	* by the Attacker's (AIPlayer::personaWeights). */
+const AIPersonaWeights &aiPersonaWeights( AIPersonality persona );
+
+/** What a team adds to its production score for the units it is made of: each share (0..1, by cost) at
+	* the personality's weight, a defence team its flat weight on top. */
+Real aiPersonaTeamBias( const AIPersonaWeights &weights, Bool defenceTeam, Real airShare, Real infantryShare,
+												Real vehicleShare, Real stealthShare );
+
+/** An air personality's taste for aircraft against what it has seen of the enemy's anti-air: the full
+	* weight with none, nothing at two thirds of his known guns able to shoot up, and a dislike past that. */
+Real aiPersonaAirBias( Real airWeight, Real enemyAntiAirShare );
+
+/** An enemy's cost (aiEnemyCost) as an Opportunist sees it: the smaller his share of what is in sight,
+	* the cheaper, and half price while he is busy with somebody else.  Any other personality, unchanged. */
+Real aiPersonaEnemyCost( AIPersonality persona, Real cost, Real economyShare, Bool fightingSomeoneElse );
+
+/** What an Economist passes to an ally out of a bank over its target: half of what is over twice the
+	* target, in hundreds, at most cap, and 0 under AI_SHARE_MIN. */
+static const Int AI_SHARE_MIN = 500;
+Int aiPersonaShareAmount( Int bank, Int target, Int cap );
+
+/** May a bot say something now: never twice inside AI_CHAT_GAP_FRAMES, the first line any time. */
+static const UnsignedInt AI_CHAT_GAP_FRAMES = 150 * LOGICFRAMES_PER_SECOND;
+Bool aiPersonaChatAllowed( UnsignedInt now, UnsignedInt lastChat );
+
+/** What a player asks of his allies: his base is under attack, by aircraft, he is short of money, or
+	* he goes after an enemy.  A computer player posts these itself; a person by beacon or chat command
+	* (MSG_TEAM_REQUEST).  Only a personality answers: Normal reads nothing off the board. */
+enum AITeamRequestKind
+{
+	AIREQ_HELP = 0,
+	AIREQ_AA,
+	AIREQ_MONEY,
+	AIREQ_ATTACK,
+	AIREQ_COUNT
+};
+
+struct AITeamRequest
+{
+	Int from;							///< the asking player's index
+	Int enemy;						///< the player he is fighting, -1 for none known
+	Coord3D pos;					///< where: the attacker, or the attack's target
+	UnsignedInt frame;		///< when it was posted, 0 for never
+};
+
+/** How long a call for help stands, and a personality keeps to an ally's attack after he posted it. */
+static const UnsignedInt AI_COOP_HELP_FRAMES = 15 * LOGICFRAMES_PER_SECOND;
+static const UnsignedInt AI_COOP_JOIN_FRAMES = 120 * LOGICFRAMES_PER_SECOND;
+
+/** Post a request from this player to every computer ally of his (allied both ways). */
+void aiPostTeamRequest( Player *from, AITeamRequestKind kind, Int enemy, const Coord3D *pos );
+/** The enemy of this player's who owns what stands nearest pos, -1 for none within reach. */
+Int aiEnemyNear( const Player *of, const Coord3D *pos );
 
 /** A skirmish AI's purchase queue, on every rung with a bank target.  Every spender asks it before it pays, with a stable key (a
 	* template id), the price, its score and whether the thing could start right now (an idle factory,
@@ -819,11 +993,16 @@ public:
 protected:
 	Pathfinder *m_pathfinder;							///< the pathfinding system
 	std::list<AIGroup *> m_groupList;			///< the list of AIGroups
+	/// where each live group sits in m_groupList, so destroyGroup need not walk it.  Looked up by
+	/// address and never iterated: m_groupList alone keeps the order the CRC walks
+	std::unordered_map<AIGroup *, std::list<AIGroup *>::iterator> m_groupIndex;
 	TAiData *m_aiData;
 	void newOverride(void);
 	void addSideInfo(AISideInfo *info);
-	
+	void sweepEmptyGroups( void );				///< destroy the groups made since the last sweep that nobody joined
+
 	UnsignedInt m_nextGroupID;
+	UnsignedInt m_sweptGroupID;						///< every group up to this ID has been through sweepEmptyGroups
 	FormationID m_nextFormationID;
 	UnsignedInt m_lastBuildingPlacementFrame;	///< cleared by reset: a static here outlived the match and deferred the next match's first placement on one machine only
 };
@@ -1503,6 +1682,7 @@ public:
 	void queueUpgrade( const UpgradeTemplate *upgrade );	///< queue an upgrade
 
 	void add( Object *obj );								///< add object to group
+	void addTeam( Team *team );							///< add() every team member, in team order (Team::getTeamAsAIGroup)
 	
 	// returns true if remove destroyed the group for us.
 	Bool remove( Object *obj);

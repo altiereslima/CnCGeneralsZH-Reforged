@@ -34,6 +34,7 @@
 
 #include "Common/BitFlagsIO.h"
 #include "Common/RandomValue.h"
+#include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Xfer.h"
 
@@ -268,7 +269,11 @@ Object* PointDefenseLaserUpdate::scanClosestTarget()
 	bonus.clear();
 	Real fireRange = data->m_weaponTemplate->getAttackRange( bonus );
 
-	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( me->getPosition(), data->m_scanRange, FROM_CENTER_2D );
+	// The loop below takes only ENEMIES, so a cell holding no enemy player's Object holds nothing it
+	// keeps and is passed over; the rest arrive in the same order. Searching from the Object rather
+	// than its position measures the same centre distance and leaves out only the laser itself.
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( me, data->m_scanRange, FROM_CENTER_2D,
+		NULL, ITER_FASTEST, me->getTeam()->getEnemyPlayerMask() );
 	MemoryPoolObjectHolder hold(iter);
 
 	for( Object *other = iter->first(); other; other = iter->next() )

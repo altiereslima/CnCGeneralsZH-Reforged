@@ -383,34 +383,28 @@ void WaveGuideUpdate::doShapeEffects( void )
 	// just above the ground
 	//
 	Int i, j;
-	ParticleSystem *particleSys;
-	Coord3D pos;
 	for( i = 0; i < m_shapePointCount; i++ )
 	{
+
+		//
+		// we have the height of the terrain at this shape point in the transformed shape
+		// point array ... just set the LOCAL position for the particle system to reflect
+		// this Z *IF* that Z will not take us above the target water height
+		//
+		if( m_transformedShapePoints[ i ].z >= modData->m_preferredHeight )
+			continue;
+		const Real z = m_transformedShapePoints[ i ].z;
 
 		for( j = 0; j < MAX_SHAPE_EFFECTS; j++ )
 		{
 
-			// get the particle system here
-			particleSys = TheParticleSystemManager->findParticleSystem( m_shapeEffects[ i ][ j ] );
-			if( particleSys )
-			{
-
-				//
-				// we have the height of the terrain at this shape point in the transformed shape
-				// point array ... just set the LOCAL position for the particle system to reflect
-				// this Z *IF* that Z will not take us above the target water height
-				//
-				if( m_transformedShapePoints[ i ].z < modData->m_preferredHeight )
-				{
-
-					particleSys->getPosition( &pos );
-					pos.z = m_transformedShapePoints[ i ].z;
-					particleSys->setPosition( &pos );
-
-				}  // end if
-
-			}  // end if
+			// the particle system, after the tick (LOGIC-THREAD.md M5)
+			TheParticleSystemManager->withSystem( m_shapeEffects[ i ][ j ], [z]( ParticleSystem *particleSys ) {
+				Coord3D pos;
+				particleSys->getPosition( &pos );
+				pos.z = z;
+				particleSys->setPosition( &pos );
+			} );
 
 		}  // end for j
 
@@ -435,10 +429,10 @@ void WaveGuideUpdate::doWaterMotion( void )
 	{
 
 		// push up the water here
-		TheTerrainVisual->addWaterVelocity( m_transformedShapePoints[ i ].x,
-																				m_transformedShapePoints[ i ].y,
-																				modData->m_waterVelocity, 
-																				modData->m_preferredHeight );
+		TheTerrainLogic->getWaterGrid()->addVelocity( m_transformedShapePoints[ i ].x,
+																									m_transformedShapePoints[ i ].y,
+																									modData->m_waterVelocity,
+																									modData->m_preferredHeight );
 
 
 	}  // end for i

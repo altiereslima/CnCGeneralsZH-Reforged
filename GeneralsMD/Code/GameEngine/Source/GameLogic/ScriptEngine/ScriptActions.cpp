@@ -38,6 +38,7 @@
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/GameAudio.h"
 #include "Common/GameEngine.h"
+#include "Common/LogicThread.h"
 #include "Common/MapObject.h"							// For MAP_XY_FACTOR
 #include "Common/PartitionSolver.h"
 #include "Common/Player.h"
@@ -130,6 +131,21 @@ static void updateTeamAndPlayerStuff( Object *obj, void *userData )
 // DEFINES ////////////////////////////////////////////////////////////////////////////////////////
 #define REALLY_FAR	(100000 * MAP_XY_FACTOR)
 
+/** LOGIC-THREAD.md phase 2, M6.  First line of an action that only drives the camera, the letterbox,
+	* the cinematic text or a movie: inside a tick the whole action runs after it, in the camera's own
+	* queue (LogicThread::callViewAfterTick), waypoint lookups included, since waypoints do not move. */
+#define VIEW_AFTER_TICK( ... ) \
+	if( LogicThread::defersView() ) { LogicThread::callViewAfterTick( __VA_ARGS__ ); return; }
+
+/** M7.  What a camera action about to wait in that queue does to the two camera answers the tick
+	* reads back, written to LogicThread::ClientBlock at the call.  Only when it waits: run from the
+	* queue it was noted when it was queued. */
+static void noteView( Bool applies, LogicThread::ViewEffect effect )
+{
+	if( applies && LogicThread::defersView() )
+		LogicThread::noteViewEffect( effect );
+}
+
 // GLOBALS ////////////////////////////////////////////////////////////////////////////////////////
 ScriptActionsInterface *TheScriptActions = NULL;
 GameWindow *ScriptActions::m_messageWindow = NULL;
@@ -186,11 +202,14 @@ void ScriptActions::closeWindows( Bool suppressNewWindows )
 {
 	m_suppressNewWindows = suppressNewWindows;
 
-	if (m_messageWindow) {
-		TheWindowManager->winDestroy(m_messageWindow);
-		m_messageWindow = NULL;
-	}
-}  
+	// the window is the client's: after the tick, in order with the one doVictory opens
+	LogicThread::callAfterTick( []{
+		if (m_messageWindow) {
+			TheWindowManager->winDestroy(m_messageWindow);
+			m_messageWindow = NULL;
+		}
+	} );
+}
 
 //-------------------------------------------------------------------------------------------------
 /** doQuickVictory */
@@ -210,6 +229,8 @@ void ScriptActions::doQuickVictory( void )
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doSetInfantryLightingOverride(Real setting)
 {
+	// a renderer setting (LOGIC-THREAD.md hazard 24): written after the tick
+	LOGIC_AFTER_TICK( [=]() { doSetInfantryLightingOverride( setting ); } );
 	DEBUG_ASSERTCRASH( (setting == -1.0f) || (setting > 0.0f), ("Invalid setting (%d) in Infantry Lighting Override script.", setting) );
 	TheWritableGlobalData->m_scriptOverrideInfantryLightScale = setting;
 }
@@ -226,13 +247,10 @@ void ScriptActions::doVictory( void )
 	{
 		const Player *localPlayer = ThePlayerList->getLocalPlayer();
 		Bool showObserverWindow = localPlayer->isPlayerObserver() || TheScriptEngine->hasShownMPLocalDefeatWindow();
-		if(showObserverWindow)
-			m_messageWindow = TheWindowManager->winCreateFromScript("Menus/ObserverQuit.wnd");
-		else
-		{
-			m_messageWindow = TheWindowManager->winCreateFromScript("Menus/Victorious.wnd");
-		}
-	}	
+		LogicThread::callAfterTick( [showObserverWindow]{
+			m_messageWindow = TheWindowManager->winCreateFromScript(showObserverWindow ? "Menus/ObserverQuit.wnd" : "Menus/Victorious.wnd");
+		} );
+	}
 	if(TheCampaignManager)
 		TheCampaignManager->SetVictorious(TRUE);
 	TheScriptEngine->startEndGameTimer();
@@ -250,12 +268,9 @@ void ScriptActions::doDefeat( void )
 	{
 		const Player *localPlayer = ThePlayerList->getLocalPlayer();
 		Bool showObserverWindow = localPlayer->isPlayerObserver() || TheScriptEngine->hasShownMPLocalDefeatWindow();
-		if(showObserverWindow)
-			m_messageWindow = TheWindowManager->winCreateFromScript("Menus/ObserverQuit.wnd");
-		else
-		{
-			m_messageWindow = TheWindowManager->winCreateFromScript("Menus/Defeat.wnd");
-		}
+		LogicThread::callAfterTick( [showObserverWindow]{
+			m_messageWindow = TheWindowManager->winCreateFromScript(showObserverWindow ? "Menus/ObserverQuit.wnd" : "Menus/Defeat.wnd");
+		} );
 	}
 	if(TheCampaignManager)
 		TheCampaignManager->SetVictorious(FALSE);
@@ -273,7 +288,7 @@ void ScriptActions::doLocalDefeat( void )
 	if (!m_suppressNewWindows)
 	{
 		if(!TheVictoryConditions->amIObserver())
-			m_messageWindow = TheWindowManager->winCreateFromScript("Menus/LocalDefeat.wnd");
+			LogicThread::callAfterTick( []{ m_messageWindow = TheWindowManager->winCreateFromScript("Menus/LocalDefeat.wnd"); } );
 	}
 	if(TheCampaignManager)
 		TheCampaignManager->SetVictorious(FALSE);
@@ -472,6 +487,7 @@ void ScriptActions::doNamedMoveToWaypoint(const AsciiString& unit, const AsciiSt
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doCameraFollowNamed(const AsciiString& unit, Bool snapToUnit)
 {
+	VIEW_AFTER_TICK( [=]() { doCameraFollowNamed( unit, snapToUnit ); } );
 	Object *theObj = TheScriptEngine->getUnitNamed( unit );
 	if (theObj) 
 	{	
@@ -488,6 +504,7 @@ void ScriptActions::doCameraFollowNamed(const AsciiString& unit, Bool snapToUnit
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doStopCameraFollowUnit(void)
 {
+	VIEW_AFTER_TICK( [=]() { doStopCameraFollowUnit(); } );
 	TheTacticalView->setCameraLock(INVALID_ID);
 }
 
@@ -805,6 +822,8 @@ void ScriptActions::doCreateReinforcements(const AsciiString& team, const AsciiS
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doMoveCameraTo(const AsciiString& waypoint, Real sec, Real cameraStutterSec, Real easeIn, Real easeOut)
 {
+	noteView( TheTerrainLogic->getWaypointByName( waypoint ) != NULL, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doMoveCameraTo( waypoint, sec, cameraStutterSec, easeIn, easeOut ); } );
 	for (Waypoint *way = TheTerrainLogic->getFirstWaypoint(); way; way = way->getNext()) {
 		if (way->getName() == waypoint) {
 			Coord3D destination = *way->getLocation();
@@ -819,6 +838,8 @@ void ScriptActions::doMoveCameraTo(const AsciiString& waypoint, Real sec, Real c
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doZoomCamera(Real zoom, Real sec, Real easeIn, Real easeOut)
 {
+	noteView( TRUE, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doZoomCamera( zoom, sec, easeIn, easeOut ); } );
 	TheTacticalView->zoomCamera(zoom, sec*1000.0f, easeIn*1000.0f, easeOut*1000.0f);
 }
 
@@ -827,6 +848,8 @@ void ScriptActions::doZoomCamera(Real zoom, Real sec, Real easeIn, Real easeOut)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doPitchCamera(Real pitch, Real sec, Real easeIn, Real easeOut)
 {
+	noteView( TRUE, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doPitchCamera( pitch, sec, easeIn, easeOut ); } );
 	TheTacticalView->pitchCamera(pitch, sec*1000.0f, easeIn*1000.0f, easeOut*1000.0f);
 }
 
@@ -835,6 +858,7 @@ void ScriptActions::doPitchCamera(Real pitch, Real sec, Real easeIn, Real easeOu
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doOversizeTheTerrain(Int amount)
 {
+	VIEW_AFTER_TICK( [=]() { doOversizeTheTerrain( amount ); } );
 	oversizeTheTerrain(amount);
 	// The two cancelling scrolls were only here to make the view notice it was dirty.
 	TheTacticalView->forceRedraw();
@@ -845,6 +869,9 @@ void ScriptActions::doOversizeTheTerrain(Int amount)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doSetupCamera(const AsciiString& waypoint, Real zoom, Real pitch, const AsciiString& lookAtWaypoint)
 {
+	noteView( TheTerrainLogic->getWaypointByName( waypoint ) && TheTerrainLogic->getWaypointByName( lookAtWaypoint ),
+		LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doSetupCamera( waypoint, zoom, pitch, lookAtWaypoint ); } );
 	Waypoint *way = TheTerrainLogic->getWaypointByName(waypoint);
 	if (way==NULL) return;
 	Coord3D	pos = *way->getLocation();
@@ -862,6 +889,7 @@ void ScriptActions::doSetupCamera(const AsciiString& waypoint, Real zoom, Real p
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doModCameraLookToward(const AsciiString& waypoint)
 {
+	VIEW_AFTER_TICK( [=]() { doModCameraLookToward( waypoint ); } );
 	for (Waypoint *way = TheTerrainLogic->getFirstWaypoint(); way; way = way->getNext()) {
 		if (way->getName() == waypoint) {
 			Coord3D destination = *way->getLocation();
@@ -876,6 +904,7 @@ void ScriptActions::doModCameraLookToward(const AsciiString& waypoint)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doModCameraFinalLookToward(const AsciiString& waypoint)
 {
+	VIEW_AFTER_TICK( [=]() { doModCameraFinalLookToward( waypoint ); } );
 	for (Waypoint *way = TheTerrainLogic->getFirstWaypoint(); way; way = way->getNext()) {
 		if (way->getName() == waypoint) {
 			Coord3D destination = *way->getLocation();
@@ -890,6 +919,9 @@ void ScriptActions::doModCameraFinalLookToward(const AsciiString& waypoint)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doModCameraMoveToSelection(void)
 {
+	// the selection it reads is the client's too, and a script selecting first queued that with the
+	// effects: so this waits in the effects queue behind it, not with the camera calls
+	LOGIC_AFTER_TICK( [=]() { doModCameraMoveToSelection(); } );
 	Int count=0;
 	Coord3D destination;
 	destination.x=destination.y=destination.z = 0;
@@ -919,6 +951,8 @@ void ScriptActions::doModCameraMoveToSelection(void)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doResetCamera(const AsciiString& waypoint, Real sec, Real easeIn, Real easeOut)
 {
+	noteView( TheTerrainLogic->getWaypointByName( waypoint ) != NULL, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doResetCamera( waypoint, sec, easeIn, easeOut ); } );
 	for (Waypoint *way = TheTerrainLogic->getFirstWaypoint(); way; way = way->getNext()) {
 		if (way->getName() == waypoint) {
 			Coord3D destination = *way->getLocation();
@@ -933,6 +967,8 @@ void ScriptActions::doResetCamera(const AsciiString& waypoint, Real sec, Real ea
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRotateCamera(Real rotations, Real sec, Real easeIn, Real easeOut)
 {
+	noteView( TRUE, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doRotateCamera( rotations, sec, easeIn, easeOut ); } );
 	TheTacticalView->rotateCamera(rotations, sec*1000.0f, easeIn*1000.0f, easeOut*1000.0f);			
 }
 
@@ -941,6 +977,8 @@ void ScriptActions::doRotateCamera(Real rotations, Real sec, Real easeIn, Real e
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRotateCameraTowardObject(const AsciiString& unitName, Real sec, Real holdSec, Real easeIn, Real easeOut)
 {
+	noteView( TheScriptEngine->getUnitNamed( unitName ) != NULL, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doRotateCameraTowardObject( unitName, sec, holdSec, easeIn, easeOut ); } );
 	const Object *unit = TheScriptEngine->getUnitNamed(unitName);
 	if (!unit)
 		return;
@@ -952,6 +990,8 @@ void ScriptActions::doRotateCameraTowardObject(const AsciiString& unitName, Real
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRotateCameraTowardWaypoint(const AsciiString& waypointName, Real sec, Real easeIn, Real easeOut, Bool reverseRotation)
 {
+	noteView( TheTerrainLogic->getWaypointByName( waypointName ) != NULL, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doRotateCameraTowardWaypoint( waypointName, sec, easeIn, easeOut, reverseRotation ); } );
 	Waypoint *way = TheTerrainLogic->getWaypointByName(waypointName);
 	if (way==NULL) return;
 	TheTacticalView->rotateCameraTowardPosition(way->getLocation(), sec*1000.0f, easeIn*1000.0f, easeOut*1000.0f, reverseRotation);			
@@ -962,6 +1002,8 @@ void ScriptActions::doRotateCameraTowardWaypoint(const AsciiString& waypointName
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doMoveCameraAlongWaypointPath(const AsciiString& waypoint, Real sec, Real cameraStutterSec, Real easeIn, Real easeOut)
 {
+	noteView( TheTerrainLogic->getWaypointByName( waypoint ) != NULL, LogicThread::VIEW_MOVES );
+	VIEW_AFTER_TICK( [=]() { doMoveCameraAlongWaypointPath( waypoint, sec, cameraStutterSec, easeIn, easeOut ); } );
 	for (Waypoint *way = TheTerrainLogic->getFirstWaypoint(); way; way = way->getNext()) {
 		if (way->getName() == waypoint) {
 			TheTacticalView->moveCameraAlongWaypointPath(way, sec*1000, cameraStutterSec*1000, true, easeIn*1000.0f, easeOut*1000.0f);			
@@ -2074,7 +2116,7 @@ void ScriptActions::doTeamHuntWithCommandButton(const AsciiString& teamName, con
 	}
 
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton( ability );
+	const CommandButton *commandButton = TheCommandStore->findCommandButton( ability );
 	if( !commandButton )
 	{
 		return;
@@ -2157,7 +2199,7 @@ void ScriptActions::doTeamHuntWithCommandButton(const AsciiString& teamName, con
 			continue;
 		}
 		Bool foundCommand = false;
-		const CommandSet *commandSet = TheControlBar->findCommandSet( obj->getCommandSetString( ) );
+		const CommandSet *commandSet = TheCommandStore->findCommandSet( obj->getCommandSetString( ) );
 		if( commandSet )
 		{
 			for( int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -2606,6 +2648,7 @@ void ScriptActions::doInGamePopupMessage( const AsciiString& message, Int x, Int
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doDisplayCinematicText(const AsciiString& displayText, const AsciiString& fontType, Int timeInSeconds)
 {
+	VIEW_AFTER_TICK( [=]() { doDisplayCinematicText( displayText, fontType, timeInSeconds ); } );
 	// set the text
 	UnicodeString uStr = TheGameText->fetch( displayText );
 	AsciiString aStr;
@@ -2672,7 +2715,7 @@ void ScriptActions::doCameoFlash(const AsciiString& name, Int timeInSeconds)
 	const CommandButton *button;
 
 	//sanity
-	button = TheControlBar->findCommandButton( name );
+	button = TheCommandStore->findCommandButton( name );
 	if( button == NULL )
 	{
 		DEBUG_CRASH(( "ScriptActions::doCameoFlash can't find AsciiString cameoflash" ));
@@ -2685,8 +2728,8 @@ void ScriptActions::doCameoFlash(const AsciiString& name, Int timeInSeconds)
 	if( count % 2 == 1 )
 		count++;
 
-	button->setFlashCount(count);
-	TheControlBar->setFlash( TRUE );
+	// the flash count is the client's field on the button; both wait for the sync point
+	ControlBar::callFromLogic( [button, count]{ button->setFlashCount(count); TheControlBar->setFlash( TRUE ); } );
 
 }
 
@@ -2779,6 +2822,7 @@ void ScriptActions::doTeamFlash(const AsciiString& teamName, Int timeInSeconds, 
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doMoviePlayFullScreen(const AsciiString& movieName)
 {
+	VIEW_AFTER_TICK( [=]() { doMoviePlayFullScreen( movieName ); } );
 	TheDisplay->playMovie(movieName);
 }
 
@@ -2962,7 +3006,7 @@ void ScriptActions::doTeamRadarCreateEvent(const AsciiString& teamName, Int even
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRadarDisable(void)
 {
-	TheRadar->hide(true);
+	LogicThread::callAfterTick( []{ TheRadar->hide(true); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2970,7 +3014,7 @@ void ScriptActions::doRadarDisable(void)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRadarEnable(void)
 {
-	TheRadar->hide(false);
+	LogicThread::callAfterTick( []{ TheRadar->hide(false); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2978,6 +3022,8 @@ void ScriptActions::doRadarEnable(void)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doCameraMotionBlurJump(const AsciiString& waypointName, Bool saturate)
 {
+	noteView( TheTerrainLogic->getWaypointByName( waypointName ) != NULL, LogicThread::VIEW_BLUR_STARTS );
+	VIEW_AFTER_TICK( [=]() { doCameraMotionBlurJump( waypointName, saturate ); } );
 	Waypoint *way = TheTerrainLogic->getWaypointByName(waypointName);
 	if (!way) {
 		return;
@@ -3016,6 +3062,8 @@ void ScriptActions::doCameraMotionBlurJump(const AsciiString& waypointName, Bool
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doCameraMotionBlur(Bool zoomIn, Bool saturate)
 {
+	noteView( TRUE, LogicThread::VIEW_BLUR_STARTS );
+	VIEW_AFTER_TICK( [=]() { doCameraMotionBlur( zoomIn, saturate ); } );
 	if (TheTacticalView->setViewFilter(FT_VIEW_MOTION_BLUR_FILTER))
 	{
 		enum FilterModes mode;
@@ -3253,13 +3301,19 @@ void ScriptActions::doDisableInput()
 	if (!TheGlobalData->m_disableScriptedInputDisabling)
 #endif
 	{
-		TheInGameUI->setInputEnabled(false);
-		TheMouse->setVisibility(false);
-		TheInGameUI->deselectAllDrawables();
-		TheInGameUI->clearAttackMoveToMode();
-		TheInGameUI->setWaypointMode( FALSE );
-		TheControlBar->deleteBuildTooltipLayout();
-		TheLookAtTranslator->resetModes();
+		// all of it is the client's: after the tick (LOGIC-THREAD.md M6); the selection the tick reads
+		// back empties now, as the immediate call emptied it (M7's block)
+		if( LogicThread::defersEffects() )
+			LogicThread::noteSelectionCleared();
+		LogicThread::callAfterTick( []{
+			TheInGameUI->setInputEnabled(false);
+			TheMouse->setVisibility(false);
+			TheInGameUI->deselectAllDrawables();
+			TheInGameUI->clearAttackMoveToMode();
+			TheInGameUI->setWaypointMode( FALSE );
+			TheControlBar->deleteBuildTooltipLayout();
+			TheLookAtTranslator->resetModes();
+		} );
 	}
 }
 
@@ -3268,8 +3322,10 @@ void ScriptActions::doDisableInput()
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doEnableInput()
 {
-	TheInGameUI->setInputEnabled(true);
-	TheMouse->setVisibility(true);
+	LogicThread::callAfterTick( []{
+		TheInGameUI->setInputEnabled(true);
+		TheMouse->setVisibility(true);
+	} );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3336,7 +3392,8 @@ void ScriptActions::doResumeSupplyTruckingForIdleUnits(const AsciiString& player
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doAmbientSoundsPause(Bool pausing)	// if true, then pause, if false then resume.
 {
-	TheAudio->pauseAmbient(pausing);
+	// the audio state calls go after the tick in order with its sounds (LOGIC-THREAD.md M5)
+	LogicThread::callAfterTick( [pausing]{ TheAudio->pauseAmbient(pausing); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3822,6 +3879,7 @@ void ScriptActions::doPlayerExitAllBuildings(const AsciiString& playerName)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doLetterBoxMode(Bool startLetterbox)
 {
+	VIEW_AFTER_TICK( [=]() { doLetterBoxMode( startLetterbox ); } );
 	if (startLetterbox)
 	{
 		HideControlBar(TRUE);
@@ -3839,6 +3897,9 @@ void ScriptActions::doLetterBoxMode(Bool startLetterbox)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doBlackWhiteMode(Bool startBWMode, Int frames)
 {
+	// which filter is on is the client's to read, after the tick
+	noteView( startBWMode, LogicThread::VIEW_BLUR_ENDS );	// its filter mode replaces a motion blur's
+	VIEW_AFTER_TICK( [=]() { doBlackWhiteMode( startBWMode, frames ); } );
 	if (startBWMode)
 	{
 		TheTacticalView->setViewFilterMode(FM_VIEW_BW_BLACK_AND_WHITE);
@@ -3861,6 +3922,7 @@ extern void doSkyBoxSet(Bool startDraw);	//hack to avoid including globaldata he
 
 void ScriptActions::doSkyBox(Bool startDraw)
 {
+	VIEW_AFTER_TICK( [=]() { doSkyBox( startDraw ); } );
 	if (startDraw)
 	{
 		doSkyBoxSet(1);
@@ -4027,7 +4089,7 @@ void ScriptActions::doAudioSetVolume(AudioAffect whichToAffect, Real newVolumeLe
 		newVolumeLevel = 1.0f;
 	}
 
-	TheAudio->setVolume(newVolumeLevel, whichToAffect);
+	LogicThread::callAfterTick( [newVolumeLevel, whichToAffect]{ TheAudio->setVolume(newVolumeLevel, whichToAffect); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -4314,7 +4376,7 @@ void ScriptActions::doNamedUseCommandButtonAbility( const AsciiString& unit, con
 		return;
 	}
 
-	const CommandSet *commandSet = TheControlBar->findCommandSet( theObj->getCommandSetString() );
+	const CommandSet *commandSet = TheCommandStore->findCommandSet( theObj->getCommandSetString() );
 	if( commandSet )
 	{
 		for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -4348,7 +4410,7 @@ void ScriptActions::doNamedUseCommandButtonAbilityOnNamed( const AsciiString& un
 		return;
 	}
 
-	const CommandSet *commandSet = TheControlBar->findCommandSet( theObj->getCommandSetString() );
+	const CommandSet *commandSet = TheCommandStore->findCommandSet( theObj->getCommandSetString() );
 	if( commandSet )
 	{
 		for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -4382,7 +4444,7 @@ void ScriptActions::doNamedUseCommandButtonAbilityAtWaypoint( const AsciiString&
 		return;
 	}
 
-	const CommandSet *commandSet = TheControlBar->findCommandSet( theObj->getCommandSetString() );
+	const CommandSet *commandSet = TheCommandStore->findCommandSet( theObj->getCommandSetString() );
 	if( commandSet )
 	{
 		for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -4421,7 +4483,7 @@ void ScriptActions::doNamedUseCommandButtonAbilityUsingWaypointPath( const Ascii
 		return;
 	}
 
-	const CommandSet *commandSet = TheControlBar->findCommandSet( theObj->getCommandSetString() );
+	const CommandSet *commandSet = TheCommandStore->findCommandSet( theObj->getCommandSetString() );
 	if( commandSet )
 	{
 		for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -4454,7 +4516,7 @@ void ScriptActions::doTeamUseCommandButtonAbility( const AsciiString& team, cons
 		return;
 	}
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton( ability );
+	const CommandButton *commandButton = TheCommandStore->findCommandButton( ability );
 	if( !commandButton )
 	{
 		return;
@@ -4489,7 +4551,7 @@ void ScriptActions::doTeamUseCommandButtonAbilityOnNamed( const AsciiString& tea
 		return;
 	}
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton( ability );
+	const CommandButton *commandButton = TheCommandStore->findCommandButton( ability );
 	if( !commandButton )
 	{
 		return;
@@ -4524,7 +4586,7 @@ void ScriptActions::doTeamUseCommandButtonAbilityAtWaypoint( const AsciiString& 
 		return;
 	}
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton( ability );
+	const CommandButton *commandButton = TheCommandStore->findCommandButton( ability );
 	if( !commandButton )
 	{
 		return;
@@ -4551,7 +4613,7 @@ void ScriptActions::doTeamUseCommandButtonAbilityAtWaypoint( const AsciiString& 
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRadarRefresh( void )
 {
-	TheRadar->refreshTerrain( TheTerrainLogic );
+	LogicThread::callAfterTick( []{ TheRadar->refreshTerrain( TheTerrainLogic ); } );
 }
 
 
@@ -4560,6 +4622,7 @@ void ScriptActions::doRadarRefresh( void )
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doCameraTetherNamed(const AsciiString& unit, Bool snapToUnit, Real play)
 {
+	VIEW_AFTER_TICK( [=]() { doCameraTetherNamed( unit, snapToUnit, play ); } );
 	Object *theObj = TheScriptEngine->getUnitNamed( unit );
 	if (theObj) 
 	{	
@@ -4576,6 +4639,7 @@ void ScriptActions::doCameraTetherNamed(const AsciiString& unit, Bool snapToUnit
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doCameraStopTetherNamed(void)
 {
+	VIEW_AFTER_TICK( [=]() { doCameraStopTetherNamed(); } );
 	TheTacticalView->setCameraLock(INVALID_ID);
 }
 
@@ -4584,6 +4648,7 @@ void ScriptActions::doCameraStopTetherNamed(void)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doCameraSetDefault(Real pitch, Real angle, Real maxHeight)
 {
+	VIEW_AFTER_TICK( [=]() { doCameraSetDefault( pitch, angle, maxHeight ); } );
 	TheTacticalView->setDefaultView(pitch, angle, maxHeight);
 }
 
@@ -5048,7 +5113,8 @@ void ScriptActions::doForceObjectSelection(const AsciiString& teamName, const As
 
 	if (centerInView) {
 		Coord3D pos = *bestGuess->getPosition();
-		TheTacticalView->moveCameraTo(&pos, 0, 0, FALSE, 0.0f, 0.0f);
+		noteView( TRUE, LogicThread::VIEW_MOVES );
+		LogicThread::callViewAfterTick( [pos]() mutable { TheTacticalView->moveCameraTo(&pos, 0, 0, FALSE, 0.0f, 0.0f); } );
 	}
 }
 
@@ -5084,7 +5150,7 @@ void ScriptActions::doDestroyAllContained(const AsciiString& unitName, Int damag
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRadarForceEnable(void)
 {
-	TheRadar->forceOn(true);
+	LogicThread::callAfterTick( []{ TheRadar->forceOn(true); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5092,7 +5158,7 @@ void ScriptActions::doRadarForceEnable(void)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doRadarRevertNormal(void)
 {
-	TheRadar->forceOn(false);
+	LogicThread::callAfterTick( []{ TheRadar->forceOn(false); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5100,6 +5166,7 @@ void ScriptActions::doRadarRevertNormal(void)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doScreenShake( UnsignedInt intensity )
 {
+	VIEW_AFTER_TICK( [=]() { doScreenShake( intensity ); } );
 	Coord3D pos;
 	TheTacticalView->getPosition( &pos );
 	TheTacticalView->shake( &pos, (View::CameraShakeType)intensity );
@@ -5173,13 +5240,13 @@ void ScriptActions::doSetWarehouseValue( const AsciiString& warehouseName, Int c
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doSoundEnableType( const AsciiString& soundEventName, Bool enable )
 {
-	TheAudio->setAudioEventEnabled(soundEventName, enable);
+	LogicThread::callAfterTick( [soundEventName, enable]{ TheAudio->setAudioEventEnabled(soundEventName, enable); } );
 }
 
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doSoundRemoveAllDisabled()
 {
-	TheAudio->removeDisabledEvents(); 
+	LogicThread::callAfterTick( []{ TheAudio->removeDisabledEvents(); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5193,7 +5260,7 @@ void ScriptActions::doSoundRemoveType( const AsciiString& soundEventName )
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doSoundOverrideVolume( const AsciiString& soundEventName, Real newVolume )
 {
-	TheAudio->setAudioEventVolumeOverride(soundEventName, newVolume / 100.0f);
+	LogicThread::callAfterTick( [soundEventName, newVolume]{ TheAudio->setAudioEventVolumeOverride(soundEventName, newVolume / 100.0f); } );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5451,7 +5518,7 @@ void ScriptActions::doSkirmishCommandButtonOnMostValuable( const AsciiString& te
 	if (!player)
 		return;
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton( ability );
+	const CommandButton *commandButton = TheCommandStore->findCommandButton( ability );
 	if( !commandButton ) {
 		return;
 	}
@@ -5510,7 +5577,7 @@ void ScriptActions::doTeamUseCommandButtonOnNamed( const AsciiString& teamName, 
 	AIGroup *theGroup = TheAI->createGroup();
 	team->getTeamAsAIGroup(theGroup);
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if(!commandButton) {
 		return;
 	}
@@ -5549,7 +5616,7 @@ void ScriptActions::doTeamUseCommandButtonOnNearestEnemy( const AsciiString& tea
 	AIGroup *theGroup = TheAI->createGroup();
 	team->getTeamAsAIGroup(theGroup);
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if(!commandButton) {
 		return;
 	}
@@ -5595,7 +5662,7 @@ void ScriptActions::doTeamUseCommandButtonOnNearestGarrisonedBuilding( const Asc
 	AIGroup *theGroup = TheAI->createGroup();
 	team->getTeamAsAIGroup(theGroup);
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if(!commandButton) {
 		return;
 	}
@@ -5645,7 +5712,7 @@ void ScriptActions::doTeamUseCommandButtonOnNearestKindof( const AsciiString& te
 	AIGroup *theGroup = TheAI->createGroup();
 	team->getTeamAsAIGroup(theGroup);
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if (!commandButton) {
 		return;
 	}
@@ -5692,7 +5759,7 @@ void ScriptActions::doTeamUseCommandButtonOnNearestBuilding( const AsciiString& 
 	AIGroup *theGroup = TheAI->createGroup();
 	team->getTeamAsAIGroup(theGroup);
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if (!commandButton) {
 		return;
 	}
@@ -5739,7 +5806,7 @@ void ScriptActions::doTeamUseCommandButtonOnNearestBuildingClass( const AsciiStr
 	AIGroup *theGroup = TheAI->createGroup();
 	team->getTeamAsAIGroup(theGroup);
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if (!commandButton) {
 		return;
 	}
@@ -5787,7 +5854,7 @@ void ScriptActions::doTeamUseCommandButtonOnNearestObjectType( const AsciiString
 	AIGroup *theGroup = TheAI->createGroup();
 	team->getTeamAsAIGroup(theGroup);
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if (!commandButton) {
 		return;
 	}
@@ -5875,7 +5942,7 @@ void ScriptActions::doTeamPartialUseCommandButton( Real percentage, const AsciiS
 		return;
 	}
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton(commandAbility);
+	const CommandButton *commandButton = TheCommandStore->findCommandButton(commandAbility);
 	if (!commandButton) {
 		return;
 	}
@@ -6128,12 +6195,14 @@ void ScriptActions::doC3CameraEnableSlaveMode
 	const AsciiString& boneName 
 )
 {
+	VIEW_AFTER_TICK( [=]() { doC3CameraEnableSlaveMode( thingTemplateName, boneName ); } );
 	TheTacticalView->cameraEnableSlaveMode( thingTemplateName, boneName );
 }
 
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doC3CameraDisableSlaveMode( void )
 {
+	VIEW_AFTER_TICK( [=]() { doC3CameraDisableSlaveMode(); } );
 	TheTacticalView->cameraDisableSlaveMode();
 }
 
@@ -6148,6 +6217,7 @@ void ScriptActions::doC3CameraShake
 	const Real radius 
 )
 {
+	VIEW_AFTER_TICK( [=]() { doC3CameraShake( waypointName, amplitude, duration_seconds, radius ); } );
 	Waypoint *way = TheTerrainLogic->getWaypointByName(waypointName);
 	DEBUG_ASSERTLOG( (way != NULL), ("Camera shake with No Valid Waypoint\n") );
 	if( way == NULL )
@@ -6336,7 +6406,7 @@ void ScriptActions::doRemoveCommandBarButton(const AsciiString& buttonName, cons
 	if (!templ) {
 		return;
 	}
-	const CommandSet *cs = TheControlBar->findCommandSet(templ->friend_getCommandSetString());
+	const CommandSet *cs = TheCommandStore->findCommandSet(templ->friend_getCommandSetString());
 	if (!cs) {
 		return;
 	}
@@ -6365,7 +6435,7 @@ void ScriptActions::doAddCommandBarButton(const AsciiString& buttonName, const A
 		return;
 	}
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton( buttonName );
+	const CommandButton *commandButton = TheCommandStore->findCommandButton( buttonName );
 	if (commandButton == NULL)
 	{
 		// not here. use doRemoveCommandBarButton to remove one.
@@ -6397,6 +6467,7 @@ void ScriptActions::doAffectSkillPointsModifier(const AsciiString& playerName, R
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doResizeViewGuardband(const Real gbx, const Real gby)
 {
+	VIEW_AFTER_TICK( [=]() { doResizeViewGuardband( gbx, gby ); } );
 
 	Coord2D newGuardBand = { gbx, gby };
 
@@ -6583,32 +6654,49 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 		case ScriptAction::MOVE_CAMERA_TO_SELECTION: 
 			doModCameraMoveToSelection();
 			return;
-		case ScriptAction::CAMERA_MOD_FREEZE_TIME: 
-			TheTacticalView->cameraModFreezeTime();
+		// the camera's own calls go to its queue (VIEW_AFTER_TICK), the parameters read now
+		case ScriptAction::CAMERA_MOD_FREEZE_TIME:
+			noteView( TRUE, LogicThread::VIEW_FREEZES_TIME );
+			LogicThread::callViewAfterTick( []{ TheTacticalView->cameraModFreezeTime(); } );
 			return;
-		case ScriptAction::CAMERA_MOD_FREEZE_ANGLE: 
-			TheTacticalView->cameraModFreezeAngle();
+		case ScriptAction::CAMERA_MOD_FREEZE_ANGLE:
+			LogicThread::callViewAfterTick( []{ TheTacticalView->cameraModFreezeAngle(); } );
 			return;
-		case ScriptAction::CAMERA_MOD_SET_FINAL_ZOOM: 
-			TheTacticalView->cameraModFinalZoom(pAction->getParameter(0)->getReal(), pAction->getParameter(1)->getReal(), pAction->getParameter(2)->getReal());
+		case ScriptAction::CAMERA_MOD_SET_FINAL_ZOOM:
+		{
+			const Real a = pAction->getParameter(0)->getReal(), b = pAction->getParameter(1)->getReal(), c = pAction->getParameter(2)->getReal();
+			LogicThread::callViewAfterTick( [=]{ TheTacticalView->cameraModFinalZoom(a, b, c); } );
 			return;
-		case ScriptAction::CAMERA_MOD_SET_FINAL_PITCH: 
-			TheTacticalView->cameraModFinalPitch(pAction->getParameter(0)->getReal(), pAction->getParameter(1)->getReal(), pAction->getParameter(2)->getReal());
+		}
+		case ScriptAction::CAMERA_MOD_SET_FINAL_PITCH:
+		{
+			const Real a = pAction->getParameter(0)->getReal(), b = pAction->getParameter(1)->getReal(), c = pAction->getParameter(2)->getReal();
+			LogicThread::callViewAfterTick( [=]{ TheTacticalView->cameraModFinalPitch(a, b, c); } );
 			return;
-		case ScriptAction::CAMERA_MOD_SET_FINAL_SPEED_MULTIPLIER: 
-			TheTacticalView->cameraModFinalTimeMultiplier(pAction->getParameter(0)->getInt());
+		}
+		case ScriptAction::CAMERA_MOD_SET_FINAL_SPEED_MULTIPLIER:
+		{
+			const Int m = pAction->getParameter(0)->getInt();
+			LogicThread::callViewAfterTick( [=]{ TheTacticalView->cameraModFinalTimeMultiplier(m); } );
 			return;
-		case ScriptAction::CAMERA_MOD_SET_ROLLING_AVERAGE: 
-			TheTacticalView->cameraModRollingAverage(pAction->getParameter(0)->getInt());
+		}
+		case ScriptAction::CAMERA_MOD_SET_ROLLING_AVERAGE:
+		{
+			const Int frames = pAction->getParameter(0)->getInt();
+			LogicThread::callViewAfterTick( [=]{ TheTacticalView->cameraModRollingAverage(frames); } );
 			return;
-		case ScriptAction::SET_VISUAL_SPEED_MULTIPLIER: 
-			TheTacticalView->setTimeMultiplier(pAction->getParameter(0)->getInt());
+		}
+		case ScriptAction::SET_VISUAL_SPEED_MULTIPLIER:
+		{
+			const Int m = pAction->getParameter(0)->getInt();
+			LogicThread::callViewAfterTick( [=]{ TheTacticalView->setTimeMultiplier(m); } );
 			return;
+		}
 		case ScriptAction::SUSPEND_BACKGROUND_SOUNDS:
-			TheAudio->pauseAudio(AudioAffect_Sound);
+			LogicThread::callAfterTick( []{ TheAudio->pauseAudio(AudioAffect_Sound); } );
 			return;
-		case ScriptAction::RESUME_BACKGROUND_SOUNDS: 
-			TheAudio->resumeAudio(AudioAffect_Sound);
+		case ScriptAction::RESUME_BACKGROUND_SOUNDS:
+			LogicThread::callAfterTick( []{ TheAudio->resumeAudio(AudioAffect_Sound); } );
 			return;
 		case ScriptAction::PLAY_SOUND_EFFECT_AT: 
 			doPlaySoundEffectAt(pAction->getParameter(0)->getString(), pAction->getParameter(1)->getString());
@@ -7024,12 +7112,21 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 			doCameraMotionBlurJump(pAction->getParameter(0)->getString(), pAction->getParameter(1)->getInt());
 			return;
 		case ScriptAction::CAMERA_MOTION_BLUR_FOLLOW:
-			TheTacticalView->setViewFilterMode((enum FilterModes)(FM_VIEW_MB_PAN_ALPHA+pAction->getParameter(0)->getInt())); 						 
-			TheTacticalView->setViewFilter(FT_VIEW_MOTION_BLUR_FILTER);
+		{
+			const FilterModes mode = (enum FilterModes)(FM_VIEW_MB_PAN_ALPHA+pAction->getParameter(0)->getInt());
+			noteView( TRUE, LogicThread::VIEW_BLUR_ENDS );
+			LogicThread::callViewAfterTick( [=]{
+				TheTacticalView->setViewFilterMode(mode);
+				TheTacticalView->setViewFilter(FT_VIEW_MOTION_BLUR_FILTER);
+			} );
 			return;
+		}
 		case ScriptAction::CAMERA_MOTION_BLUR_END_FOLLOW:
-			TheTacticalView->setViewFilterMode(FM_VIEW_MB_END_PAN_ALPHA); 						 
-			TheTacticalView->setViewFilter(FT_VIEW_MOTION_BLUR_FILTER);
+			noteView( TRUE, LogicThread::VIEW_BLUR_ENDS );
+			LogicThread::callViewAfterTick( []{
+				TheTacticalView->setViewFilterMode(FM_VIEW_MB_END_PAN_ALPHA);
+				TheTacticalView->setViewFilter(FT_VIEW_MOTION_BLUR_FILTER);
+			} );
 			return;
 		case ScriptAction::FREEZE_TIME:
 			doFreezeTime();
@@ -7047,22 +7144,29 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 			doSetStoppingDistance(pAction->getParameter(0)->getString(), pAction->getParameter(1)->getReal());
 			return;
 		case ScriptAction::SET_FPS_LIMIT:
-			if (!pAction->getParameter(0)->getInt())
-			{
-				TheGameEngine->setFramesPerSecondLimit(TheGlobalData->m_framesPerSecondLimit);
-			}
-			else
-			{
-				// the map asks for a 30 Hz logic rate; 30 is normal speed.  A mission or skirmish map gets
-				// half speed to normal like the player does, never faster
-				Int fps = ConvertRetailFrames(pAction->getParameter(0)->getInt());
-				if (TheGameLogic->isInSkirmishGame() || TheGameLogic->isInSinglePlayerGame())
-					fps = ClampPlayerGameSpeed(fps);
-				TheGameEngine->setFramesPerSecondLimit(fps);
-			}
-			// Setting the fps limit doesn't do much good if we don't use it.  jba.
-			TheWritableGlobalData->m_useFpsLimit = true; 
+		{
+			// the engine's pacing and TheWritableGlobalData are the main thread's: after the tick
+			// (LOGIC-THREAD.md hazard 24), which is when the engine next paces anyway
+			const Int asked = pAction->getParameter(0)->getInt();
+			LogicThread::callAfterTick( [asked]{
+				// A match someone plays, or its replay, keeps the speed it started at: normal, or turbo
+				// mode's twice that.  Only the shell map's scripts may still pace themselves.
+				if (!TheGameLogic->isInShellGame())
+					return;
+				if (!asked)
+				{
+					TheGameEngine->setFramesPerSecondLimit(TheGlobalData->m_framesPerSecondLimit);
+				}
+				else
+				{
+					// the map asks for a 30 Hz logic rate; 30 is normal speed
+					TheGameEngine->setFramesPerSecondLimit(ConvertRetailFrames(asked));
+				}
+				// Setting the fps limit doesn't do much good if we don't use it.  jba.
+				TheWritableGlobalData->m_useFpsLimit = true;
+			} );
 			return;
+		}
 			
 		case ScriptAction::DISABLE_SPECIAL_POWER_DISPLAY:
 			doDisableSpecialPowerDisplay();

@@ -34,6 +34,7 @@
 #include "Common/GameAudio.h"
 #include "Common/GlobalData.h"
 #include "Common/INI.h"
+#include "Common/MatchHistory.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Science.h"
@@ -575,6 +576,9 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
 	// (location NULL); this only tells the client
 	TheObserverCamera.noteSpecialPower( getObject()->getControllingPlayer(), getObject()->getPosition(), location,
 		getObject()->isKindOf( KINDOF_FS_SUPERWEAPON ), getSpecialPowerModuleData()->m_specialPowerTemplate, getObject()->getTemplate() );
+	// and the score screen's graphs mark it; nothing in the logic reads that back
+	TheMatchHistory.notePower( getObject()->getControllingPlayer(), getSpecialPowerModuleData()->m_specialPowerTemplate,
+		getObject()->getTemplate(), getObject()->isKindOf( KINDOF_FS_SUPERWEAPON ) );
 
 	// Let EVA do her thing
 	SpecialPowerType type = getSpecialPowerModuleData()->m_specialPowerTemplate->getSpecialPowerType();
@@ -585,7 +589,7 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
   Player *localPlayer = ThePlayerList->getLocalPlayer();
   if( localPlayer && !localPlayer->isPlayerActive() )
   {
-    Player *observed = TheControlBar ? TheControlBar->getObserverLookAtPlayer() : NULL;
+    Player *observed = LogicThread::clientBlock().observerLookAt;	// as the sync point saw it (M7)
     if( observed )
       localPlayer = observed;
   }

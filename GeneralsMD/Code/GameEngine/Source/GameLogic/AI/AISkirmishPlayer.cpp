@@ -129,7 +129,10 @@ void AISkirmishPlayer::processBaseBuilding( void )
 		const ThingTemplate *bldgPlan=NULL;
 		BuildListInfo	*bldgInfo = NULL;
 		Bool isPriority = false;
-		const Bool rushBigGuns = getSkillProfile()->m_economyBuildings;
+		// and a Tech AI from Medium up, whose whole plan is the tree and the superweapon at its top, and a
+		// GLA Air one, whose SCUD Storm stands in for the air force it cannot build
+		const Bool rushBigGuns = getSkillProfile()->m_economyBuildings ||
+			(m_persona != AIPERSONA_NORMAL && m_skillLevel >= AISKILL_MEDIUM && superweaponIsPlan());
 		Bool rushTaken = false;
 		// With the purchase queue the priority entries are taken by its score, the first of the best in
 		// list order, so an early drop zone does not wait behind the scripts' bunkers.
@@ -236,6 +239,11 @@ void AISkirmishPlayer::processBaseBuilding( void )
 			if (bldg) {
 				continue; // already built.
 			}
+			// A second war factory, barracks or airfield of the plan's waits until the ones standing
+			// fall behind their queues, as an extra one would.
+			if (holdsExtraFactory(curPlan)) {
+				continue;
+			}
 			// The safety check below is a range query over everything near the spot, most of a
 			// millisecond each late in a 4v4, and it ran for every unbuilt entry on every pass (36 of
 			// them, 28ms, in one frame). An entry that cannot change what this pass picks skips it.
@@ -249,7 +257,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 			// of an outage waited 45 seconds in that queue and the base went dark before it was started.
 			const Bool rushThis = rushBigGuns && (curPlan->isKindOf(KINDOF_FS_SUPERWEAPON) || curPlan->isKindOf(KINDOF_FS_ADVANCED_TECH) ||
 				(powerThin && curPlan->isKindOf(KINDOF_FS_POWER) && !curPlan->isKindOf(KINDOF_CASH_GENERATOR)));
-			const Int planScore = byScore ? aiPurchaseScore(purchaseKindOf(curPlan), earlyGame) : 0;
+			const AIPurchaseKind planKind = purchaseKindOf(curPlan);
+			const Int planScore = byScore ? aiPurchaseScore(planKind, earlyGame) +
+				(m_persona != AIPERSONA_NORMAL ? personaWeights().m_buy[planKind] + personaBuildingScore(curPlan) : 0) : 0;
 			const Bool couldBePriority = info->isPriorityBuild() &&
 				(!isPriority || (rushThis && !rushTaken) || planScore > bldgScore) && m_player->canBuild(curPlan);
 			const Bool couldBePower = powerPlan==NULL && curPlan->isKindOf(KINDOF_FS_POWER) &&
@@ -599,7 +609,24 @@ void AISkirmishPlayer::acquireEnemy(void)
 	Player *bestEnemy = NULL;
 	Real bestDistanceSqr = HUGE_DIST*HUGE_DIST;
 
-	if (m_currentEnemy) {
+	// a personality joins an ally's attack (the team board): his target is ours while it stands
+	if (m_persona != AIPERSONA_NORMAL && m_persona != AIPERSONA_OPPORTUNIST) {
+		const AITeamRequest *attack = freshRequest(AIREQ_ATTACK, AI_COOP_JOIN_FRAMES);
+		Player *target = attack && attack->enemy >= 0 ? ThePlayerList->getNthPlayer(attack->enemy) : NULL;
+		if (target && target != m_currentEnemy && m_player->getRelationship(target->getDefaultTeam()) == ENEMIES &&
+				target->hasAnyObjects()) {
+			DEBUG_LOG(("AI COOP frame %d player %d joins player %d's attack on player %d\n", TheGameLogic->getFrame(),
+				m_player->getPlayerIndex(), attack->from, attack->enemy));
+			m_currentEnemy = target;
+			coopChat("Join");
+			return;
+		}
+	}
+
+	// an Opportunist keeps looking for the weaker, busier enemy, and changes when one is clearly cheaper
+	const Bool opportunist = m_persona == AIPERSONA_OPPORTUNIST;
+	Real currentCost = HUGE_DIST*HUGE_DIST;
+	if (m_currentEnemy && !opportunist) {
 		Bool inBadShape = !m_currentEnemy->hasAnyUnits() || !m_currentEnemy->hasAnyBuildFacility();
 		if (!inBadShape) return;
 	}
@@ -644,17 +671,34 @@ void AISkirmishPlayer::acquireEnemy(void)
 			// The candidate itself has to have picked us. EA asked this of every other AI in the loop
 			// below, which skips the candidate, so the bonus went to anyone but the aggressor.
 			Bool attackingMe = curPlayer->isSkirmishAIPlayer() && curPlayer->getCurrentEnemy()==m_player;
+			Bool targetedByAnother = FALSE;		// as alreadyTargeted, this AI's own pick left out
 			Int k;
 			for (k=0; k<ThePlayerList->getPlayerCount(); k++) {
 				if (k==i) continue;  // don't count self.
 				Player *somePlayer = ThePlayerList->getNthPlayer(k);
 				if (!somePlayer->isSkirmishAIPlayer()) continue;
-				if (somePlayer->getCurrentEnemy()==curPlayer) alreadyTargeted = TRUE;
+				if (somePlayer->getCurrentEnemy()==curPlayer) {
+					alreadyTargeted = TRUE;
+					if (somePlayer != m_player)
+						targetedByAnother = TRUE;
+				}
 			}
 
 			const Real share = (estateTotal > 0.0f && i < MAX_PLAYER_COUNT) ? (estate[i] / estateTotal) : 0.0f;
-			curDistSqr = aiEnemyCost( curDistSqr, inBadShape, alreadyTargeted, attackingMe, share,
+			// an Opportunist does not count its own pick as somebody else's: its current enemy would pay
+			// the gang-up term and the busy discount for being its own target
+			curDistSqr = aiEnemyCost( curDistSqr, inBadShape, opportunist ? targetedByAnother : alreadyTargeted, attackingMe, share,
 														getAIRole() == AIROLE_SUPPORTIVE );
+			if (opportunist) {
+				// busy: another computer's chosen enemy, or hit in the last twenty seconds while he is not
+				// ours, so the hit was somebody else's.  The player keeps only when he was last hit, not by whom.
+				const UnsignedInt hit = curPlayer->getAttackedFrame();
+				const Bool busy = targetedByAnother ||
+					(curPlayer != m_currentEnemy && hit != 0 && hit + 20 * LOGICFRAMES_PER_SECOND > TheGameLogic->getFrame());
+				curDistSqr = aiPersonaEnemyCost( m_persona, curDistSqr, share, busy );
+				if (curPlayer == m_currentEnemy)
+					currentCost = curDistSqr;
+			}
 
 			// Ai enemy - will take if we don't get a better offer.
 			if (curDistSqr<bestDistanceSqr) {
@@ -663,7 +707,14 @@ void AISkirmishPlayer::acquireEnemy(void)
 			}
 		}
 	}
+	// a standing enemy the Opportunist could still fight is dropped only for one at under 70% of his cost
+	if (opportunist && m_currentEnemy && bestDistanceSqr >= 0.7f * currentCost &&
+			m_currentEnemy->hasAnyUnits() && m_currentEnemy->hasAnyBuildFacility())
+		return;
 	if (bestEnemy!=NULL && (bestEnemy!=m_currentEnemy)) {
+		if (opportunist)
+			DEBUG_LOG(("AI PERSONA frame %d player %d turns on player %d, cost %.0f against %.0f\n", TheGameLogic->getFrame(),
+				m_player->getPlayerIndex(), bestEnemy->getPlayerIndex(), bestDistanceSqr, currentCost));
 		m_currentEnemy = bestEnemy;
 		AsciiString msg = TheNameKeyGenerator->keyToName(m_player->getPlayerNameKey());
 		msg.concat(" acquiring target enemy player: ");
@@ -833,7 +884,8 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 		/* See if we can build there. */
 		Bool canBuild;
 		Real placeAngle = tTemplate->getPlacementViewAngle();
-		canBuild = LBC_OK == TheBuildAssistant->isLocationLegalToBuild(&buildPos, tTemplate, placeAngle, 
+		// a spot the base cannot drive to guards nothing: a ledge, or across a valley the path runs beside
+		canBuild = reachableFromBase(&buildPos) && LBC_OK == TheBuildAssistant->isLocationLegalToBuild(&buildPos, tTemplate, placeAngle,
 			BuildAssistant::TERRAIN_RESTRICTIONS|BuildAssistant::NO_OBJECT_OVERLAP, NULL, m_player);
 		TheTerrainVisual->removeAllBibs();	// isLocationLegalToBuild adds bib feedback, turn it off.  jba.
 		if (flank) {

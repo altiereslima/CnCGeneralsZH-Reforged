@@ -52,7 +52,9 @@ static void drawFramerateBar(void);
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/ThingFactory.h"
+#include "Common/LogicThread.h"
 #include "Common/GameEngine.h"
+#include "GameClient/LookAtXlat.h"
 #include "Common/GlobalData.h"
 #include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
@@ -87,6 +89,7 @@ static void drawFramerateBar(void);
 #include "GameClient/Line2D.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/ObserverCamera.h"
+#include "GameClient/CinemaDirector.h"
 #include "GameClient/GlobalLanguage.h"
 #include "GameClient/Water.h"
 
@@ -101,6 +104,8 @@ static void drawFramerateBar(void);
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "W3DDevice/GameClient/W3DScene.h"
+#include "W3DDevice/GameClient/W3DParticleSys.h"
+#include "W3DDevice/GameClient/W3DView.h"
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
 #include "W3DDevice/GameClient/W3DWater.h"
 #include "W3DDevice/GameClient/W3DVideobuffer.h"
@@ -541,6 +546,8 @@ W3DDisplay::~W3DDisplay()
 			twinBuffers, twinBytes / 1024,
 			texturesMirrored, texturesReused, texturesRefused,
 			pipelines, drawsMade, drawsRefused));
+		if( Direct3D11_Is_Active() )
+			DEBUG_LOG(("-dx11 constants: %s\n", Direct3D11_Constant_Path()));
 		unsigned programsShipped = 0;
 		unsigned programsHeld = 0;
 		Direct3D11_Program_Statistics( programsShipped, programsHeld );
@@ -1235,8 +1242,9 @@ void W3DDisplay::init( void )
 #endif
 	DEBUG_LOG(("W3DDisplay::init - present: %s\n", DX8Wrapper::Is_Flip_Present() ? "flip" : "discard"));
 	if (Direct3D11_Present_Is_Enabled())
-		DEBUG_LOG(("W3DDisplay::init - dx11 swap chain: %s\n",
-							 Direct3D11_Can_Tear() ? "flip, tearing allowed" : "blt, held to the refresh"));
+		DEBUG_LOG(("W3DDisplay::init - dx11 swap chain: %s%s\n",
+							 Direct3D11_Can_Tear() ? "flip, tearing allowed" : "blt, held to the refresh",
+							 Direct3D11_Has_Frame_Wait() ? ", the frame waits for room in its queue" : ""));
 	DEBUG_LOG(("W3DDisplay::init - adapter: %s\n",
 						 WW3D::Get_Render_Device_Name(WW3D::Get_Render_Device())));
 	{
@@ -2172,6 +2180,7 @@ static Bool videoRecordingFrame(void);
 extern Real TheSceneDrawMS;
 extern Real TheUIDrawMS;
 extern Real TheParticleUpdateMS;
+extern Real TheOverlapWindowMS;
 extern UnsignedInt TheSceneDrawCalls;
 
 //=============================================================================
@@ -2283,6 +2292,50 @@ static Real w3dElapsedMS( const Int64 &from, const Int64 &to )
 	return (Real)((double)(to - from) * 1000.0 / (double)freq);
 }
 #endif
+
+/* Whether this pass draws a picture.  TiVO's fast forward through a replay draws one logic frame a
+	 second of game time. */
+static Bool rendersThisPass( void )
+{
+#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
+	return (TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 1) || ( ! ( !TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode) );
+#else
+	return (TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 1) || ( ! (!TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame()) );
+#endif
+}
+
+/* LOGIC-THREAD.md phase 3.  The sync point of the render: everything the render below reads of logic
+	 is taken here, before the overlap window opens, and the render reads only these.  The logic frame,
+	 the overlays that ask objects what to show, recorded for the render to replay, the particles'
+	 stealth fades and fields, the toppling trees, and the strings the last pass's overlays freed, now
+	 that nothing recorded draws them.  The scene's own reads of an object were taken by
+	 GameClient::update's drawable walk (Drawable::getObjectForDraw) and the radar's blips by its update. */
+extern void W3DControlBar_takeReadsForRender( void );
+
+static void takeReadsForRender( Bool renders )
+{
+	TheDisplay->freeDeferred();
+	TheGameLogic->takeFrameForDraw();
+	// step 3b: what the tick handed over at the window's opening writes beside the render, the client's
+	// clock, each drawable's look (after the views' update eased its fades) and the players the control
+	// bar's painters ask
+	TheGameClient->takeFrameForDraw();
+	for( Drawable *draw = TheGameClient->firstDrawable(); draw; draw = draw->getNextDrawable() )
+	{
+		// flushes the conditions the client set; inside the window the scene's dirty walk is a no-op
+		draw->getDrawModules();
+		draw->takeLookForDraw();
+	}
+	W3DControlBar_takeReadsForRender();
+	if( !renders || TheGlobalData->m_breakTheMovie || TheGlobalData->m_disableRender )
+		return;
+	for( View *view = TheDisplay->getFirstView(); view; view = TheDisplay->getNextView( view ) )
+		static_cast<W3DView *>( view )->recordPostDraw();
+	TheInGameUI->recordDraw();
+	TheTerrainRenderObject->takeWaypointsForRender();
+	TheTerrainRenderObject->stepTrees();	// before the particles: a falling tree's FX makes systems
+	static_cast<W3DParticleSystemManager *>( TheParticleSystemManager )->takeReadsForRender();
+}
 
 void W3DDisplay::draw( void )
 {
@@ -2510,8 +2563,18 @@ AGAIN:
 	} 
 
 
+	// the span a logic thread could run beside, marked for LOGIC-THREAD.md phase 3's count of logic reads
+	// made inside it; opened each time round below and closed after End_Render, or after the loop when
+	// a continue skips that.  Phase 4: while the tick handed over at its opening runs on and another
+	// picture fits before the next tick is due, it stays open and the loop draws the same state again
+	LogicThread::OverlapWindow overlapWindow;
+	Bool drawAgain = FALSE;
 	do {
-		
+		Int64 pictureStart = Clock_Ticks();	// phase 4 weighs the next picture by this one, sync point left out
+#ifdef DEBUG_LOGGING
+		Int64 tOverlapStart = 0;		// the part a logic thread could run beside, TheOverlapWindowMS
+#endif
+
 		{
 			if(TheGlobalData->m_loadScreenRender != TRUE)
 			{
@@ -2537,26 +2600,65 @@ AGAIN:
 		if (DX8Wrapper::_Get_D3D_Device() && (DX8Wrapper::_Get_D3D_Device()->TestCooperativeLevel()) == D3D_OK)
 		{	//Checking if we have the device before updating views because the heightmap crashes otherwise while
 			//trying to refresh the visible terrain geometry.
-			smoothMotionBegin();
-//			if(TheGlobalData->m_loadScreenRender != TRUE)
-				updateViews();
+			if (drawAgain)
+			{
+				// Phase 4: the last tick's state again, with only the scroll the input holds applied to the
+				// camera.  No view update, particle update or sync point, which read logic, and W3D's clock
+				// stands still, so nothing that steps on the frame time steps twice
+				WW3D::Sync( syncTime );
+				now = Clock_Milliseconds();		// the letterbox's fade runs on it
+				TheLookAtTranslator->scrollView();
+				primaryW3DView->updateCameraBesideTick();
 #ifdef DEBUG_LOGGING
-			Int64 tParticleStart, tParticleEnd;
-			tParticleStart = Clock_Ticks();
+				tOverlapStart = Clock_Ticks();
 #endif
-     		TheParticleSystemManager->update();//LORENZEN AND WILCZYNSKI MOVED THIS FROM ITS NATIVE POSITION, ABOVE
-                                           //FOR THE PURPOSE OF LETTING THE PARTICLE SYSTEM LOOK UP THE RENDER OBJECT"S
-                                           //TRANSFORM MATRIX, WHILE IT IS STILL VALID (HAVING DONE ITS CLIENT TRANSFORMS
-                                           //BUT NOT YET RESETTING TOT HE LOGICAL TRANSFORM)
-                                           //THE RESULT IS THAT PARTICLESYSTEMS LINKED TO BONES IN DRAWABLES.OBJECTS
-                                           //MOVE WITH THE CLIENT TRANSFORMS, NOW.
-                                           //REVOLUTIONARY!
-                                           //-LORENZEN
+			}
+			else
+			{
+				smoothMotionBegin();
+//				if(TheGlobalData->m_loadScreenRender != TRUE)
+					updateViews();
+#ifdef DEBUG_LOGGING
+				Int64 tParticleStart, tParticleEnd;
+				tParticleStart = Clock_Ticks();
+#endif
+	     		TheParticleSystemManager->update();//LORENZEN AND WILCZYNSKI MOVED THIS FROM ITS NATIVE POSITION, ABOVE
+	                                           //FOR THE PURPOSE OF LETTING THE PARTICLE SYSTEM LOOK UP THE RENDER OBJECT"S
+	                                           //TRANSFORM MATRIX, WHILE IT IS STILL VALID (HAVING DONE ITS CLIENT TRANSFORMS
+	                                           //BUT NOT YET RESETTING TOT HE LOGICAL TRANSFORM)
+	                                           //THE RESULT IS THAT PARTICLESYSTEMS LINKED TO BONES IN DRAWABLES.OBJECTS
+	                                           //MOVE WITH THE CLIENT TRANSFORMS, NOW.
+	                                           //REVOLUTIONARY!
+	                                           //-LORENZEN
 
 #ifdef DEBUG_LOGGING
-			tParticleEnd = Clock_Ticks();
-			TheParticleUpdateMS = w3dElapsedMS( tParticleStart, tParticleEnd );
+				tParticleEnd = Clock_Ticks();
+				TheParticleUpdateMS = w3dElapsedMS( tParticleStart, tParticleEnd );
 #endif
+				takeReadsForRender( rendersThisPass() );
+				pictureStart = Clock_Ticks();
+#ifdef DEBUG_LOGGING
+				tOverlapStart = Clock_Ticks();
+#endif
+				// a draw from inside a tick (the load screen the map start paints) is the tick's own.  The
+				// tick runs beside a render that reads logic only through the sync point's copies, which
+				// rules out the scripted camera's loop of renders, the debug overlays and displays that walk
+				// the objects live, -cinema's own interface, smooth motion's restore and the load screen.
+				if( !TheGameLogic->isInGameLogicUpdate() )
+				{
+					Bool mayOverlap = !loopForCameraMovement && rendersThisPass() && !TheSmoothMotionActive
+						&& m_debugDisplayCallback == NULL && !TheGlobalData->m_loadScreenRender
+						&& !TheGlobalData->m_showLanes && !CinemaDirector_hidesHud()
+						&& TheObserverCamera.getDrawnPaneCount() <= 1;
+#if defined(_DEBUG) || defined(_INTERNAL)
+					mayOverlap = mayOverlap && !TheGlobalData->m_debugAI && !TheGlobalData->m_debugCamera
+						&& !TheGlobalData->m_showAudioLocations;
+#else
+					mayOverlap = mayOverlap && !TheGlobalData->m_debugAI;
+#endif
+					overlapWindow.open( mayOverlap );
+				}
+			}
 
 			// R1: after the particles read the logic bones (Lorenzen's note above), before anything renders.
 			smoothMotionApply();
@@ -2587,8 +2689,10 @@ AGAIN:
 			// Above it runs right after updateViews on purpose (see Lorenzen's note), so the systems
 			// read the client transform while it is still valid.  There is no updateViews here and
 			// nothing to draw the result of, so a frame's worth of stale transforms costs nothing.
+			// Not beside a tick (phase 4's pictures drawn again), which may be making systems.
 			//
-			TheParticleSystemManager->update();
+			if (!drawAgain)
+				TheParticleSystemManager->update();
 		}
 
 		Debug_Statistics::End_Statistics();	//record number of polygons rendered in RenderTargetTextures.
@@ -2598,11 +2702,7 @@ AGAIN:
 		Int numRenderTargetVertices=Debug_Statistics::Get_DX8_Vertices();
 
 		// start render block
-		#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
-    if ( (TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 1) || ( ! ( !TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode) ) )
-		#else
-	    if ( (TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 1) || ( ! (!TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame())) )
-    #endif
+		if ( rendersThisPass() )
 		{
 			USE_PERF_TIMER(BigAssRenderLoop)
 			static Bool couldRender = true;
@@ -2614,7 +2714,9 @@ AGAIN:
 					TheInGameUI->draw();
 					if( TheMouse )
 						TheMouse->draw();	//keep applying the current cursor style so it remains hidden if needed.
-					WW3D::End_Render();	
+					WW3D::End_Render();
+					overlapWindow.close();
+					drawAgain = FALSE;
 					continue;
 				}
 				couldRender = true;
@@ -2700,7 +2802,9 @@ AGAIN:
 						width = ( TheDisplay->getWidth() - displayString->getWidth() ) / 2;
 					displayString->draw( width, height, color, backColor );
 
-					m_cinematicTextFrames--;
+					// counted in passes; a picture drawn again beside a tick is not one
+					if (!drawAgain)
+						m_cinematicTextFrames--;
 				}
 
 				if ( m_debugDisplayCallback )
@@ -2753,10 +2857,21 @@ AGAIN:
 					double textureMS = 0.0;
 					unsigned textures = 0;
 					unsigned depthCopies = 0;
-					Direct3D11_Take_Frame_Cost( pipelineMS, pipelines, textureMS, textures, depthCopies );
+					unsigned constantWrites = 0;
+					unsigned constantRenames = 0;
+					Direct3D11_Take_Frame_Cost( pipelineMS, pipelines, textureMS, textures, depthCopies,
+						constantWrites, constantRenames );
 					if( pipelineMS + textureMS > DX11_FRAME_COST_REPORT_MS )
-						DEBUG_LOG(("DX11 FRAME COST frame %d: %u pipelines built in %.1f ms, %u textures copied in %.1f ms, %u soft particle depth copies\n",
-							TheGameLogic->getFrame(), pipelines, pipelineMS, textures, textureMS, depthCopies));
+						DEBUG_LOG(("DX11 FRAME COST frame %d: %u pipelines built in %.1f ms, %u textures copied in %.1f ms, %u soft particle depth copies, %u constant writes, %u renames\n",
+							TheGameLogic->getFrame(), pipelines, pipelineMS, textures, textureMS, depthCopies,
+							constantWrites, constantRenames));
+
+					/* Once a second in a match, what the GPU's own clock says the frames cost and how
+						 long it sat idle between them: busy well under 100% beside a low frame rate is a
+						 frame held up on the CPU side, not by the card. */
+					const char *gpuReport = Direct3D11_Take_GPU_Report();
+					if( gpuReport && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() )
+						DEBUG_LOG(("DX11 GPU frame %d: %s\n", TheGameLogic->getFrame(), gpuReport));
 
 					long presentResult = 0;
 					if( Direct3D11_Take_Present_Failure( presentResult ) )
@@ -2790,7 +2905,18 @@ AGAIN:
 				}
 			}
 		}
-					
+#ifdef DEBUG_LOGGING
+		if (tOverlapStart)
+			TheOverlapWindowMS += w3dElapsedMS( tOverlapStart, Clock_Ticks() );
+#endif
+		drawAgain = overlapWindow.closeOrDrawAgain(
+			(Real)( (double)( Clock_Ticks() - pictureStart ) * 1000.0 / (double)Clock_Ticks_Per_Second() ) );
+		if (drawAgain)
+		{
+			GameEngine_noteExtraPicture();
+			continue;
+		}
+
 		if (TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript() || TheGameLogic->isGamePaused())
 		{
 			freezeTime = false; // We're frozen for debug or for pause, and need to continue out of the loop.
@@ -2801,10 +2927,15 @@ AGAIN:
 		if (loopForCameraMovement)
 			TheGameEngine->serviceWindowsOS();
 
-	} while (loopForCameraMovement && !TheTacticalView->isCameraMovementFinished());
+	} while (drawAgain || (loopForCameraMovement && !TheTacticalView->isCameraMovementFinished()));
+	overlapWindow.close();
 
 	// R1: the logic transforms back on every model, before picking (the message stream) and the logic.
 	smoothMotionRestore();
+
+	// LOGIC-THREAD.md phase 3, step 3b: the tick that ran beside the render hands the client its work here,
+	// after the restore, so the transforms it gives the models are the ones they keep
+	LogicThread::flushOverlap();
 
 #ifdef EXTENDED_STATS
 	if (DX8Wrapper::stats.m_disableOverhead) {
@@ -3041,6 +3172,7 @@ void W3DDisplay::flush2D( void )
 //=============================================================================
 void W3DDisplay::beginBatch2D( void )
 {
+	if( isRecording() ) { record( [=]() { beginBatch2D(); } ); return; }
 
 	flush2D();
 	m_batch2D = TRUE;
@@ -3051,6 +3183,7 @@ void W3DDisplay::beginBatch2D( void )
 //=============================================================================
 void W3DDisplay::endBatch2D( void )
 {
+	if( isRecording() ) { record( [=]() { endBatch2D(); } ); return; }
 
 	flush2D();
 	m_batch2D = FALSE;
@@ -3062,10 +3195,34 @@ void W3DDisplay::endBatch2D( void )
 //=============================================================================
 void W3DDisplay::flushBatch2D( void )
 {
+	if( isRecording() ) { record( [=]() { flushBatch2D(); } ); return; }
 
 	flush2D();
 
 }  // end flushBatch2D
+
+// W3DDisplay::replayShifted ==================================================
+/** The 2D renderer turns a corner into screen space as it is added, so a coordinate range moved by
+	* the shift moves every quad the list adds; strings add the shift themselves (getReplayShift). */
+//=============================================================================
+void W3DDisplay::replayShifted( DrawCalls &calls, Int dx, Int dy )
+{
+	if( dx == 0 && dy == 0 )
+	{
+		replay( calls );
+		return;
+	}
+	flush2D();
+	m_2DRender->Set_Coordinate_Range( RectClass( -dx, -dy, (Real)getWidth() - dx, (Real)getHeight() - dy ) );
+	m_replayShift.x = dx;
+	m_replayShift.y = dy;
+	replay( calls );
+	flush2D();
+	m_replayShift.x = 0;
+	m_replayShift.y = 0;
+	m_2DRender->Set_Coordinate_Range( RectClass( 0, 0, getWidth(), getHeight() ) );
+
+}  // end replayShifted
 
 // W3DDisplay::drawLine =======================================================
 /** draw a line on the display in pixel coordinates with the specified color */
@@ -3075,6 +3232,7 @@ void W3DDisplay::drawLine( Int startX, Int startY,
 													 Real lineWidth,
 													 UnsignedInt lineColor )
 {
+	if( isRecording() ) { record( [=]() { drawLine( startX, startY, endX, endY, lineWidth, lineColor ); } ); return; }
 
 	if( setup2D( NULL, TRUE ) )
 		m_2DRender->Enable_Texturing( FALSE );
@@ -3092,7 +3250,8 @@ void W3DDisplay::drawLine( Int startX, Int startY,
 													 Real lineWidth,
 													 UnsignedInt lineColor1,UnsignedInt lineColor2 )
 {
-	
+	if( isRecording() ) { record( [=]() { drawLine( startX, startY, endX, endY, lineWidth, lineColor1, lineColor2 ); } ); return; }
+
 	if( setup2D( NULL, TRUE ) )
 		m_2DRender->Enable_Texturing( FALSE );
 	m_2DRender->Add_Line( Vector2( startX, startY ), Vector2( endX, endY ),
@@ -3107,7 +3266,8 @@ void W3DDisplay::drawLine( Int startX, Int startY,
 void W3DDisplay::drawOpenRect( Int startX, Int startY, Int width, Int height,
 															 Real lineWidth, UnsignedInt lineColor )
 {
-	
+	if( isRecording() ) { record( [=]() { drawOpenRect( startX, startY, width, height, lineWidth, lineColor ); } ); return; }
+
 	if (m_isClippedEnabled)
 	{
 		ICoord2D start, end, returnStart, returnEnd;
@@ -3157,6 +3317,7 @@ void W3DDisplay::drawOpenRect( Int startX, Int startY, Int width, Int height,
 void W3DDisplay::drawFillRect( Int startX, Int startY, Int width, Int height,
 															 UnsignedInt color )
 {
+	if( isRecording() ) { record( [=]() { drawFillRect( startX, startY, width, height, color ); } ); return; }
 
 	if( setup2D( NULL, TRUE ) )
 		m_2DRender->Enable_Texturing( FALSE );
@@ -3170,6 +3331,7 @@ void W3DDisplay::drawFillRect( Int startX, Int startY, Int width, Int height,
 
 void W3DDisplay::drawRectClock(Int startX, Int startY, Int width, Int height, Int percent, UnsignedInt color)
 {
+	if( isRecording() ) { record( [=]() { drawRectClock( startX, startY, width, height, percent, color ); } ); return; }
 	// sanity
 	if(percent < 1 || percent > 100)
 		return;
@@ -3333,6 +3495,7 @@ void W3DDisplay::drawRectClock(Int startX, Int startY, Int width, Int height, In
 //--------------------------------------------------------------------------------------------------------------------
 void W3DDisplay::drawRemainingRectClock(Int startX, Int startY, Int width, Int height, Int percent, UnsignedInt color)
 {
+	if( isRecording() ) { record( [=]() { drawRemainingRectClock( startX, startY, width, height, percent, color ); } ); return; }
 	// sanity
 	if( percent < 0 || percent > 99 )
 		return;
@@ -3513,6 +3676,7 @@ void W3DDisplay::drawImage( const Image *image, Int startX, Int startY,
 	// sanity
 	if( image == NULL )
 		return;
+	if( isRecording() ) { record( [=]() { drawImage( image, startX, startY, endX, endY, color, mode ); } ); return; }
 
 	// !!
 	// Remember to update the GUIEditDisplay::drawImage when you make
@@ -3747,6 +3911,7 @@ VideoBuffer*	W3DDisplay::createVideoBuffer( void )
 
 void W3DDisplay::drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY, Int endX, Int endY )
 {
+	if( isRecording() ) { record( [=]() { drawVideoBuffer( buffer, startX, startY, endX, endY ); } ); return; }
 	W3DVideoBuffer *vbuffer = (W3DVideoBuffer*) buffer;
 
 	setup2D( NULL, FALSE );
@@ -3764,6 +3929,7 @@ void W3DDisplay::drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY, I
 //=============================================================================
 void W3DDisplay::setClipRegion( IRegion2D *region )
 {
+	if( isRecording() ) { const IRegion2D at = *region; record( [=]() { IRegion2D copy = at; setClipRegion( &copy ); } ); return; }
 		// assign new region
 		m_clipRegion = *region;
 		m_isClippedEnabled = TRUE;
@@ -3782,6 +3948,9 @@ void W3DDisplay::clearShroud()
 //=============================================================================
 void W3DDisplay::setBorderShroudLevel(UnsignedByte level)
 {
+	// LOGIC-THREAD.md M6: what a tick pushes here waits for the end of it, in order
+	LOGIC_AFTER_TICK( [=]() { setBorderShroudLevel( level ); } );
+	LOGIC_CENSUS( CENSUS_DISPLAY );
 	if (TheTerrainRenderObject && TheTerrainRenderObject->getShroud())
 	{
 		TheTerrainRenderObject->getShroud()->setBorderShroudLevel((W3DShroudLevel)level);
@@ -3791,6 +3960,8 @@ void W3DDisplay::setBorderShroudLevel(UnsignedByte level)
 //=============================================================================
 void W3DDisplay::setShroudLevel( Int x, Int y, CellShroudStatus setting )
 {
+	LOGIC_AFTER_TICK( [=]() { setShroudLevel( x, y, setting ); } );
+	LOGIC_CENSUS( CENSUS_DISPLAY );
 	if (TheTerrainRenderObject && TheTerrainRenderObject->getShroud())
 	{
 		#ifdef INTENSE_DEBUG
@@ -4718,8 +4889,11 @@ static void captureVideoFrame(void)
 
 		// a directory left over from an earlier run would hand ffmpeg its tail as well
 		deleteVideoFrames();
-		DEBUG_LOG(("VIDEO: recording logic frames %d to %d into %s\n",
-			TheGlobalData->m_videoStartFrame, TheGlobalData->m_videoEndFrame, s_videoDirectory));
+		DEBUG_LOG(("VIDEO: recording logic frames %d to %d into %s, the first picture on frame %d\n",
+			TheGlobalData->m_videoStartFrame, TheGlobalData->m_videoEndFrame, s_videoDirectory, frame));
+		// the files are numbered from the first picture taken, so a late first one moves every file after it
+		// that many frames early; say so in the summary rather than leave the count short and silent
+		s_videoFramesMissed += picture - (UnsignedInt)TheGlobalData->m_videoStartFrame * GameEngine_videoPictures();
 	}
 	else if (picture <= s_videoLastPicture)
 	{

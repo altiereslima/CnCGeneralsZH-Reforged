@@ -43,6 +43,7 @@
 #include "GameClient/ChromaKeyboard.h"
 #include "GameClient/GameConsole.h" // for -freecam
 #include "GameNetwork/GameInfo.h" // for the SlotState -autoskirmish hands the AI slots
+#include "GameLogic/AI.h" // for aiPersonalityFromName, which -aipersona reads its names with
 #include "GameNetwork/NetworkUtil.h" // for ResolveIP, which -lanip parses its address with
 #include "Common/FileSystem.h"
 #include "Common/RandomMapGenerator.h" // for -randommap
@@ -1405,8 +1406,8 @@ Int parseIgnoreStackTrace(char *args[], int num)
 }
 #endif
 
-/* -fps <n> is the game speed itself: the rate the logic tick is paced at, the command-line twin of
-	 the skirmish menu's game speed slider.  MSG_NEW_GAME only honours 1..1000.  n is in retail 30 Hz
+/* -fps <n> is the game speed itself: the rate the logic tick is paced at, for tests; a player gets
+	 normal speed or turbo mode's twice that, and turbo doubles this too.  MSG_NEW_GAME only honours 1..1000.  n is in retail 30 Hz
 	 frames, so -fps 30 is still normal speed and every script that passes it keeps its meaning. */
 
 Int parseFPSLimit(char *args[], int num)
@@ -2157,6 +2158,38 @@ Int parseSeatName(char *args[], int num)
 	return 1;
 }
 
+/* -aipersona <slot> <name> gives one -autoskirmish (or -netai) AI seat a personality by its name in
+	 AIPersonality (Normal, Attacker, Turtle, ... Random); -aipersona2 <name> gives every odd seat one,
+	 the way -aidiff2 gives them a rung, and -aipersonaall <name> every seat.  An unknown name is Normal.
+	 It goes into the slot like a lobby's pick, so the replay header carries it. */
+Int parseAIPersona(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 2 && args[1] && args[2])
+	{
+		const Int slot = atoi(args[1]);
+		if (slot >= 0 && slot < MAX_SLOTS)
+			TheWritableGlobalData->m_autoSkirmishPersona[slot] = aiPersonalityFromName(args[2]);
+		else
+			DEBUG_LOG(("-aipersona: slot %d is outside 0..%d\n", slot, MAX_SLOTS - 1));
+		return 3;
+	}
+	return 1;
+}
+
+Int parseAIPersona2(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+		TheWritableGlobalData->m_autoSkirmishPersonaOdd = aiPersonalityFromName(args[1]);
+	return 2;
+}
+
+Int parseAIPersonaAll(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+		TheWritableGlobalData->m_autoSkirmishPersonaAll = aiPersonalityFromName(args[1]);
+	return 2;
+}
+
 /* -takeover empties every -autoskirmish seat instead of filling it with an AI.
 
 	 SLOT_TAKEOVER is an occupied seat with nothing behind it: startNewGame writes playerIsHuman for
@@ -2296,6 +2329,15 @@ Int parseSupplyPileLimit(char *args[], int num)
 		TheWritableGlobalData->m_supplyPileLimit = atoi(args[1]);
 		return 2;
 	}
+	return 1;
+}
+
+/* -turbomode: the lobby's turbo mode for an -autoskirmish or -netgame run, twice the logic frames a
+	 second at the same frames.  Not -turbo, which fast-forwards a drawing run as fast as it goes. */
+Int parseTurboMode(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+		TheWritableGlobalData->m_turboMatch = TRUE;
 	return 1;
 }
 
@@ -2833,7 +2875,6 @@ static CommandLineParam params[] =
 	{ "-constantDebug", parseConstantDebug },
 	{ "-noagpfix", parseIncrAGPBuf },
 	{ "-dumpAssetUsage", parseDumpAssetUsage },
-	{ "-jumpToFrame", parseJumpToFrame },
 	{ "-updateImages", parseUpdateImages },
 	{ "-showTeamDot", parseShowTeamDot },
 	{ "-extraLogging", parseExtraLogging },
@@ -2853,6 +2894,9 @@ static CommandLineParam params[] =
 	{ "-autoskirmish", parseAutoSkirmish },
 	{ "-aidiff", parseAIDifficulty },
 	{ "-aidiff2", parseAIDifficulty2 },
+	{ "-aipersona", parseAIPersona },
+	{ "-aipersona2", parseAIPersona2 },
+	{ "-aipersonaall", parseAIPersonaAll },
 	{ "-notactics", parseNoTactics },
 	{ "-aiknobsoff", parseAIKnobsOff },
 	{ "-observer", parseObserver },
@@ -2861,6 +2905,7 @@ static CommandLineParam params[] =
 		 opened the audio device.  It turns every sound off as -headless does: the device is never opened. */
 	{ "-noaudio", parseNoAudio },
 	{ "-maxframes", parseMaxGameFrames },
+	{ "-jumpToFrame", parseJumpToFrame },	// the late-game window without playing up to it (LOGIC-THREAD.md)
 	{ "-screenshot", parseScreenShot },
 	{ "-video", parseVideo },
 	{ "-directorrecord", parseDirectorRecord },
@@ -2887,6 +2932,7 @@ static CommandLineParam params[] =
 	{ "-techrespawn", parseTechRespawn },
 	{ "-superweapons", parseSuperweapons },
 	{ "-supplypilelimit", parseSupplyPileLimit },
+	{ "-turbomode", parseTurboMode },
 	{ "-startingcash", parseStartingCash },
 	{ "-showlanes", parseShowLanes },
 	{ "-uidrill", parseUIDrill },

@@ -86,6 +86,20 @@
 
 #include <float.h>
 
+/* A hint that a cache line is about to be read. It reads nothing the program sees and decides
+	 nothing, so no result can depend on it; on a compiler without one it is no code at all. */
+#if defined(__GNUC__) || defined(__clang__)
+	#define PM_PREFETCH(addr) __builtin_prefetch(addr)
+#elif defined(_M_X64) || defined(_M_IX86)
+	#include <xmmintrin.h>
+	#define PM_PREFETCH(addr) _mm_prefetch((const char *)(addr), _MM_HINT_T0)
+#elif defined(_M_ARM64)
+	#include <intrin.h>
+	#define PM_PREFETCH(addr) __prefetch(addr)
+#else
+	#define PM_PREFETCH(addr) ((void)0)
+#endif
+
 #ifdef _DEBUG
 //#include "GameClient/InGameUI.h"	// for debugHints
 #include "Common/PlayerList.h"
@@ -1732,6 +1746,7 @@ void PartitionData::friend_setShroudednessPrevious(Int playerIndex, ObjectShroud
 //-----------------------------------------------------------------------------
 ObjectShroudStatus PartitionData::getShroudedStatus(Int playerIndex)
 {
+	LOGIC_WINDOW_READ( WINDOW_SHROUD );
 	// sanity
 	DEBUG_ASSERTCRASH( playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT, 
 										 ("PartitionData::getShroudedStatus - Invalid player index '%d'\n", playerIndex) );
@@ -1745,10 +1760,13 @@ ObjectShroudStatus PartitionData::getShroudedStatus(Int playerIndex)
 	}
 
 	// answered before the cache, so no snapshot is taken and the site is not marked as seen: the
-	// building that goes up there later is news to this player like any other
-	if (m_object && Object_isPlanHiddenFrom(m_object->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION),
-																					m_object->getConstructionPercent(),
-																					ThePlayerList->getNthPlayer(playerIndex)->getRelationship(m_object->getTeam())))
+	// building that goes up there later is news to this player like any other. Only a plan nobody
+	// has started can be hidden, so the relationship lookup waits until the Object is one.
+	if (m_object && Object_isAwaitingBuilder(m_object->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION),
+																					 m_object->getConstructionPercent()) &&
+			Object_isPlanHiddenFrom(m_object->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION),
+															m_object->getConstructionPercent(),
+															ThePlayerList->getNthPlayer(playerIndex)->getRelationship(m_object->getTeam())))
 		return OBJECTSHROUD_SHROUDED;
 
 #ifndef DISABLE_INVALID_PREVENTION
@@ -2258,10 +2276,11 @@ void PartitionData::updateCellsTouched()
 	const PartitionCell *currentCell = ThePartitionManager->getCellAt( currentCellIndexX, currentCellIndexY );
 	if(obj && currentCell != m_lastCell )
 	{
-		// To not expose PartitionCells, he will think in terms of points.  He will 
-		// unlook at a point and look at the new point.  We do the rounding and the 
+		// To not expose PartitionCells, he will think in terms of points.  He will
+		// unlook at a point and look at the new point.  We do the rounding and the
 		// changing into PartitionCells
-		obj->onPartitionCellChange(); 
+		if( !ThePartitionManager->isKeepingCellsFromSave() )
+			obj->onPartitionCellChange();
 		m_lastCell = currentCell;
 	}
 
@@ -2752,6 +2771,7 @@ PartitionManager::PartitionManager()
 	m_worldExtents.hi.zero();
 	m_dirtyModules = NULL;
 	m_updatedSinceLastReset = false;
+	m_cellsFromSave = FALSE;
 #ifdef FASTER_GCO
 	m_maxGcoRadius = 0;
 #endif
@@ -2881,6 +2901,7 @@ void PartitionManager::reset()
 void PartitionManager::shutdown()
 {
 	m_updatedSinceLastReset = false;
+	m_cellsFromSave = FALSE;
 	ThePartitionManager->removeAllDirtyModules();
 
 #ifdef _DEBUG
@@ -2952,19 +2973,22 @@ void PartitionManager::update()
 				dirty->friend_updateCellsTouched();
 			}
 
-			if (collideEm && !dirty->getObject()->isKindOf(KINDOF_IMMOBILE))
+			// the update a load ends with only puts every object back in its cells: the collisions
+			// and the queued unlooks were the saved frame's, and the next frame does its own
+			if (collideEm && !dirty->getObject()->isKindOf(KINDOF_IMMOBILE) && !m_cellsFromSave)
 			{
 				dirty->addPossibleCollisions(&ctList);
 			}
 		}
-		
+
 		ctList.processContactList();
 #ifdef INTENSE_DEBUG
 		DEBUG_ASSERTLOG(cc==0,("updated partition info for %d objects\n",cc));
 #endif
 		TheContactList = NULL;
 
-		processPendingUndoShroudRevealQueue();
+		if (!m_cellsFromSave)
+			processPendingUndoShroudRevealQueue();
 	}
 
 #if defined(_DEBUG) || defined(_INTERNAL)
@@ -3245,6 +3269,7 @@ void PartitionManager::refreshShroudForLocalPlayer()
 //-----------------------------------------------------------------------------
 CellShroudStatus PartitionManager::getShroudStatusForPlayer(Int playerIndex, Int x, Int y) const
 {
+	LOGIC_WINDOW_READ( WINDOW_PARTITION );
 	if( playerIndex < 0 )
 		return CELLSHROUD_SHROUDED;// Safety.  There are no Negative players, but PlayerIndex is typedef'd to Int, not UnsignedInt
 
@@ -3522,6 +3547,11 @@ Object *PartitionManager::getClosestObjects(
 		m_radiusVec[curRadius] contains a list of the cells (foo) that could
 		contain objects that are <= (curRadius * cellSize) distance away from cell (0,0).
 	*/
+	/* The cells of a ring lie scattered through a grid of cells some 300 bytes apiece, so nearly every
+		 one is a cache miss, and the empty-or-not test on each keeps the processor from running ahead to
+		 the next. So each step asks for the cell a few places further on, and its line is in by the time
+		 the walk gets there. The walk itself, its order and what it finds are unchanged. */
+	const Int GCO_PREFETCH_AHEAD = 8;
   for (Int curRadius = 0; curRadius <= maxRadiusLimit; ++curRadius)
   {
     const OffsetVec& offsets = m_radiusVec[curRadius];
@@ -3529,6 +3559,14 @@ Object *PartitionManager::getClosestObjects(
 			continue;
     for (OffsetVec::const_iterator it = offsets.begin(); it != offsets.end(); ++it)
 		{
+			if (offsets.end() - it > GCO_PREFETCH_AHEAD)
+			{
+				const ICoord2D& ahead = *(it + GCO_PREFETCH_AHEAD);
+				const PartitionCell *aheadCell = getCellAt(cellCenterX + ahead.x, cellCenterY + ahead.y);
+				if (aheadCell)
+					PM_PREFETCH(aheadCell->getHotFieldsAddress());
+			}
+
 			PartitionCell* thisCell = getCellAt(cellCenterX + it->x, cellCenterY + it->y);
 			if (thisCell == NULL)
 				continue;
@@ -3696,10 +3734,11 @@ Object *PartitionManager::getClosestObject(
 	DistanceCalculationType dc, 
 	PartitionFilter **filters, 
 	Real *closestDist,
-	Coord3D *closestDistVec
+	Coord3D *closestDistVec,
+	PlayerMaskType onlyPlayers
 )
 {
-	return getClosestObjects(obj, NULL, maxDist, dc, filters, NULL, closestDist, closestDistVec);
+	return getClosestObjects(obj, NULL, maxDist, dc, filters, NULL, closestDist, closestDistVec, onlyPlayers);
 }
 
 //-----------------------------------------------------------------------------
@@ -3839,18 +3878,19 @@ Real PartitionManager::getRelativeAngle2D( const Object *obj, const Coord3D *pos
 
 //-----------------------------------------------------------------------------
 SimpleObjectIterator *PartitionManager::iterateObjectsInRange(
-	const Object *obj, 
-	Real maxDist, 
-	DistanceCalculationType dc, 
-	PartitionFilter **filters, 
-	IterOrderType order
+	const Object *obj,
+	Real maxDist,
+	DistanceCalculationType dc,
+	PartitionFilter **filters,
+	IterOrderType order,
+	PlayerMaskType onlyPlayers
 )
 {
 	MemoryPoolObjectHolder iterHolder;
 	SimpleObjectIterator *iter = newInstance(SimpleObjectIterator);
 	iterHolder.hold(iter);
 
-	getClosestObjects(obj, NULL, maxDist, dc, filters, iter, NULL, NULL);
+	getClosestObjects(obj, NULL, maxDist, dc, filters, iter, NULL, NULL, onlyPlayers);
 
 	iter->sort(order);
 	iterHolder.release();
@@ -4487,6 +4527,13 @@ static Real sightGroundHeight( PartitionCell *cell )
 		if( bridge->peekBridgeInfo()->curDamageState == BODY_RUBBLE )
 			continue;
 
+		// isPointOnBridge turns away any point outside the deck's bounds before anything else, and the
+		// nine samples lie between these four edges, so a grid the bounds miss can skip all nine
+		const Region2D *bounds = bridge->getBounds();
+		if( centerX + halfCell < bounds->lo.x || centerX - halfCell > bounds->hi.x ||
+				centerY + halfCell < bounds->lo.y || centerY - halfCell > bounds->hi.y )
+			continue;
+
 		for( Int sampleY = -1; sampleY <= 1; ++sampleY )
 		{
 			for( Int sampleX = -1; sampleX <= 1; ++sampleX )
@@ -4515,10 +4562,12 @@ static Real sightBlockingHeight( PartitionCell *cell, const Object *looker, cons
 		if( obj == NULL || obj == looker || obj == lookerContainer )
 			continue;
 
-		if( !obj->isKindOf( KINDOF_STRUCTURE ) && !obj->isKindOf( KINDOF_SHRUBBERY ) )
+		// one template lookup for the three questions; Object::isKindOf is this same lookup each time
+		const ThingTemplate *tmpl = obj->getTemplate();
+		if( !tmpl->isKindOf( KINDOF_STRUCTURE ) && !tmpl->isKindOf( KINDOF_SHRUBBERY ) )
 			continue;
 
-		if( obj->isKindOf( KINDOF_BRIDGE ) )
+		if( tmpl->isKindOf( KINDOF_BRIDGE ) )
 			continue;
 
 		if( Object_isAwaitingBuilder( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ), obj->getConstructionPercent() ) )
@@ -4527,6 +4576,22 @@ static Real sightBlockingHeight( PartitionCell *cell, const Object *looker, cons
 		height = max( height, obj->getPosition()->z + obj->getGeometryInfo().getMaxHeightAbovePosition() );
 	}
 	return height;
+}
+
+//-----------------------------------------------------------------------------
+struct RowReach
+{
+	Int m_centerX;
+	Int m_cornerY;		///< cell row of m_reach[0]
+	Int *m_reach;			///< per row, how many cells either side of the middle the circle takes in
+};
+
+//-----------------------------------------------------------------------------
+static void hLineRowReach( Int /*x1*/, Int x2, Int y, void *rowsVoid )
+{
+	RowReach *rows = (RowReach *)rowsVoid;
+	Int &reach = rows->m_reach[ y - rows->m_cornerY ];
+	reach = max( reach, x2 - rows->m_centerX );
 }
 
 //-----------------------------------------------------------------------------
@@ -4543,14 +4608,32 @@ void PartitionManager::doBlockedShroudReveal( SightingInfo *sighting, const Obje
 	heights.resize( side * side );
 	sightMargin.resize( side * side );
 
+	/* Only the cells of the reveal's circle are ever applied: applyRecordedReveal draws this same circle
+		 over the recording, now and again at the undo. Each of them takes its sight line only from cells
+		 nearer the middle that the circle holds too (its rows narrow outwards, and the inner neighbour
+		 findSightMargins reads is no further out on either axis), so the corners of the square outside it,
+		 a fifth of the square, need no height, and each would have been a walk over every Object standing
+		 there. They are recorded as revealing nothing. */
+	static std::vector<Int> rowReach;
+	rowReach.assign( side, -1 );
+	RowReach rows = { cellCenterX, cellCenterY - cellRadius, &rowReach[0] };
+	DiscreteCircle circle( cellCenterX, cellCenterY, cellRadius );
+	circle.drawCircle( hLineRowReach, &rows );
+
 	for( Int offsetY = -cellRadius; offsetY <= cellRadius; ++offsetY )
 	{
+		const Int reach = rowReach[ offsetY + cellRadius ];
 		const Int cellY = min( max( cellCenterY + offsetY, 0 ), m_cellCountY - 1 );
 		for( Int offsetX = -cellRadius; offsetX <= cellRadius; ++offsetX )
 		{
+			Real &height = heights[ ( offsetY + cellRadius ) * side + offsetX + cellRadius ];
+			if( abs( offsetX ) > reach )
+			{
+				height = 0.0f;
+				continue;
+			}
 			const Int cellX = min( max( cellCenterX + offsetX, 0 ), m_cellCountX - 1 );
-			heights[ ( offsetY + cellRadius ) * side + offsetX + cellRadius ] =
-				sightBlockingHeight( getCellAt( cellX, cellY ), looker, lookerContainer );
+			height = sightBlockingHeight( getCellAt( cellX, cellY ), looker, lookerContainer );
 		}
 	}
 
@@ -4565,6 +4648,11 @@ void PartitionManager::doBlockedShroudReveal( SightingInfo *sighting, const Obje
 	{
 		const Int offsetX = cell % side - cellRadius;
 		const Int offsetY = cell / side - cellRadius;
+		if( abs( offsetX ) > rowReach[ offsetY + cellRadius ] )
+		{
+			sighting->m_revealedCells[ cell ] = 0;
+			continue;
+		}
 		Bool revealed = sightMargin[ cell ] >= 0.0f;
 		if( revealed && stretched )
 		{
@@ -5093,15 +5181,20 @@ void PartitionManager::crc( Xfer *xfer )
 	* Version Info:
 	* 1: Initial version
 	* 2: m_pendingUndoShroudReveals stores Unlooks waiting to happen.
+	* 3: the cells are kept as saved through the update that ends the load
 	*/
 // ------------------------------------------------------------------------------------------------
 void PartitionManager::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 2;
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
+
+	// version 3 writes nothing new: it says the objects carry their threat and value (Object 12)
+	if( xfer->getXferMode() == XFER_LOAD )
+		m_cellsFromSave = version >= 3;
 
 	// cell size information
 	Real cellSize = m_cellSize;

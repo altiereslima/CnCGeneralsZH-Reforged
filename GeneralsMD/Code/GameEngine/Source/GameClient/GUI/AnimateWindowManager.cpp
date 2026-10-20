@@ -473,7 +473,29 @@ void AnimateWindowManager::resetToRestPosition( void )
 		it ++;
 	}
 
-	
+
+}
+
+//-----------------------------------------------------------------------------
+/** A click while the windows slide: put each one where its slide ends - its resting place going in,
+	* its start off screen going out - and call the lot finished, as the last step would have. */
+void AnimateWindowManager::finish( void )
+{
+	AnimateWindowList *lists[] = { &m_winMustFinishList, &m_winList };
+	for( Int i = 0; i < 2; ++i )
+	{
+		for( AnimateWindowList::iterator it = lists[i]->begin(); it != lists[i]->end(); ++it )
+		{
+			AnimateWindow *animWin = *it;
+			if( animWin->isFinished() )
+				continue;		// at rest already; a window moved since must not be pulled back
+			ICoord2D pos = m_reverse ? animWin->getStartPos() : animWin->getRestPos();
+			animWin->getGameWindow()->winSetPosition( pos.x, pos.y );
+			animWin->setCurPos( pos );
+			animWin->setFinished( TRUE );
+		}
+	}
+	m_needsUpdate = FALSE;
 }
 
 //-----------------------------------------------------------------------------

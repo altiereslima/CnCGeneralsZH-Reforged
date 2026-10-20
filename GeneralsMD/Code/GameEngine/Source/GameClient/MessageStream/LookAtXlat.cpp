@@ -223,6 +223,113 @@ LookAtTranslator::LookAtTranslator() :
 }
 
 //-----------------------------------------------------------------------------
+/* One step of the scroll the keys, the screen's edges or the right drag are holding, every client
+	 frame (MSG_FRAME_TICK), and on every picture W3DDisplay::draw shows again while a tick runs on
+	 (LOGIC-THREAD.md phase 4), which reads no logic and runs no message stream: the step is the scroll
+	 the last frame's input left, and the view's clock makes it as long as the time since the last. */
+void LookAtTranslator::scrollView( void )
+{
+	Coord2D offset = {0, 0};
+
+	// If we've been forced to stop scrolling (script action?) then stop
+	if (m_isScrolling && !TheInGameUI->isScrolling())
+	{
+		TheInGameUI->setScrollAmount(offset);
+		stopScrolling();
+	}
+	else
+	// scroll the view
+	if (m_isScrolling)
+	{
+		switch (m_scrollType)
+		{
+		case SCROLL_RMB:
+			{
+				// The anchor stays where the button went down and the camera runs away from it,
+				// faster the further the cursor gets.  This is the retail right-drag scroll, and it
+				// is what the hand expects; a one-to-one drag of the world is not the same
+				// gesture and reads as sluggish at these scroll factors.
+				if (TheInGameUI->shouldMoveScrollAnchor())
+				{
+					Int maxX = TheDisplay->getWidth()/2;
+					Int maxY = TheDisplay->getHeight()/2;
+
+					if (m_currentPos.x + maxX < m_anchor.x)
+						m_anchor.x = m_currentPos.x + maxX;
+					else if (m_currentPos.x - maxX > m_anchor.x)
+						m_anchor.x = m_currentPos.x - maxX;
+
+					if (m_currentPos.y + maxY < m_anchor.y)
+						m_anchor.y = m_currentPos.y + maxY;
+					else if (m_currentPos.y - maxY > m_anchor.y)
+						m_anchor.y = m_currentPos.y - maxY;
+				}
+
+				// The drag's own pull did not follow the scroll speed slider at all; only the
+				// floor added below did.  Scaled against the default so the default drags as it did.
+				const Real dragSpeed = TheGlobalData->m_keyboardDefaultScrollFactor > 0.0f
+					? TheGlobalData->m_keyboardScrollFactor / TheGlobalData->m_keyboardDefaultScrollFactor : 1.0f;
+				offset.x = TheGlobalData->m_horizontalScrollSpeedFactor * (m_currentPos.x - m_anchor.x) * dragSpeed;
+				offset.y = TheGlobalData->m_verticalScrollSpeedFactor * (m_currentPos.y - m_anchor.y) * dragSpeed;
+				Coord2D vec;
+				vec.x = offset.x;
+				vec.y = offset.y;
+				vec.normalize();
+				// Add in the window scroll amount as the minimum.
+				offset.x += TheGlobalData->m_horizontalScrollSpeedFactor * vec.x * sqr(TheGlobalData->m_keyboardScrollFactor);
+				offset.y += TheGlobalData->m_verticalScrollSpeedFactor * vec.y * sqr(TheGlobalData->m_keyboardScrollFactor);
+			}
+			break;
+		case SCROLL_KEY:
+			{
+				if (scrollDir[DIR_UP])
+				{
+					offset.y -= TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
+				}
+				if (scrollDir[DIR_DOWN])
+				{
+					offset.y += TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
+				}
+				if (scrollDir[DIR_LEFT])
+				{
+					offset.x -= TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
+				}
+				if (scrollDir[DIR_RIGHT])
+				{
+					offset.x += TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
+				}
+			}
+			break;
+		case SCROLL_SCREENEDGE:
+			{
+				// The speed the last three pixels always gave, scaled by how deep into the band
+				// the pointer is: barely moving where it enters, all of it at the edge itself.
+				const Coord2D pull = edgeScrollPull( m_currentPos );
+				offset.x = TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor * pull.x;
+				offset.y = TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor * pull.y;
+			}
+			break;
+		}
+
+		TheInGameUI->setScrollAmount(offset);
+	}
+	else	//not scrolling so reset amount
+		TheInGameUI->setScrollAmount(offset);
+
+	// The view turns this into the same number of world units at any height, so a pan crossed
+	// the screen ten times faster right down on the ground than from the farthest zoom, and
+	// zoomed out no setting of the scroll speed made it feel like it moved.  Scaled by the
+	// height against MaxCameraHeight, where maps open, it crosses the screen at one pace at
+	// every zoom: the pace it always had at that height.
+	const Real zoomScale = TheTacticalView->getHeightAboveGround() / TheGlobalData->m_maxCameraHeight;
+	offset.x *= zoomScale;
+	offset.y *= zoomScale;
+
+	// Advance the pan clock even while stationary, so restarting does not include idle time.
+	TheTacticalView->scrollBy( &offset );
+}
+
+//-----------------------------------------------------------------------------
 LookAtTranslator::~LookAtTranslator()
 {
 	if (TheLookAtTranslator == this)
@@ -351,6 +458,15 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 		{
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
 			m_anchor = msg->getArgument( 0 )->pixel;
+
+			// where the right button gives the move order it also draws Shift's move line (CommandXlat),
+			// and a drag that draws it does not pan as well.  An armed key's lines and the circle are
+			// the left button's in every mouse, so with one armed this press pans
+			if( TheInGameUI->isOrderDragButton( TRUE ) && TheInGameUI->wantsDragLine() )
+			{
+				m_rightPanArmed = false;
+				break;
+			}
 
 			// the Classic mouse is 1.04's scroll, which starts on the press itself, so a click that
 			// wobbles nudges the camera.  Its second press of a quick pair started nothing, as there.
@@ -607,104 +723,7 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_FRAME_TICK:
 		{
-			Coord2D offset = {0, 0};
-
-			// If we've been forced to stop scrolling (script action?) then stop
-			if (m_isScrolling && !TheInGameUI->isScrolling())
-			{
-				TheInGameUI->setScrollAmount(offset);
-				stopScrolling();
-			}
-			else
-			// scroll the view
-			if (m_isScrolling)
-			{
-				switch (m_scrollType)
-				{
-				case SCROLL_RMB:
-					{
-						// The anchor stays where the button went down and the camera runs away from it,
-						// faster the further the cursor gets.  This is the retail right-drag scroll, and it
-						// is what the hand expects; a one-to-one drag of the world is not the same
-						// gesture and reads as sluggish at these scroll factors.
-						if (TheInGameUI->shouldMoveScrollAnchor())
-						{
-							Int maxX = TheDisplay->getWidth()/2;
-							Int maxY = TheDisplay->getHeight()/2;
-
-							if (m_currentPos.x + maxX < m_anchor.x)
-								m_anchor.x = m_currentPos.x + maxX;
-							else if (m_currentPos.x - maxX > m_anchor.x)
-								m_anchor.x = m_currentPos.x - maxX;
-
-							if (m_currentPos.y + maxY < m_anchor.y)
-								m_anchor.y = m_currentPos.y + maxY;
-							else if (m_currentPos.y - maxY > m_anchor.y)
-								m_anchor.y = m_currentPos.y - maxY;
-						}
-
-						// The drag's own pull did not follow the scroll speed slider at all; only the
-						// floor added below did.  Scaled against the default so the default drags as it did.
-						const Real dragSpeed = TheGlobalData->m_keyboardDefaultScrollFactor > 0.0f
-							? TheGlobalData->m_keyboardScrollFactor / TheGlobalData->m_keyboardDefaultScrollFactor : 1.0f;
-						offset.x = TheGlobalData->m_horizontalScrollSpeedFactor * (m_currentPos.x - m_anchor.x) * dragSpeed;
-						offset.y = TheGlobalData->m_verticalScrollSpeedFactor * (m_currentPos.y - m_anchor.y) * dragSpeed;
-						Coord2D vec;
-						vec.x = offset.x;
-						vec.y = offset.y;
-						vec.normalize();
-						// Add in the window scroll amount as the minimum.
-						offset.x += TheGlobalData->m_horizontalScrollSpeedFactor * vec.x * sqr(TheGlobalData->m_keyboardScrollFactor);
-						offset.y += TheGlobalData->m_verticalScrollSpeedFactor * vec.y * sqr(TheGlobalData->m_keyboardScrollFactor);
-					}
-					break;
-				case SCROLL_KEY:
-					{
-						if (scrollDir[DIR_UP])
-						{
-							offset.y -= TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
-						if (scrollDir[DIR_DOWN])
-						{
-							offset.y += TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
-						if (scrollDir[DIR_LEFT])
-						{
-							offset.x -= TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
-						if (scrollDir[DIR_RIGHT])
-						{
-							offset.x += TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
-					}
-					break;
-				case SCROLL_SCREENEDGE:
-					{
-						// The speed the last three pixels always gave, scaled by how deep into the band
-						// the pointer is: barely moving where it enters, all of it at the edge itself.
-						const Coord2D pull = edgeScrollPull( m_currentPos );
-						offset.x = TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor * pull.x;
-						offset.y = TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor * pull.y;
-					}
-					break;
-				}
-
-				TheInGameUI->setScrollAmount(offset);
-			}
-			else	//not scrolling so reset amount
-				TheInGameUI->setScrollAmount(offset);
-
-			// The view turns this into the same number of world units at any height, so a pan crossed
-			// the screen ten times faster right down on the ground than from the farthest zoom, and
-			// zoomed out no setting of the scroll speed made it feel like it moved.  Scaled by the
-			// height against MaxCameraHeight, where maps open, it crosses the screen at one pace at
-			// every zoom: the pace it always had at that height.
-			const Real zoomScale = TheTacticalView->getHeightAboveGround() / TheGlobalData->m_maxCameraHeight;
-			offset.x *= zoomScale;
-			offset.y *= zoomScale;
-
-			// Advance the pan clock even while stationary, so restarting does not include idle time.
-			TheTacticalView->scrollBy( &offset );
+			scrollView();
 
 			// A playing player's camera goes to the other machines too, so an observer can watch his
 			// screen: every CAMERA_NETWORK_FRAMES logic frames at most and only when it moved, where

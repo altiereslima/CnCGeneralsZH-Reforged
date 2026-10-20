@@ -1,0 +1,33 @@
+# A Raptor built at an airfield, sent out, and left idle until it comes home: one takeoff and one
+# landing on the same runway. The airfield (isobase2's ground) builds it in 20 seconds; the move at
+# 700 sends it about 1500 away, and ten seconds after it gets there (ReturnToBaseIdleTime) it flies
+# back and lands.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 6000
+#     -scenario jetrunway -logPrefix jetrunway_
+#
+# Measured 2026-10-16 with a temporary per-frame trace (runway 140 long, threshold at x 2690).
+# Takeoff, EA: held at about 105 u/s by the slow-down for the end of its path, the wheels left 67
+# down the runway and it went from level to 51 u/s up in a fifth of a second, a 25 degree hop.
+# Now: full throttle to 175, wheels off 43 down, the climb rounds into 12 degrees (5 to 35 u/s up),
+# 14 up at the far end of the runway and 30 at 224.
+# Landing, EA: it reached the threshold at 100 up and corkscrewed 270 degrees down to the runway in
+# 2.4 s, sinking at up to 73 u/s, touched down 103 past the threshold 13 degrees off the centre line,
+# and stopped dead from 60 u/s into the taxi. Now: a circuit out to 183 past the threshold, a
+# descending turn onto a 150 final, an 11 degree glide (sink no more than 22 u/s), a flare to a
+# touchdown 52 past the threshold on the centre line, and a rollout from 61 to 17 u/s. Threshold to
+# touchdown takes 6.6 s instead of 2.4.
+# Taxi, EA: treads, so it stopped dead at each taxiway corner and spun on the spot at 180 degrees a
+# second, and swung onto its parking spot the same way. Now: on its nose wheel, the corners rounded
+# and taken at 14 to 30 u/s, the rollout running into the taxi without a stop, a slow stop on the
+# spot and an eased half turn there in 1.8 s. Runway to parked takes 4.7 s instead of 3.2.
+#
+# For a film, swap -headless for -win -fps 120.
+
+30    spawn      0  AmericaAirfield              1   2520 3370
+30    spawn      0  AmericaPowerPlant            1   1950 3380
+40    produce    0  AmericaAirfield              AmericaJetRaptor 1
+700   move       0  AmericaJetRaptor                 2520 1900
+2900  tally      0  AmericaJetRaptor

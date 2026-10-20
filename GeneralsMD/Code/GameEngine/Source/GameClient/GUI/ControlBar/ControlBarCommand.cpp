@@ -397,15 +397,6 @@ void ControlBar::populateCommand( Object *obj )
 			types[ i ] = ( set[ i ] && !BitTest( set[ i ]->getOptions(), SCRIPT_ONLY ) ) ? set[ i ]->getCommandType() : GUI_COMMAND_NONE;
 			windowed[ i ] = m_commandWindows[ i ] != NULL;
 		}
-		{
-			const Int forceSlot = ControlBar_forceAttackSlot( types, MAX_COMMANDS_PER_SET, ControlBar_forceFires( obj ) );
-			const CommandButton *force = forceSlot >= 0 ? findCommandButton( AsciiString( "Command_ForceAttack" ) ) : NULL;
-			if( force )
-			{
-				set[ forceSlot ] = force;
-				types[ forceSlot ] = force->getCommandType();
-			}
-		}
 		ControlBar_fitCommandSlots( types, windowed, MAX_COMMANDS_PER_SET, shown );
 
 		// a window nothing is fitted to stays empty: its own slot is empty or script only

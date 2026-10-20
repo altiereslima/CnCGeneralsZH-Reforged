@@ -79,7 +79,7 @@ public:
 	// Drawing management
 	virtual void setClipRegion( IRegion2D *region );	///< Set clip rectangle for 2D draw operations.
 	virtual Bool	isClippingEnabled( void ) 	{ return m_isClippedEnabled; }
-	virtual void	enableClipping( Bool onoff )		{ m_isClippedEnabled = onoff; }
+	virtual void	enableClipping( Bool onoff )		{ if( isRecording() ) { record( [=]() { enableClipping( onoff ); } ); return; } m_isClippedEnabled = onoff; }
 
 	virtual void draw( void );  ///< redraw the entire display
 
@@ -123,6 +123,7 @@ public:
 	virtual void beginBatch2D( void );
 	virtual void endBatch2D( void );
 	virtual void flushBatch2D( void );
+	virtual void replayShifted( DrawCalls &calls, Int dx, Int dy );
 
 	virtual VideoBuffer*	createVideoBuffer( void ) ;							///< Create a video buffer that can be used for this display
 

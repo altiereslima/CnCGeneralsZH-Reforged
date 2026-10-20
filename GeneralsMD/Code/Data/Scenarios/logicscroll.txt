@@ -1,0 +1,42 @@
+# Logic thread scroll proof (2026-10-18): a fight just above the local player's command centre,
+# inside the view the camera opens on, plus ambulances and Tomahawks driving off toward the other
+# start, so a short hard scroll either way crosses health bars and the player's own units. Seat 0 is
+# the player (no -observer), so the drag box selects real units and their selection markers show.
+# Fed by waves so it is still fighting 40 seconds in. Driven by a script that holds the arrow keys,
+# parks the pointer on the screen edges and drags selection boxes while the camera moves.
+#
+#   generals.exe -borderless -xres 1280 -yres 720 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -nochroma -noFPSLimit -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario logicscroll -logicthread 1
+#     -maxframes 3600
+
+30    spawn      0  AmericaTankCrusader             10  start0:0:200     40
+30    spawn      0  AmericaVehicleHumvee            6   start0:250:200   34
+30    spawn      0  AmericaInfantryRanger           16  start0:-150:250  18
+30    spawn      0  AmericaTankPaladin              4   start0:150:150   40
+30    spawn      1  ChinaTankBattleMaster           10  start0:-50:520   40
+30    spawn      1  ChinaInfantryRedguard           16  start0:-50:650   18
+30    spawn      1  ChinaTankGattling               4   start0:200:520   36
+30    spawn      0  AmericaVehicleMedic             8   start0:350:50    40
+30    spawn      0  AmericaVehicleTomahawk          4   start0:350:-100  40
+
+60    attackmove 1  *  start0:0:250
+90    attackmove 0  AmericaTankCrusader             start0:0:450
+90    attackmove 0  AmericaVehicleHumvee            start0:0:450
+90    attackmove 0  AmericaInfantryRanger           start0:0:450
+90    attackmove 0  AmericaTankPaladin              start0:0:450
+90    move       0  AmericaVehicleTomahawk          start1
+90    move       0  AmericaVehicleMedic             start1
+
+240   tally      0  *
+
+900   spawn      1  ChinaTankBattleMaster           8   start0:-50:540   40
+900   spawn      1  ChinaInfantryRedguard           12  start0:-50:700   18
+930   attackmove 1  *  start0:0:250
+1200  spawn      0  AmericaTankCrusader             8   start0:0:150     40
+1200  spawn      0  AmericaInfantryRanger           12  start0:-150:200  18
+1230  attackmove 0  AmericaTankCrusader             start0:0:450
+1230  attackmove 0  AmericaInfantryRanger           start0:0:450
+1500  spawn      1  ChinaTankBattleMaster           8   start0:-50:540   40
+1500  spawn      1  ChinaInfantryRedguard           12  start0:-50:700   18
+1530  attackmove 1  *  start0:0:250

@@ -81,7 +81,8 @@ static const Char *ZERO_NAME_ONLY      = "00000000";
 static const Int MAX_SAVE_FILE_NUMBER  =  99999999;
 
 // The GameState block's version.  4 adds nothing to the block: it marks the build where logic went
-// to 60 ticks a second, and a file written before that cannot load in this one.  The original
+// to 60 ticks a second, and a file written before that cannot load in this one (a mission save
+// aside: SaveGameInfo::isLoadable).  The original
 // game's files are 2, as were this fork's until 3 added the game speed.
 static const XferVersion GAME_STATE_VERSION = 4;
 
@@ -122,7 +123,13 @@ Bool SaveGameInfo::isLoadable( void ) const
 {
 
 	// a newer one never gets this far: xferVersion refuses it while the header is read
-	return version >= GAME_STATE_VERSION;
+	if( version >= GAME_STATE_VERSION )
+		return TRUE;
+
+	// A mission save holds only this block and the campaign's, neither of which counts frames, so
+	// the one an older build or the original game wrote at a mission's start still loads.  Version
+	// 2 is the first that records the file type.
+	return version >= 2 && saveFileType == SAVE_FILE_TYPE_MISSION;
 
 }  // end isLoadable
 
@@ -864,7 +871,8 @@ SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
 
 	// A loaded match played at the default 30 whatever speed it was saved at: the reset during the
 	// load puts the default back, and nothing kept the speed. A mission save starts its map afresh. A
-	// save from when the speed went past normal comes back at normal.
+	// save comes back at normal speed or in turbo mode, whichever is nearer what it was saved at, so
+	// one from the old half-speed settings plays at normal.
 	if( getSaveGameInfo()->saveFileType != SAVE_FILE_TYPE_MISSION && getSaveGameInfo()->framesPerSecond > 0 )
 		TheGameEngine->setFramesPerSecondLimit( ClampPlayerGameSpeed( getSaveGameInfo()->framesPerSecond ) );
 
@@ -883,6 +891,7 @@ SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
 		msg->appendIntegerArgument(GAME_SINGLE_PLAYER);
 		msg->appendIntegerArgument(TheCampaignManager->getGameDifficulty());
 		msg->appendIntegerArgument(TheCampaignManager->getRankPoints());
+		msg->appendIntegerArgument(GameEngine_matchFramesPerSecond(TheGlobalData->m_turboMode));
 
 		// remove the mission save data, we've got all we need and have started the load
 		SaveGameInfo *gameInfo = getSaveGameInfo();
@@ -1655,6 +1664,10 @@ void GameState::gameStatePostProcessLoad( void )
 
 	// evil... must ensure this is updated prior to the script engine running the first time.
 	ThePartitionManager->update();
+	ThePartitionManager->stopKeepingCellsFromSave();
+
+	// last, so nothing the load did can draw from the stream after it is put back
+	TheGameLogic->restoreLoadedRandomState();
 
 }  // end loadPostProcess
 

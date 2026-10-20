@@ -1236,6 +1236,7 @@ W3DTreeBuffer::W3DTreeBuffer(void)
 	m_initialized = true;
 	m_curSwayVersion = -1;
 	m_lastSwayFrame = 0xffffffff;	// so the first drawTrees always steps
+	m_lastTreeStepFrame = 0xffffffff;
 
 	m_shadow = NULL;
 
@@ -1856,7 +1857,11 @@ void W3DTreeBuffer::drawModelShadows(CameraClass *camera, Real stretchX, Real st
 		ms.baseZ = 0.0f;
 		Int k;
 		for (k=0; k<ms.numMesh; k++) {
-			//the meshes are where the object stands now, which is the only place this is known
+			//the meshes are where the object stands now, which is the only place this is known.  The
+			//cached box never asks whether the transform moved: a sub-mesh takes its HLod's transform
+			//only when something validates it, and a palm placed after a draw had already cached its
+			//box at the origin kept that box, and its shadow stayed culled, for the whole match
+			ms.mesh[k]->Get_Transform();
 			const AABoxClass &box = ms.mesh[k]->Get_Bounding_Box();
 			Real bottom = box.Center.Z - box.Extent.Z;
 			if (k == 0 || bottom < ms.baseZ) {
@@ -2089,6 +2094,55 @@ DECLARE_PERF_TIMER(Tree_Render)
 //=============================================================================
 /** Draws the trees.  Uses camera to cull. */
 //=============================================================================
+//-------------------------------------------------------------------------------------------------
+/** Update pushed aside and toppling trees, once a logic frame like the sway: the push and sink
+	counts are logic frames, and the topple's speeds were converted to them.  Run every render pass,
+	they went as much faster as the picture rate was over the logic's.  Called at the render's sync
+	point rather than from drawTrees: a toppling tree asks the partition whether the drawn player sees
+	its cell, and its bounce plays an effect (LOGIC-THREAD.md phase 3). */
+//-------------------------------------------------------------------------------------------------
+void W3DTreeBuffer::stepTrees( void )
+{
+	Bool pause = TheScriptEngine->isTimeFrozenScript() || TheScriptEngine->isTimeFrozenDebug();
+	if (TheGameLogic && TheGameLogic->isGamePaused()) {
+		pause = true;
+	}
+	const UnsignedInt now = TheGameClient ? TheGameClient->getFrame() : 0;
+	if (pause || now == m_lastTreeStepFrame) {
+		return;
+	}
+	m_lastTreeStepFrame = now;
+
+	for (Int curTree=0; curTree<m_numTrees; curTree++) {
+		Int type = m_trees[curTree].treeType;
+		if (type<0) { // deleted.
+			continue;
+		}
+		if(m_trees[curTree].m_toppleState == TOPPLE_FALLING ||
+			 m_trees[curTree].m_toppleState == TOPPLE_FOGGED) {
+			updateTopplingTree(m_trees+curTree);
+		} else if(m_trees[curTree].m_toppleState == TOPPLE_DOWN) {
+			if (m_treeTypes[type].m_data->m_killWhenToppled) {
+				if (m_trees[curTree].m_sinkFramesLeft==0) {
+					m_trees[curTree].treeType = DELETED_TREE_TYPE; // delete it. [7/11/2003]
+					m_anythingChanged = true; // need to regenerate trees. [7/11/2003]
+				}
+				m_trees[curTree].m_sinkFramesLeft--;
+				m_trees[curTree].location.Z -= m_treeTypes[type].m_data->m_sinkDistance/m_treeTypes[type].m_data->m_sinkFrames;
+				m_trees[curTree].m_mtx.Set_Translation(m_trees[curTree].location);
+			}
+		} else if (m_trees[curTree].pushAsideDelta!=0.0f) {
+			m_trees[curTree].pushAside += m_trees[curTree].pushAsideDelta;
+			if (m_trees[curTree].pushAside>=1.0f) {
+				m_trees[curTree].pushAsideDelta = -1.0/(Real)m_treeTypes[type].m_data->m_framesToMoveInward;
+			} else if (m_trees[curTree].pushAside<=0.0f) {
+				m_trees[curTree].pushAsideDelta = 0.0f;
+				m_trees[curTree].pushAside = 0.0f;
+			}
+		}
+	}
+}
+
 void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pDynamicLightsIterator)
 {
 	USE_PERF_TIMER(Tree_Render)
@@ -2191,40 +2245,7 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 		TheW3DProjectedShadowManager->flushDecals(m_shadow->getTexture(0), SHADOW_DECAL);
 	}
 
-	// Update pushed aside and toppling trees, once a logic frame like the sway: the push and sink
-	// counts are logic frames, and the topple's speeds were converted to them.  Run every render
-	// pass, they went as much faster as the picture rate was over the logic's.
-	for (curTree=0; curTree<m_numTrees; curTree++) {
-		if (!stepSway) {
-			break;
-		}
-		Int type = m_trees[curTree].treeType;
-		if (type<0) { // deleted.
-			continue;
-		}
-		if(m_trees[curTree].m_toppleState == TOPPLE_FALLING ||
-			 m_trees[curTree].m_toppleState == TOPPLE_FOGGED) {
-			updateTopplingTree(m_trees+curTree);
-		} else if(m_trees[curTree].m_toppleState == TOPPLE_DOWN) {
-			if (m_treeTypes[type].m_data->m_killWhenToppled) {
-				if (m_trees[curTree].m_sinkFramesLeft==0) {
-					m_trees[curTree].treeType = DELETED_TREE_TYPE; // delete it. [7/11/2003]
-					m_anythingChanged = true; // need to regenerate trees. [7/11/2003]
-				}
-				m_trees[curTree].m_sinkFramesLeft--;
-				m_trees[curTree].location.Z -= m_treeTypes[type].m_data->m_sinkDistance/m_treeTypes[type].m_data->m_sinkFrames;
-				m_trees[curTree].m_mtx.Set_Translation(m_trees[curTree].location);
-			}	
-		} else if (m_trees[curTree].pushAsideDelta!=0.0f) {
-			m_trees[curTree].pushAside += m_trees[curTree].pushAsideDelta;
-			if (m_trees[curTree].pushAside>=1.0f) {
-				m_trees[curTree].pushAsideDelta = -1.0/(Real)m_treeTypes[type].m_data->m_framesToMoveInward;
-			} else if (m_trees[curTree].pushAside<=0.0f) {
-				m_trees[curTree].pushAsideDelta = 0.0f;
-				m_trees[curTree].pushAside = 0.0f;
-			}
-		} 
-	}
+	// the pushed aside and toppling trees moved in stepTrees, at the sync point
 
 	if (m_anythingChanged) {
 		loadTreesInVertexAndIndexBuffers(pDynamicLightsIterator);

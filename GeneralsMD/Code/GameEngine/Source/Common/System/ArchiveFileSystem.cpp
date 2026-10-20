@@ -297,11 +297,13 @@ void ArchiveFileSystem::loadMods() {
 	if (TheGlobalData->m_mods.empty())
 		return;
 
-	// retail < mods < the fork: the fork's Reforged*.big already in the tree go back on top afterwards
+	// retail < mods < the fork: the fork's Reforged*.big already in the tree go back on top afterwards.
+	// ReforgedUI.big is EA's interface pages redrawn cell by cell, and a mod that ships its own copy of a
+	// page has its own cameos at its own coordinates in it, so that one stays under the mods.
 	std::vector<AsciiString> forkArt;
 	for (ArchiveFileMap::const_iterator it = m_archiveFileMap.begin(); it != m_archiveFileMap.end(); ++it)
 	{
-		if (isReforgedArchiveName(it->first))
+		if (isReforgedArchiveName(it->first) && !it->first.endsWithNoCase("ReforgedUI.big"))
 			forkArt.push_back(it->first);
 	}
 

@@ -43,7 +43,11 @@
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/GameText.h"
+#include "GameClient/Display.h"
+#include "GameClient/Image.h"
+#include "GameClient/UIStyle.h"
 #include "GameLogic/GameLogic.h" // SUPERWEAPON_RESTRICT_COUNT
+#include "GameLogic/AI.h" // AIPersonality, for the personality column
 #include "GameNetwork/GameInfo.h"
 #include "Common/PlayerTemplate.h"
 #include "GameNetwork/LANAPICallbacks.h" // for acceptTrueColor, etc
@@ -138,6 +142,20 @@ void EnableAcceptControls(Bool Enabled, GameInfo *myGame, GameWindow *comboPlaye
 
 // -----------------------------------------------------------------------------
 
+// What the hiding took down, so showing brings back exactly that: a seat's personality box, ready
+// mark or ping that was already hidden for its own reason stays hidden.  Kept by name, since the
+// windows can be destroyed while the list waits.
+static std::vector<NameKeyType> theUnderlyingHidden;
+
+static void hideUnderlying( GameWindow *parent, NameKeyType id )
+{
+	GameWindow *win = TheWindowManager->winGetWindowFromId( parent, id );
+	if (win == NULL || win->winIsHidden())
+		return;
+	win->winHide( TRUE );
+	theUnderlyingHidden.push_back( id );
+}
+
 void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const char *parentName,
 															 const char **gadgetsToHide, const char **perPlayerGadgetsToHide )
 {
@@ -151,41 +169,34 @@ void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const cha
 		return;
 	}
 
-	// hide some GUI elements of the screen underneath
-	GameWindow *win;
+	if (show)
+	{
+		for (size_t i = 0; i < theUnderlyingHidden.size(); ++i)
+		{
+			GameWindow *win = TheWindowManager->winGetWindowFromId( parent, theUnderlyingHidden[i] );
+			if (win)
+				win->winHide( FALSE );
+		}
+		theUnderlyingHidden.clear();
+		return;
+	}
 
-	Int player;
-	const char **text;
-
-	text = gadgetsToHide;
-	while (*text)
+	// hide some GUI elements of the screen underneath; a window the layout does not have is skipped
+	for (const char **text = gadgetsToHide; *text; ++text)
 	{
 		AsciiString gadgetName;
 		gadgetName.format("%s:%s", layoutFilename, *text);
-		win	= TheWindowManager->winGetWindowFromId( parent, NAMEKEY(gadgetName) );
-		//DEBUG_ASSERTCRASH(win, ("Cannot find %s to show/hide it", gadgetName.str()));
-		if (win)
-		{
-			win->winHide( !show );
-		}
-		++text;
+		hideUnderlying( parent, NAMEKEY(gadgetName) );
 	}
 
-	text = perPlayerGadgetsToHide;
-	while (*text)
+	for (const char **text = perPlayerGadgetsToHide; *text; ++text)
 	{
-		for (player = 0; player < MAX_SLOTS; ++player)
+		for (Int player = 0; player < MAX_SLOTS; ++player)
 		{
 			AsciiString gadgetName;
 			gadgetName.format("%s:%s%d", layoutFilename, *text, player);
-			win	= TheWindowManager->winGetWindowFromId( parent, NAMEKEY(gadgetName) );
-			//DEBUG_ASSERTCRASH(win, ("Cannot find %s to show/hide it", gadgetName.str()));
-			if (win)
-			{
-				win->winHide( !show );
-			}
+			hideUnderlying( parent, NAMEKEY(gadgetName) );
 		}
-		++text;
 	}
 }
 
@@ -282,7 +293,8 @@ void PopulateColorComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myG
 			continue;
 
 		colorName = TheGameText->fetch(def->getTooltipName().str());
-		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], colorName, def->getColor());
+		// a colour's name is words in that colour; the swatch beside it keeps the colour itself
+		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], colorName, UIStyle::readable(def->getColor()));
 		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)(intptr_t)c);
 	}
 	if (wasObserver)
@@ -806,6 +818,309 @@ void ShutdownLobbyTabs(void)
   theLobbyOtherTab = NULL;
   theLobbySettingsTabID = NAMEKEY_INVALID;
   theLobbyOtherTabID = NAMEKEY_INVALID;
+}
+
+// -----------------------------------------------------------------------------
+
+// The personality column has no heading and only a computer's seat fills it; on any other seat the
+// player box (and the online room's name over it) reaches across it.  The two widths are taken from
+// the persona box and the army box after it, which never move, so a second init of a layout whose
+// boxes are already wide measures the same.
+static GameWindow *thePersonaSeatPlayer[MAX_SLOTS];
+static GameWindow *thePersonaSeatName[MAX_SLOTS];
+static GameWindow *thePersonaSeatArmy[MAX_SLOTS];
+static Int thePersonaSeatNarrow[MAX_SLOTS];
+static Int thePersonaSeatWide[MAX_SLOTS];
+
+static GameWindow *findSeatWindow(GameWindow *parent, const char *layoutFilename, const char *name, Int seat)
+{
+	AsciiString full;
+	full.format("%s:%s%d", layoutFilename, name, seat);
+	return TheWindowManager->winGetWindowFromId(parent, NAMEKEY(full));
+}
+
+static void measurePersonaSeat(GameWindow *parent, const char *layoutFilename, GameWindow *persona, Int seat)
+{
+	GameWindow *player = findSeatWindow(parent, layoutFilename, "ComboBoxPlayer", seat);
+	if (!player)
+	{
+		// the skirmish room's own seat is a text entry
+		AsciiString full;
+		full.format("%s:TextEntryPlayerName", layoutFilename);
+		player = TheWindowManager->winGetWindowFromId(parent, NAMEKEY(full));
+	}
+	thePersonaSeatPlayer[seat] = player;
+	thePersonaSeatName[seat] = findSeatWindow(parent, layoutFilename, "StaticTextPlayer", seat);
+	GameWindow *army = findSeatWindow(parent, layoutFilename, "ComboBoxPlayerTemplate", seat);
+	thePersonaSeatArmy[seat] = army;
+
+	Int playerX, personaX, armyX, y, personaWidth, height;
+	player->winGetScreenPosition(&playerX, &y);
+	persona->winGetScreenPosition(&personaX, &y);
+	persona->winGetSize(&personaWidth, &height);
+	army->winGetScreenPosition(&armyX, &y);
+	const Int gap = armyX - (personaX + personaWidth);
+	thePersonaSeatNarrow[seat] = personaX - gap - playerX;
+	thePersonaSeatWide[seat] = personaX + personaWidth - playerX;
+}
+
+static void setSeatPlayerWidth(GameWindow *window, Int width)
+{
+	if (!window)
+		return;	// only the online room has a name over the box
+	Int oldWidth, height;
+	window->winGetSize(&oldWidth, &height);
+	if (oldWidth != width)
+		window->winSetSize(width, height);
+}
+
+void InitAIPersonaComboBoxes(GameWindow *parent, const char *layoutFilename,
+														 GameWindow *comboPersona[], NameKeyType comboPersonaID[])
+{
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		AsciiString name;
+		name.format("%s:ComboBoxAIPersona%d", layoutFilename, i);
+		comboPersonaID[i] = NAMEKEY(name);
+		comboPersona[i] = TheWindowManager->winGetWindowFromId(parent, comboPersonaID[i]);
+		if (!comboPersona[i])
+			continue;	// a layout from before the column
+		measurePersonaSeat(parent, layoutFilename, comboPersona[i], i);
+
+		// make room for the whole list before the first add, as PopulatePlayerSlotComboBox does
+		GameWindow *listBox = GadgetComboBoxGetListBox(comboPersona[i]);
+		ListboxData *listData = (ListboxData *)listBox->winGetUserData();
+		if (listData->listLength < AIPERSONA_COUNT)
+			GadgetListBoxSetListLength(listBox, AIPERSONA_COUNT);
+		// sixteen lines from a lower seat ran off the bottom of the screen; eight and a scroll bar
+		GadgetComboBoxSetMaxDisplay(comboPersona[i], min((Int)AIPERSONA_COUNT, 8));
+
+		GadgetComboBoxReset(comboPersona[i]);
+		const Color color = comboPersona[i]->winGetEnabledTextColor();
+		for (Int p = 0; p < AIPERSONA_COUNT; ++p)
+		{
+			AsciiString label;
+			label.format("GUI:AIPersona%s", aiPersonalityName((AIPersonality)p));
+			Int index = GadgetComboBoxAddEntry(comboPersona[i], TheGameText->fetch(label), color);
+			GadgetComboBoxSetItemData(comboPersona[i], index, (void *)(intptr_t)p);
+		}
+		GadgetComboBoxSetSelectedPos(comboPersona[i], AIPERSONA_NORMAL, TRUE);
+	}
+}
+
+void UpdateAIPersonaComboBoxes(GameInfo *myGame, GameWindow *comboPersona[])
+{
+	if (!AreSlotListUpdatesEnabled())
+		return;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		if (!comboPersona[i])
+			continue;
+		const GameSlot *slot = myGame->getConstSlot(i);
+		// a takeover seat has no AI behind it, so nothing for a personality to steer
+		const Bool computer = slot->isAI() && !slot->isTakeover();
+		// the personality goes with the seat's army box, which ShowUnderlyingGUIElements hides while a
+		// map list lies over the seats, so a network update then cannot bring it back through the list
+		comboPersona[i]->winHide(!computer || thePersonaSeatArmy[i]->winIsHidden());
+		const Int width = computer ? thePersonaSeatNarrow[i] : thePersonaSeatWide[i];
+		setSeatPlayerWidth(thePersonaSeatPlayer[i], width);
+		setSeatPlayerWidth(thePersonaSeatName[i], width);
+		if (!computer)
+			continue;
+		comboPersona[i]->winEnable(myGame->amIHost());
+		Int pos = -1;
+		GadgetComboBoxGetSelectedPos(comboPersona[i], &pos);
+		if (pos != slot->getAIPersonality())
+			GadgetComboBoxSetSelectedPos(comboPersona[i], slot->getAIPersonality(), TRUE);
+	}
+}
+
+Bool HandleAIPersonaSelection(GameInfo *myGame, GameWindow *comboPersona[], NameKeyType comboPersonaID[],
+															NameKeyType controlID)
+{
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		if (!comboPersona[i] || controlID != comboPersonaID[i])
+			continue;
+		Int pos = -1;
+		GadgetComboBoxGetSelectedPos(comboPersona[i], &pos);
+		GameSlot *slot = myGame->getSlot(i);
+		// Random goes into the slot as Random; the AI draws the real one from the logic stream
+		const Int persona = (Int)(intptr_t)GadgetComboBoxGetItemData(comboPersona[i], pos);
+		if (!myGame->amIHost() || !slot->isAI() || persona == slot->getAIPersonality())
+			return FALSE;
+		const Int was = slot->getAIPersonality();
+		slot->setAIPersonality(persona);
+		// an options string past the LAN budget comes back empty and is never sent: the host would
+		// start with a persona nobody else has, so the pick does not stand
+		if (GameInfoToAsciiString(myGame).isEmpty())
+		{
+			slot->setAIPersonality(was);
+			GadgetComboBoxSetSelectedPos(comboPersona[i], was, TRUE);	// entries are in enum order
+			return FALSE;
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+// -----------------------------------------------------------------------------
+
+static GameWindow *theSeatCard[MAX_SLOTS];
+static GameWindow *theSeatBar[MAX_SLOTS];
+static GameWindow *theSeatSwatch[MAX_SLOTS];
+static GameWindow *theSeatTeam[MAX_SLOTS];
+static Bool theSeatsShowReady;
+
+// The eight player colours (gold, red, blue, green, orange, sky blue, purple, pink) take every bright
+// hue, so the teams go by lightness as much as hue: white, black, brown and a dark teal.  Even with
+// no colour vision at all white, teal, brown and black come out as four different greys, and the
+// spot's number stays besides.
+static const Color theTeamColors[] =
+{
+	GameMakeColor(245, 245, 245, 255),
+	GameMakeColor(16, 16, 20, 255),
+	GameMakeColor(150, 88, 30, 255),
+	GameMakeColor(0, 128, 128, 255),
+};
+static const Color theSeatEmptyColor = GameMakeColor(48, 54, 76, 255);
+static const Color theSeatUnpickedColor = GameMakeColor(128, 128, 128, 255);
+// a card is UIStyle's panel in its frame, the host's framed in gold; ready is a state of its own
+static const Color theCardReadyColor = GameMakeColor(22, 74, 40, 210);
+
+Color LobbyTeamColor(Int team)
+{
+	return team >= 0 && team < (Int)ARRAY_SIZE(theTeamColors) ? theTeamColors[team] : theSeatEmptyColor;
+}
+
+Color LobbySeatColor(const GameSlot *slot)
+{
+	if (!slot->isOccupied())
+		return theSeatEmptyColor;
+	if (slot->getColor() >= 0 && slot->getColor() < TheMultiplayerSettings->getNumColors())
+		return TheMultiplayerSettings->getColor(slot->getColor())->getColor();
+	return theSeatUnpickedColor;
+}
+
+// WCAG's relative luminance of one 0-255 channel
+static Real linearChannel(Int channel)
+{
+	const Real c = channel / 255.0f;
+	return c <= 0.03928f ? c / 12.92f : (Real)pow((c + 0.055f) / 1.055f, 2.4f);
+}
+
+Color LobbyTextColorOn(Color fill)
+{
+	UnsignedByte r, g, b, a;
+	GameGetColorComponents(fill, &r, &g, &b, &a);
+	const Real luminance = 0.2126f * linearChannel(r) + 0.7152f * linearChannel(g) + 0.0722f * linearChannel(b);
+	// black on it beats white on it in contrast exactly when the luminance is over about 0.179
+	const Real blackContrast = (luminance + 0.05f) / 0.05f;
+	const Real whiteContrast = 1.05f / (luminance + 0.05f);
+	return blackContrast > whiteContrast ? GameMakeColor(0, 0, 0, 255) : GameMakeColor(255, 255, 255, 255);
+}
+
+void LobbyStartSpotFill(Int x, Int y, Int width, Int height, Color fill)
+{
+	// both halves are cut from EA's PlayerStart cell (Tools/lobby_spot.py), so they lie on it pixel for
+	// pixel: the white middle multiplied by the colour, then the ring over it untinted, its inner edge
+	// fading into the colour as it faded into the black
+	TheDisplay->drawImage(TheMappedImageCollection->findImageByName("ReforgedLobbySpot"), x, y, x + width, y + height, fill);
+	TheDisplay->drawImage(TheMappedImageCollection->findImageByName("ReforgedLobbySpotRing"), x, y, x + width, y + height);
+}
+
+// A colour swatch drawn as one of the rules page's check boxes: their own empty box, and the colour
+// inside its hole with the same room on all four sides.
+static void drawSwatch(GameWindow *window, WinInstanceData *instData)
+{
+	Int x, y, width, height;
+	window->winGetScreenPosition(&x, &y);
+	window->winGetSize(&width, &height);
+	TheDisplay->drawImage(TheMappedImageCollection->findImageByName("Active-Unchecked"), x, y, x + width, y + height);
+	// the art is a 22 pixel cell whose black hole runs from 3 to 17 on both axes, up and left of the
+	// middle because the drop shadow takes the last two; each edge is rounded on its own so the hole
+	// is found again at whatever size the room was scaled to
+	const Int CELL = 22, HOLE_START = 3, HOLE_END = 17;
+	const Int holeLeft = x + (HOLE_START * width + CELL / 2) / CELL;
+	const Int holeRight = x + (HOLE_END * width + CELL / 2) / CELL;
+	const Int holeTop = y + (HOLE_START * height + CELL / 2) / CELL;
+	const Int holeBottom = y + (HOLE_END * height + CELL / 2) / CELL;
+	const Int gap = max(1, min(holeRight - holeLeft, holeBottom - holeTop) / 8);
+	TheDisplay->drawFillRect(holeLeft + gap, holeTop + gap, holeRight - holeLeft - 2 * gap,
+		holeBottom - holeTop - 2 * gap, window->winGetEnabledColor(0));
+}
+
+void DrawMapListTab(GameWindow *window, WinInstanceData *instData)
+{
+	Int x, y, width, height;
+	window->winGetScreenPosition(&x, &y);
+	window->winGetSize(&width, &height);
+	UIStyle::tab(x, y, width, height);
+	DisplayString *text = instData->getTextDisplayString();
+	if (text->getFont() != window->winGetFont())
+		text->setFont(window->winGetFont());
+	Color color = UIStyle::INK;
+	if (!BitTest(window->winGetStatus(), WIN_STATUS_ENABLED))
+		color = UIStyle::MUTED;
+	else if (BitTest(instData->getState(), WIN_STATE_SELECTED))
+		color = UIStyle::ACTIVE;
+	Int textWidth, textHeight;
+	text->getSize(&textWidth, &textHeight);
+	text->draw(x + (width - textWidth) / 2, y + (height - textHeight) / 2, color, UIStyle::SHADOW);
+}
+
+void InitLobbySeatVisuals(GameWindow *parent, const char *layoutFilename)
+{
+	GameWindow **const windows[] = { theSeatCard, theSeatBar, theSeatSwatch, theSeatTeam };
+	const char *const names[] = { "SeatCard", "SeatBar", "SeatSwatch", "SeatTeam" };
+	for (Int kind = 0; kind < (Int)ARRAY_SIZE(names); ++kind)
+		for (Int i = 0; i < MAX_SLOTS; ++i)
+		{
+			AsciiString name;
+			name.format("%s:%s%d", layoutFilename, names[kind], i);
+			windows[kind][i] = TheWindowManager->winGetWindowFromId(parent, NAMEKEY(name));
+		}
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		if (theSeatSwatch[i])
+			theSeatSwatch[i]->winSetDrawFunc(drawSwatch);
+		if (theSeatTeam[i])
+			theSeatTeam[i]->winSetDrawFunc(drawSwatch);
+	}
+	theSeatsShowReady = strcmp(layoutFilename, "SkirmishGameOptionsMenu.wnd") != 0;
+}
+
+void ShutdownLobbySeatVisuals(void)
+{
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+		theSeatCard[i] = theSeatBar[i] = theSeatSwatch[i] = theSeatTeam[i] = NULL;
+}
+
+static void showColor(GameWindow *window, Color color)
+{
+	if (window)
+		window->winSetEnabledColor(0, color);
+}
+
+void UpdateLobbySeatVisuals(GameInfo *myGame)
+{
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		const GameSlot *slot = myGame->getConstSlot(i);
+		const Bool occupied = slot->isOccupied();
+		const Color color = LobbySeatColor(slot);
+		showColor(theSeatBar[i], color);
+		showColor(theSeatSwatch[i], color);
+		showColor(theSeatTeam[i], occupied ? LobbyTeamColor(slot->getTeamNumber()) : theSeatEmptyColor);
+
+		if (theSeatCard[i] == NULL || !theSeatsShowReady)
+			continue;
+		// the host always sits in the first seat of a network room and is never asked to ready up
+		const Bool host = i == 0 && slot->isHuman();
+		const Bool ready = slot->isHuman() && !host && slot->isAccepted();
+		theSeatCard[i]->winSetEnabledColor(0, ready ? theCardReadyColor : UIStyle::PANEL);
+		theSeatCard[i]->winSetEnabledBorderColor(0, host ? UIStyle::GOLD : UIStyle::FRAME);
+	}
 }
 
 // -----------------------------------------------------------------------------

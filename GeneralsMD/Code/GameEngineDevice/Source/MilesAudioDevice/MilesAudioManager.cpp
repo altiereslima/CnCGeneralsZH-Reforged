@@ -58,7 +58,10 @@
 #include "Common/GameSounds.h"
 #include "Common/CRCDebug.h"
 #include "Common/GlobalData.h"
+#include "Common/LogicThread.h"
 #include "Common/ScopedMutex.h"
+
+#include <algorithm>
 
 #include "GameClient/DebugDisplay.h"
 #include "GameClient/Drawable.h"
@@ -1649,6 +1652,15 @@ Bool MilesAudioManager::isMusicPlaying( void ) const
 //-------------------------------------------------------------------------------------------------
 Bool MilesAudioManager::hasMusicTrackCompleted( const AsciiString& trackName, Int numberOfTimes ) const
 {
+	if( LogicThread::defersEffects() )
+	{
+		for( size_t i = 0; i < m_musicLoopsAtSync.size(); ++i )
+			if( m_musicLoopsAtSync[ i ].first == trackName && m_musicLoopsAtSync[ i ].second >= numberOfTimes )
+				return TRUE;
+		return FALSE;
+	}
+
+	LOGIC_CENSUS( CENSUS_AUDIO_READ );
 	std::list<PlayingAudio *>::const_iterator it;
 	PlayingAudio *playing;
 	for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
@@ -1751,6 +1763,10 @@ void MilesAudioManager::closeDevice( void )
 //-------------------------------------------------------------------------------------------------
 Bool MilesAudioManager::isCurrentlyPlaying( AudioHandle handle )
 {
+	if( LogicThread::defersEffects() )
+		return std::binary_search( m_playingAtSync.begin(), m_playingAtSync.end(), handle ) || isQueuedFromTick( handle );
+
+	LOGIC_CENSUS( CENSUS_AUDIO_READ );
 	std::list<PlayingAudio *>::iterator it;
 	PlayingAudio *playing;
 
@@ -1785,7 +1801,43 @@ Bool MilesAudioManager::isCurrentlyPlaying( AudioHandle handle )
 		}
 	}
 
-	return false;
+	// and so is a sound the tick asked for, which waits for the end of the tick to be requested
+	return isQueuedFromTick(handle);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** isCurrentlyPlaying's yes for every handle it would give one to, less the tick's own queue, which
+	* it still asks itself; and hasMusicTrackCompleted's loop count for every music stream. */
+void MilesAudioManager::captureForLogic( void )
+{
+	m_playingAtSync.clear();
+	m_musicLoopsAtSync.clear();
+
+	const std::list<PlayingAudio *> *lists[] = { &m_playingSounds, &m_playing3DSounds, &m_playingStreams };
+	for( Int i = 0; i < 3; ++i )
+	{
+		for( std::list<PlayingAudio *>::const_iterator it = lists[ i ]->begin(); it != lists[ i ]->end(); ++it )
+		{
+			PlayingAudio *playing = *it;
+			if( playing && playing->isPlaying() )
+				m_playingAtSync.push_back( playing->m_audioEventRTS->getPlayingHandle() );
+		}
+	}
+	for( std::list<AudioRequest *>::const_iterator ait = m_audioRequests.begin(); ait != m_audioRequests.end(); ++ait )
+	{
+		AudioRequest *req = *ait;
+		if( req && req->m_usePendingEvent )
+			m_playingAtSync.push_back( req->m_pendingEvent->getPlayingHandle() );
+	}
+	std::sort( m_playingAtSync.begin(), m_playingAtSync.end() );
+
+	for( std::list<PlayingAudio *>::const_iterator it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it )
+	{
+		PlayingAudio *playing = *it;
+		if( playing && audioIsType( playing->m_audioEventRTS, AT_Music ) )
+			m_musicLoopsAtSync.push_back( std::make_pair( playing->m_audioEventRTS->getEventName(),
+				(Int)( INFINITE_LOOP_COUNT - AIL_stream_loop_count( playing->m_stream ) ) ) );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2903,6 +2955,7 @@ Real MilesAudioManager::getFileLengthMS( AsciiString strToLoad ) const
 		return fromHeader;
 	}
 
+	LOGIC_CENSUS( CENSUS_AUDIO_READ );	// the device, from the tick (LOGIC-THREAD.md M7)
 	// Load it as a stream to get the file info without actually opening the file.
 	HSTREAM stream = AIL_open_stream(m_digitalHandle, strToLoad.str(), 0);
 	if (!stream) {

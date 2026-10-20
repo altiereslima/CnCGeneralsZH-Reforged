@@ -71,6 +71,7 @@ public:
 
 	virtual void setHidden(Bool h);
 	virtual void doDrawModule(const Matrix3D* transformMtx);
+	virtual void buildRenderObjects( Bool madeInTick );
 	virtual void setFullyObscuredByShroud(Bool fullyObscured);
 
 protected:

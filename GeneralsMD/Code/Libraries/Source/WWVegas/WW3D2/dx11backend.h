@@ -52,6 +52,7 @@
 #include "ffshader.h"
 #include "ffvertex.h"
 
+#include <d3d11_1.h>
 #include <d3d9.h>
 #include <map>
 #include <string.h>
@@ -239,6 +240,23 @@ public:
 	// A draw it does not suit takes none (Draw_Effect).
 	void Set_Draw_Effect(unsigned effect, const float parameters[4]);
 
+	// The look Set_Draw_Effect last asked for and its numbers (zeros with none), for the sorting
+	// pool: a sorted mesh is drawn after its object's draws have put the look back to none.
+	unsigned Requested_Draw_Effect(float parameters[4]) const;
+
+	// Whether a look asked for now would be drawn at all, for the scene to ask before it leaves an
+	// object's heat vision pass or disabled tint out for it: only into the scene's own target, not
+	// a screen filter's texture, a mirror or the sun's map, and the cloak only where the device
+	// makes the copy of the scene it bends.  A single draw can still refuse one (Draw_Effect).
+	bool Takes_Draw_Effect(unsigned effect);
+
+	// Whether the draws are going into the scene's own target.
+	bool Draws_Into_Scene() const;
+
+	// The scene's target, its depth and the draws' viewport bound again after a pass that bound
+	// its own on the context mid-scene (the post chain's occlusion).
+	void Resume_Scene();
+
 	// What an additive draw (ONE, ONE) into the scene is worth, for the Glow option: the blend
 	// takes the draw's colour times this through the blend factor, so fire, muzzle flashes and
 	// laser cores pass white in the half float scene and the bloom's bright pass finds them, where
@@ -290,6 +308,15 @@ public:
 	// and device objects together.  A pipeline is built the first time its state reaches a draw, so
 	// this is the stutter a new effect costs on the frame it first appears.
 	void Take_Frame_Build_Cost(double & milliseconds, unsigned & pipelines);
+
+	// The constant blocks written since the last call, and how many of those writes discarded their
+	// buffer, which is a rename in the driver.  With offsets a rename is a ring wrapping; without
+	// them every write is one.
+	void Take_Frame_Constant_Writes(unsigned & writes, unsigned & renames);
+	// Which way the constant blocks go up, and why, for the log line Initialise owes: the rings, or
+	// one entry a kind because the device has no offset binding or refused a ring that size.
+	const char * Constant_Path() const { return ConstantPath; }
+	bool Constant_Offsets() const { return OffsetContext != NULL; }
 
 	// Why the refusals happened, in the order Draw checks them: no buffer bound, no texture stage
 	// enabled, a vertex format with no input layout, and a program the generator or the compiler
@@ -427,9 +454,28 @@ private:
 	bool Draw_Indexed(unsigned index_count, unsigned start_index, unsigned base_vertex,
 		D3D11_PRIMITIVE_TOPOLOGY topology);
 
+	// A dynamic constant buffer the blocks of one kind are written into one after another, each at
+	// the next free entry with NO_OVERWRITE, and bound at that entry's offset.  Only a write that
+	// finds the ring full discards it and starts again at zero, so a frame of thousands of writes
+	// renames a few times instead of once a write.  Each kind has its own ring because a discard
+	// throws away everything in the buffer: in a shared one the block a skipped write left behind
+	// would be gone.  Without offset binding the ring is one entry long and every write discards,
+	// which is how every write went before.
+	struct ConstantRing
+	{
+		ID3D11Buffer * Buffer;
+		unsigned EntryBytes;	///< the block rounded up to the 256 bytes an offset moves in
+		unsigned Bytes;			///< the whole buffer, a whole number of entries
+		unsigned Next;			///< where the next write goes; Bytes makes it discard
+		unsigned Current;		///< where the last write went, which is what the draws read
+	};
+	bool Create_Constant_Ring(ConstantRing & ring, unsigned block_bytes);
+	bool Write_Constants(ConstantRing & ring, const void * block, unsigned bytes);
+	void Release_Constant_Ring(ConstantRing & ring);
+
 	// Which bank the vertex half is reading: the engine's own registers while a transcribed
 	// program is bound, the generated block otherwise.
-	ID3D11Buffer * Vertex_Constants() const;
+	const ConstantRing & Vertex_Constants() const;
 	void Bind_State_Objects();
 	void Release_Cached();
 
@@ -514,6 +560,7 @@ private:
 	ID3D11ShaderResourceView * SceneColourCopyView;
 	bool SceneColourStale;
 	bool SceneColourRefused;
+	bool Make_Scene_Colour();
 	bool Take_Scene_Colour();
 	void Release_Scene_Colour();
 	float AdditiveGain;
@@ -583,23 +630,33 @@ private:
 	};
 	Light Lights[MAXIMUM_VERTEX_LIGHTS];
 
-	ID3D11Buffer * VertexConstantBuffer;
-	ID3D11Buffer * PixelConstantBuffer;
+	ConstantRing VertexConstantRing;
+	ConstantRing PixelConstantRing;
 
-	// The engine's own constant bank and the buffer it is uploaded through.  It replaces the
+	// The engine's own constant bank and the ring it is uploaded through.  It replaces the
 	// generated vertex block at slot zero while a transcribed program is bound, because that
 	// program reads registers and not the fixed-function fields.
-	ID3D11Buffer * EngineConstantBuffer;
+	ConstantRing EngineConstantRing;
 	float EngineConstants[ENGINE_SHADER_CONSTANTS][4];
+
+	// The context's 11.1 face, which binds a constant buffer at an offset.  Null when the runtime or
+	// the driver cannot bind at an offset or map a constant buffer without discarding it; the rings
+	// are then one entry long and bound whole.
+	ID3D11DeviceContext1 * OffsetContext;
+	unsigned FrameConstantWrites;
+	unsigned FrameConstantRenames;
+	const char * ConstantPath;
 
 	// What each constant buffer already holds.
 	//
-	// Upload_Constants runs on every draw and each Map asks for D3D11_MAP_WRITE_DISCARD, which is
-	// the driver being told to hand back a fresh region: three renames a draw, thousands of draws a
-	// frame, and NtGdiDdDDICreateAllocation sitting in a steady-state profile where nothing should
-	// be allocating at all.  Most draws in a row change none of this - the transforms, the material
-	// and the lights are set once for a whole batch - so the block is built into a local, compared
-	// against the copy here, and written through only when it differs.
+	// Upload_Constants runs on every draw, and a write used to be a Map with
+	// D3D11_MAP_WRITE_DISCARD, the driver being told to hand back a fresh region: three renames a
+	// draw, thousands of draws a frame, and NtGdiDdDDICreateAllocation sitting in a steady-state
+	// profile where nothing should be allocating at all.  The rings above took the renames out of
+	// the writes that remain.  Most draws in a row change none of this - the transforms, the
+	// material and the lights are set once for a whole batch - so the block is built into a local,
+	// compared against the copy here, and written through only when it differs.  A draw that
+	// writes nothing binds the entry the last write went to.
 	//
 	// The setters do flag the blocks now (ConstantsChanged below), but only to skip building them.
 	// The byte compare still decides the write: a flag says something was set, often to the value
@@ -845,8 +902,10 @@ private:
 		D3D11_PRIMITIVE_TOPOLOGY Topology;
 		ID3D11VertexShader * VertexShader;
 		ID3D11Buffer * VertexConstants;
+		UINT VertexConstantsOffset;
 		ID3D11PixelShader * PixelShader;
 		ID3D11Buffer * PixelConstants;
+		UINT PixelConstantsOffset;
 	};
 	ContextBindings Bound;
 	void Bind_Pipeline(const Pipeline & pipeline, ID3D11Buffer * vertices, UINT stride,

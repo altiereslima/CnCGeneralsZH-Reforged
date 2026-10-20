@@ -115,9 +115,10 @@ public:
 	/** The key a command button gets: the one the player gave it in Hotkeys.ini (the launcher's
 		* Hotkeys page writes it, INI::parseCommandButtonHotKeyDefinition reads it), 0 where the player
 		* took the key away, and labelKey, the letter after the label's '&', where the player left the
-		* button alone; upper case.  Attack move, stop, guard, rally point, evacuate and sell have their
-		* fixed letters; another button gets one only from the player, and loses it to the fixed order
-		* on a bar holding both (addHotKey).  Force Attack is 0: it is Ctrl, painted on the
+		* button alone; upper case.  Attack move, stop, guard, rally point, evacuate and sell have fixed
+		* letters in place of the label's, which the player's own letter still overrides; another button
+		* gets one only from the player, and loses it to the fixed order on a bar holding both
+		* (addHotKey).  Force Attack is 0: it is Ctrl, painted on the
 		* cameo, never a letter. */
 	static WideChar playerButtonKey( const AsciiString& button, WideChar labelKey, Int commandType );
 	/// playerButtonKey over `keys` (lower case button name to letter, 0 for none) in place of the file's
@@ -170,6 +171,7 @@ struct HotkeyCommandRow
 	std::string label;			///< DisplayName, empty for none
 	std::string pair;				///< END_ of a BEGIN_, empty otherwise
 	Bool barOnly;						///< Force Attack's hold, set on the command bar page only
+	Bool hold;							///< a BEGIN_ the shipped file puts on a modifier alone, which a modifier alone may take again
 	Bool launcherDefault;		///< a key the launcher gives a command the game leaves unbound
 };
 
@@ -181,7 +183,8 @@ struct HotkeysFile
 };
 
 /** The rows of the shipped Data\<language>\CommandMap.ini text, then the commands it leaves unbound
-	* and Force Attack's hold (loadCommands in hotkeys.js). */
+	* and the holds it puts on a modifier alone: Force Attack, waypoints and prefer selection
+	* (loadCommands in hotkeys.js). */
 std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandMapText );
 /** The player's part of a Hotkeys.ini text, and the launcher's part as it stands (parseOverrides). */
 HotkeysFile Hotkeys_parse( const std::string& text, const std::vector< HotkeyCommandRow >& rows );

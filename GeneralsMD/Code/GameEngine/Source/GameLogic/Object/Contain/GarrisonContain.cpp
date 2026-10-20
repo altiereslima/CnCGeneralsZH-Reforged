@@ -1648,8 +1648,9 @@ void GarrisonContain::onContaining( Object *obj, Bool wasSelected )
 	//
 	recalcApparentControllingPlayer();
 
+  // whether it is selected is asked after the tick, where a select queued earlier in it has landed
   Drawable *draw = obj->getDrawable();
-  if ( draw && draw->isSelected() )
+  if ( draw )
     TheInGameUI->deselectDrawable( draw );
 
 

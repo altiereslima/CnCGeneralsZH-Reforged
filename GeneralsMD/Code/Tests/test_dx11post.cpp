@@ -635,3 +635,55 @@ TEST(dx11post_resolves_once_a_frame)
 	delete [] first;
 	delete [] second;
 }
+
+TEST(dx11post_the_scene_takes_its_occlusion_once_a_frame_and_the_chain_then_skips_it)
+{
+	DeviceFixture fixture;
+	if (!fixture.Create()) {
+		printf("skip: no Direct3D 11 device on this machine\n");
+		return;
+	}
+	DX11DeviceClass & device = fixture.Get_Device();
+	DX11PostProcessClass & post = fixture.Get_Post();
+
+	// Nothing to do without ao in the chain.
+	const DX11PostEffect copy_only[] = { DX11_POST_COPY };
+	post.Set_Chain(copy_only, 1);
+	post.Open_Frame();
+	post.Begin_Frame();
+	device.Set_Scene_View(post.Scene_View());
+	CHECK(!post.Occlude_Scene(device.Get_Depth_Texture()));
+
+	// With it, once a frame, and the chain of ao alone still brings the scene to the screen.  The
+	// depth is all far plane, so nothing is occluded and the multiply has to give every pixel back.
+	unsigned char * picture = new unsigned char[SURFACE_SIZE * SURFACE_SIZE * BYTES_A_PIXEL];
+	fill_diagonal(picture);
+	const DX11PostEffect ao_only[] = { DX11_POST_AO };
+	post.Set_Chain(ao_only, 1);
+	post.Open_Frame();
+	post.Begin_Frame();
+	device.Set_Scene_View(post.Scene_View());
+	device.Get_Context()->ClearDepthStencilView(device.Get_Depth_Stencil_View(), D3D11_CLEAR_DEPTH,
+		1.0f, 0);
+	CHECK(write_scene(device, post, picture));
+	CHECK(post.Occlude_Scene(device.Get_Depth_Texture()));
+	CHECK(!post.Occlude_Scene(device.Get_Depth_Texture()));
+	CHECK(post.Run_Chain());
+	unsigned pitch = 0;
+	unsigned char * result = read_back_buffer(device, pitch);
+	CHECK(result != NULL);
+	if (result != NULL) {
+		CHECK_EQ(0u, differing_pixels(picture, result, pitch));
+		delete [] result;
+	}
+
+	// A Begin_Frame alone (a mirror's scene, then the frame's own) does not arm it again; the top of
+	// the next frame does.
+	post.Begin_Frame();
+	CHECK(!post.Occlude_Scene(device.Get_Depth_Texture()));
+	post.Open_Frame();
+	CHECK(post.Occlude_Scene(device.Get_Depth_Texture()));
+
+	device.Set_Scene_View(NULL);
+	delete [] picture;
+}

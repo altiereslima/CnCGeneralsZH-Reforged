@@ -903,6 +903,14 @@ DEFINE_KEY(skirmishAISkill)
 
 /**
 	Which: Player Properties
+	Type: Int
+	Usage: (optional) the personality a lobby seat picked for this computer player (AIPersonality),
+	       absent for AIPERSONA_NORMAL so a Normal seat's dict is the one it always was.
+*/
+DEFINE_KEY(skirmishAIPersonality)
+
+/**
+	Which: Player Properties
 	Type: Bool
 	Usage: (optional) if present, signifies if the player is the local player
 */

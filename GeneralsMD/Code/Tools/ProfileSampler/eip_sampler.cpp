@@ -288,15 +288,96 @@ void report_callers(HANDLE proc, const std::vector<CallerChain> &chains, const c
 	}
 }
 
+// -under answers "where does this function's time go": a sample whose stack holds a frame matching
+// the filter counts toward it, and every function between the leaf and that frame is ranked by how
+// many such samples it was on the stack for, once a sample however often it recurses.  The stack is
+// walked deep enough to reach the render loop from a leaf inside the driver.
+const size_t UNDER_DEPTH = 48;
+
+std::vector<DWORD64> walk_stack(HANDLE proc, HANDLE thread, CONTEXT ctx)
+{
+	std::vector<DWORD64> stack;
+	stack.push_back(ctx.CONTEXT_PC);
+	STACKFRAME64 frame = {};
+	frame.AddrPC.Offset = ctx.CONTEXT_PC;
+	frame.AddrPC.Mode = AddrModeFlat;
+	frame.AddrFrame.Offset = ctx.CONTEXT_FRAME;
+	frame.AddrFrame.Mode = AddrModeFlat;
+	frame.AddrStack.Offset = ctx.CONTEXT_STACK;
+	frame.AddrStack.Mode = AddrModeFlat;
+	for (size_t depth = 0; depth < UNDER_DEPTH; ++depth) {
+		const BOOL walked = StackWalk64(SAMPLED_MACHINE, proc, thread, &frame, &ctx, nullptr,
+			SymFunctionTableAccess64, SymGetModuleBase64, nullptr);
+		if (!walked || frame.AddrPC.Offset == 0) {
+			break;
+		}
+		if (depth > 0) {	// the first walked frame is the leaf itself
+			stack.push_back(frame.AddrPC.Offset);
+		}
+	}
+	return stack;
+}
+
+void report_under(HANDLE proc, const std::vector<std::vector<DWORD64>> &stacks, const char *root_filter)
+{
+	std::map<DWORD64, std::string> names;
+	std::map<std::string, unsigned long long> inclusive;
+	std::map<std::string, unsigned long long> leaves;
+	unsigned long long matched = 0;
+
+	for (const std::vector<DWORD64> &stack : stacks) {
+		size_t root = stack.size();
+		for (size_t depth = 0; depth < stack.size(); ++depth) {
+			if (symbol_name(proc, stack[depth], names).find(root_filter) != std::string::npos) {
+				root = depth;
+				break;
+			}
+		}
+		if (root == stack.size()) {
+			continue;
+		}
+		++matched;
+		++leaves[symbol_name(proc, stack[0], names)];
+		std::map<std::string, bool> seen;
+		for (size_t depth = 0; depth <= root; ++depth) {
+			const std::string &name = symbol_name(proc, stack[depth], names);
+			if (!seen[name]) {
+				seen[name] = true;
+				++inclusive[name];
+			}
+		}
+	}
+
+	printf("\nunder '%s' - %llu of %zu main-thread samples\n", root_filter, matched, stacks.size());
+	if (matched == 0) {
+		return;
+	}
+	const auto print_ranked = [matched](const std::map<std::string, unsigned long long> &counts,
+		const char *title) {
+		std::vector<std::pair<std::string, unsigned long long>> ranked(counts.begin(), counts.end());
+		std::sort(ranked.begin(), ranked.end(),
+			[](const auto &a, const auto &b) { return a.second > b.second; });
+		printf("%s\n", title);
+		const size_t shown = ranked.size() < 45 ? ranked.size() : 45;
+		for (size_t i = 0; i < shown; ++i) {
+			printf("%7llu  %5.1f%%  %s\n", ranked[i].second, 100.0 * ranked[i].second / matched,
+				ranked[i].first.c_str());
+		}
+	};
+	print_ranked(inclusive, "inclusive (on the stack):");
+	print_ranked(leaves, "self (the leaf):");
+}
+
 } // namespace
 
 int main(int argc, char **argv)
 {
 	if (argc < 3) {
 		fprintf(stderr,
-			"usage: %s <exe-name|pid> <seconds> [-all] [-callers <leaf substring>]\n"
+			"usage: %s <exe-name|pid> <seconds> [-all] [-callers <leaf substring>] [-under <function substring>]\n"
 			"       -all samples every thread, not just main\n"
-			"       -callers walks the main thread's stack and ranks who calls the matching leaves\n", argv[0]);
+			"       -callers walks the main thread's stack and ranks who calls the matching leaves\n"
+			"       -under ranks the functions the main thread spent its time in below the matching one\n", argv[0]);
 		return 2;
 	}
 
@@ -308,11 +389,14 @@ int main(int argc, char **argv)
 	const double seconds = atof(argv[2]);
 	bool all_threads = false;
 	const char *caller_filter = nullptr;
+	const char *under_filter = nullptr;
 	for (int arg = 3; arg < argc; ++arg) {
 		if (_stricmp(argv[arg], "-all") == 0) {
 			all_threads = true;
 		} else if (_stricmp(argv[arg], "-callers") == 0 && arg + 1 < argc) {
 			caller_filter = argv[++arg];
+		} else if (_stricmp(argv[arg], "-under") == 0 && arg + 1 < argc) {
+			under_filter = argv[++arg];
 		}
 	}
 
@@ -369,6 +453,7 @@ int main(int argc, char **argv)
 	std::vector<std::map<DWORD64, unsigned long long>> hits(handles.size());
 	std::vector<unsigned long long> totals(handles.size(), 0);
 	std::vector<CallerChain> chains;
+	std::vector<std::vector<DWORD64>> stacks;
 	unsigned long long missed = 0;
 
 	LARGE_INTEGER freq = {}, start = {}, now = {};
@@ -388,12 +473,15 @@ int main(int argc, char **argv)
 				continue;
 			}
 			CONTEXT ctx = {};
-			ctx.ContextFlags = caller_filter ? CONTEXT_FULL : CONTEXT_CONTROL;
+			ctx.ContextFlags = (caller_filter || under_filter) ? CONTEXT_FULL : CONTEXT_CONTROL;
 			if (GetThreadContext(handles[i], &ctx)) {
 				++hits[i][ctx.CONTEXT_PC];
 				++totals[i];
 				if (caller_filter && i == 0) {
 					chains.push_back(walk_callers(proc, handles[i], ctx));
+				}
+				if (under_filter && i == 0) {
+					stacks.push_back(walk_stack(proc, handles[i], ctx));
 				}
 			} else {
 				++missed;
@@ -426,6 +514,9 @@ int main(int argc, char **argv)
 
 	if (caller_filter) {
 		report_callers(proc, chains, caller_filter);
+	}
+	if (under_filter) {
+		report_under(proc, stacks, under_filter);
 	}
 
 	SymCleanup(proc);

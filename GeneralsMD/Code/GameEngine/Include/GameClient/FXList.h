@@ -34,16 +34,39 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "Common/GameMemory.h"
+#include "Common/GameType.h"
 #include "Common/NameKeyGenerator.h"
 #include "Common/STLTypedefs.h"
+#include "WWMath/matrix3d.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
+class Drawable;
 class FXNugget;
 class FXList;
 class FXListStore;
 class INI;
 class Object;
-class Matrix3D;
+
+//-------------------------------------------------------------------------------------------------
+/**
+	What an FX nugget reads of an object, taken when the FX was asked for.  An FX logic plays inside
+	a tick runs after the tick (LOGIC-THREAD.md phase 2, M5), when the object may have moved on or
+	been destroyed; it plays where and as the object stood at the call.
+*/
+struct FXObjectView
+{
+	ObjectID				id;
+	Coord3D					position;
+	Matrix3D				transform;
+	Int							playerIndex;					///< of the controlling player, -1 without one
+	Real						boundingCircleRadius;
+	/// the object answers clear for every player: always visible, or out of the partition (garrisoned)
+	Bool						alwaysClear;
+	/// for the bones an FX reads; a drawable the tick destroyed is deleted only after the tick's FX ran
+	const Drawable	*drawable;
+
+	void take( const Object *obj );
+};
 
 //-------------------------------------------------------------------------------------------------
 /**
@@ -88,11 +111,11 @@ public:
 		the object-based version... by default, just call the location-based implementation.
 		Note that primary and/or secondary can be null, so you must check for this.
 	*/
-	virtual void doFXObj(const Object* primary, const Object* secondary = NULL) const;
+	virtual void doFXObj(const FXObjectView* primary, const FXObjectView* secondary = NULL) const;
 
 private:
 
-};  
+};
 EMPTY_DTOR(FXNugget)
 
 //-------------------------------------------------------------------------------------------------
@@ -184,6 +207,10 @@ protected:
 	void doFXObj(const Object* primary, const Object* secondary = NULL) const;
 
 private:
+
+	/// what the two above do, at once outside a tick and after it for one a tick asked for
+	void doFXPosNow(const Coord3D *primary, const Matrix3D* primaryMtx, const Real primarySpeed, const Coord3D *secondary, const Real overrideRadius) const;
+	void doFXObjNow(const FXObjectView* primary, const FXObjectView* secondary, const Object* primaryObject) const;
 
 	typedef std::list< FXNugget* > FXNuggetList;
 

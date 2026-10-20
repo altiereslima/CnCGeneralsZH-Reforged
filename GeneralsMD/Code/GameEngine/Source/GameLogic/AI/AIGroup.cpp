@@ -172,8 +172,27 @@ Bool AIGroup::isMember( Object *obj )
 }
 
 /**
- * Add object to group.
+ * Whether add() takes the object.
  * Only allow AI agents into the group.
+ */
+static Bool canJoinGroup( Object *obj )
+{
+	if (obj->getAIUpdateInterface() != NULL)
+		return TRUE;
+
+	//If this object doesn't have an AIUpdateInterface, then
+	//don't add it to the group UNLESS it is a structure! Structures
+	//with AIUpdateInterfaces also issue similar commands, but those
+	//commands don't need AI updates... they are instant commands like
+	//evacuate or triggering certain special powers...
+	KindOfMaskType validNonAIKindofs;
+	validNonAIKindofs.set(KINDOF_STRUCTURE);
+	validNonAIKindofs.set(KINDOF_ALWAYS_SELECTABLE);
+	return obj->isAnyKindOf( validNonAIKindofs );
+}
+
+/**
+ * Add object to group.
  */
 void AIGroup::add( Object *obj )
 {
@@ -182,20 +201,8 @@ void AIGroup::add( Object *obj )
 	if (obj == NULL)
 		return;
 
-	AIUpdateInterface *ai = obj->getAIUpdateInterface();
-
-	//If this object doesn't have an AIUpdateInterface, then 
-	//don't add it to the group UNLESS it is a structure! Structures
-	//with AIUpdateInterfaces also issue similar commands, but those
-	//commands don't need AI updates... they are instant commands like
-	//evacuate or triggering certain special powers...
-	KindOfMaskType validNonAIKindofs;
-	validNonAIKindofs.set(KINDOF_STRUCTURE);
-	validNonAIKindofs.set(KINDOF_ALWAYS_SELECTABLE);
-	if( ai == NULL && !obj->isAnyKindOf( validNonAIKindofs ) )
-	{
+	if (!canJoinGroup( obj ))
 		return;
-	}
 
 	// add to group's list of objects
 	m_memberList.push_back( obj );
@@ -206,6 +213,62 @@ void AIGroup::add( Object *obj )
 
 	// list has changed, properties need recomputation
 	m_dirty = true;
+}
+
+/**
+ * Add every member of the team, as calling add() on each in team order does.
+ *
+ * A team moving as a group is rebuilt into a fresh group on every update of every member
+ * (AIFollowWaypointPathState::update), so it nearly always arrives here as exactly the group it was
+ * put in last time: the same objects in the same order and nobody else.  Then the list nodes move
+ * across instead of each one being freed from the old group and allocated in this one, and the
+ * members, their order, both groups' counts and dirty bits and the old group's destruction come out
+ * as the add() loop leaves them.
+ */
+void AIGroup::addTeam( Team *team )
+{
+	AIGroup *from = NULL;
+	ListObjectPtrIt fromIt;
+	UnsignedInt count = 0;
+	Bool exact = m_memberList.empty();
+	for (DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); exact && !iter.done(); iter.advance())
+	{
+		Object *obj = iter.cur();
+		if (obj == NULL || !canJoinGroup( obj ))
+			continue;
+		if (from == NULL)
+		{
+			from = obj->getGroup();
+			if (from == NULL || from == this)
+				break;
+			fromIt = from->m_memberList.begin();
+		}
+		exact = obj->getGroup() == from && fromIt != from->m_memberList.end() && *fromIt == obj;
+		if (exact)
+		{
+			++fromIt;
+			++count;
+		}
+	}
+
+	if (exact && from != NULL && from != this && fromIt == from->m_memberList.end())
+	{
+		m_memberList.splice( m_memberList.end(), from->m_memberList );
+		m_memberListSize += count;
+		// each leaves 'from', whose list is already empty, so its remove() finds nothing to do
+		for (ListObjectPtrIt it = m_memberList.begin(); it != m_memberList.end(); ++it)
+			(*it)->enterGroup( this );
+		m_dirty = true;
+		// the add() loop destroys it on the last member, as remove() does any group it empties
+		TheAI->destroyGroup( from );
+		return;
+	}
+
+	for (DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); !iter.done(); iter.advance())
+	{
+		if (iter.cur())
+			add( iter.cur() );
+	}
 }
 
 /**
@@ -3661,7 +3724,7 @@ static Bool mayPlayerSell( const Object *obj )
 	if( obj->testScriptStatusBit( OBJECT_STATUS_SCRIPT_UNSELLABLE ) || obj->isDisabledByType( DISABLED_SUBDUED ) )
 		return FALSE;
 
-	const CommandSet *commandSet = TheControlBar->findCommandSet( obj->getCommandSetString() );
+	const CommandSet *commandSet = TheCommandStore->findCommandSet( obj->getCommandSetString() );
 	if( commandSet == NULL )
 		return FALSE;
 
@@ -4119,7 +4182,7 @@ Object *AIGroup::getCommandButtonSourceObject( GUICommandType type )
 			continue;
 		}
 
-		const CommandSet *commandSet = TheControlBar->findCommandSet( object->getCommandSetString() );
+		const CommandSet *commandSet = TheCommandStore->findCommandSet( object->getCommandSetString() );
 		if (!commandSet) {
 			continue;
 		}

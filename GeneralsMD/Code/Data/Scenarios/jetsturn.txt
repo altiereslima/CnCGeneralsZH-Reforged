@@ -1,0 +1,15 @@
+# A Raptor flying an S: east at cruise, sent off to the left at 4 s, then while it is still banked
+# into that turn sent off to the right at 5.5 s, then back towards east at 7.5 s. Each new order
+# lands mid-turn, so the jet has to roll from one bank through level into the other: the reversal
+# jetturn.txt's single 180 never shows. Made for a film; nothing is measured.
+#
+#   generals.exe -win -xres 1280 -yres 720 -fps 120 -noFPSLimit -quickstart -noshellmap -observer
+#     -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario jetsturn -cinema jetfilm_sturn -video 90 720 jf_sturn -maxframes 730
+
+30    spawn      0  AmericaJetRaptor             1   1000 3000
+31    move       0  AmericaJetRaptor                 4400 3000
+120   move       0  AmericaJetRaptor                 2300 3700
+165   move       0  AmericaJetRaptor                 3000 2300
+225   move       0  AmericaJetRaptor                 4400 2900

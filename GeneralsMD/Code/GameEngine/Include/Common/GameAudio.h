@@ -190,6 +190,13 @@ class AudioManager : public SubsystemInterface
 		///< NOTE NOTE NOTE !!DO NOT USE THIS IN FOR GAMELOGIC PURPOSES!! NOTE NOTE NOTE
 		virtual Bool isCurrentlyPlaying( AudioHandle handle );
 
+		/** LOGIC-THREAD.md M7.  At the sync point, before every tick: which sounds play and how many loops
+			* each music track has finished, so isCurrentlyPlaying and hasMusicTrackCompleted asked from the
+			* tick answer from that and never touch the device.  A sound ends on this machine's clock, so
+			* the copy differs from a read in the middle of the tick only by the milliseconds the tick took;
+			* the tick's own adds and removes reach the device after it either way. */
+		virtual void captureForLogic( void ) { }
+
 		// Device Dependent open and close functions
 		virtual void openDevice( void ) = 0;
 		virtual void closeDevice( void ) = 0;
@@ -332,7 +339,15 @@ class AudioManager : public SubsystemInterface
     virtual void removeLevelSpecificAudioEventInfos( void );
     
     void removeAllAudioRequests( void );
-    
+
+		/** What addAudioEvent and removeAudioEvent do on the main thread.  A sound a tick plays gets its
+			* handle at the call and comes here after the tick with it (LOGIC-THREAD.md M5); 0 mints one. */
+		AudioHandle addAudioEventNow( const AudioEventRTS *eventToAdd, AudioHandle handle );
+		void removeAudioEventNow( AudioHandle audioEvent );
+
+		/// a handle a tick minted for a sound still waiting for the end of the tick counts as playing
+		Bool isQueuedFromTick( AudioHandle handle ) const;
+
 	protected:
 		AudioSettings *m_audioSettings;
 		MiscAudio *m_miscAudio;
@@ -346,6 +361,7 @@ class AudioManager : public SubsystemInterface
 		AudioEventInfoHash m_allAudioEventInfo;
 		std::vector< std::pair<AudioEventInfo *, AudioEventInfo *> > m_beforeMapOverrides;	///< live event, its copy from before the map
 		AudioHandle theAudioHandlePool;
+		std::vector<AudioHandle> m_handlesQueuedFromTick;	///< minted by addAudioEvent inside a tick, not yet added
 		std::list<std::pair<AsciiString, Real> > m_adjustedVolumes;
 
 		Real m_musicVolume;

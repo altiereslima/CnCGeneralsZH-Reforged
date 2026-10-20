@@ -178,25 +178,17 @@ UpdateSleepTime FirestormDynamicGeometryInfoUpdate::update( void )
 
 		if( m_myParticleSystemID[ i ] )
 		{
-			ParticleSystem *sys = TheParticleSystemManager->findParticleSystem( m_myParticleSystemID[ i ] );
-		
-			if( sys )
-			{
+			// after the tick, a system that died having nothing to do (LOGIC-THREAD.md M5); it used to
+			// forget the ID of one it could not find, which logic may not ask the client inside a tick
+			const Real radius = getObject()->getGeometryInfo().getMajorRadius();
+			TheParticleSystemManager->withSystem( m_myParticleSystemID[ i ], [radius]( ParticleSystem *sys ) {
 				ParticleSystemInfo::EmissionVolumeType type = sys->getEmisionVolumeType();
 
 				if( type == ParticleSystemInfo::EmissionVolumeType::SPHERE )
-					sys->setEmissionVolumeSphereRadius( getObject()->getGeometryInfo().getMajorRadius() );
+					sys->setEmissionVolumeSphereRadius( radius );
 				else if( type == ParticleSystemInfo::EmissionVolumeType::CYLINDER )
-					sys->setEmissionVolumeCylinderRadius( getObject()->getGeometryInfo().getMajorRadius() );
-
-			}  // end if
-			else
-			{
-
-				// this system not found (it probably died)... stop trying to find it in the future
-				m_myParticleSystemID[ i ] = INVALID_PARTICLE_SYSTEM_ID;
-
-			}  // end else
+					sys->setEmissionVolumeCylinderRadius( radius );
+			} );
 
 		}  // end if
 

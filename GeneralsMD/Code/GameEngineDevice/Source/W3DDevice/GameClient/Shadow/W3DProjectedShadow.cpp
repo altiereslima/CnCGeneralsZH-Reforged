@@ -996,11 +996,11 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 			if (robj->Get_User_Data())
 			{
 				Drawable *draw=((DrawableInfo *)robj->Get_User_Data())->m_drawable;
-				const Object *object=draw->getObject();
-				PathfindLayerEnum objectLayer;
-				if (object && (objectLayer=object->getLayer()) != LAYER_GROUND) 
+				// the object's layer and its height under the drawable, as the sync point took them
+				const Drawable::ObjectForDraw &forDraw = draw->getObjectForDraw();
+				if (forDraw.hasObject && forDraw.layer != LAYER_GROUND)
 				{	//check if object that this decal belongs to is not on the ground (bridge?)
-					layerHeight=BRIDGE_OFFSET_FACTOR+TheTerrainLogic->getLayerHeight(objPos.X,objPos.Y,objectLayer);
+					layerHeight=BRIDGE_OFFSET_FACTOR+forDraw.layerHeight;
 				}
 			}
 		}
@@ -1031,7 +1031,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 		Real heightAboveGround = 0.0f;
 		if (layerHeight == 0.0f && TheW3DShadowManager != NULL && TheTerrainLogic != NULL)
 		{
-			heightAboveGround = objPos.Z - TheTerrainLogic->getGroundHeight(objPos.X, objPos.Y);
+			heightAboveGround = objPos.Z - TheTerrainRenderObject->getDrawHeight(objPos.X, objPos.Y);
 			toSun = TheW3DShadowManager->getLightPosWorld(0);
 			const Real MIN_SUN_HEIGHT = 0.01f;		// a sun on the horizon casts a shadow of infinite length
 			sunCasts = sunCast && toSun.Z > MIN_SUN_HEIGHT;	//a marker ring stays under its object

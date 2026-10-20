@@ -5111,7 +5111,7 @@ NetCommandList * NetPacket::getCommandList() {
 			case NETCOMMANDTYPE_FRAMEINFO:
 				msg = readFrameMessage(m_packet, i);
 				// frameinfodebug
-				DEBUG_LOG(("read frame %d from player %d, command count = %d, relay = 0x%X\n", frame, playerID, ((NetFrameCommandMsg *)msg)->getCommandCount(), relay));
+				DEBUG_LOG_DEV(("read frame %d from player %d, command count = %d, relay = 0x%X\n", frame, playerID, ((NetFrameCommandMsg *)msg)->getCommandCount(), relay));
 				break;
 			case NETCOMMANDTYPE_PLAYERLEAVE:
 				msg = readPlayerLeaveMessage(m_packet, i);

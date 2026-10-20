@@ -44,6 +44,7 @@
 
 #include "WWMath/matrix3d.h"		///< @todo Replace with our own matrix library
 #include "Common/STLTypedefs.h"
+#include <functional>
 #include <vector>
 
  
@@ -684,6 +685,14 @@ public:
 
 	void attachToDrawable( const Drawable *draw );							///< attach this particle system to a Drawable
 	void attachToObject( const Object *obj );									///< attach this particle system to an Object
+	void attachToObjectID( ObjectID id ) { m_attachedToObjectID = id; }	///< the same, for an object that may be gone already
+
+	/** LOGIC-THREAD.md phase 2, M5.  A system made inside a tick is a shell until the end of the tick:
+		* its ID and everything copied from the template, so logic can place it, attach it, stop it and
+		* keep its ID.  The client stream's draws, the slave, the manager's list and the DebrisTrails
+		* option wait for this, which the constructor runs at once outside a tick. */
+	void buildClientPart( Bool createSlaves );
+	Bool isShell( void ) const { return m_isShell; }
 
 	virtual Bool update( Int localPlayerIndex );								///< update this particle system, return false if dead
 
@@ -717,9 +726,11 @@ public:
 	/// Force a burst of particles to be emitted immediately.
 	void trigger (void) { m_burstDelayLeft = 0; m_delayLeft = 0;}
 
-	void setInitialDelay( UnsignedInt delay ) { m_delayLeft = delay; }
+	void setInitialDelay( UnsignedInt delay ) { m_delayLeft = delay; m_initialDelaySet = TRUE; }
 
-	AsciiString getParticleTypeName( void ) { return m_particleTypeName; }	///< return the name of the particles
+	/// the name of the particles; a reference, as the renderer asks it of every system several times
+	/// a frame and a copy is an atomic increment and decrement each
+	const AsciiString &getParticleTypeName( void ) const { return m_particleTypeName; }
 	Bool isUsingDrawables( void ) { return (m_particleType == DRAWABLE) ? true : false; }
 	Bool isUsingStreak( void ) { return (m_particleType == STREAK) ? true : false; }
 	Bool isUsingSmudge( void ) { return (m_particleType == SMUDGE) ? true : false; }
@@ -846,6 +857,7 @@ protected:
 
 	DrawableID				m_attachedToDrawableID;					///< if non-zero, system is parented to this Drawable
 	ObjectID					m_attachedToObjectID;						///< if non-zero, system is parented to this Object
+	DrawableID				m_attachedObjectDrawableForDraw;	///< that Object's drawable at the last update, for getStealthFade inside the overlap window
 
 	Matrix3D					m_localTransform;								///< local orientation & position of system
 	Matrix3D					m_transform;										///< composite transform of parent Drawable and local
@@ -885,6 +897,8 @@ protected:
 	Bool							m_isFirstPos;													///< true if this system hasn't been drawn before.
 	Bool							m_isSaveable;													///< true if this system should be saved/loaded
   Bool              m_skipParentXfrm;                     ///< true if this system is already in world space.
+	Bool							m_isShell;														///< made inside a tick and not yet built (buildClientPart)
+	Bool							m_initialDelaySet;										///< setInitialDelay was called, so the build keeps it over the template's
 
 
 	// the actual particle system data is inherited from ParticleSystemInfo
@@ -941,6 +955,10 @@ public:
 	/// destroy the particle system with the given id (if it still exists)
 	void destroyParticleSystemByID(ParticleSystemID id);
 
+	/** Run work on the system with this id if it exists: at once outside a tick, after it for a call
+		* from one (LOGIC-THREAD.md M5), where logic may not reach a live system. */
+	void withSystem( ParticleSystemID id, const std::function<void( ParticleSystem * )> &work );
+
 	/// return iterators to the particle system template
 	TemplateMap::iterator beginParticleSystemTemplate() { return m_templateMap.begin(); }
 	TemplateMap::iterator endParticleSystemTemplate() { return m_templateMap.end(); }
@@ -975,6 +993,8 @@ public:
 	// A restored system reads its saved id after the constructor has already filed it under the
 	// fresh one, so it tells the manager to re-file it.
 	void friend_renumberParticleSystem( ParticleSystem *particleSystem, ParticleSystemID oldID );
+	/// a system a tick made waits here for its build after the tick (ParticleSystem::buildClientPart)
+	void friend_addShell( ParticleSystem *shell, Bool createSlaves );
 
 protected:
 
@@ -999,6 +1019,7 @@ protected:
 	UnsignedInt m_lastLogicFrameUpdate;
 	Int m_localPlayerIndex;	///<used to tell particle systems which particles can be skipped due to player shroud status
 	std::vector<ParticleSystem *> m_independentUpdates;	///< this update's systems whose particles go to the job pool; kept so it does not reallocate
+	std::vector<ParticleSystem *> m_shells;							///< made inside this tick, built after it; reset() deletes any a cleared game left
 
 private:
 	TemplateMap m_templateMap;		///< a hash map of all particle system templates

@@ -186,7 +186,8 @@ public:
 	Real computeOrbitBeamWidthScalar( UnsignedInt frame ) const;
 
 	Bool calculateDefaultInformation();
-	Bool calculateUpBonePositions();
+	void calculateUpBonePositions();
+	void placeOnUpBones();		///< after the tick: the raised antenna's bones, and what this tick placed at them
 
 	virtual Bool doesSpecialPowerHaveOverridableDestinationActive() const; //Is it active now?
 	virtual Bool doesSpecialPowerHaveOverridableDestination() const { return true; }	//Does it have it, even if it's not active?
@@ -246,6 +247,7 @@ protected:
 	Bool						m_manualTargetMode;
 	Bool						m_scriptedWaypointMode;
 	Bool						m_clientShroudedLastFrame;
+	Bool						m_upBonesToRead;		///< calculateUpBonePositions asked in this setClientStatus; not saved, a save is never inside a tick
 };
 
 

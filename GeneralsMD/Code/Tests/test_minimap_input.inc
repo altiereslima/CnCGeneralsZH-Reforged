@@ -1,5 +1,7 @@
-// Drive minimap gestures through the actual window and mouse message translators.
+// Drive minimap gestures, and the world's armed-key gestures, through the actual window and mouse
+// message translators.
 #include "GameClient/MetaEvent.h"
+#include "GameClient/CommandXlat.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Shell.h"
@@ -391,9 +393,9 @@ TEST(minimap_drag_works_during_keyboard_scroll_and_pins_to_a_letterboxed_picture
 	CHECK(f.windows.winGetGrabWindow() == NULL);
 }
 
-/* 1.04's radar in both of its mouse setups: the look button moves the camera on the press and a drag
-   after it leaves the camera alone. */
-TEST(minimap_classic_looks_on_the_press_in_both_mouse_setups)
+/* Classic's radar in both of 1.04's mouse setups: the look button moves the camera on the press, the
+   camera follows the cursor while that button is held, and stops following on the release. */
+TEST(minimap_classic_look_follows_the_held_button_in_both_mouse_setups)
 {
 	CHECK(bootOnce());
 	for (Int alternate = 0; alternate < 2; ++alternate)
@@ -409,12 +411,18 @@ TEST(minimap_classic_looks_on_the_press_in_both_mouse_setups)
 		const GameMessage::Type lookDrag = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_DRAG : GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG;
 		const GameMessage::Type lookUp = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP : GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP;
 
+		// the cursor is over the radar before it presses there, as it always is in the game
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_POSITION, 120, 220);
 		f.event(messages, lookDown, 120, 220);
 		CHECK(f.engine.view.lookAtCalls == 1);
+		const Coord3D pressed = *f.engine.view.getPosition();
 		f.event(messages, lookDrag, 150, 250);
-		CHECK(f.engine.view.lookAtCalls == 1);
+		CHECK(f.engine.view.lookAtCalls == 2);
+		CHECK(f.engine.view.getPosition()->x != pressed.x || f.engine.view.getPosition()->y != pressed.y);
 		f.event(messages, lookUp, 150, 250);
 		CHECK(messages.commands.getFirstMessage() == NULL);
+		f.event(messages, lookDrag, 180, 280);
+		CHECK(f.engine.view.lookAtCalls == 2);
 	}
 }
 
@@ -507,4 +515,207 @@ TEST(classic_right_click_deselects_or_takes_back_a_command_as_1_04_did)
 	}
 	guard->deleteInstance();
 	TheSelectionTranslator = savedSelection;
+}
+
+namespace
+{
+class OrderButtonUI : public MinimapInputUI
+{
+public:
+	void select(Int count) { m_selectCount = count; }
+	void reset() { clearAttackMoveToMode(); setForceAttackMode(FALSE); clearFormationDrag(); cancelAttackCircle(); m_selectCount = 0; }
+	void placeBuildAvailable(const ThingTemplate*, Drawable*) {}
+	void deselectAllDrawables() {}
+};
+
+OrderButtonUI *orderButtonUI()
+{
+	// kept until process exit, as the other input tests keep theirs
+	static OrderButtonUI *ui = NEW OrderButtonUI;
+	return ui;
+}
+
+// the three mice: Classic, Classic under EA's Alternate Mouse Setup, Reforged
+const Int ORDER_BUTTON_STYLES[3] = { MOUSE_STYLE_CLASSIC, MOUSE_STYLE_CLASSIC, MOUSE_STYLE_REFORGED };
+const Bool ORDER_BUTTON_ALTERNATE[3] = { FALSE, TRUE, FALSE };
+
+GameMessageDisposition sendRawMouse(GameMessageTranslator &translator, GameMessage::Type type, Int x, Int y, Int time)
+{
+	GameMessage *message = newInstance(GameMessage)(type);
+	const ICoord2D pixel = {x, y};
+	message->appendPixelArgument(pixel);
+	message->appendIntegerArgument(0);
+	message->appendIntegerArgument(time);
+	const GameMessageDisposition disp = translator.translateGameMessage(message);
+	message->deleteInstance();
+	return disp;
+}
+
+GameMessageDisposition sendClick(GameMessageTranslator &translator, GameMessage::Type type, Int x, Int y)
+{
+	GameMessage *message = newInstance(GameMessage)(type);
+	IRegion2D region;
+	region.lo.x = region.hi.x = x;
+	region.lo.y = region.hi.y = y;
+	message->appendPixelRegionArgument(region);
+	message->appendIntegerArgument(0);
+	const GameMessageDisposition disp = translator.translateGameMessage(message);
+	message->deleteInstance();
+	return disp;
+}
+}
+
+/* Attack move, guard and the Ctrl hold are aimed with the left button in every mouse, the drag as well
+   as the click.  Their lines and circle used to follow the button that orders, so under the Alternate
+   Mouse Setup an attack move line or a Ctrl circle took the right button and the left one drew a box.
+   Shift's plain move line still follows the button that orders. */
+TEST(armed_keys_and_ctrl_drag_with_the_left_button_in_every_mouse_setup)
+{
+	CHECK(bootOnce());
+	MinimapEngineFixture f;
+	OrderButtonUI *ui = orderButtonUI();
+	TheInGameUI = ui;
+	SelectionTranslator *savedSelection = TheSelectionTranslator;
+	f.mouse.m_dragTolerance = 25;
+	f.mouse.m_dragTolerance3D = 25;
+	f.mouse.m_dragToleranceMS = 250;
+	{
+		SelectionTranslator selection;
+		for (Int i = 0; i < 3; ++i)
+		{
+			f.global->m_mouseStyle = ORDER_BUTTON_STYLES[i];
+			f.global->m_useAlternateMouse = ORDER_BUTTON_ALTERNATE[i];
+			f.keyboard.modifiers(0);
+
+			// nothing armed: a line, Shift's move line, belongs to the button that orders
+			ui->reset();
+			ui->select(1);
+			CHECK(ui->isOrderDragButton(FALSE) == f.global->leftButtonOrders());
+			CHECK(ui->isOrderDragButton(TRUE) == f.global->rightButtonOrders());
+
+			// attack move, then guard: the left press latches the line, so the click behind the release
+			// that ends the drag is eaten instead of selecting
+			for (Int key = 0; key < 2; ++key)
+			{
+				ui->reset();
+				ui->select(1);
+				if (key == 0)
+					ui->toggleAttackMoveToMode();
+				else
+					ui->toggleGuardArmed();
+				CHECK(ui->isOrderDragButton(FALSE));
+				CHECK(!ui->isOrderDragButton(TRUE));
+
+				sendRawMouse(selection, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN, 300, 300, 1000);
+				const ICoord2D from = {300, 300}, to = {420, 300};
+				ui->addFormationDragPoint(from);
+				ui->addFormationDragPoint(to);
+				sendRawMouse(selection, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP, 420, 300, 1200);
+				CHECK(sendClick(selection, GameMessage::MSG_MOUSE_LEFT_CLICK, 420, 300) == DESTROY_MESSAGE);
+			}
+
+			// the Ctrl hold: the right press never starts the attack circle, the left one does
+			ui->reset();
+			ui->select(1);
+			ui->setForceAttackMode(TRUE);
+			f.keyboard.modifiers(KEY_STATE_LCONTROL);
+			sendRawMouse(selection, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300, 1000);
+			CHECK(!ui->isAttackCircling());
+			sendRawMouse(selection, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN, 300, 300, 1000);
+			CHECK(ui->isAttackCircling());
+			ui->cancelAttackCircle();
+
+			// Ctrl+Shift draws the attack line, on the left as well
+			f.keyboard.modifiers(KEY_STATE_LCONTROL | KEY_STATE_LSHIFT);
+			CHECK(ui->isForceLineHeld());
+			CHECK(ui->isOrderDragButton(FALSE));
+			CHECK(!ui->isOrderDragButton(TRUE));
+		}
+	}
+	f.keyboard.modifiers(0);
+	ui->reset();
+	TheSelectionTranslator = savedSelection;
+}
+
+/* Where the right button gives the orders, a right click with attack move, guard or Ctrl puts the key
+   down and orders nothing, the way a right click takes back any command waiting for its target.  A
+   right drag pans and leaves the key armed. */
+TEST(right_click_puts_an_armed_key_down_without_an_order_where_the_right_button_orders)
+{
+	CHECK(bootOnce());
+	MinimapEngineFixture f;
+	MinimapMessages messages;
+	OrderButtonUI *ui = orderButtonUI();
+	TheInGameUI = ui;
+	f.mouse.m_dragTolerance = 25;
+	f.mouse.m_dragTolerance3D = 25;
+	f.mouse.m_dragToleranceMS = 250;
+	{
+		CommandTranslator command;
+		const auto rightClick = [&command](Int dx)
+		{
+			sendRawMouse(command, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300, 1000);
+			sendRawMouse(command, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 300 + dx, 300, 1100);
+			return sendClick(command, GameMessage::MSG_MOUSE_RIGHT_CLICK, 300 + dx, 300);
+		};
+		for (Int i = 1; i < 3; ++i)
+		{
+			f.global->m_mouseStyle = ORDER_BUTTON_STYLES[i];
+			f.global->m_useAlternateMouse = ORDER_BUTTON_ALTERNATE[i];
+			for (Int key = 0; key < 2; ++key)
+			{
+				ui->reset();
+				ui->select(1);
+				if (key == 0)
+					ui->toggleAttackMoveToMode();
+				else
+					ui->toggleGuardArmed();
+				CHECK(rightClick(60) == DESTROY_MESSAGE);
+				CHECK(ui->isOrderKeyArmed());
+				CHECK(rightClick(0) == DESTROY_MESSAGE);
+				CHECK(!ui->isOrderKeyArmed());
+			}
+
+			ui->reset();
+			ui->select(1);
+			ui->setForceAttackMode(TRUE);
+			CHECK(rightClick(0) == DESTROY_MESSAGE);
+			CHECK(messages.stream.getFirstMessage() == NULL);
+		}
+	}
+	ui->reset();
+}
+
+/* The radar follows the world: with a key armed the left press is the order and the right one looks,
+   in the mice where the right button orders as well as in Classic's default. */
+TEST(minimap_armed_key_orders_on_the_left_and_looks_on_the_right_in_every_mouse_setup)
+{
+	CHECK(bootOnce());
+	GameClient *savedClient = TheGameClient;
+	TheGameClient = getTestGameClient();
+	for (Int i = 0; i < 3; ++i)
+	{
+		MinimapInputFixture f;
+		MinimapMessages messages;
+		messages.stream.attachTranslator(NEW WindowTranslator, 10);
+		TheWritableGlobalData->m_mouseStyle = ORDER_BUTTON_STYLES[i];
+		TheWritableGlobalData->m_useAlternateMouse = ORDER_BUTTON_ALTERNATE[i];
+		MinimapTestUI *ui = (MinimapTestUI*)TheInGameUI;
+		ui->selected.push_back(NULL);
+		ui->clearAttackMoveToMode();
+		ui->toggleAttackMoveToMode();
+
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_POSITION, 120, 220);
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 120, 220);
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 120, 220);
+		CHECK(f.engine.view.lookAtCalls == 1);
+		CHECK(ui->isOrderKeyArmed());
+
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN, 120, 220);
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP, 120, 220);
+		CHECK(f.engine.view.lookAtCalls == 1);
+		CHECK(!ui->isOrderKeyArmed());
+		ui->clearAttackMoveToMode();
+	}
+	TheGameClient = savedClient;
 }

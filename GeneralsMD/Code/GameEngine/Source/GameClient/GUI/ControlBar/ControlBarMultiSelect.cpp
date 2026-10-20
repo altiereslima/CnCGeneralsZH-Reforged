@@ -302,7 +302,7 @@ Bool ControlBar::describePortraitBarWindow( GameWindow *window, UnicodeString &n
 		name = TheGameText->fetch( shown->getDisplayNameLabel().str() );
 		// the description is the one on the button that buys it, when there is such a button
 		description.clear();
-		for( const CommandButton *button = m_commandButtons; button; button = button->getNext() )
+		for( const CommandButton *button = TheCommandStore->getCommandButtons(); button; button = button->getNext() )
 		{
 			if( button->getUpgradeTemplate() == shown && button->getDescriptionLabel().isNotEmpty() )
 			{

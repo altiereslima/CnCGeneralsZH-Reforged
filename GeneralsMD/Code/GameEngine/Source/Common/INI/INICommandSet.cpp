@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,12 +33,12 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/INI.h"
-#include "GameClient/ControlBar.h"
+#include "Common/CommandStore.h"
 
 //-------------------------------------------------------------------------------------------------
 /** Parse a command set */
 //-------------------------------------------------------------------------------------------------
 void INI::parseCommandSetDefinition( INI *ini )
 {
-	ControlBar::parseCommandSetDefinition(ini);
+	CommandStore::parseCommandSetDefinition(ini);
 }  // end parseCommandSetDefinition

@@ -34,6 +34,7 @@
 #define DEFINE_DEATH_NAMES
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
+#include "Common/LogicThread.h"
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
 #include "Common/Player.h"
@@ -188,6 +189,7 @@ ParticleUplinkCannonUpdate::ParticleUplinkCannonUpdate( Thing *thing, const Modu
 	m_connectorNodePosition.zero();
 	m_laserOriginPosition.zero();
 	m_upBonesCached = FALSE;
+	m_upBonesToRead = FALSE;
 	m_defaultInfoCached = FALSE;
 	m_invalidSettings = FALSE;
 	m_manualTargetMode = FALSE;
@@ -1203,7 +1205,18 @@ Bool ParticleUplinkCannonUpdate::calculateDefaultInformation()
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool ParticleUplinkCannonUpdate::calculateUpBonePositions()
+/** The raised antenna's connector and fire bones are the render object's: DEPLOYED starts on the
+	animation's last frame, and the pristine bones are its first, about 34 units lower.  Inside a tick
+	that render object has not caught up with the tick (LOGIC-THREAD.md phase 3), so the read waits
+	for the flush after it, and setClientStatus asks then for what it placed at them meanwhile.  The two
+	positions only place beams, flares and the launch FX; logic decides nothing with them. */
+void ParticleUplinkCannonUpdate::calculateUpBonePositions()
+{
+	m_upBonesToRead = TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void ParticleUplinkCannonUpdate::placeOnUpBones()
 {
 	const ParticleUplinkCannonUpdateModuleData *data = getParticleUplinkCannonUpdateModuleData();
 	Object *obj = getObject();
@@ -1222,7 +1235,31 @@ Bool ParticleUplinkCannonUpdate::calculateUpBonePositions()
 			obj->convertBonePosToWorldPos( &pos, &mtx, &m_laserOriginPosition, &mtx );
 		}
 	}
-	return TRUE;
+
+	// the beams and flares the same setClientStatus made, which took the positions as they stood
+	static NameKeyType nameKeyClientUpdate = NAMEKEY( "LaserUpdate" );
+	for( Int i = 0; i < data->m_outerEffectNumBones; i++ )
+	{
+		Drawable *beam = TheGameClient->findDrawableByID( m_laserBeamIDs[ i ] );
+		LaserUpdate *update = beam ? (LaserUpdate*)beam->findClientUpdateModule( nameKeyClientUpdate ) : NULL;
+		if( update )
+			update->moveEnds( &m_outerNodePositions[ i ], &m_connectorNodePosition );
+	}
+	Drawable *beam = TheGameClient->findDrawableByID( m_groundToOrbitBeamID );
+	LaserUpdate *update = beam ? (LaserUpdate*)beam->findClientUpdateModule( nameKeyClientUpdate ) : NULL;
+	if( update )
+	{
+		Coord3D orbitPosition;
+		orbitPosition.set( &m_laserOriginPosition );
+		orbitPosition.z += ORBITAL_BEAM_Z_OFFSET;
+		update->moveEnds( &m_laserOriginPosition, &orbitPosition );
+	}
+	ParticleSystem *system = TheParticleSystemManager->findParticleSystem( m_connectorSystemID );
+	if( system )
+		system->setPosition( &m_connectorNodePosition );
+	system = TheParticleSystemManager->findParticleSystem( m_laserBaseSystemID );
+	if( system )
+		system->setPosition( &m_laserOriginPosition );
 }
 
 
@@ -1435,6 +1472,20 @@ void ParticleUplinkCannonUpdate::setClientStatus( PUCStatus newStatus, Bool reve
 		{
 			break;
 		}
+	}
+
+	if( m_upBonesToRead )
+	{
+		m_upBonesToRead = FALSE;
+		// by ID: the tick may destroy the cannon before the flush
+		const ObjectID id = getObject()->getID();
+		LogicThread::callAfterTick( [id]() {
+			static const NameKeyType key = NAMEKEY( "ParticleUplinkCannonUpdate" );
+			Object *obj = TheGameLogic->findObjectByID( id );
+			ParticleUplinkCannonUpdate *cannon = obj ? (ParticleUplinkCannonUpdate *)obj->findUpdateModule( key ) : NULL;
+			if( cannon )
+				cannon->placeOnUpBones();
+		} );
 	}
 }
 

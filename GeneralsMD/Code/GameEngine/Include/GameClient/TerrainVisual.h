@@ -240,28 +240,9 @@ public:
 	//
 	// water methods
 	//
+	/** the water grid was enabled or disabled; the grid itself (mesh, settings, motion, heights) is
+		TerrainLogic's WaterGrid, and this only builds what the visual draws it with */
 	virtual void enableWaterGrid( Bool enable ) = 0;
-	/// set min/max height values allowed in water grid pointed to by waterTable
-	virtual void setWaterGridHeightClamps( const WaterHandle *waterTable, Real minZ, Real maxZ ) = 0;
-	/// adjust fallof parameters for grid change method
-	virtual void setWaterAttenuationFactors( const WaterHandle *waterTable, Real a, Real b, Real c, Real range ) = 0;
-	/// set the water table position and orientation in world space
-	virtual void setWaterTransform( const WaterHandle *waterTable, Real angle, Real x, Real y, Real z ) = 0;
-	virtual void setWaterTransform( const Matrix3D *transform ) = 0;
-	/// get water transform parameters
-	virtual void getWaterTransform( const WaterHandle *waterTable, Matrix3D *transform ) = 0;
-	/// water grid resolution spacing
-	virtual void setWaterGridResolution( const WaterHandle *waterTable, Real gridCellsX, Real gridCellsY, Real cellSize ) = 0;
-	virtual void getWaterGridResolution( const WaterHandle *waterTable, Real *gridCellsX, Real *gridCellsY, Real *cellSize ) = 0;
-	/// adjust the water grid in world coords by the delta
-	virtual void changeWaterHeight( Real x, Real y, Real delta ) = 0;
-	/// adjust the velocity at a water grid point corresponding to the world x,y
-	virtual void addWaterVelocity( Real worldX, Real worldY, Real velocity, Real preferredHeight ) = 0;
-	/// get height of water grid at specified position
-	virtual Bool getWaterGridHeight( Real worldX, Real worldY, Real *height) = 0;
-	/** move the water grid's mesh one step for this logic frame; a second call for the same frame does
-		nothing.  GameLogic::update calls it at the top of every logic frame (T1c, defect 17). */
-	virtual void updateWaterGrid( UnsignedInt logicFrame ) = 0;
 
 	/// set detail of terrain tracks.
 	virtual void setTerrainTracksDetail(void)=0;

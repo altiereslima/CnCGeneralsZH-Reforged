@@ -304,6 +304,72 @@ static void showOptionsPage( Int which )
 	}
 }
 
+//-------------------------------------------------------------------------------------------------
+// The main menu's button columns under the options panel.
+//
+// The panel is the layouts' see-through black, so over the main menu its buttons showed through as
+// ghosts on every page.  While options is up over a main menu on screen, the columns are hidden, and
+// shown again on the way out.  The panel's draw hides them each frame rather than once: a main menu
+// transition still running when options opens (-optionsmenu opens it over the menu's first frames)
+// shows its column again when it ends.  The main menu's logo and frame stay; they are the screen's
+// mark and its edge.
+//-------------------------------------------------------------------------------------------------
+enum { MAIN_MENU_COLUMN_COUNT = 6 };
+
+static const char *TheMainMenuColumnNames[ MAIN_MENU_COLUMN_COUNT ] =
+{
+	"MainMenu.wnd:MapBorder",
+	"MainMenu.wnd:MapBorder1",
+	"MainMenu.wnd:MapBorder2",
+	"MainMenu.wnd:MapBorder3",
+	"MainMenu.wnd:MapBorder4",
+	"MainMenu.wnd:MapBorder5",
+};
+
+static Bool mainMenuColumnHidden[ MAIN_MENU_COLUMN_COUNT ] = { FALSE };
+static GameWinDrawFunc optionsPanelDraw = NULL;
+
+/** The main menu's parent window when the main menu is what options opened over, else NULL. */
+static GameWindow *mainMenuOnScreen( void )
+{
+	GameWindow *mainMenu = TheWindowManager->winGetWindowFromId( NULL, TheNameKeyGenerator->nameToKey( "MainMenu.wnd:MainMenuParent" ) );
+	if( mainMenu == NULL || mainMenu->winIsHidden() )
+		return NULL;
+	return mainMenu;
+}
+
+static void hideMainMenuColumns( void )
+{
+	GameWindow *mainMenu = mainMenuOnScreen();
+	if( mainMenu == NULL )
+		return;
+	for( Int i = 0; i < MAIN_MENU_COLUMN_COUNT; ++i )
+	{
+		GameWindow *column = TheWindowManager->winGetWindowFromId( mainMenu, TheNameKeyGenerator->nameToKey( TheMainMenuColumnNames[ i ] ) );
+		if( column->winIsHidden() )
+			continue;
+		column->winHide( TRUE );
+		mainMenuColumnHidden[ i ] = TRUE;
+	}
+}
+
+static void showMainMenuColumns( void )
+{
+	GameWindow *mainMenu = mainMenuOnScreen();
+	for( Int i = 0; i < MAIN_MENU_COLUMN_COUNT; ++i )
+	{
+		if( mainMenu != NULL && mainMenuColumnHidden[ i ] )
+			TheWindowManager->winGetWindowFromId( mainMenu, TheNameKeyGenerator->nameToKey( TheMainMenuColumnNames[ i ] ) )->winHide( FALSE );
+		mainMenuColumnHidden[ i ] = FALSE;
+	}
+}
+
+static void drawOptionsPanel( GameWindow *window, WinInstanceData *instData )
+{
+	hideMainMenuColumns();
+	optionsPanelDraw( window, instData );
+}
+
 enum Detail
 {
 	ULTRADETAIL = 0,
@@ -1696,6 +1762,7 @@ static void DestroyOptionsLayout() {
 
 	SignalUIInteraction(SHELL_SCRIPT_HOOK_OPTIONS_CLOSED);
 
+	showMainMenuColumns();
 	TheShell->destroyOptionsLayout();
 	OptionsLayout = NULL;
 }
@@ -2684,6 +2751,16 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 	// show menu
 	layout->hide( FALSE );
+
+	// the main menu's buttons go while this is up; the backdrop's draw keeps them gone
+	// (a layout kept from an earlier open already draws through it)
+	GameWindow *backdrop = layout->getFirstWindow();
+	if( backdrop->winGetDrawFunc() != drawOptionsPanel )
+	{
+		optionsPanelDraw = backdrop->winGetDrawFunc();
+		backdrop->winSetDrawFunc( drawOptionsPanel );
+	}
+	hideMainMenuColumns();
 
 	// set keyboard focus to main parent
 	AsciiString parentName( "OptionsMenu.wnd:OptionsMenuParent" );

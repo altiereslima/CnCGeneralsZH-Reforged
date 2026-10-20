@@ -114,6 +114,7 @@ private:
 	VecCoord3D						m_flightPath;							///< The frame by frame flight path in a Bezier curve
 	Coord3D								m_flightPathStart;				///< where flight path started (in case we must regen it)
 	Coord3D								m_flightPathEnd;					///< where flight path ends (in case we must regen it)
+	Coord3D								m_aimOffset;							///< the shot's point on the victim, in the victim's frame (Weapon::bodyOffsetFromPoint)
 	Real									m_flightPathSpeed;				///< flight path speed (in case we must regen it)
 	Real									m_launchSlope;						///< rise over run of the barrel at launch, 0 for a level or lowered barrel
 	Int										m_flightPathSegments;			///< number of segments in the flightpath (in case we must regen it)

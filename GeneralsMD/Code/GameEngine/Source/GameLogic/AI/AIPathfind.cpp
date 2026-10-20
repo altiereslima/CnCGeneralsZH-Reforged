@@ -35,6 +35,7 @@
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
 #include "Common/CRCDebug.h"
+#include "Common/GameState.h"
 #include "Common/GlobalData.h"
 #include "Common/LatchRestore.h"	 
 #include "Common/ThingTemplate.h"
@@ -397,7 +398,9 @@ void Path::xfer( Xfer *xfer )
 {
   // version
 	// 2: the cached point on the path
-  XferVersion currentVersion = 2;
+	// 3: each node's direction and distance to its next optimized node, as cached.  A node moved
+	//    after its link was set keeps the old values, and computePointOnPath reads them.
+  XferVersion currentVersion = 3;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -421,11 +424,16 @@ void Path::xfer( Xfer *xfer )
 			Bool canOpt = node->getCanOptimize();
 			xfer->xferBool(&canOpt);
 			Int id = -1;
-			if (node->getNextOptimized()) {
+			Coord2D optDir;
+			Real optDist;
+			if (node->getNextOptimized(&optDir, &optDist)) {
 				id = node->getNextOptimized()->m_id;
 			}
 			xfer->xferInt(&id);
-			count--; 
+			xfer->xferReal(&optDir.x);
+			xfer->xferReal(&optDir.y);
+			xfer->xferReal(&optDist);
+			count--;
 			node = node->getPrevious();
 		}
 		DEBUG_ASSERTCRASH(count==0, ("Wrong data count"));
@@ -443,6 +451,13 @@ void Path::xfer( Xfer *xfer )
 			xfer->xferBool(&canOpt);
 			Int optID = -1;
 			xfer->xferInt(&optID);
+			Coord2D optDir = { 0.0f, 0.0f };
+			Real optDist = 0.0f;
+			if (version >= 3) {
+				xfer->xferReal(&optDir.x);
+				xfer->xferReal(&optDir.y);
+				xfer->xferReal(&optDist);
+			}
 			PathNode *node = newInstance(PathNode);
 			node->m_id = nodeId;
 			node->setPosition(&pos);
@@ -461,6 +476,8 @@ void Path::xfer( Xfer *xfer )
 				m_pathTail = node;
 			if (optNode) {
 				node->setNextOptimized(optNode);
+				if (version >= 3)
+					node->friend_setNextOptimizedCache(optDir, optDist);
 			}
 			count--;
 		}
@@ -469,7 +486,7 @@ void Path::xfer( Xfer *xfer )
 	xfer->xferBool(&m_isOptimized);
 	Int obsolete1 = 0;
 	xfer->xferInt(&obsolete1);	
-	UnsignedInt obsolete2;
+	UnsignedInt obsolete2 = 0;	// was written uninitialised: two saves of one path differed by stack garbage
 	xfer->xferUnsignedInt(&obsolete2);
 	xfer->xferBool(&m_blockedByAlly);
 
@@ -1458,7 +1475,7 @@ void Path::computePointOnPath(
 	Returns the goal position in goalPos.  This is intended for use with flying paths, that go
 	directly to the goal and don't consider obstacles.  jba.
  */
-Real Path::computeFlightDistToGoal( const Coord3D *pos, Coord3D& goalPos )
+Real Path::computeFlightDistToGoal( const Coord3D *pos, Coord3D& goalPos, Real nodeReachedDist )
 {
 	if (m_path == NULL)
 	{
@@ -1501,7 +1518,7 @@ Real Path::computeFlightDistToGoal( const Coord3D *pos, Coord3D& goalPos )
 
 		// Dot product is the posToGoal vector projected onto the path vector.
 		Real dotProduct = posToGoalVector.x*pathVector.x	+ posToGoalVector.y*pathVector.y;
-		if (dotProduct>=0) {
+		if (dotProduct>=nodeReachedDist) {
 			distance += dotProduct;
 			useNext = false;
 		}	else if (useNext) {
@@ -1512,6 +1529,46 @@ Real Path::computeFlightDistToGoal( const Coord3D *pos, Coord3D& goalPos )
 	}
 	return distance;
 
+}
+
+//-----------------------------------------------------------------------------------
+Real Path::computeFlightRouteLeft( const Coord3D *pos, Real *bendDist, Real *bendCos ) const
+{
+	*bendDist = 0.0f;
+	*bendCos = 1.0f;
+	const PathNode *curNode = m_cpopRecentStart ? m_cpopRecentStart : m_path;
+	if (curNode == NULL)
+		return 0.0f;
+	Coord2D dir;
+	Real length;
+	const PathNode *nextNode = curNode->getNextOptimized(&dir, &length);
+	if (nextNode == NULL)
+		return 0.0f;
+
+	Real left = (nextNode->getPosition()->x - pos->x) * dir.x + (nextNode->getPosition()->y - pos->y) * dir.y;
+	if (left < 0.0f)
+		left = 0.0f;
+	Real toNext = left;
+
+	/* A corner rounded into an arc is many small bends; the one braked for is the whole turn off this
+		 segment's heading within BEND_LOOK past the node steered for, so the speed comes down before the
+		 arc and stays down round it. */
+	const Real BEND_LOOK = 4.0f * PATHFIND_CELL_SIZE_F;
+	Coord2D outDir;
+	for (const PathNode *node = nextNode->getNextOptimized(&outDir, &length); node; node = node->getNextOptimized(&outDir, &length))
+	{
+		if (left - toNext < BEND_LOOK)
+		{
+			Real turnCos = dir.x * outDir.x + dir.y * outDir.y;
+			if (turnCos < *bendCos)
+			{
+				*bendCos = turnCos;
+				*bendDist = toNext;
+			}
+		}
+		left += length;
+	}
+	return left;
 }
 //-----------------------------------------------------------------------------------
 
@@ -2674,8 +2731,10 @@ void ZoneBlock::blockCalculateZones(PathfindCell **map, PathfindLayer layers[], 
 	UnsignedInt minZone = map[bounds.lo.x][bounds.lo.y].getZone();
 	UnsignedInt maxZone = minZone;
 
-	for( j=bounds.lo.y; j<=bounds.hi.y; j++ )	{
-		for( i=bounds.lo.x; i<=bounds.hi.x; i++ )	{
+	// both walks go down the columns, as the cells lie in memory; a merge keeps the smaller id
+	// whichever pair comes first, so the tables are the same as a walk along the rows gave
+	for( i=bounds.lo.x; i<=bounds.hi.x; i++ )	{
+		for( j=bounds.lo.y; j<=bounds.hi.y; j++ )	{
 			PathfindCell *cell = &map[i][j];
 			zoneStorageType zone = cell->getZone();
 			if (minZone>zone) minZone=zone;
@@ -2697,8 +2756,8 @@ void ZoneBlock::blockCalculateZones(PathfindCell **map, PathfindLayer layers[], 
 		m_crusherZones[i] = i+m_firstZone;
 	}
 
-	for( j=bounds.lo.y; j<=bounds.hi.y; j++ )	{
-		for( i=bounds.lo.x; i<=bounds.hi.x; i++ )	{
+	for( i=bounds.lo.x; i<=bounds.hi.x; i++ )	{
+		for( j=bounds.lo.y; j<=bounds.hi.y; j++ )	{
 			if (i>bounds.lo.x && map[i][j].getZone()!=map[i-1][j].getZone()) {
 
 				if (waterGround(map[i][j], map[i-1][j])) {
@@ -3111,23 +3170,16 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 
 
 
-	// Now map the zones in the map back into the collapsed zones.
-	j=globalBounds.lo.y;
-  while( j<=globalBounds.hi.y )	
-  {
-    i=globalBounds.lo.x;
-		while( i<=globalBounds.hi.x )	
-    {
-      PathfindCell &cell = map[i][j];
-			cell.setZone(collapsedZones[cell.getZone()]);
-			
-      //if (cell.getZone()==0) 
-      //{
-			//	DEBUG_CRASH(("Zone not set cell %d, %d", i, j));
-			//}
-      ++i;
-		}
-    ++j;
+	// Now map the zones in the map back into the collapsed zones. Each cell is mapped on its own, so
+	// the walk goes down a column, the way the cells lie in memory: across a row every cell was a
+	// cache line of its own, and a building put down late in a match stalled a frame for 7-10ms on it.
+	i=globalBounds.lo.x;
+	while( i<=globalBounds.hi.x )
+	{
+		PathfindCell *column = map[i];
+		for( j=globalBounds.lo.y; j<=globalBounds.hi.y; ++j )
+			column[j].setZone(collapsedZones[column[j].getZone()]);
+		++i;
 	}
 
 //	for( j=globalBounds.lo.y; j<=globalBounds.hi.y; j++ )	{
@@ -3324,11 +3376,14 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 //		}
 //	}
   UnsignedInt maxZone = m_maxZone;
-	j=globalBounds.lo.y;
-  while( j <= globalBounds.hi.y )	
+	/* Down each column, as the cells lie in memory, rather than across the rows. Every pair this looks
+		 at is the same either way, and a merge keeps the smaller id of the two sets whichever comes
+		 first, so the flattened tables come out the same. */
+	i=globalBounds.lo.x;
+  while( i <= globalBounds.hi.x )
   {
-    i=globalBounds.lo.x;
-		while( i <= globalBounds.hi.x )	
+    j=globalBounds.lo.y;
+		while( j <= globalBounds.hi.y )
     {
       PathfindCell &r_thisCell = map[i][j];
 
@@ -3410,10 +3465,10 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 
 //			DEBUG_ASSERTCRASH(r_thisCell.getZone() != 0, ("Cleared the zone."));
 
-      ++i;
+      ++j;
 		}
 
-    ++j; 
+    ++i;
 	}
 
 
@@ -6038,10 +6093,14 @@ void Pathfinder::newMap( void )
 	}
 	allocateFlowMaps();
 	classifyMap();
-	// Add existing objects.
+	// Add existing objects.  Not a plan still waiting for its builder: it goes down with the first
+	// percent of work (Object::setConstructionPercent), and a loaded game, which comes through here,
+	// walled its builder out of a site the game that was saved still walked across.
 	Object *obj;
 	for( obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
 	{
+		if( Object_isAwaitingBuilder( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ), obj->getConstructionPercent() ) )
+			continue;
 		classifyObjectFootprint(obj, true);
 	}
 
@@ -13198,18 +13257,57 @@ void Pathfinder::xfer( Xfer *xfer )
 //-----------------------------------------------------------------------------
 void Pathfinder::loadPostProcess( void )
 {
-	/* None of the three flow maps is saved, and only one of them needs to be.  Clearance is a
-		 measure of the map, so it is simply recomputed from the map that has just been loaded and
-		 comes out identical to the one the save was taken from.  Traffic and claims are a few
-		 seconds of history that the game rebuilds by playing: a loaded game starts with nobody
-		 jammed and nobody's plan on the map, and is back to the same state within a second or two.
-		 The cost of that is a unit or two picking a marginally different route just after a load,
-		 which is a single-player concern - Generals has no mid-game save in a network match, so
-		 there is no second machine to disagree with. */
-	buildClearance();
-	resetClaims();
-	m_numTrafficCells = 0;
-	if (m_traffic)
-		memset(m_traffic, 0, (m_extent.hi.x+1)*(m_extent.hi.y+1)*sizeof(UnsignedByte));
 
 }  // end loadPostProcess
+
+//-----------------------------------------------------------------------------
+/** What the pathfinder carries from one frame to the next beyond the map itself: the queue of
+	* units waiting for a path, and the three flow maps.  The map loads with the save and the objects
+	* put themselves back on it, but these are history, and a loaded game that rebuilt them from
+	* nothing chose other routes for the first seconds than the game that was saved.  GameLogic
+	* writes this after the objects, since loading them touches the same maps. */
+void Pathfinder::xferFlowState( Xfer *xfer )
+{
+	xfer->xferUser( m_queuedPathfindRequests, sizeof( ObjectID ) * PATHFIND_QUEUE_LEN );
+	xfer->xferInt( &m_queuePRHead );
+	xfer->xferInt( &m_queuePRTail );
+	xfer->xferInt( &m_cumulativeCellsAllocated );
+	if( xfer->getXferMode() == XFER_LOAD )
+	{
+		// queueForPath turns away a unit already waiting by this, so it has to say who is
+		m_isQueuedForPath.assign( m_isQueuedForPath.size(), false );
+		for( Int slot = m_queuePRHead; slot != m_queuePRTail; slot = ( slot + 1 ) % PATHFIND_QUEUE_LEN )
+		{
+			const size_t id = (size_t)m_queuedPathfindRequests[ slot ];
+			if( id >= m_isQueuedForPath.size() )
+				m_isQueuedForPath.resize( id + 1024, false );
+			m_isQueuedForPath[ id ] = true;
+		}
+	}
+
+	const Int cells = (m_extent.hi.x+1) * (m_extent.hi.y+1);
+	Int savedCells = cells;
+	xfer->xferInt( &savedCells );
+	if( savedCells != cells )
+		throw SC_INVALID_DATA;
+
+	xfer->xferUser( m_clearance, cells * sizeof( UnsignedByte ) );
+	xfer->xferBool( &m_clearanceDirty );
+	xfer->xferUnsignedInt( &m_clearanceFrame );
+
+	xfer->xferUser( m_traffic, cells * sizeof( UnsignedByte ) );
+	xfer->xferInt( &m_numTrafficCells );
+	if( m_numTrafficCells < 0 || m_numTrafficCells > PF_TRAFFIC_CELLS )
+		throw SC_INVALID_DATA;
+	if( m_numTrafficCells > 0 )
+		xfer->xferUser( m_trafficCells, m_numTrafficCells * sizeof( Int ) );
+	xfer->xferUnsignedInt( &m_trafficDecayFrame );
+
+	for( Int i = 0; i < PF_CLAIM_TABLE_SIZE; ++i )
+	{
+		xfer->xferInt( &m_claims[ i ].m_cell );
+		xfer->xferUnsignedInt( &m_claims[ i ].m_bucket );
+		xfer->xferUnsignedShort( &m_claims[ i ].m_weight );
+	}
+	xfer->xferUser( m_claimTouch, cells * sizeof( UnsignedShort ) );
+}

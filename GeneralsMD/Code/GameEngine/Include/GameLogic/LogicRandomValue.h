@@ -46,6 +46,11 @@ extern Real GetGameLogicRandomValueReal( Real lo, Real hi, char *file, int line 
 extern Int GetGameLogicRandomValueUnchanged( int lo, int hi );
 extern Real GetGameLogicRandomValueRealUnchanged( Real lo, Real hi );
 
+// A copy of the logic seed, and a copy the two reads above use instead of the live seed until it is
+// unpinned with NULL.  For a sound a tick plays and the main thread builds after it (LOGIC-THREAD.md M5).
+extern void CopyGameLogicSeed( UnsignedInt seed[6] );
+extern void PinGameLogicSeedForUnchanged( const UnsignedInt *seed );
+
 // use these macros to access the random value functions
 #define GameLogicRandomValue( lo, hi ) GetGameLogicRandomValue( lo, hi, __FILE__, __LINE__ )
 #define GameLogicRandomValueReal( lo, hi ) GetGameLogicRandomValueReal( lo, hi, __FILE__, __LINE__ )

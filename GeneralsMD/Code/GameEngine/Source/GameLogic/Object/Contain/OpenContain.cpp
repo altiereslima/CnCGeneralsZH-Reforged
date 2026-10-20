@@ -313,7 +313,7 @@ void OpenContain::addToContain( Object *rider )
 
 	Drawable *riderDraw = rider->getDrawable();
 	Bool wasSelected = FALSE;
-	if( riderDraw && riderDraw->isSelected() )
+	if( riderDraw && LogicThread::isSelectedForTick( riderDraw ) )
 	{
 		wasSelected = TRUE;
 	}

@@ -32,6 +32,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/GlobalData.h"
+#include "Common/MessageStream.h"
 #include "Common/MultiplayerSettings.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -51,6 +52,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/GUICallbacks.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/Keyboard.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/VictoryConditions.h"
 #include "GameNetwork/GameInfo.h"
@@ -90,6 +92,18 @@ static GameWindow *buttonMute[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, 
 static GameWindow *buttonUnMute[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 static Int slotNumInRow[MAX_SLOTS];
 
+// The money column (fork, Tools/diplomacy_layout.py).  The amount each row would send is kept per
+// slot, so it survives the screen being closed and opened again.
+static NameKeyType buttonMoneyMinusID[MAX_SLOTS];
+static NameKeyType buttonMoneyPlusID[MAX_SLOTS];
+static NameKeyType buttonMoneySendID[MAX_SLOTS];
+static GameWindow *buttonMoneyMinus[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static GameWindow *staticTextMoney[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static GameWindow *buttonMoneyPlus[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static GameWindow *buttonMoneySend[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static GameWindow *staticTextMoneyTitle = NULL;
+static Int moneyToSend[MAX_SLOTS] = {0, 0, 0, 0, 0, 0, 0, 0};
+
 //-------------------------------------------------------------------------------------------------
 
 static WindowLayout *theLayout = NULL;
@@ -124,8 +138,21 @@ static void grabWindowPointers( void )
 		buttonMute[i] = TheWindowManager->winGetWindowFromId(theWindow, buttonMuteID[i]);
 		buttonUnMute[i] = TheWindowManager->winGetWindowFromId(theWindow, buttonUnMuteID[i]);
 
+		temp.format("Diplomacy.wnd:ButtonMoneyMinus%d", i);
+		buttonMoneyMinusID[i] = NAMEKEY(temp);
+		temp.format("Diplomacy.wnd:ButtonMoneyPlus%d", i);
+		buttonMoneyPlusID[i] = NAMEKEY(temp);
+		temp.format("Diplomacy.wnd:ButtonMoneySend%d", i);
+		buttonMoneySendID[i] = NAMEKEY(temp);
+		temp.format("Diplomacy.wnd:StaticTextMoney%d", i);
+		buttonMoneyMinus[i] = TheWindowManager->winGetWindowFromId(theWindow, buttonMoneyMinusID[i]);
+		buttonMoneyPlus[i] = TheWindowManager->winGetWindowFromId(theWindow, buttonMoneyPlusID[i]);
+		buttonMoneySend[i] = TheWindowManager->winGetWindowFromId(theWindow, buttonMoneySendID[i]);
+		staticTextMoney[i] = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY(temp));
+
 		slotNumInRow[i] = -1;
 	}
+	staticTextMoneyTitle = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY("Diplomacy.wnd:StaticTextMoneyTitle"));
 }
 
 static void releaseWindowPointers( void )
@@ -138,9 +165,86 @@ static void releaseWindowPointers( void )
 		staticTextStatus[i] = NULL;
 		buttonMute[i] = NULL;
 		buttonUnMute[i] = NULL;
+		buttonMoneyMinus[i] = NULL;
+		staticTextMoney[i] = NULL;
+		buttonMoneyPlus[i] = NULL;
+		buttonMoneySend[i] = NULL;
 
 		slotNumInRow[i] = -1;
 	}
+	staticTextMoneyTitle = NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+// The money column.  The screen only picks the amount and asks; MSG_TRANSFER_MONEY is checked and
+// carried out in GameLogic on every machine alike (GameLogicDispatch.cpp).
+
+static Player *playerInSlot( Int slotNum )
+{
+	AsciiString playerName;
+	playerName.format("player%d", slotNum);
+	return ThePlayerList->findPlayerWithNameKey(NAMEKEY(playerName));
+}
+
+/// 100 a step, 1,000 with Ctrl, 10,000 with Shift, 100,000 with both
+static Int moneyStep( void )
+{
+	const Bool ctrl = TheKeyboard->isCtrl();
+	const Bool shift = TheKeyboard->isShift();
+	if (ctrl && shift)
+		return 100000;
+	if (shift)
+		return 10000;
+	if (ctrl)
+		return 1000;
+	return 100;
+}
+
+static void showMoneyToSend( Int row )
+{
+	if (staticTextMoney[row] == NULL || slotNumInRow[row] < 0)
+		return;
+	UnicodeString text;
+	text.format(TheGameText->fetch("GUI:MoneyTransferAmount"), moneyToSend[slotNumInRow[row]]);
+	GadgetStaticTextSetText(staticTextMoney[row], text);
+}
+
+/// direction +1 or -1, one step of moneyStep, kept between nothing and all the local player holds
+static void adjustMoneyToSend( Int row, Int direction )
+{
+	Int &amount = moneyToSend[slotNumInRow[row]];
+	const Int held = (Int)ThePlayerList->getLocalPlayer()->getMoney()->countMoney();
+	amount += direction * moneyStep();
+	if (amount > held)
+		amount = held;
+	if (amount < 0)
+		amount = 0;
+	showMoneyToSend(row);
+}
+
+static void sendMoney( Int row )
+{
+	Int &amount = moneyToSend[slotNumInRow[row]];
+	if (amount <= 0)
+		return;
+	GameMessage *msg = TheMessageStream->appendMessage(GameMessage::MSG_TRANSFER_MONEY);
+	msg->appendIntegerArgument(playerInSlot(slotNumInRow[row])->getPlayerIndex());
+	msg->appendIntegerArgument(amount);
+	amount = 0;
+	showMoneyToSend(row);
+}
+
+/// the row whose money controls are under the mouse, or -1
+static Int moneyRowAt( Int x, Int y )
+{
+	for (Int row = 0; row < MAX_SLOTS; ++row)
+	{
+		GameWindow *controls[] = { buttonMoneyMinus[row], staticTextMoney[row], buttonMoneyPlus[row], buttonMoneySend[row] };
+		for (Int c = 0; c < 4; ++c)
+			if (controls[c] && !controls[c]->winIsHidden() && controls[c]->winPointInWindow(x, y))
+				return row;
+	}
+	return -1;
 }
 
 
@@ -375,6 +479,18 @@ WindowMsgHandledType DiplomacyInput( GameWindow *window, UnsignedInt msg,
 
 		}  // end char
 
+		// --------------------------------------------------------------------------------------------
+		// the wheel over a row's money controls moves its amount; every control there lets it through
+		case GWM_WHEEL_UP:
+		case GWM_WHEEL_DOWN:
+		{
+			Int row = moneyRowAt(LOLONGTOSHORT(mData1), HILONGTOSHORT(mData1));
+			if (row < 0)
+				return MSG_IGNORED;
+			adjustMoneyToSend(row, msg == GWM_WHEEL_UP ? 1 : -1);
+			return MSG_HANDLED;
+		}
+
 	}
 
 	return MSG_IGNORED;
@@ -445,6 +561,23 @@ WindowMsgHandledType DiplomacySystem( GameWindow *window, UnsignedInt msg,
 					PopulateInGameDiplomacyPopup();
 					break;
 				}
+				if (slotNumInRow[i] < 0)
+					continue;
+				if (controlID == buttonMoneyMinusID[i])
+				{
+					adjustMoneyToSend(i, -1);
+					break;
+				}
+				if (controlID == buttonMoneyPlusID[i])
+				{
+					adjustMoneyToSend(i, 1);
+					break;
+				}
+				if (controlID == buttonMoneySendID[i])
+				{
+					sendMoney(i);
+					break;
+				}
 			}
 			break;
 
@@ -464,6 +597,12 @@ void PopulateInGameDiplomacyPopup( void )
 {
 	if (!TheGameInfo)
 		return;
+
+	// the money column is for a player still in the match, and never in a replay, where the
+	// transfers already recorded play back by themselves
+	const Bool mayGive = !TheGameLogic->isInReplayGame() && ThePlayerList->getLocalPlayer()->isPlayerActive();
+	if (staticTextMoneyTitle)
+		staticTextMoneyTitle->winHide(!mayGive);
 
 	Int rowNum = 0;
 	for (Int slotNum=0; slotNum<MAX_SLOTS; ++slotNum)
@@ -575,7 +714,20 @@ void PopulateInGameDiplomacyPopup( void )
 				}
 			}
 
-			slotNumInRow[rowNum++] = slotNum;
+			// the same test MSG_TRANSFER_MONEY makes in GameLogicDispatch.cpp: allies both ways, still playing
+			Player *local = ThePlayerList->getLocalPlayer();
+			const Bool canGiveTo = mayGive && TheGameInfo->getLocalSlotNum() != slotNum
+														 && player->isPlayableSide() && player->isPlayerActive()
+														 && local->getRelationship(player->getDefaultTeam()) == ALLIES
+														 && player->getRelationship(local->getDefaultTeam()) == ALLIES;
+			GameWindow *money[] = { buttonMoneyMinus[rowNum], staticTextMoney[rowNum], buttonMoneyPlus[rowNum], buttonMoneySend[rowNum] };
+			for (Int c = 0; c < 4; ++c)
+				if (money[c])
+					money[c]->winHide(!canGiveTo);
+
+			slotNumInRow[rowNum] = slotNum;
+			showMoneyToSend(rowNum);
+			++rowNum;
 		}
 	}
 
@@ -594,6 +746,10 @@ void PopulateInGameDiplomacyPopup( void )
 			buttonMute[rowNum]->winHide(TRUE);
 		if (buttonUnMute[rowNum])
 			buttonUnMute[rowNum]->winHide(TRUE);
+		GameWindow *money[] = { buttonMoneyMinus[rowNum], staticTextMoney[rowNum], buttonMoneyPlus[rowNum], buttonMoneySend[rowNum] };
+		for (Int c = 0; c < 4; ++c)
+			if (money[c])
+				money[c]->winHide(TRUE);
 
 		++rowNum;
 	}

@@ -96,7 +96,7 @@ void findDozerCommandSet( Object *object, void *userData )
 	}
 	if( object && object->isKindOf( KINDOF_DOZER ) )
 	{
-		dozerCommandSet = TheControlBar->findCommandSet( object->getCommandSetString() );
+		dozerCommandSet = TheCommandStore->findCommandSet( object->getCommandSetString() );
 	}
 }
 

@@ -359,13 +359,21 @@ AI::AI( void )
 void AI::init( void )
 {
 	m_nextGroupID = 0;
+	m_sweptGroupID = 0;
 }
+
+#ifdef DEBUG_LOGGING
+static Int theSweptGroups = 0;		///< temporary: groups sweepEmptyGroups destroyed this match
+#endif
 
 /**
  * Reset the AI system in preparation for a new map
  */
 void AI::reset( void )
 {
+#ifdef DEBUG_LOGGING
+	theSweptGroups = 0;
+#endif
 	m_pathfinder->reset();
 	while (m_aiData && m_aiData->m_next) {
 		TAiData *cur = m_aiData;
@@ -385,6 +393,7 @@ void AI::reset( void )
 		}
 	}
 	m_nextGroupID = 0;
+	m_sweptGroupID = 0;
 	m_nextFormationID = NO_FORMATION_ID;
 	getNextFormationID(); // increment once past NO_FORMATION_ID.  jba.
 	m_lastBuildingPlacementFrame = 0;
@@ -440,6 +449,8 @@ void AI::update( void )
 	end = Clock_Ticks();
 	s_lastPathfindMS = aiElapsedMS( start, afterPathfind );
 	s_lastPlayerUpdateMS = aiElapsedMS( afterPathfind, end );
+
+	sweepEmptyGroups();
 }
 
 /**
@@ -585,6 +596,7 @@ AIGroup *AI::createGroup( void )
 	// add it to the list
 //	DEBUG_LOG(("***AIGROUP %x is being added to m_groupList.\n", group ));
 	m_groupList.push_back( group );
+	m_groupIndex[ group ] = --m_groupList.end();
 
 	return group;
 }
@@ -594,20 +606,67 @@ AIGroup *AI::createGroup( void )
  */
 void AI::destroyGroup( AIGroup *group )
 {
-	std::list<AIGroup *>::iterator i = std::find( m_groupList.begin(), m_groupList.end(), group );
+	std::unordered_map<AIGroup *, std::list<AIGroup *>::iterator>::iterator i = m_groupIndex.find( group );
 
-	// make sure group is actually in the list
-	if (i == m_groupList.end())
+	// make sure group is actually in the list: a caller can hold one that emptied and destroyed itself,
+	// and the group's own destructor comes back here through remove()
+	if (i == m_groupIndex.end())
 		return;
 
 	DEBUG_ASSERTCRASH(group != NULL, ("A NULL group made its way into the AIGroup list.. jkmcd"));
 
 	// remove it
 //	DEBUG_LOG(("***AIGROUP %x is being removed from m_groupList.\n", group ));
-	m_groupList.erase( i );
+	m_groupList.erase( i->second );
+	m_groupIndex.erase( i );
 
 	// destroy group
 	group->deleteInstance();
+}
+
+/**
+ * Destroy every group made since the last sweep that is still empty.
+ *
+ * remove() destroys a group when its last member leaves, so a group that never had a member was
+ * never destroyed at all: a sequential script or a script action asking a team with nobody left in
+ * it whether it is idle (ScriptEngine::evaluateAndProgressAllSequentialScripts, the ScriptActions
+ * team actions) left one behind every time, and each stayed in m_groupList, walked by the CRC every
+ * frame, for the rest of the match.  Nothing keeps a group past the call that made it, so by the end
+ * of the AI update an empty one is garbage.  Groups leave the list only by being destroyed and are
+ * appended with rising IDs, so the ones made since the last sweep are its tail, and one that had a
+ * member once is destroyed by remove() the moment it empties.
+ */
+void AI::sweepEmptyGroups( void )
+{
+	std::list<AIGroup *>::iterator it = m_groupList.end();
+	while (it != m_groupList.begin())
+	{
+		std::list<AIGroup *>::iterator prev = it;
+		--prev;
+		if ((*prev)->getID() <= m_sweptGroupID)
+			break;
+		it = prev;
+	}
+	while (it != m_groupList.end())
+	{
+		AIGroup *group = *it;
+		++it;
+		if (group->isEmpty())
+		{
+			destroyGroup( group );
+#ifdef DEBUG_LOGGING
+			++theSweptGroups;
+#endif
+		}
+	}
+	m_sweptGroupID = m_nextGroupID;
+
+#ifdef DEBUG_LOGGING
+	// temporary: what the list holds once a minute, and how many groups it used to keep by now
+	if (TheGameLogic->getFrame() % (60 * LOGICFRAMES_PER_SECOND) == 0)
+		DEBUG_LOG(("AI GROUPS frame %d: %d listed, %d empty swept this match\n", TheGameLogic->getFrame(),
+			(Int)m_groupList.size(), theSweptGroups));
+#endif
 }
 
 /**
@@ -885,7 +944,12 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 
 	filters[numFilters] = NULL;
 
-	if (info == NULL || info == TheScriptEngine->getDefaultAttackInfo()) 
+	// filterObvious goes first in both lists and lets only ENEMIES through, so a cell holding no
+	// enemy player's Object cannot hold an answer and the searches below pass over it: the same
+	// objects reach the filters in the same order, and no filter after the first ever sees the rest
+	const PlayerMaskType enemyPlayers = me->getTeam()->getEnemyPlayerMask();
+
+	if (info == NULL || info == TheScriptEngine->getDefaultAttackInfo())
 	{
 		if (qualifiers & PREFER_HIGH_THREAT)
 		{
@@ -896,7 +960,7 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 			Real distanceModifier = TheAI->getAiData()->m_attackPriorityDistanceModifier;
 			Object *bestThreat = NULL;
 			Int bestScore = 0;
-			ObjectIterator *threatIter = ThePartitionManager->iterateObjectsInRange(me, range, FROM_BOUNDINGSPHERE_2D, gatherFilters, ITER_SORTED_NEAR_TO_FAR);
+			ObjectIterator *threatIter = ThePartitionManager->iterateObjectsInRange(me, range, FROM_BOUNDINGSPHERE_2D, gatherFilters, ITER_SORTED_NEAR_TO_FAR, enemyPlayers);
 			MemoryPoolObjectHolder threatHolder(threatIter);
 			for (Object *theEnemy = threatIter->first(); theEnemy; theEnemy = threatIter->next())
 			{
@@ -936,14 +1000,14 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 		}
 
 		// No additional attack info, so just return the closest one.
-		Object* o = ThePartitionManager->getClosestObject( me, range, FROM_BOUNDINGSPHERE_2D, filters );
+		Object* o = ThePartitionManager->getClosestObject( me, range, FROM_BOUNDINGSPHERE_2D, filters, NULL, NULL, enemyPlayers );
 		return o;
 	}
 
 	Object *bestEnemy = NULL;
 	Int			effectivePriority=0;
 	Int			actualPriority=0;
-	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(me, range, FROM_BOUNDINGSPHERE_2D, gatherFilters, ITER_SORTED_NEAR_TO_FAR);
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(me, range, FROM_BOUNDINGSPHERE_2D, gatherFilters, ITER_SORTED_NEAR_TO_FAR, enemyPlayers);
 	MemoryPoolObjectHolder holder(iter);
 	for (Object *theEnemy = iter->first(); theEnemy; theEnemy = iter->next()) 
 	{
@@ -1241,12 +1305,25 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	* on armed units sent every strike at the army; a strike on the economy is the one a player feels
 	* for the rest of the match.  Easy keeps price alone, Medium doubles it, Hard triples it.
 	*
-	*                      scoutS maxSc decis  cntr  mass   ttk  indiv team infl focus save harv expand guard hoard econ micro  gate  answer massU  bankS  floor payoff upgr    nonc  share maxF fMult push   minPow  siege  beam  strikeE */
+	* strikeT and swDef came in on 2026-10-20, from v3.1.0 players: the computer seldom built a
+	* superweapon and spent the ones it built on their army.  strikeT is the threat weight that was a
+	* flat 2 on every rung; Easy keeps it, Medium halves it, Hard drops it and looks at his army only when
+	* none of his buildings is known.  strikeE now also covers factories, power plants and superweapons
+	* (the last at the 1,000 floor, since a strike seldom kills one), and Medium's went from 1 to 2, Hard's
+	* from 2 to 3.  swDef is the guns each superweapon asks for, 12 on every rung before: over twelve
+	* four-player matches on Twilight Flame the median side peaked at 4 finished guns on Easy, 9 on Medium
+	* and 18 on Hard, so Medium
+	* built 3 superweapons in 48 sides over 25 minutes.  At 6 it built 36, and 29 of its 38 shots landed
+	* mostly on buildings.  Hard's went from 14 of 33 shots mostly on buildings to 23 of 36, and against
+	* Easy from 17 of 30 to 27 of 29.  Easy's 3 is unmeasured in play: its script clock still holds its
+	* first superweapon past 25 minutes, so none was built either way.
+	*
+	*                      scoutS maxSc decis  cntr  mass   ttk  indiv team infl focus save harv expand guard hoard econ micro  gate  answer massU  bankS  floor payoff upgr    nonc  share maxF fMult push   minPow  siege  beam  strikeE strikeT swDef */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
-	/* Easy      */ { 75.0f, 1,  7.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0, FALSE, FALSE, FALSE, FALSE, FALSE, 120.0f, 6000, 4.0f, 720.0f, 0.05f, 0.05f, 3, 0.0f, 360.0f, 1500.0f,  80.0f, 0.00f, 0.0f },
-	/* Medium    */ { 45.0f, 1,  3.0f,  0.50f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  6000, FALSE, FALSE, FALSE, FALSE, FALSE,  60.0f, 5000, 2.5f, 420.0f, 0.05f, 0.25f, 5, 3.0f, 300.0f, 2000.0f, 120.0f, 1.00f, 1.0f },
-	/* Hard      */ { 25.0f, 2,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  30.0f, 4000, 1.5f, 180.0f, 0.05f, 1.00f, 8, 2.0f, 240.0f, 4500.0f, 160.0f, 0.25f, 2.0f }
+	/* Easy      */ { 75.0f, 1,  7.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0, FALSE, FALSE, FALSE, FALSE, FALSE, 120.0f, 6000, 4.0f, 720.0f, 0.05f, 0.05f, 3, 0.0f, 360.0f, 1500.0f,  80.0f, 0.00f, 0.0f, 2.0f, 3 },
+	/* Medium    */ { 45.0f, 1,  3.0f,  0.50f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  6000, FALSE, FALSE, FALSE, FALSE, FALSE,  60.0f, 5000, 2.5f, 420.0f, 0.05f, 0.25f, 5, 3.0f, 300.0f, 2000.0f, 120.0f, 1.00f, 2.0f, 1.0f, 6 },
+	/* Hard      */ { 25.0f, 2,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  30.0f, 4000, 1.5f, 180.0f, 0.05f, 1.00f, 8, 2.0f, 240.0f, 4500.0f, 160.0f, 0.25f, 3.0f, 0.0f, DEFENSES_PER_SUPERWEAPON }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1373,17 +1450,15 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool aiWantsAnotherFactory( Int finished, Int constructing, Int idle, Int deepest, Bool unlimited )
+Bool aiWantsAnotherFactory( Int finished, Int constructing, Int shallowest, UnsignedInt backedUpFor )
 {
 	if( constructing > 0 )
 		return FALSE;					// one is already going up
-	if( unlimited )
-		return TRUE;
 	if( finished <= 0 )
 		return TRUE;					// the last one is gone, so put one back
-	if( idle > 0 )
-		return FALSE;					// a factory with nothing in it is the spare
-	return deepest >= 2;			// busy, and a unit is waiting behind the one being built
+	if( shallowest < 2 )
+		return FALSE;					// one of them has room: nothing is waiting behind what it builds
+	return backedUpFor >= (UnsignedInt)( AI_FACTORY_BACKLOG_SECONDS * LOGICFRAMES_PER_SECOND );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1411,6 +1486,156 @@ Real aiFireSampleWeight( Real baseToThreat, Real sampleToThreat, Real reach, Boo
 	if( weight < 0.0f )
 		weight = 0.0f;
 	return outsideBase ? weight + 0.1f : weight;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int aiFindChoke( const UnsignedShort *fromBase, const UnsignedShort *fromThreat, Int width, Int cells, Int routeLength,
+								 Int minDistance, Int maxDistance, Int *roadCells )
+{
+	*roadCells = 0;
+	// whole bands only: a sliver at the far end holds few cells because it is thin, not narrow
+	const Int bands = ( maxDistance - minDistance + 1 ) / AI_CHOKE_BAND;
+	if( bands <= 0 )
+		return -1;
+	std::vector<Int> count( bands, 0 );
+	std::vector<Real> sumX( bands, 0.0f );
+	std::vector<Real> sumY( bands, 0.0f );
+	std::vector<Int> bandOf( cells, -1 );
+	for( Int i = 0; i < cells; ++i )
+	{
+		const Int b = fromBase[ i ];
+		const Int t = fromThreat[ i ];
+		if( b == AI_GROUND_UNREACHED || t == AI_GROUND_UNREACHED || b < minDistance || b > maxDistance || b > t )
+			continue;
+		if( ( b + t ) * 100 > routeLength * AI_CHOKE_SLACK_PERCENT )
+			continue;
+		const Int band = ( b - minDistance ) / AI_CHOKE_BAND;
+		if( band >= bands )
+			continue;
+		bandOf[ i ] = band;
+		++count[ band ];
+		sumX[ band ] += INT_TO_REAL( i % width );
+		sumY[ band ] += INT_TO_REAL( i / width );
+	}
+
+	Int best = -1;
+	Real bestNarrow = 0.0f;
+	for( Int band = 0; band < bands; ++band )
+	{
+		if( count[ band ] == 0 )
+			continue;
+		const Real middle = INT_TO_REAL( minDistance + band * AI_CHOKE_BAND + AI_CHOKE_BAND / 2 );
+		const Real open = sqrt( middle * ( INT_TO_REAL( routeLength ) - middle ) );
+		const Real narrow = INT_TO_REAL( count[ band ] ) / ( open > 1.0f ? open : 1.0f );
+		if( best < 0 || narrow < bestNarrow )
+		{
+			best = band;
+			bestNarrow = narrow;
+		}
+	}
+	if( best < 0 )
+		return -1;
+
+	// ponytail: two roads through one band meet in the middle; the road cell nearest it stands for both
+	const Real midX = sumX[ best ] / INT_TO_REAL( count[ best ] );
+	const Real midY = sumY[ best ] / INT_TO_REAL( count[ best ] );
+	Int choke = -1;
+	Real chokeSqr = 0.0f;
+	for( Int i = 0; i < cells; ++i )
+	{
+		if( bandOf[ i ] != best )
+			continue;
+		const Real d = sqr( INT_TO_REAL( i % width ) - midX ) + sqr( INT_TO_REAL( i / width ) - midY );
+		if( choke < 0 || d < chokeSqr )
+		{
+			choke = i;
+			chokeSqr = d;
+		}
+	}
+	*roadCells = count[ best ];
+	return choke;
+}
+
+//-------------------------------------------------------------------------------------------------
+AIGroundFlood::AIGroundFlood( Int width, Int height, WalkableFunc walkable, void *userData ) :
+	m_width( width ),
+	m_height( height ),
+	m_walkable( walkable ),
+	m_userData( userData ),
+	m_dist( width * height, AI_GROUND_UNREACHED ),
+	m_walk( width * height, 0 ),
+	m_at( 0 ),
+	m_cursor( 0 ),
+	m_pending( 0 ),
+	m_max( AI_GROUND_UNREACHED - 1 )
+{
+}
+
+//-------------------------------------------------------------------------------------------------
+void AIGroundFlood::addSource( Int x, Int y )
+{
+	if( x < 0 || y < 0 || x >= m_width || y >= m_height )
+		return;
+	const Int index = y * m_width + x;
+	if( m_dist[ index ] == 0 )
+		return;
+	m_dist[ index ] = 0;
+	m_bucket[ 0 ].push_back( index );
+	++m_pending;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool AIGroundFlood::walkable( Int x, Int y, Int index )
+{
+	if( m_walk[ index ] == 0 )
+		m_walk[ index ] = m_walkable( x, y, m_userData ) ? 1 : 2;
+	return m_walk[ index ] == 1;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool AIGroundFlood::next( Int *x, Int *y, Int *distance )
+{
+	static const Int STEPS[ 8 ][ 3 ] = {
+		{ 1, 0, AI_GROUND_STEP }, { -1, 0, AI_GROUND_STEP }, { 0, 1, AI_GROUND_STEP }, { 0, -1, AI_GROUND_STEP },
+		{ 1, 1, AI_GROUND_DIAGONAL }, { -1, 1, AI_GROUND_DIAGONAL }, { 1, -1, AI_GROUND_DIAGONAL }, { -1, -1, AI_GROUND_DIAGONAL } };
+
+	while( m_pending > 0 )
+	{
+		std::vector<Int> &bucket = m_bucket[ m_at & 3 ];
+		if( m_cursor >= (Int)bucket.size() )
+		{
+			m_pending -= (Int)bucket.size();
+			bucket.clear();
+			m_cursor = 0;
+			++m_at;
+			continue;
+		}
+		const Int index = bucket[ m_cursor++ ];
+		if( m_dist[ index ] != m_at )
+			continue;		// reached again by a shorter way, and handed out from that bucket
+
+		const Int cx = index % m_width;
+		const Int cy = index / m_width;
+		for( Int n = 0; n < 8; ++n )
+		{
+			const Int nx = cx + STEPS[ n ][ 0 ];
+			const Int ny = cy + STEPS[ n ][ 1 ];
+			if( nx < 0 || ny < 0 || nx >= m_width || ny >= m_height )
+				continue;
+			const Int d = m_at + STEPS[ n ][ 2 ];
+			const Int nIndex = ny * m_width + nx;
+			if( d > m_max || d >= m_dist[ nIndex ] || !walkable( nx, ny, nIndex ) )
+				continue;
+			m_dist[ nIndex ] = (UnsignedShort)d;
+			m_bucket[ d & 3 ].push_back( nIndex );
+			++m_pending;
+		}
+		*x = cx;
+		*y = cy;
+		*distance = m_at;
+		return TRUE;
+	}
+	return FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1475,6 +1700,102 @@ Real aiRoleMassFraction( AIRole role )
 		case AIROLE_STEAMROLLER:	return 1.8f;		// one push, and it had better land
 		default:									return 1.0f;
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+static const char *const s_personalityNames[ AIPERSONA_COUNT ] =
+{
+	"Normal", "Attacker", "Turtle", "Economist", "Air", "Rusher", "Raider", "Tech",
+	"Infantry", "Armor", "Sneaky", "Opportunist", "Supporter", "Counter", "Random"
+};
+
+const char *aiPersonalityName( AIPersonality persona )
+{
+	return (persona >= 0 && persona < AIPERSONA_COUNT) ? s_personalityNames[ persona ] : s_personalityNames[ 0 ];
+}
+
+AIPersonality aiPersonalityFromName( const char *name )
+{
+	for( Int i = 0; i < AIPERSONA_COUNT; ++i )
+		if( strcasecmp( name, s_personalityNames[ i ] ) == 0 )
+			return (AIPersonality)i;
+	return AIPERSONA_NORMAL;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The personalities, one row each in AIPersonality's order.  The buy columns are aiPurchaseScore's
+	* kinds: power, dozer, economy, base, superweapon, defence, army, upgrade, emergency.  The Rusher's
+	* row is the one it plays by until its rush is out; after that it plays the Attacker's. */
+//-------------------------------------------------------------------------------------------------
+//                                  role                push  atkP  wave  hold  bank  hoard surpl retr  cntr  +cntr def   upgr   defT   air    inf    veh    stlth    pow dz  eco base sw   def  army upg em
+static const AIPersonaWeights s_personaWeights[ AIPERSONA_COUNT ] =
+{
+	/* Normal      */ { -1,                 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f,   0.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   0, 0,   0,   0,   0,   0, 0 } },
+	/* Attacker    */ { AIROLE_AGGRESSIVE,  0.6f, 0.5f, 0.5f, 0.5f, 0.35f,0.5f, 2.0f, 0.8f, 1.0f, 0.0f, 0.6f, 1.0f,  -5.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   0, 0,   0, -15,  20,   0, 0 } },
+	/* Turtle      */ { AIROLE_DEFENSIVE,   1.6f, 1.5f, 1.8f, 1.6f, 1.0f, 1.0f, 1.0f, 1.6f, 1.0f, 0.0f, 1.8f, 1.0f,  15.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   0, 0,   0,  40, -10,   0, 0 } },
+	/* Economist   */ { -1,                 1.2f, 1.1f, 1.2f, 1.0f, 1.2f, 0.7f, 0.8f, 1.2f, 1.0f, 0.0f, 1.1f, 0.6f,   0.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,  30, 0,   0,   0,  -5,  15, 0 } },
+	/* Air         */ { -1,                 1.0f, 1.0f, 1.0f, 1.0f, 0.6f, 1.0f, 1.5f, 1.0f, 1.0f, 0.0f, 0.6f, 1.0f,   0.0f, 25.0f, -5.0f, -5.0f,  0.0f, { 0, 0,   0, 10, -20, -15,  20,   0, 0 } },
+	/* Rusher      */ { AIROLE_AGGRESSIVE,  1.0f, 1.0f, 1.0f, 1.0f, 0.25f,0.3f, 3.0f, 0.5f, 1.0f, 0.0f, 0.3f, 3.0f, -15.0f,-10.0f,  5.0f,  5.0f,  0.0f, { 0, 0,   0, 0, -30, -40,  35, -20, 0 } },
+	/* Raider      */ { AIROLE_AGGRESSIVE,  0.9f, 0.8f, 0.8f, 0.8f, 0.8f, 1.0f, 1.2f, 1.2f, 1.0f, 0.0f, 0.8f, 1.0f,  -5.0f,  0.0f, -5.0f, 15.0f,  0.0f, { 0, 0,   0, 0,   0, -10,  10,   0, 0 } },
+	/* Tech        */ { AIROLE_DEFENSIVE,   1.4f, 1.2f, 1.3f, 1.2f, 1.0f, 1.0f, 1.0f, 1.2f, 1.0f, 0.0f, 1.4f, 0.5f,   5.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   5, 0,  40,  10, -10,  15, 0 } },
+	/* Infantry    */ { -1,                 0.9f, 1.0f, 1.0f, 1.0f, 0.8f, 1.0f, 1.3f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f,   0.0f, -5.0f, 25.0f,-10.0f,  0.0f, { 0, 0,   0, 0,   0,   0,  10,   0, 0 } },
+	/* Armor       */ { -1,                 1.2f, 1.4f, 1.6f, 1.4f, 0.7f, 1.0f, 1.5f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f,   0.0f, -5.0f,-10.0f, 25.0f,  0.0f, { 0, 0,   0, 0,   0,   0,   5,   0, 0 } },
+	/* Sneaky      */ { -1,                 1.0f, 1.0f, 1.0f, 1.0f, 0.8f, 1.0f, 1.5f, 1.1f, 1.0f, 0.0f, 1.0f, 1.0f,   0.0f,  0.0f,  0.0f,  0.0f, 25.0f, { 0, 0,   0, 0,   0,   0,   0,   0, 0 } },
+	/* Opportunist */ { AIROLE_AGGRESSIVE,  0.9f, 0.9f, 0.8f, 0.8f, 0.9f, 1.0f, 1.0f, 1.2f, 1.0f, 0.0f, 1.0f, 1.0f,   0.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   0, 0,   0,   0,   5,   0, 0 } },
+	/* Supporter   */ { AIROLE_SUPPORTIVE,  1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.2f, 1.0f,   5.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   0, 0,   0,   5,   0,   0, 0 } },
+	/* Counter     */ { -1,                 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.6f, 0.3f, 1.0f, 1.0f,   0.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   0, 0,   0,   0,   0,   0, 0 } },
+	/* Random      */ { -1,                 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f,   0.0f,  0.0f,  0.0f,  0.0f,  0.0f, { 0, 0,   0, 0,   0,   0,   0,   0, 0 } }
+};
+
+const AIPersonaWeights &aiPersonaWeights( AIPersonality persona )
+{
+	return s_personaWeights[ (persona >= 0 && persona < AIPERSONA_COUNT) ? persona : AIPERSONA_NORMAL ];
+}
+
+Real aiPersonaTeamBias( const AIPersonaWeights &weights, Bool defenceTeam, Real airShare, Real infantryShare,
+												Real vehicleShare, Real stealthShare )
+{
+	Real bias = weights.m_air * airShare + weights.m_infantry * infantryShare + weights.m_vehicle * vehicleShare +
+							weights.m_stealth * stealthShare;
+	if( defenceTeam )
+		bias += weights.m_defenceTeams;
+	return bias;
+}
+
+Real aiPersonaAirBias( Real airWeight, Real enemyAntiAirShare )
+{
+	Real taste = 1.0f - 1.5f * enemyAntiAirShare;
+	if( taste < -0.5f )
+		taste = -0.5f;
+	return airWeight * taste;
+}
+
+Real aiPersonaEnemyCost( AIPersonality persona, Real cost, Real economyShare, Bool fightingSomeoneElse )
+{
+	if( persona != AIPERSONA_OPPORTUNIST )
+		return cost;
+	if( economyShare < 0.0f ) economyShare = 0.0f;
+	if( economyShare > 1.0f ) economyShare = 1.0f;
+	cost *= 0.4f + economyShare;			// the thinnest in sight costs under half of the fattest
+	if( fightingSomeoneElse )
+		cost *= 0.5f;
+	return cost;
+}
+
+Int aiPersonaShareAmount( Int bank, Int target, Int cap )
+{
+	const Int over = bank - 2 * target;
+	if( over <= 0 )
+		return 0;
+	Int amount = (over / 2) / 100 * 100;
+	if( amount > cap )
+		amount = cap;
+	return amount < AI_SHARE_MIN ? 0 : amount;
+}
+
+Bool aiPersonaChatAllowed( UnsignedInt now, UnsignedInt lastChat )
+{
+	return lastChat == 0 || now - lastChat >= AI_CHAT_GAP_FRAMES;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1906,6 +2227,8 @@ void AI::parseSkillLevel(INI *ini, void *instance, void* /*store*/, const void* 
 		{ "SiegeTrail",								INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_siegeTrail ) },
 		{ "BeamSteerSeconds",					INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_beamSteerSeconds ) },
 		{ "StrikeEconomyWeight",			INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_strikeEconomyWeight ) },
+		{ "StrikeThreatWeight",				INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_strikeThreatWeight ) },
+		{ "SuperweaponDefenses",			INI::parseInt,  NULL, offsetof( AIDifficultyProfile, m_superweaponDefenses ) },
 		{ NULL, NULL, NULL, 0 }
 	};
 

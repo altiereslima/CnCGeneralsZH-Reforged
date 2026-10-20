@@ -47,6 +47,7 @@
 #include "GameClient/HotKey.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/MetaEvent.h"
+#include "GameClient/UIStyle.h"
 
 namespace
 {
@@ -70,11 +71,13 @@ enum CaptureKind { CAPTURE_NONE, CAPTURE_COMMAND, CAPTURE_BUTTON };
 
 typedef std::basic_string< WideChar > KeyText;	///< a key as the page shows it, for a map
 
-const Color TEXT_COLOR = GameMakeColor( 254, 254, 254, 255 );
-const Color HEADING_COLOR = GameMakeColor( 186, 255, 12, 255 );
-const Color CHANGED_COLOR = GameMakeColor( 255, 214, 92, 255 );
+// The front end's tokens (UI-STYLE.md).  References, so they read UIStyle's values whatever order
+// the two files' statics are built in.  A clash keeps its own red, the one error on the page.
+const Color &TEXT_COLOR = UIStyle::INK;
+const Color &HEADING_COLOR = UIStyle::ACTIVE;
+const Color &CHANGED_COLOR = UIStyle::GOLD;
 const Color CLASH_COLOR = GameMakeColor( 255, 104, 72, 255 );
-const Color QUIET_COLOR = GameMakeColor( 150, 150, 150, 255 );
+const Color &QUIET_COLOR = UIStyle::MUTED;
 const WideChar WAITING[] = u"...";	///< the key cell while a key is awaited; the note under the lists says what to press
 
 GameWindow *s_parent = NULL;
@@ -98,7 +101,7 @@ Int s_active = 0;					///< the list touched last: 0 the commands, 1 the bar
 Int s_commandRow = -1;		///< index into s_rows
 const CommandButton *s_button = NULL;
 CaptureKind s_capture = CAPTURE_NONE;
-std::string s_holdCandidate;	///< Force Attack's hold: Ctrl or Alt pressed alone so far
+std::string s_holdCandidate;	///< a hold's capture: the modifier pressed alone so far, "-" once anything else was
 Bool s_filling = FALSE;
 
 UnicodeString wide( const std::string& text )
@@ -358,7 +361,7 @@ std::vector< UnicodeString > sameChord( const HotkeyCommandRow& row )
 {
 	std::vector< UnicodeString > others;
 	const HotkeyBinding binding = bindingOf( row );
-	if( binding.key.empty() )
+	if( binding.key.empty() && binding.modifiers == "NONE" )
 		return others;
 	for( size_t each = 0; each < s_rows.size(); each++ )
 		if( !s_rows[ each ].barOnly && s_rows[ each ].id != row.id && bindingOf( s_rows[ each ] ) == binding )
@@ -508,7 +511,7 @@ void updateNote( void )
 		changed = s_file.commands.count( row.id ) != 0;
 		canChange = TRUE;
 		if( s_capture == CAPTURE_COMMAND )
-			note = TheGameText->fetch( "GUI:HotkeysPressKey" );
+			note = TheGameText->fetch( row.hold ? "GUI:HotkeysPressHold" : "GUI:HotkeysPressKey" );
 		else
 		{
 			note.format( u"%s: %s.", commandName( row ).str(), chordOf( binding ).str() );
@@ -536,21 +539,21 @@ void updateNote( void )
 	else if( s_active == 1 && s_button )
 	{
 		const Bool force = s_button->getCommandType() == GUI_COMMAND_FORCE_ATTACK;
-		const Bool fixed = !force && HotKeyManager::fixedKey( s_button->getName(), s_button->getCommandType() ) != 0;
+		const WideChar fixed = force ? 0 : HotKeyManager::fixedKey( s_button->getName(), s_button->getCommandType() );
 		const std::string name = HotKeyManager::fileButtonName( s_button->getName() );
 		changed = force ? s_file.commands.count( "BEGIN_FORCEATTACK" ) != 0 : s_file.buttons.count( name ) != 0;
-		canChange = !fixed;
+		canChange = TRUE;
 		if( s_capture == CAPTURE_BUTTON )
 			note = TheGameText->fetch( force ? "GUI:HotkeysPressForceAttack" : "GUI:HotkeysPressLetter" );
-		else if( fixed )
-			note = TheGameText->fetch( "GUI:HotkeysFixed" );
 		else if( force )
 			note = TheGameText->fetch( "GUI:HotkeysForceAttack" );
 		else if( changed )
 		{
-			const UnicodeString key = letterText( TheGameText->fetchEnglishHotKey( s_button->getTextLabel() ) );
+			const UnicodeString key = letterText( fixed != 0 ? fixed : TheGameText->fetchEnglishHotKey( s_button->getTextLabel() ) );
 			note.format( TheGameText->fetch( "GUI:HotkeysGameKey" ), key.isEmpty() ? TheGameText->fetch( "GUI:HotkeysNone" ).str() : key.str() );
 		}
+		else if( fixed != 0 )
+			note = TheGameText->fetch( "GUI:HotkeysFixed" );
 		else if( s_launcherButtons.count( name ) )
 			note = TheGameText->fetch( "GUI:HotkeysButtonMoved" );
 	}
@@ -587,8 +590,7 @@ void startCapture( void )
 {
 	if( s_active == 0 && s_commandRow >= 0 )
 		s_capture = CAPTURE_COMMAND;
-	else if( s_active == 1 && s_button && ( s_button->getCommandType() == GUI_COMMAND_FORCE_ATTACK
-			|| HotKeyManager::fixedKey( s_button->getName(), s_button->getCommandType() ) == 0 ) )
+	else if( s_active == 1 && s_button )
 		s_capture = CAPTURE_BUTTON;
 	else
 		return;
@@ -767,26 +769,29 @@ Bool OptionsHotkeysKey( UnsignedByte key, Int state )
 	const Bool ctrlKey = key == KEY_LCTRL || key == KEY_RCTRL, altKey = key == KEY_LALT || key == KEY_RALT;
 	const Bool shiftKey = key == KEY_LSHIFT || key == KEY_RSHIFT;
 	const Bool force = s_capture == CAPTURE_BUTTON && s_button->getCommandType() == GUI_COMMAND_FORCE_ATTACK;
+	const Bool hold = force || ( s_capture == CAPTURE_COMMAND && s_rows[ s_commandRow ].hold );
 
-	if( force )
+	if( hold )
 	{
-		// Ctrl or Alt let go with no key between is the hold alone; Shift cannot be the hold
-		if( ctrlKey || altKey )
+		// a modifier let go with no key between is the hold alone.  Shift cannot be Force Attack's:
+		// Shift on top of that hold queues the circle.
+		const char *alone = ctrlKey ? "CTRL" : altKey ? "ALT" : ( shiftKey && !force ) ? "SHIFT" : NULL;
+		if( alone )
 		{
 			if( down )
-				s_holdCandidate = s_holdCandidate.empty() ? ( ctrlKey ? "CTRL" : "ALT" ) : std::string( "-" );
-			else if( s_holdCandidate == "CTRL" || s_holdCandidate == "ALT" )
+				s_holdCandidate = s_holdCandidate.empty() ? std::string( alone ) : std::string( "-" );
+			else if( s_holdCandidate == alone )
 			{
-				const HotkeyBinding hold( "", s_holdCandidate );
-				applySelected( &hold, FALSE );
+				const HotkeyBinding binding( "", alone );
+				applySelected( &binding, FALSE );
 			}
 			return TRUE;
 		}
 		const std::string name = keyName( key );
-		if( down && !shift && !name.empty() )
+		if( down && !( force && shift ) && !name.empty() )
 		{
-			const HotkeyBinding hold( name, modifierName( ctrl, alt, FALSE ) );
-			applySelected( &hold, FALSE );
+			const HotkeyBinding binding( name, modifierName( ctrl, alt, !force && shift ) );
+			applySelected( &binding, FALSE );
 		}
 		else if( down )
 			s_holdCandidate = "-";

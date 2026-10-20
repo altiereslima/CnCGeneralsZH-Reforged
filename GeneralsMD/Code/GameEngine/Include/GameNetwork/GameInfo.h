@@ -106,6 +106,9 @@ public:
 	void setTeamNumber( Int teamNumber ) { m_teamNumber = teamNumber; }
 	Int getTeamNumber( void ) const { return m_teamNumber; }
 
+	void setAIPersonality( Int persona ) { m_aiPersonality = persona; }	///< an AIPersonality; RANDOM stays RANDOM until the match starts
+	Int getAIPersonality( void ) const { return m_aiPersonality; }
+
 	inline void setName( UnicodeString name ) { m_name = name; }
 	inline UnicodeString getName( void ) const { return m_name; }
 
@@ -155,6 +158,7 @@ protected:
 	Int m_startPos;																		///< start position, or -1 for random
 	Int m_playerTemplate;															///< PlayerTemplate
 	Int m_teamNumber;																	///< alliance, -1 for none
+	Int m_aiPersonality;															///< AIPersonality of an AI seat, AIPERSONA_NORMAL otherwise
 	Int m_origColor;																			///< color, or -1 for random
 	Int m_origStartPos;																		///< start position, or -1 for random
 	Int m_origPlayerTemplate;															///< PlayerTemplate
@@ -282,6 +286,11 @@ public:
   inline Int getSupplyPileLimit( void ) const;
   void setSupplyPileLimit( Int players );
 
+  // Turbo mode: the match runs twice as many logic frames a second, each one the same as at normal
+  // speed.  The host's choice, so every machine and the replay agree on it.
+  Bool getTurbo( void ) const { return m_turbo; }
+  void setTurbo( Bool turbo ) { m_turbo = turbo; }
+
   Bool hasAIPlayers( void ) const;									///< is any slot held by a computer player?
 
 protected:
@@ -311,6 +320,7 @@ protected:
   Int m_incomeSharing; // an IncomeSharing, INCOME_SHARING_OFF = the retail game
   Int m_techRespawn; // minutes before a destroyed tech building comes back, 0 = never
   Int m_supplyPileLimit; // players who may gather from one supply pile at once, 0 = any number
+  Bool m_turbo; // the lobby's turbo mode is on
 };
 
 extern GameInfo *TheGameInfo;
@@ -347,6 +357,14 @@ Int         GameInfo::getSupplyPileLimit( void ) const      { return m_supplyPil
 
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );
+
+// An AI seat's personality is an optional sixth field on its slot entry, C<rung>,color,tmpl,start,team[,persona].
+// AIPersonaSlotField is what goes after the team: nothing for Normal, so every Normal options string,
+// replay header and Skirmish.ini stays the one it was, and ",<n>" otherwise.  AIPersonaFromSlotField
+// reads that field back; absent (NULL or empty, every older string) or a value this build does not
+// know is Normal, so a bad field costs the seat its personality and never the whole parse.
+AsciiString AIPersonaSlotField( Int persona );
+Int AIPersonaFromSlotField( const char *field );
 
 //
 // Three things every lobby - skirmish, LAN and online - has to agree on about a slot state, kept

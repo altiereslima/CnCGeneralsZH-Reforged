@@ -206,11 +206,13 @@ void DX8Wrapper::_Set_DX8_Render_Target(IDirect3DSurface9 * render_target, IDire
 }
 
 void DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPRIMITIVETYPE type, unsigned primitive_count,
-	const void * vertices, unsigned stride)
+	const void * vertices, unsigned stride, bool d3d9_reads_back)
 {
-	// Drawn on Direct3D 9 whichever device presents: the smudge test reads this draw back.
-	Flush_Deferred_D3D9_State();
-	DX8CALL(DrawPrimitiveUP(type, primitive_count, vertices, stride));
+	if (!Direct3D11_Present_Is_Enabled() || d3d9_reads_back) {
+		Flush_Deferred_D3D9_State();
+		Open_D3D9_Scene();
+		DX8CALL(DrawPrimitiveUP(type, primitive_count, vertices, stride));
+	}
 	if (type == D3DPT_TRIANGLESTRIP) {
 		Direct3D11_Draw_User_Strip(vertices, primitive_count, stride);
 	}
@@ -342,6 +344,7 @@ D3DMATERIAL9					DX8Wrapper::PendingMaterialValue;
 unsigned							DX8Wrapper::PendingLights								= 0;
 unsigned							DX8Wrapper::PendingLightEnables						= 0;
 D3DLIGHT9						DX8Wrapper::PendingLightValues[4];
+bool								DX8Wrapper::D3D9SceneOpen								= false;
 bool								DX8Wrapper::IsDeviceLost;
 int								DX8Wrapper::ZBias;
 float								DX8Wrapper::ZNear;
@@ -1147,6 +1150,8 @@ bool DX8Wrapper::Reset_Device(bool reload_assets)
 		RenderResult hr=_Get_D3D_Device()->TestCooperativeLevel();
 		if (hr != D3DERR_DEVICELOST )
 		{	DX8CALL_HRES(Reset(&_PresentParameters),hr)
+			// A reset ends any scene the device had open.
+			D3D9SceneOpen=false;
 			if (hr != D3D_OK)
 				return false;	//reset failed.
 		}
@@ -1176,6 +1181,7 @@ void DX8Wrapper::Release_Device(void)
 
 		// So that no pending bit outlives this device and is sent to the next one.
 		Flush_Deferred_D3D9_State();
+		D3D9SceneOpen=false;
 
 		// The device made every shader in the combiner cache and outliving it is not something they
 		// can do.  Nothing recompiles them: the next draw asks the cache again and it is empty.
@@ -2270,6 +2276,13 @@ void DX8_Assert()
 	DX8_THREAD_ASSERT();
 }
 
+void DX8Wrapper::Open_D3D9_Scene()
+{
+	if (D3D9SceneOpen) return;
+	DX8CALL(BeginScene());
+	D3D9SceneOpen=true;
+}
+
 void DX8Wrapper::Begin_Scene(void)
 {
 	DX8_THREAD_ASSERT();
@@ -2277,8 +2290,12 @@ void DX8Wrapper::Begin_Scene(void)
 #if ENABLE_EMBEDDED_BROWSER
 	DX8WebBrowser::Update();
 #endif
-	
-	DX8CALL(BeginScene());
+
+	// With Direct3D 11 presenting, the smudge test's two quads are what is left for the Direct3D 9
+	// device to draw, and those begin its scene themselves.
+	if (!Direct3D11_Present_Is_Enabled()) {
+		Open_D3D9_Scene();
+	}
 	Direct3D11_Begin_Scene();
 
 #if defined(_WIN32)
@@ -2289,7 +2306,10 @@ void DX8Wrapper::Begin_Scene(void)
 void DX8Wrapper::End_Scene(bool flip_frames)
 {
 	DX8_THREAD_ASSERT();
-	DX8CALL(EndScene());
+	if (D3D9SceneOpen) {
+		DX8CALL(EndScene());
+		D3D9SceneOpen=false;
+	}
 	Direct3D11_End_Scene(flip_frames);
 
 #if defined(_WIN32)
@@ -2418,6 +2438,13 @@ void DX8Wrapper::Flip_To_Primary(void)
 void DX8Wrapper::Clear(bool clear_color, bool clear_z_stencil, const Vector3 &color, float dest_alpha, float z, unsigned int stencil)
 {
 	DX8_THREAD_ASSERT();
+
+	// Nothing reads a cleared Direct3D 9 target while Direct3D 11 presents: the smudge test reads back
+	// only the corner its own quad covers.
+	if (Direct3D11_Present_Is_Enabled()) {
+		Direct3D11_Mirror_Clear(clear_color, clear_z_stencil, color.X, color.Y, color.Z, dest_alpha);
+		return;
+	}
 
 	// If we try to clear a stencil buffer which is not there, the entire call will fail
 	// KJM fixed this to get format from back buffer (incase render to texture is used)
@@ -2880,8 +2907,8 @@ void DX8Wrapper::Draw(
 				// When Direct3D 11 owns the window, the Direct3D 9 frame is never shown and nothing
 				// reads its pixels back, so drawing it is only GPU time.  Most of the state for it is
 				// deferred as well (Defer_D3D9_State) and sent only before the probe's sampled draws.
-				// _Draw_DX8_Primitive_UP keeps its D3D9 draw, because the smudge hardware test draws
-				// with it and reads the D3D9 target back.
+				// _Draw_DX8_Primitive_UP keeps its D3D9 draw for the smudge hardware test alone,
+				// which reads the D3D9 target back.
 				if (!Direct3D11_Present_Is_Enabled()) {
 					DX8CALL(DrawIndexedPrimitive(
 						(D3DPRIMITIVETYPE)primitive_type,
@@ -3084,6 +3111,11 @@ void DX8Wrapper::Apply_Render_State_Changes()
 		SNAPSHOT_SAY(("DX8 - apply view matrix\n"));
 		_Set_DX8_Transform(D3DTS_VIEW,render_state.view);
 	}
+	// The streams and the indices are sent to Direct3D 9 only for its own indexed draws, which it
+	// skips while Direct3D 11 presents, and nothing reads either back off the device.  The draws that
+	// set their own buffers behind this wrapper's back (water, shadows, snow) set them on the device
+	// themselves.
+	const bool d3d9_draws_indexed=!Direct3D11_Present_Is_Enabled();
 	if (render_state_changed&VERTEX_BUFFER_CHANGED) {
 		SNAPSHOT_SAY(("DX8 - apply vb change\n"));
 		for (i=0;i<MAX_VERTEX_STREAMS;++i) {
@@ -3091,11 +3123,13 @@ void DX8Wrapper::Apply_Render_State_Changes()
 				switch (render_state.vertex_buffer_types[i]) {//->Type()) {
 				case BUFFER_TYPE_DX8:
 				case BUFFER_TYPE_DYNAMIC_DX8:
-					DX8CALL(SetStreamSource(
-						i,
-						static_cast<DX8VertexBufferClass*>(render_state.vertex_buffers[i])->Get_DX8_Vertex_Buffer(),
-						0,	// OffsetInBytes, D3D9's extra parameter
-						render_state.vertex_buffers[i]->FVF_Info().Get_FVF_Size()));
+					if (d3d9_draws_indexed) {
+						DX8CALL(SetStreamSource(
+							i,
+							static_cast<DX8VertexBufferClass*>(render_state.vertex_buffers[i])->Get_DX8_Vertex_Buffer(),
+							0,	// OffsetInBytes, D3D9's extra parameter
+							render_state.vertex_buffers[i]->FVF_Info().Get_FVF_Size()));
+					}
 					DX8_RECORD_VERTEX_BUFFER_CHANGE();
 					// The backend reads one stream.  Streams above the first carry the skinning
 					// and shadow data the .vso files take, and nothing generated consumes them yet.
@@ -3120,7 +3154,9 @@ void DX8Wrapper::Apply_Render_State_Changes()
 					WWASSERT(0);
 				}
 			} else {
-				DX8CALL(SetStreamSource(i,NULL,0,0));
+				if (d3d9_draws_indexed) {
+					DX8CALL(SetStreamSource(i,NULL,0,0));
+				}
 				if (i==0) {
 					Direct3D11_Mirror_Stream_Source(NULL,0,0);
 				}
@@ -3135,8 +3171,10 @@ void DX8Wrapper::Apply_Render_State_Changes()
 			case BUFFER_TYPE_DX8:
 			case BUFFER_TYPE_DYNAMIC_DX8:
 				// The base vertex index that used to travel here now goes on the draw call.
-				DX8CALL(SetIndices(
-					static_cast<DX8IndexBufferClass*>(render_state.index_buffer)->Get_DX8_Index_Buffer()));
+				if (d3d9_draws_indexed) {
+					DX8CALL(SetIndices(
+						static_cast<DX8IndexBufferClass*>(render_state.index_buffer)->Get_DX8_Index_Buffer()));
+				}
 				Direct3D11_Mirror_Indices(
 					static_cast<DX8IndexBufferClass*>(render_state.index_buffer)->Get_DX11_Twin());
 				DX8_RECORD_INDEX_BUFFER_CHANGE();
@@ -3149,7 +3187,9 @@ void DX8Wrapper::Apply_Render_State_Changes()
 			}
 		}
 		else {
-			DX8CALL(SetIndices(NULL));
+			if (d3d9_draws_indexed) {
+				DX8CALL(SetIndices(NULL));
+			}
 			Direct3D11_Mirror_Indices(NULL);
 			DX8_RECORD_INDEX_BUFFER_CHANGE();
 		}
@@ -5617,6 +5657,7 @@ void DX8Wrapper::Draw_Owned_Triangles(unsigned first_index, unsigned triangle_co
 	const unsigned index_count=as_strip ? (triangle_count+2) : (triangle_count*3);
 
 	Flush_Deferred_D3D9_State();
+	Open_D3D9_Scene();
 	DX8CALL(DrawIndexedPrimitive(
 		as_strip ? D3DPT_TRIANGLESTRIP : D3DPT_TRIANGLELIST,
 		0,						// BaseVertexIndex: the stream offset already moved the vertices
@@ -5641,6 +5682,7 @@ void DX8Wrapper::Draw_Owned_Points(unsigned first_vertex, unsigned point_count)
 	if (point_count==0) return;
 
 	Flush_Deferred_D3D9_State();
+	Open_D3D9_Scene();
 	DX8CALL(DrawPrimitive(D3DPT_POINTLIST, first_vertex, point_count));
 
 	// No mirror: the Direct3D 11 backend resolves triangles out of the fixed-function state and

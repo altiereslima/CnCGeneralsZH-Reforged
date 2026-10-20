@@ -241,6 +241,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_GUARD;
 	else if (token == "repeat")
 		*action = SCENARIO_ACTION_REPEAT;
+	else if (token == "givemoney")
+		*action = SCENARIO_ACTION_GIVEMONEY;
 	else
 		return FALSE;
 
@@ -339,6 +341,7 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_GUARD:				return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_PRODUCE:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_REPEAT:			return SCENARIO_TOKENS_ATTACK;
+		case SCENARIO_ACTION_GIVEMONEY:		return SCENARIO_TOKENS_STANCE;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_TALLY:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_ARRIVE:			return SCENARIO_TOKENS_ARRIVE;
@@ -478,6 +481,13 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 			action->name = tokens[ 5 ];
 			if (action->name != "on" && action->name != "off")
 				return SCENARIO_PARSE_BAD_ACTION;
+			break;
+
+		case SCENARIO_ACTION_GIVEMONEY:
+			if (!parseWholeNumber( tokens[ 3 ], &action->targetSlot ))
+				return SCENARIO_PARSE_BAD_SLOT;
+			if (!parseWholeNumber( tokens[ 4 ], &action->count ) || action->count < 1)
+				return SCENARIO_PARSE_BAD_COUNT;
 			break;
 
 		case SCENARIO_ACTION_STOP:
@@ -1807,6 +1817,7 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_POWER:
 		case SCENARIO_ACTION_PRODUCE:
 		case SCENARIO_ACTION_REPEAT:
+		case SCENARIO_ACTION_GIVEMONEY:
 		case SCENARIO_ACTION_TALLY:
 		case SCENARIO_ACTION_RESPOND:
 			ordered = FALSE;		// handled before the group is built
@@ -1864,6 +1875,28 @@ static Bool executeRepeat( const ScenarioAction &action, Player *player )
 	return TRUE;
 }
 
+/** The Tab screen's Send: one MSG_TRANSFER_MONEY onto the message stream, recorded and checked in
+	  GameLogic like a click on the button, so only the local player can send it.  The target is a seat;
+	  the screen never offers an enemy, and this is how a request to pay one gets made anyway. */
+static Bool executeGiveMoney( const ScenarioAction &action, Player *player )
+{
+	Player *target = findPlayerForSlot( action.targetSlot );
+	if (player != ThePlayerList->getLocalPlayer() || target == NULL)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d givemoney: slot %d is not the local player, or nobody sits in slot %d\n",
+							 action.frame, action.slot, action.targetSlot));
+		return FALSE;
+	}
+
+	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_TRANSFER_MONEY );
+	msg->appendIntegerArgument( target->getPlayerIndex() );
+	msg->appendIntegerArgument( action.count );
+
+	DEBUG_LOG(("SCENARIO: frame %d givemoney slot %d to slot %d (player %d) %d\n", action.frame, action.slot,
+						 action.targetSlot, target->getPlayerIndex(), action.count));
+	return TRUE;
+}
+
 Bool ScenarioDrill_execute( const ScenarioAction &action )
 {
 	Player *player = findPlayerForSlot( action.slot );
@@ -1897,6 +1930,9 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_REPEAT)
 		return executeRepeat( action, player );
+
+	if (action.action == SCENARIO_ACTION_GIVEMONEY)
+		return executeGiveMoney( action, player );
 
 	if (action.action == SCENARIO_ACTION_TALLY)
 		return executeTally( action, player );

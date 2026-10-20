@@ -192,7 +192,7 @@ void AICommandParmsStorage::doXfer(Xfer *xfer)
 	}
 	xfer->xferAsciiString(&cmdName);
 	if (cmdName.isNotEmpty() && m_commandButton==NULL) {
-		m_commandButton = TheControlBar->findCommandButton(cmdName);
+		m_commandButton = TheCommandStore->findCommandButton(cmdName);
 	}
 
 	Bool hasPath = m_path!=NULL;
@@ -5630,20 +5630,20 @@ Coord3D AIAttackAimAtTargetState::computeAttackRunGoal( Object *source, const We
 	const Real dx = targetPos.x - pos->x;
 	const Real dy = targetPos.y - pos->y;
 
-	// a hard turn bleeds speed toward the locomotor's minimum, so the circle tightens as it goes
-	const Real speed = 0.5f*(max(source->getPhysics()->getForwardSpeed2D(), loco->getMinSpeed()) + loco->getMinSpeed());
-	const Real turnRadius = speed / loco->getMaxTurnRate(source->getBodyModule()->getDamageState());
+	// the circle the turn would fly, and the straight run before it while a jet rolls into the bank
+	Real entryDist = 0.0f;
+	const Real turnRadius = loco->calcTurnCircle(source, &entryDist);
 
 	// range is measured between the bounding spheres, so the minimum range seen from the centres is longer
 	Real minRange = weapon->getTemplate()->getMinimumAttackRange() + source->getGeometryInfo().getBoundingSphereRadius();
 	if (victim)
 		minRange += victim->getGeometryInfo().getBoundingSphereRadius();
-	const Real runOutDist = minRange + 2.0f*turnRadius;
+	const Real runOutDist = minRange + 2.0f*turnRadius + entryDist;
 
 	if (m_isRunningOut)
 		m_isRunningOut = dx*dx + dy*dy < sqr(runOutDist);
 	else if (fabs(relAngle) >= aimDelta)
-		m_isRunningOut = AIAttackAim_needsRunOut(dx*dir->x + dy*dir->y, dir->x*dy - dir->y*dx, turnRadius,
+		m_isRunningOut = AIAttackAim_needsRunOut(dx*dir->x + dy*dir->y - entryDist, dir->x*dy - dir->y*dx, turnRadius,
 																						 Cos(aimDelta), minRange);
 
 	if (!m_isRunningOut)

@@ -45,6 +45,7 @@
 //----------------------------------------------------------------------------
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Common/LogicThread.h"
 #include "Common/GameAudio.h"
 
 #include "Common/AudioAffect.h"
@@ -57,6 +58,10 @@
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
 #include "Common/GameMusic.h"
+#include "GameLogic/LogicRandomValue.h"
+
+#include <algorithm>
+#include <array>
 #include "Common/GameSounds.h"
 #include "Common/GlobalData.h"
 #include "Common/MiscAudio.h"
@@ -322,6 +327,7 @@ void AudioManager::reset()
 	m_speechVolume = m_systemSpeechVolume;
 
 	m_disallowSpeech = FALSE;
+	m_handlesQueuedFromTick.clear();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -432,6 +438,78 @@ AudioHandle AudioManager::addAudioEvent(const AudioEventRTS *eventToAdd)
 		return AHSV_NoSound;
 	}
 
+	if (!LogicThread::defersEffects()) {
+		return addAudioEventNow(eventToAdd, 0);
+	}
+
+	/* LOGIC-THREAD.md phase 2, M5.  Inside a tick the sound gets its handle here, so logic can keep it
+		 and stop the sound later, and everything else waits for the end of the tick: the options, the
+		 local player, the request list and the audio stream's draws, which then come in the order the
+		 tick played its sounds.  The handle is minted whether or not this machine will play the sound;
+		 which handles exist was never the same on two machines, so nothing logic keeps depends on it. */
+	if (!eventToAdd->getAudioEventInfo()) {
+		getInfoForAudioEvent(eventToAdd);
+		if (!eventToAdd->getAudioEventInfo()) {
+			DEBUG_CRASH(("No info for requested audio event '%s'\n", eventToAdd->getEventName().str()));
+			return AHSV_Error;
+		}
+	}
+
+	const AudioHandle handle = allocateNewHandle();
+	m_handlesQueuedFromTick.push_back(handle);
+	AudioEventRTS copy(*eventToAdd);
+
+	// A list played in order steps on from the index the caller's event holds; the build writes the
+	// step into its own copy, so the caller's event takes it here.  A random list remembers its last
+	// pick to avoid playing it twice running, and that pick is made after the tick: the caller is held
+	// until then, so the pick reads its memory as it stands and leaves the new pick in it.
+	const AudioEventInfo *info = eventToAdd->getAudioEventInfo();
+	AudioEventRTS *caller = const_cast<AudioEventRTS*>(eventToAdd);
+	Int callerSlot = -1;
+	if (info->m_soundType != AT_Music && info->m_soundType != AT_Streaming && !info->m_sounds.empty()) {
+		if (BitTest(info->m_control, AC_RANDOM)) {
+			callerSlot = AudioEventRTS::holdCallerForPick(caller);
+		} else {
+			caller->setPlayingAudioIndex(caller->getPlayingAudioIndex() + 1);
+		}
+	}
+
+	// A scripted sound picks its file from the logic seed without moving it; pin the seed it would
+	// have read at this call.
+	const Bool logical = eventToAdd->getIsLogicalAudio();
+	std::array<UnsignedInt, 6> seed = {};
+	if (logical) {
+		CopyGameLogicSeed(seed.data());
+	}
+
+	LogicThread::callAfterTick([this, copy, handle, logical, seed, callerSlot]() mutable {
+		std::vector<AudioHandle>::iterator queued = std::find(m_handlesQueuedFromTick.begin(), m_handlesQueuedFromTick.end(), handle);
+		if (queued != m_handlesQueuedFromTick.end()) {
+			m_handlesQueuedFromTick.erase(queued);
+		}
+		if (logical) {
+			PinGameLogicSeedForUnchanged(seed.data());
+		}
+		AudioEventRTS *liveCaller = AudioEventRTS::heldCaller(callerSlot);
+		if (liveCaller) {
+			copy.setPlayingAudioIndex(liveCaller->getPlayingAudioIndex());
+		}
+		addAudioEventNow(&copy, handle);
+		if (liveCaller) {
+			liveCaller->setPlayingAudioIndex(copy.getPlayingAudioIndex());
+		}
+		if (logical) {
+			PinGameLogicSeedForUnchanged(NULL);
+		}
+	});
+	return handle;
+}
+
+//-------------------------------------------------------------------------------------------------
+AudioHandle AudioManager::addAudioEventNow(const AudioEventRTS *eventToAdd, AudioHandle handle)
+{
+	LOGIC_CENSUS( CENSUS_AUDIO );
+
 #ifdef INTENSIVE_AUDIO_DEBUG
 	DEBUG_LOG(("AUDIO (%d): Received addAudioEvent('%s')", TheGameLogic->getFrame(), eventToAdd->getEventName().str()));
 #endif
@@ -474,7 +552,7 @@ AudioHandle AudioManager::addAudioEvent(const AudioEventRTS *eventToAdd)
 	}
 
 	AudioEventRTS *audioEvent = MSGNEW("AudioEventRTS") AudioEventRTS(*eventToAdd);		// poolify
-	audioEvent->setPlayingHandle( allocateNewHandle() );
+	audioEvent->setPlayingHandle( handle ? handle : allocateNewHandle() );
 	audioEvent->generateFilename();	// which file are we actually going to play?
 	((AudioEventRTS*)eventToAdd)->setPlayingAudioIndex( audioEvent->getPlayingAudioIndex() );
 	audioEvent->generatePlayInfo();	// generate pitch shift and volume shift now as well
@@ -596,6 +674,14 @@ AsciiString AudioManager::prevTrackName(const AsciiString& currentTrack )
 //-------------------------------------------------------------------------------------------------
 void AudioManager::removeAudioEvent(AudioHandle audioEvent)
 {
+	// in order with the tick's adds, so a sound it starts and stops is started first
+	LogicThread::callAfterTick([this, audioEvent]() { removeAudioEventNow(audioEvent); });
+}
+
+//-------------------------------------------------------------------------------------------------
+void AudioManager::removeAudioEventNow(AudioHandle audioEvent)
+{
+	LOGIC_CENSUS( CENSUS_AUDIO );
 	if (audioEvent == AHSV_StopTheMusic || audioEvent == AHSV_StopTheMusicFade) {
 		m_music->removeAudioEvent(audioEvent);
 		return;
@@ -654,7 +740,16 @@ void AudioManager::setAudioEventVolumeOverride( AsciiString eventToAffect, Real 
 //-------------------------------------------------------------------------------------------------
 void AudioManager::removeAudioEvent( AsciiString eventToRemove )
 {
-	removePlayingAudio( eventToRemove );
+	LogicThread::callAfterTick( [this, eventToRemove]() {
+		LOGIC_CENSUS( CENSUS_AUDIO );
+		removePlayingAudio( eventToRemove );
+	} );
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool AudioManager::isQueuedFromTick( AudioHandle handle ) const
+{
+	return std::find( m_handlesQueuedFromTick.begin(), m_handlesQueuedFromTick.end(), handle ) != m_handlesQueuedFromTick.end();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1084,6 +1179,9 @@ Real AudioManager::getWaveFileLengthMS( AsciiString strToLoad ) const
 }
 
 //-------------------------------------------------------------------------------------------------
+/* Logic's, not the device's (LOGIC-THREAD.md M7): the event table, the file headers and the logic
+	 stream's Unchanged reads, with no draw from the audio stream.  Only a file that is not a .wav goes
+	 to the device, in getFileLengthMS, which counts it. */
 Real AudioManager::getAudioLengthMS( const AudioEventRTS *event )
 {
 	if (!event->getAudioEventInfo()) {
@@ -1095,8 +1193,8 @@ Real AudioManager::getAudioLengthMS( const AudioEventRTS *event )
 
 	AudioEventRTS tmpEvent = *event;
 
-	tmpEvent.generateFilename();
-	tmpEvent.generatePlayInfo();
+	tmpEvent.generateFilename( FALSE );
+	tmpEvent.generatePlayInfo( FALSE );
 	AsciiString attack = tmpEvent.getAttackFilename();
 	AsciiString sound = tmpEvent.getFilename();
 	AsciiString decay = tmpEvent.getDecayFilename();

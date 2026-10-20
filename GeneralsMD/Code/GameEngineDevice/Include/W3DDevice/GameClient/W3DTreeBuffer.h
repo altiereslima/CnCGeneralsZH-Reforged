@@ -223,6 +223,7 @@ public:
 	void setBounds(const Region2D &bounds) {m_bounds = bounds;}
 	/// Draws the trees.  Uses camera for culling.
 	void drawTrees(CameraClass * camera, RefRenderObjListIterator *pDynamicLightsIterator);
+	void stepTrees(void);	///< the toppling and pushed trees, once a logic frame, at the render's sync point
 	/// Called when the view changes, and sort key needs to be recalculated.
 	/// Normally sortKey gets calculated when a tree becomes visible.
 	void doFullUpdate(void) {m_updateAllKeys = true;};
@@ -289,6 +290,7 @@ private:
 
 	Real		m_curSwayOffset[MAX_SWAY_TYPES];
 	UnsignedInt	m_lastSwayFrame;		///< last logic frame the sway was stepped on (drawTrees runs per render frame)
+	UnsignedInt	m_lastTreeStepFrame;	///< last logic frame stepTrees moved the toppling and pushed trees on
 	Real		m_curSwayStep[MAX_SWAY_TYPES];
 	Real		m_curSwayFactor[MAX_SWAY_TYPES];
 

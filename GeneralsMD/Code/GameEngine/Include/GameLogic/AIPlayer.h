@@ -257,6 +257,16 @@ public:
 	void setAISkillLevel(AISkillLevel level) {m_skillLevel = level;}
 	AIRole getAIRole(void) const {return m_role;}
 
+	/** The third axis, how it plays: set once from the seat at the start of the match, after the role is
+		* rolled, which a personality with a role of its own then overrides.  RANDOM draws one of the others
+		* from the logic random stream here, and only then. */
+	void setAIPersonality(AIPersonality persona);
+	AIPersonality getAIPersonality(void) const {return m_persona;}
+	Bool superweaponIsPlan(void) const;	///< a Tech AI, or a GLA Air AI whose SCUD Storm stands in for the air force: its first superweapon is rushed
+	void noteTeamRequest(AITeamRequestKind kind, Int from, Int enemy, const Coord3D *pos);	///< an ally asks (aiPostTeamRequest)
+	/// HEADLESS PERSONA: one line of what this seat's personality did over the match, for ai-batch
+	void logPersonaSummary(void);
+
 	/// This rung's knobs, for any behaviour that has a difficulty-dependent decision to make.
 	const AIDifficultyProfile *getSkillProfile(void) const;
 
@@ -362,16 +372,20 @@ protected:
 	void buyUpgradesForArmy(Bool overTarget);								///< the player upgrade the standing army gets the most out of
 	void addProductionForIncome(Int bank, Int bankWindowAgo, Int target);	///< another factory, while what stands does not bring the bank down
 	void trainSurplus(Int budget);												///< a unit from each idle factory, within budget
+	void trainFavoured(void);															///< a personality's favoured units, below the bank target as well
+	void buyPersonaTransports(void);											///< an Infantry AI's ground transports, a few by rung
+	void sendPersonaTransports(AIGroup *wave);	///< ... driven loaded to a wave's front, riders put down there
 	Int					m_incomeMark;						///< money earned in all, when the income was last measured ...
 	UnsignedInt	m_incomeMarkFrame;			///< ... and the frame, 0 for never
 	Int					m_bankMark;							///< ... and the bank then
 	Real				m_incomePerSecond;			///< smoothed over the windows measured so far
 	Int					m_startFortune;					///< what the match started with over the default starting cash, 0 at the default
-	Bool purchaseAllowed(Int key, Int cost, AIPurchaseKind kind, Bool startable, const AsciiString &what);
+	UnsignedInt	m_factoryBackedUpSince[ 3 ];	///< per war factory, barracks, airfield: the frame every finished one was first seen with a unit waiting, 0 for not
+	Bool purchaseAllowed(Int key, Int cost, AIPurchaseKind kind, Bool startable, const AsciiString &what, Int scoreOffset = 0);
 	void purchased(Int key, Int cost, AIPurchaseKind kind, const AsciiString &what);
 	Bool buyUnit(ProductionUpdateInterface *pu, const ThingTemplate *unit, AIPurchaseKind kind);	///< queueCreateUnit through the queue
-	Bool buyUpgrade(ProductionUpdateInterface *pu, const UpgradeTemplate *upgrade);								///< queueUpgrade through the queue
-	static AIPurchaseKind purchaseKindOf(const ThingTemplate *tmpl);
+	Bool buyUpgrade(ProductionUpdateInterface *pu, const UpgradeTemplate *upgrade, Int scoreOffset = 0);	///< queueUpgrade through the queue
+	AIPurchaseKind purchaseKindOf(const ThingTemplate *tmpl) const;
 	AIPurchaseQueue	m_purchases;
 	AsciiString			m_purchaseSavingFor;	///< the reserved item's name, for the log only
 
@@ -385,10 +399,23 @@ protected:
 	void buyMoneyUnits(void);
 	Int moneyUnitRoom(void) const;	///< how many more money units this player's army and internet centers carry
 	Bool hasEnoughMoneyUnitsFor(TeamPrototype *proto) const;	///< this team is all hackers and there is no room for more
-	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius, Bool walkOutward);	///< a legal, safe spot on a ring round center, queued for a dozer. walkOutward keeps searching further out as the inner rings fill
-	Bool queueExtraFactory(Object *dozer, KindOfType kind, Bool unlimited);	///< one more of this factory, beside a held expansion or around the base
+	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius, Bool walkOutward);	///< the nearest legal, safe spot by the ground from center, queued for a dozer. walkOutward keeps searching further out as the near ground fills
+	Bool queueExtraFactory(Object *dozer, KindOfType kind);	///< one more of this factory, beside a held expansion or around the base, once the ones standing fall behind their queues
+	Bool holdsExtraFactory(const ThingTemplate *tmpl);	///< a factory of a kind already standing or going up, while the ones standing keep up with their queues
 	const ThingTemplate *nextBaseDefense(Object *dozer);	///< the base defence off this dozer's buttons that the base has fewest of, NULL for none
-	Bool placeDefense(const ThingTemplate *defense);	///< queue it on the ring spot whose clear field of fire covers the most ground toward the enemy
+	Bool placeDefense(const ThingTemplate *defense);	///< queue it on the ring spot whose clear field of fire covers the most ground the enemy drives in over; a Turtle's round a choke first
+	Bool placeDefenseAround(const ThingTemplate *defense, const Coord3D *choke);	///< placeDefense's search, on rings round the base center, or round choke when it is set
+	Int possibleEnemyStarts(Coord3D *starts, Int *known);	///< starts a scout found an enemy at, then while one is unplaced every start not looked at
+	Int enemyStarts(Coord3D *threats);	///< enemyStartGuess of every enemy with anything left, at most MAX_PLAYER_COUNT
+	const std::vector<Coord3D> &turtleChokes(void);	///< the narrowest place on the road in from each start an enemy may be at, nearest first, cached until the base or the starts change
+	Int guardedChokes(void);	///< how many of turtleChokes this rung fortifies
+	Real nearestChokeDistance(const Coord3D *pos);	///< straight-line distance to the nearest guarded choke, negative when there is none
+	void queueTurtleLine(void);	///< the Turtle's defence pass, on every rung, before the hoard and not while the base is hit
+	void queueBaseDefenses(Object *dozer);	///< the next defences the allowance has room for, off this dozer's buttons, each on its best spot
+	void fortifyChokes(Object *dozer);	///< a Turtle's mines on the guns at its chokes and demo traps in front of them
+	const std::vector<UnsignedShort> &groundFromBase(void);	///< AIGroundFlood distance of every pathfind cell from the base center, cached until the center moves
+	const std::vector<UnsignedShort> &groundFromThreats(const Coord3D *threats, Int count);	///< the same from the nearest of these, cached until they change
+	Bool reachableFromBase(const Coord3D *pos);	///< a vehicle at the base center could drive there; TRUE before the base is placed
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
 	Bool loadGunships(void);	///< infantry boards the transports it can shoot out of: the wave's anything at home, a team's its own; TRUE while a firing gunship is still filling
@@ -448,7 +475,7 @@ protected:
  		* player index and only what that player can see (or, for a building, has ever seen) is
  		* counted; -1 keeps the omniscient answer for a caller that is not a player's own thinking. */
  	static Int getPlayerSuperweaponValue( Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits = TRUE, Int observerNdx = -1,
-																				Real economyWeight = 0.0f );
+																				Real economyWeight = 0.0f, Real threatWeight = 0.0f );
 // End of aiplayer interface. 
 
 protected:
@@ -509,6 +536,7 @@ protected:
 	/// what a superweapon aimed here is worth, with the shots already on their way taken off
 	Int superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits );
 	Real strikeEconomyWeight( void );	///< the rung's m_strikeEconomyWeight for a skirmish AI, 0 for a campaign one
+	Real strikeThreatWeight( void );	///< the rung's m_strikeThreatWeight for a skirmish AI, 0 for a campaign one
 	void noteSuperweaponAim( const Coord3D *pos );	///< remember a spot, so the next shot goes elsewhere
 
 protected:
@@ -518,6 +546,50 @@ protected:
 	AISkillLevel m_skillLevel;				///< rung of the ladder: how well this AI plays
 	mutable AIDifficultyProfile m_measuredProfile;	///< the rung's profile less the knobs -aiknobsoff turns off for this slot
 	AIRole		m_role;									///< what it is trying to do; rolled once, kept for the match
+
+	// the personality (AIPersonality) and what it keeps; nothing here is read on a Normal seat
+	const AIPersonaWeights &personaWeights(void) const;	///< its row, the Attacker's for a Rusher whose rush is out
+	AIPersonaWeights personaTaste(void) const;		///< ... with an Air one's taste cut by the enemy's known anti-air, or turned to vehicles on a side with no airfield
+	Int personaShareKind(void) const;	///< the kind (SHARE_* in AIPlayer.cpp) whose share of what it builds this personality is about, -1 for none
+	AIPersonaWeights personaKindTaste(void) const;	///< the row, turned to vehicles for an Air AI on a side with no airfield
+	Bool sideFlies(void) const;									///< this side's dozers can put up an airfield at all
+	Int favouredFactoryScore(const ThingTemplate *tmpl) const;	///< what a personality adds to the purchase score of a factory of its favoured kind, 0 for any other building
+	Bool isKindPersona(void) const;		///< an Air, Infantry or Armor AI, whose army is its favoured kind
+	Int personaBuildingScore(const ThingTemplate *tmpl) const;	///< ... and of any building: that, or an Air AI's first few anti-air defences
+	Real wavePower(void) const;										///< what a parked wave waits for
+	UnsignedInt waveMaxHoldFrames(void) const;		///< ... and for how long at most
+	Bool rushPending(void) const;									///< a Rusher whose one big attack has not gone yet
+	UnsignedInt rushFrame(void) const;						///< when it goes, by rung
+	void personaChat(const char *trigger);				///< a line of chat in character, rate limited; display only
+	void notePersonaProgress(void);								///< the summary's superweapon frame and the chat's beaten enemies
+	void doPersonaRaids(void);										///< Raider: fast units at the enemy's gatherers, workers and depots
+	void huntGatherers(void);										///< raiders out of the base turn on the nearest known gatherer near them
+	void personaSortie(void);										///< Attacker and Rusher on a rung that does not mass: the rush and the regular sorties of what idles at home
+	void defendAlly(void);												///< Supporter: idle units at home go to an ally's base when it is hit
+	void postTeamRequests(void);									///< what this AI asks of its allies, every wave tick
+	void answerTeamRequests(void);								///< Air, Attacker and Rusher answer an ally's call for help
+	const AITeamRequest *freshRequest(AITeamRequestKind kind, UnsignedInt within) const;	///< the request of that kind posted inside within frames, NULL for none
+	void coopChat(const char *trigger);					///< one line to the team when answering, GUI:AICoop<trigger>
+	AITeamRequest	m_inbox[ AIREQ_COUNT ];				///< the latest request of each kind from an ally
+	UnsignedInt		m_answeredFrame;							///< the frame of the last call answerTeamRequests answered
+	void shareSurplusWithAllies(Int bank, Int target);	///< Economist: who gets what out of the bank (the hook only)
+	AsciiString sneakyLane(const Coord3D *from, const AsciiString &requested, Int pathSuffix);	///< Sneaky: the back door or the flank
+
+	AIPersonality	m_persona;
+	Bool					m_personaFromRandom;	///< the seat said Random and this was drawn
+	Bool					m_rushSent;
+	Bool					m_techDone;						///< a Tech AI's first superweapon stands: from then on it plays the Normal row
+	UnsignedInt		m_raidFrame;					///< the last Raider sortie
+	enum { MAX_PERSONA_RAIDERS = 8 };
+	ObjectID			m_raider[ MAX_PERSONA_RAIDERS ];	///< the Raider's own raiders, which no wave or defence takes
+	UnsignedInt		m_shareFrame;					///< the last Economist share
+	UnsignedInt		m_chatFrame;					///< the last line of chat, 0 for none yet
+	Int						m_beatenMask;					///< enemies seen eliminated, by player index, for the chat
+	// counters for logPersonaSummary, written and never read by a decision
+	Int						m_personaWaves;
+	UnsignedInt		m_firstWaveFrame;
+	Int						m_personaShared;
+	UnsignedInt		m_superweaponFrame;
 
 	enum { MAX_AI_SCOUTS = 2 };				///< the ladder's maxScouts never asks for more than this
 	ObjectID	m_scoutID[ MAX_AI_SCOUTS ];	///< the units currently touring the map for us
@@ -626,6 +698,24 @@ protected:
 	const ThingTemplate *m_buildSearchPlan;		///< the building whose footprint the search is trying
 	Coord3D m_buildProbePos;
 
+	/* Ground distance fields over the whole pathfind grid (groundFromBase, groundFromThreats), not
+		 xferred for the same reason: each is a pure function of the map, the bridges standing and
+		 the point it was flooded from, recomputed the first time it is asked for after the point
+		 moves or a bridge falls or is put back. */
+	std::vector<UnsignedShort> m_groundFromBase;
+	Coord3D m_groundFromBaseAt;
+	UnsignedInt m_groundFromBaseBridges;
+	std::vector<UnsignedShort> m_groundFromThreats;
+	std::vector<Coord3D> m_groundThreatsAt;
+	UnsignedInt m_groundThreatsBridges;
+
+	/* The Turtle's chokes (turtleChokes), not xferred for the same reason: a pure function of the
+		 map, the bridges, the base center and the enemy addresses, recomputed when one of them moves. */
+	std::vector<Coord3D> m_chokes;
+	std::vector<Coord3D> m_chokeThreatsAt;
+	Coord3D m_chokeBaseAt;
+	UnsignedInt m_chokeBridges;
+
 	GameDifficulty m_difficulty;
 
 	Int			m_skillsetSelector;
@@ -633,7 +723,7 @@ protected:
 	Coord3D m_baseCenter; // Center of the initial build list of structures.
 	Bool		m_baseCenterSet; // True if baseCenter is valid.
 	Real m_baseRadius; // Radius of the initial build list of structures.
-	Int			m_placementRing;	///< first ring placeNear tries when the search is allowed to walk outward
+	Int			m_placementRing;	///< ground distance (AIGroundFlood units) placeNear starts trying spots at when it may walk outward
 
 	// Bridge repair info.
 	enum {MAX_STRUCTURES_TO_REPAIR = 2};

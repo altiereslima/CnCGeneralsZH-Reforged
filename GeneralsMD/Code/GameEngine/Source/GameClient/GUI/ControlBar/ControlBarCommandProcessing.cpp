@@ -337,11 +337,6 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 		TheInGameUI->setGUICommand( NULL );
 		TheMessageStream->appendMessage( GameMessage::MSG_META_TOGGLE_ATTACKMOVE );
 	}
-	else if( commandButton->getCommandType() == GUI_COMMAND_FORCE_ATTACK )
-	{
-		TheInGameUI->setGUICommand( NULL );
-		TheMessageStream->appendMessage( GameMessage::MSG_META_TOGGLE_FORCEATTACK );
-	}
 	else if( BitTest( commandButton->getOptions(), COMMAND_OPTION_NEED_TARGET ) )
 	{
 		if (commandButton->getOptions() & USES_MINE_CLEARING_WEAPONSET)

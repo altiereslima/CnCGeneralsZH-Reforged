@@ -1,0 +1,29 @@
+# The Laser General's beams in one side-on view, for before and after pictures of the beam look:
+# three Laser Crusaders and a Laser Paladin firing north into four Battlemasters, and a Laser
+# Avenger burning down two Helixes hovering over them. Seat 0 America, seat 1 China, -takeover so
+# only these fire. The beams run up the y axis, so a freecam west of them looking east sees each
+# one whole across the frame. Draws, so -win and not -headless:
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -fps 120 -noFPSLimit -particlecap 2500 -cinema nohud -freecam 3170 3790 270 0 -36
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 250
+#     -video 120 240 laserlook_d3d11 -scenario laserlook -logPrefix laserlook_d3d11_
+#
+# Add -d3d9 and change the names for the reference device. The Avenger's beam is on from about
+# logic frame 140 to the end. The beam at 147 to 152 and 207 to 212, where a still is taken (209),
+# is the Paladin's gun, fired on logic frames 146 and 206; the Crusaders do not fire before 250.
+# Those frames are the same in every run at either -logicthread. A shot that once seemed to come at
+# 199 was a recording that opened 8 frames late (2026-10-19); the VIDEO line now names the frame
+# of the first picture.
+
+30    spawn      0  Lazr_AmericaTankCrusader      3   3300 3740  40
+30    spawn      0  Lazr_AmericaTankPaladin       1   3420 3740
+30    spawn      0  Lazr_AmericaTankAvenger       1   3360 3690
+30    spawn      1  ChinaTankBattleMaster         4   3330 3870  40
+30    spawn      1  ChinaVehicleHelix             2   3330 3950  60
+
+60    attack     0  Lazr_AmericaTankCrusader      1  ChinaTankBattleMaster
+60    attack     0  Lazr_AmericaTankPaladin       1  ChinaTankBattleMaster
+60    attack     0  Lazr_AmericaTankAvenger       1  ChinaVehicleHelix
+60    move       1  ChinaVehicleHelix                 3360 3880

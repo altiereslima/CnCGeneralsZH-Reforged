@@ -38,6 +38,7 @@
 #include "Lib/BaseType.h"
 #include "Common/SubsystemInterface.h"
 #include "Common/GameMemory.h"
+#include "Common/LogicThread.h"
 #include "GameClient/Display.h"	// for ShroudLevel
 #include "GameClient/Color.h"
 
@@ -103,14 +104,20 @@ public:
 	inline Color getColor( void ) const { return m_color; }
 
 	inline void friend_setObject( Object *obj ) { m_object = obj; }
-	inline Object *friend_getObject( void ) { return m_object; }
-	inline const Object *friend_getObject( void ) const { return m_object; }
+	inline Object *friend_getObject( void ) { LOGIC_WINDOW_READ( WINDOW_RADAR_OBJECT ); return m_object; }
+	inline const Object *friend_getObject( void ) const { LOGIC_WINDOW_READ( WINDOW_RADAR_OBJECT ); return m_object; }
 
 	inline void friend_setNext( RadarObject *next ) { m_next = next; }
 	inline RadarObject *friend_getNext( void ) { return m_next; }
 	inline const RadarObject *friend_getNext( void ) const { return m_next; }
 
 	Bool isTemporarilyHidden() const;
+
+	/** The object's radar priority when it went on the list.  The insert walks the list by it rather
+		* than through the objects, because after a tick (LOGIC-THREAD.md M6) the list can still hold
+		* the entry of an object that tick destroyed, its removal queued behind the insert. */
+	inline void friend_setPriority( Int priority ) { m_priority = priority; }
+	inline Int friend_getPriority( void ) const { return m_priority; }
 
 protected:
 
@@ -122,6 +129,7 @@ protected:
 	Object *m_object;				///< the object
 	RadarObject *m_next;		///< next radar object
 	Color m_color;					///< color to draw for this object on the radar
+	Int m_priority;					///< RadarPriorityType at the add, see friend_getPriority
 
 };
 
@@ -239,6 +247,7 @@ protected:
 
 	void deleteListResources( void );			///< delete list radar resources used
 	Bool deleteFromList( Object *obj, RadarObject **list );	///< try to remove object from specific list
+	Bool unlinkEntry( RadarObject *entry, RadarObject **list );	///< take an entry off a list by its address
 
 	inline Real getTerrainAverageZ() const { return m_terrainAverageZ; }
 	inline Real getWaterAverageZ() const { return m_waterAverageZ; }

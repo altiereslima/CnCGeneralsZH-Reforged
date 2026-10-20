@@ -1,0 +1,15 @@
+# Seat 1 is a computer China on Twilight Flame building its base in seat 0's fog; seat 0 is the
+# player at this machine and builds nothing.  At frame 1200 (40 seconds) a Comanche of seat 0 is
+# put down over seat 1's start and the base comes into view.  With a structure on the cursor over
+# that base, the placement grid must wash none of its cells red before the Comanche and the seen
+# ones after it.  A file cannot put a structure on the cursor, so the check is a drawing run with a
+# temporary log in W3DInGameUI::takeBuildGrid, or a look.  On 2026-10-19 the 57-cell patch round
+# seat 1's command centre held 175 enemy cells (4 of them a building going up) and washed 0 of
+# them until the Comanche arrived, then 171.
+#
+#   generals.exe -win -turbo -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -aidiff easy
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -maxframes 3000 -scenario fogleak
+#     -logPrefix fogleak_
+
+1200  spawn  0  AmericaVehicleComanche  1  start1

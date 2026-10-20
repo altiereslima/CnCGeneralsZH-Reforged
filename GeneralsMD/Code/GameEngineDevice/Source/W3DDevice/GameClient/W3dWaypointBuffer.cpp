@@ -176,21 +176,77 @@ void W3DWaypointBuffer::setDefaultLineStyle( void )
 }
 
 
+void W3DWaypointBuffer::record( DrawKind kind, Bool orderHint, Int count, const Vector3 *points )
+{
+	WaypointDraw draw;
+	draw.kind = kind;
+	draw.orderHint = orderHint;
+	draw.first = (Int)m_drawPoints.size();
+	draw.count = count;
+	m_draws.push_back( draw );
+	m_drawPoints.insert( m_drawPoints.end(), points, points + count );
+}
+
 //=============================================================================
 // W3DWaypointBuffer::drawWaypoints
 //=============================================================================
-/** Draws the waypoints. Uses camera to cull */
+/** Draws the pucks and lines takeReadsForRender took, in the order it took them. */
 //=============================================================================
 void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 {
+	setDefaultLineStyle();
+	if( m_draws.empty() )
+		return;
 
-  if ( ! TheInGameUI )
-    return;
+	//Create a default light environment with no lights and only full ambient.
+	//@todo: Fix later by copying default scene light environement from W3DScene.cpp.
+	LightEnvironmentClass lightEnv;
+	lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
+	lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
+	RenderInfoClass localRinfo(rinfo.Camera);
+	localRinfo.light_environment=&lightEnv;
 
+	// not in the water's mirror pass: the ground is left out of the reflection, and a PASS_ALWAYS
+	// order line would lie on top of the water
+	const Bool mirror = ShaderClass::Is_Backface_Culling_Inverted();
+	for( std::vector<WaypointDraw>::const_iterator it = m_draws.begin(); it != m_draws.end(); ++it )
+	{
+		if( it->orderHint && mirror )
+			continue;
+		Vector3 *points = &m_drawPoints[ it->first ];
+		switch( it->kind )
+		{
+			case DRAW_PUCK:
+				m_waypointNodeRobj->Set_Position( points[ 0 ] );
+				WW3D::Render( *m_waypointNodeRobj, localRinfo );		// the little hockey puck
+				break;
+			case DRAW_LINE:
+				queueLine( it->count, points );
+				break;
+			case DRAW_OUTPOST_LINE:
+				m_line->Set_Color( Vector3( 0.95f, 0.5f, 0.0f ) );
+				m_line->Set_Width( 3.0f );
+				m_line->Set_Points( it->count, points );
+				m_line->Render( localRinfo );
+				break;
+		}
+	}
 
-  setDefaultLineStyle();
+	// every line goes out after the last puck: a puck's render flushes the static sort list (queueLine)
+	if( m_linesUsed > 0 )
+		renderQueuedLines( localRinfo );
+}
 
-
+//=============================================================================
+// W3DWaypointBuffer::takeReadsForRender
+//=============================================================================
+/** LOGIC-THREAD.md phase 4: the selection's orders, rally points and exits read the objects and the
+		ground, so they are read at the render's sync point and drawWaypoints draws what was taken. */
+//=============================================================================
+void W3DWaypointBuffer::takeReadsForRender(void)
+{
+	m_draws.clear();
+	m_drawPoints.clear();
 
 	// Retail drew its own white nodes-and-lines here for every selected unit's goal path while
 	// isInWaypointMode() (shift held) was true. The shift queue now has its own per-order hint
@@ -201,16 +257,7 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 	// line, the puck on each point short of the end and on any unit or building it is aimed at, and
 	// the rally flag on the last bit of ground (a drawable of its own, InGameUI::updateOrderFlags).
 	// The hints are rebuilt off the units every frame, so a puck on a target follows it.
-	// not in the water's mirror pass: the ground is left out of the reflection, and a PASS_ALWAYS
-	// line would lie on top of the water
-	if( !TheInGameUI->getOrderHints().empty() && !ShaderClass::Is_Backface_Culling_Inverted() )
 	{
-		LightEnvironmentClass lightEnv;
-		lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
-		lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
-		RenderInfoClass localRinfo(rinfo.Camera);
-		localRinfo.light_environment=&lightEnv;
-
 		const std::vector<InGameUI::OrderHint>& hints = TheInGameUI->getOrderHints();
 		for( std::vector<InGameUI::OrderHint>::const_iterator it = hints.begin(); it != hints.end(); ++it )
 		{
@@ -229,15 +276,12 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 			const Bool lineShown = TheGlobalData->m_showOrderLines || it->step > 0
 				|| it->kind == InGameUI::ORDER_HINT_WAYPOINT;
 			if( lineShown )
-				queueLine( 2, points );
+				record( DRAW_LINE, TRUE, 2, points );
 
 			// with the line drawn, its end wears the puck the joints between orders do
 			if( it->mark == InGameUI::ORDER_MARK_JOINT
 					|| ( lineShown && it->mark == InGameUI::ORDER_MARK_FLAG ) )
-			{
-				m_waypointNodeRobj->Set_Position( points[ 1 ] );
-				WW3D::Render( *m_waypointNodeRobj, localRinfo );		// the little hockey puck
-			}
+				record( DRAW_PUCK, TRUE, 1, &points[ 1 ] );
 		}
 		// the lines stay queued: the rally and placement pucks below would flush them into the
 		// terrain pass, under the buildings (see queueLine)
@@ -247,13 +291,6 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 	// else of the block above, which is why turning that block on full time hid every rally line.
 	if( !TheInGameUI->isInWaypointMode() )
 	{
-		//Create a default light environment with no lights and only full ambient.
-		//@todo: Fix later by copying default scene light environement from W3DScene.cpp.
-		LightEnvironmentClass lightEnv;
-		lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
-		lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
-		RenderInfoClass localRinfo(rinfo.Camera);
-		localRinfo.light_environment=&lightEnv;
 		Vector3 points[ MAX_DISPLAY_NODES + 1 ]; //Lines have nodes + 1 points.
 
 		const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
@@ -318,8 +355,8 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 								            points[ numPoints++ ].Set( Vector3( waypoint->x, waypoint->y, waypoint->z ) );
 							            }
 
-							            m_waypointNodeRobj->Set_Position(Vector3(waypoint->x,waypoint->y,waypoint->z));
-							            WW3D::Render(*m_waypointNodeRobj,localRinfo);
+							            Vector3 puck( waypoint->x, waypoint->y, waypoint->z );
+							            record( DRAW_PUCK, FALSE, 1, &puck );
                           lineExists = TRUE;
 						            }
 					            }
@@ -330,8 +367,7 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
                       if ( destinationPoint->length() > 1.0f )
                       {
 								        points[ numPoints++ ].Set( Vector3( destinationPoint->x, destinationPoint->y, destinationPoint->z ) );
-							          m_waypointNodeRobj->Set_Position(Vector3(destinationPoint->x,destinationPoint->y,destinationPoint->z));
-							          WW3D::Render(*m_waypointNodeRobj,localRinfo);
+							          record( DRAW_PUCK, FALSE, 1, &points[ numPoints - 1 ] );
                         lineExists = TRUE;
                       }
                     }
@@ -339,12 +375,8 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
                     if ( lineExists )
                     {
 					            //Now render the lines in one pass!
-
-                      m_line->Set_Color( Vector3( 0.95f, 0.5f, 0.0f ) );
-                      m_line->Set_Width( 3.0f );
-
-					            m_line->Set_Points( numPoints, points );
-					            m_line->Render( localRinfo );                    }
+					            record( DRAW_OUTPOST_LINE, FALSE, numPoints, points );
+                    }
                   }
                   //////////////////////////////////////////////////////////////////////                
 
@@ -546,7 +578,7 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 					else
 						continue;
 
-					queueLine( numPoints, points );
+					record( DRAW_LINE, FALSE, numPoints, points );
 
 				}// end if exit interface
 				
@@ -580,32 +612,14 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 			// a helipad puts both points in the same place; one puck, no line
 			if( !(exitLoc == rallyLoc) )
 			{
-				LightEnvironmentClass lightEnv;
-				lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
-				lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
-				RenderInfoClass localRinfo(rinfo.Camera);
-				localRinfo.light_environment=&lightEnv;
-
-				m_waypointNodeRobj->Set_Position( rallyLoc );
-				WW3D::Render(*m_waypointNodeRobj,localRinfo); //The little hockey puck
+				record( DRAW_PUCK, FALSE, 1, &rallyLoc );	//The little hockey puck
 
 				Vector3 points[ 2 ];
 				points[ 0 ] = exitLoc;
 				points[ 1 ] = rallyLoc;
-				queueLine( 2, points );
+				record( DRAW_LINE, FALSE, 2, points );
 			}
 		}
-	}
-
-	// every line of every block above goes out after the last puck
-	if( m_linesUsed > 0 )
-	{
-		LightEnvironmentClass lightEnv;
-		lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
-		lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
-		RenderInfoClass localRinfo(rinfo.Camera);
-		localRinfo.light_environment=&lightEnv;
-		renderQueuedLines( localRinfo );
 	}
 }
 

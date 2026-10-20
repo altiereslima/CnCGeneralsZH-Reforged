@@ -380,40 +380,48 @@ private:
 		}
 	}
 
+	// the rope's draw module is client state: told after the tick (LOGIC-THREAD.md phase 2, M3)
 	static void initRopeParms(Drawable* rope, Real length, Real width, const RGBColor& color, Real wobbleLen, Real wobbleAmp, Real wobbleRate)
 	{
-		RopeDrawInterface* tdi = NULL;
-		for (DrawModule** d = rope->getDrawModules(); *d; ++d)
-		{
-			if ((tdi = (*d)->getRopeDrawInterface()) != NULL)
+		const RGBColor ropeColor = color;
+		rope->doClientWork( [rope, length, width, ropeColor, wobbleLen, wobbleAmp, wobbleRate]() {
+			RopeDrawInterface* tdi = NULL;
+			for (DrawModule** d = rope->getDrawModulesNonDirty(); *d; ++d)
 			{
-				tdi->initRopeParms(length, width, color, wobbleLen, wobbleAmp, wobbleRate);
+				if ((tdi = (*d)->getRopeDrawInterface()) != NULL)
+				{
+					tdi->initRopeParms(length, width, ropeColor, wobbleLen, wobbleAmp, wobbleRate);
+				}
 			}
-		}
+		}, Drawable::WORK_AFTER_FLUSH );
 	}
 
 	static void setRopeCurLen(Drawable* rope, Real length)
 	{
-		RopeDrawInterface* tdi = NULL;
-		for (DrawModule** d = rope->getDrawModules(); *d; ++d)
-		{
-			if ((tdi = (*d)->getRopeDrawInterface()) != NULL)
+		rope->doClientWork( [rope, length]() {
+			RopeDrawInterface* tdi = NULL;
+			for (DrawModule** d = rope->getDrawModulesNonDirty(); *d; ++d)
 			{
-				tdi->setRopeCurLen(length);
+				if ((tdi = (*d)->getRopeDrawInterface()) != NULL)
+				{
+					tdi->setRopeCurLen(length);
+				}
 			}
-		}
+		}, Drawable::WORK_AFTER_FLUSH );
 	}
 
 	static void setRopeSpeed(Drawable* rope, Real curSpeed, Real maxSpeed, Real accel)
 	{
-		RopeDrawInterface* tdi = NULL;
-		for (DrawModule** d = rope->getDrawModules(); *d; ++d)
-		{
-			if ((tdi = (*d)->getRopeDrawInterface()) != NULL)
+		rope->doClientWork( [rope, curSpeed, maxSpeed, accel]() {
+			RopeDrawInterface* tdi = NULL;
+			for (DrawModule** d = rope->getDrawModulesNonDirty(); *d; ++d)
 			{
-				tdi->setRopeSpeed(curSpeed, maxSpeed, accel);
+				if ((tdi = (*d)->getRopeDrawInterface()) != NULL)
+				{
+					tdi->setRopeSpeed(curSpeed, maxSpeed, accel);
+				}
 			}
-		}
+		}, Drawable::WORK_AFTER_FLUSH );
 	}
 
 protected:

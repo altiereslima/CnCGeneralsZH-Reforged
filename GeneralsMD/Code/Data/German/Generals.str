@@ -870,7 +870,7 @@ GUI:SendDelay
 END
 
 GUI:FirewallRefresh
-"NAT aktualisieren"
+"NAT AKTUALISIEREN"
 END
 
 GUI:Exit
@@ -14777,6 +14777,22 @@ TOOLTIP:ProRules
 "Die Turnierliste. Keine Partikelkanone und kein SCUD Storm, außer der einen Kanone des Superwaffengenerals. Das Atomraketen-Silo wird gebaut, feuert aber nie. Kein Aurora, keine Tactical-Nuke-MiGs, kein Sprengmotorrad, keine Selbstmordbomben, Neutronengranaten oder Tarn-Comanche, und kein Flächenbombardement vor Rang 3. Ein Mikrowellenpanzer kann kein Gebäude einfrieren, das noch im Bau ist, niemand baut näher als 300 an einem feindlichen Gebäude, und niemand setzt mehr als zwei Patriots, Gatling-Kanonen oder Stinger-Stellungen um eine Ölbohrturm-Gruppe."
 END
 
+GUI:TurboMode
+"Turbo-Modus"
+END
+
+TOOLTIP:TurboMode
+"Das Spiel läuft doppelt so schnell: In jeder Sekunde vergehen zwei Sekunden Spielzeit, sonst ändert sich nichts. Im Netzwerkspiel wählt der Host für alle."
+END
+
+GUI:TurboModeMissions
+"Turbo-Modus in Missionen"
+END
+
+TOOLTIP:TurboModeMissions
+"Kampagnen- und Generalsherausforderungs-Missionen laufen doppelt so schnell, auch eine laufende Mission sofort. Gefecht und Mehrspieler haben ein eigenes Kästchen in der Lobby."
+END
+
 GUI:CantBuildTooCloseToEnemy
 "Hier kannst du nicht so nah an einem feindlichen Gebäude bauen."
 END
@@ -14977,6 +14993,10 @@ GUI:OptionsGroupMenus
 "Menüs"
 END
 
+GUI:OptionsGroupSpeed
+"Spieltempo"
+END
+
 GUI:OptionsGroupReplays
 "Replays"
 END
@@ -15010,15 +15030,15 @@ GUI:HotkeysCommandBar
 END
 
 GUI:HotkeysChange
-"Ändern"
+"ÄNDERN"
 END
 
 GUI:HotkeysClear
-"Keine Taste"
+"KEINE TASTE"
 END
 
 GUI:HotkeysDefault
-"Standard"
+"STANDARD"
 END
 
 TOOLTIP:HotkeyChange
@@ -15049,8 +15069,12 @@ GUI:HotkeysPressForceAttack
 "Drücke eine Taste, oder Strg oder Alt allein. Umschalt kann nicht die Haltetaste sein. Esc bricht ab."
 END
 
+GUI:HotkeysPressHold
+"Drücke eine Taste, oder Strg, Alt oder Umschalt allein. Esc bricht ab."
+END
+
 GUI:HotkeysClash
-"%s: %s teilen sich diese Taste. Im Spiel bekommt sie nur einer davon, und ein fester Befehl behält seine eigene."
+"%s: %s teilen sich diese Taste. Im Spiel bekommt sie nur einer davon: ein fester Befehl behält seine eigene, und ein Buchstabe von dir schlägt den des Spiels."
 END
 
 GUI:HotkeysAlsoOn
@@ -15058,7 +15082,7 @@ GUI:HotkeysAlsoOn
 END
 
 GUI:HotkeysFixed
-"Feste Tasten auf jeder Leiste: A Angriffsmarsch, S Stopp, G Bewachen, Y Sammelpunkt, V Evakuieren, C Abseilen, N Verkaufen, H Minen, Tarnnetz und der Wechsel zur Attrappe."
+"Dieselbe Vorgabe auf jeder Leiste: A Angriffsmarsch, S Stopp, G Bewachen, Y Sammelpunkt, V Evakuieren, C Abseilen, N Verkaufen, H Minen, Tarnnetz und der Wechsel zur Attrappe. Ändern verlegt sie."
 END
 
 GUI:HotkeysGameKey
@@ -15202,7 +15226,7 @@ GUI:HotkeysCommandSELECT_ALL
 END
 
 GUI:HotkeysCommandSELECT_ALL_MILITARY
-"Alle Kampfeinheiten auswählen"
+"Alle Infanteristen auswählen"
 END
 
 GUI:HotkeysCommandSELECT_ALL_VEHICLES
@@ -15233,6 +15257,30 @@ GUI:HotkeysCommandSELECT_NEXT_IDLE_UNIT
 "Nächste untätige Einheit"
 END
 
+GUI:HotkeysCommandSELECT_NEXT_IDLE_AIRCRAFT
+"Nächstes untätiges Flugzeug"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_VEHICLE
+"Nächstes untätiges Fahrzeug"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_INFANTRY
+"Nächster untätiger Infanterist"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_UNITS
+"Alle untätigen Einheiten auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_AIRCRAFT
+"Alle untätigen Flugzeuge auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_VEHICLES
+"Alle untätigen Fahrzeuge auswählen"
+END
+
 GUI:HotkeysCommandTOGGLE_PAUSE
 "Pause (Einzelspieler und Replays)"
 END
@@ -15251,4 +15299,48 @@ END
 
 GUI:HotkeysCommandSIGNAL_ATTENTION
 "Signal: hierher schauen"
+END
+
+GUI:HotkeysCommandBEGIN_WAYPOINTS
+"Befehle einreihen (halten)"
+END
+
+GUI:HotkeysCommandBEGIN_PREFER_SELECTION
+"Zur Auswahl hinzufügen (halten)"
+END
+
+GUI:MoneyTransferTitle
+"Geld senden"
+END
+
+GUI:MoneyTransferSend
+"Senden"
+END
+
+GUI:MoneyTransferAmount
+"$%d"
+END
+
+GUI:MoneyTransferSent
+"Du hast $%d an %ls geschickt."
+END
+
+GUI:MoneyTransferReceived
+"%ls hat dir $%d geschickt."
+END
+
+TOOLTIP:MoneyTransfer
+"Betrag mit dem Mausrad oder mit - und + wählen: 100 pro Schritt, 1.000 mit Strg, 10.000 mit Umschalt, 100.000 mit beiden. Senden übergibt ihn."
+END
+
+GUI:LobbyRecord
+"Bilanz"
+END
+
+GUI:LobbyRecordButton
+"BILANZ"
+END
+
+GUI:LobbyRecordClose
+"SCHLIESSEN"
 END

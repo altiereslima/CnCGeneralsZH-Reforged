@@ -108,19 +108,17 @@ constexpr Real ConvertRetailPerFrameSquared( Real perFrameSqr ) { return perFram
 inline Real ConvertRetailPerFrameFactor( Real factor ) { return sqrtf( factor > 0.0f ? factor : 0.0f ); }
 
 // ----------------------------------------------------------------------------------------------
-// The speeds a skirmish or single-player match may run at: half speed to normal, never faster.  The
-// menu, the console, a saved game and a map script all pass through this; -fps, -turbo and a network
-// game do not.
+// The two speeds a match someone plays runs at: normal, and turbo mode at twice that.  There is no
+// slider any more.  A saved game and the console's speed land on the nearer of the two; -fps, -turbo
+// and a replay's speed keys do not pass through here.
 enum
 {
-	PLAYER_GAME_SPEED_MIN_FPS = LOGICFRAMES_PER_SECOND / 2,
-	PLAYER_GAME_SPEED_MAX_FPS = LOGICFRAMES_PER_SECOND
+	PLAYER_GAME_SPEED_NORMAL_FPS = LOGICFRAMES_PER_SECOND,
+	PLAYER_GAME_SPEED_TURBO_FPS = LOGICFRAMES_PER_SECOND * 2
 };
 constexpr Int ClampPlayerGameSpeed( Int fps )
 {
-	if( fps < PLAYER_GAME_SPEED_MIN_FPS ) return PLAYER_GAME_SPEED_MIN_FPS;
-	if( fps > PLAYER_GAME_SPEED_MAX_FPS ) return PLAYER_GAME_SPEED_MAX_FPS;
-	return fps;
+	return fps > PLAYER_GAME_SPEED_NORMAL_FPS ? PLAYER_GAME_SPEED_TURBO_FPS : PLAYER_GAME_SPEED_NORMAL_FPS;
 }
 
 // ----------------------------------------------------------------------------------------------

@@ -60,6 +60,7 @@
 //-----------------------------------------------------------------------------
 #include "Common/GameMemory.h"
 #include "Common/KindOf.h"
+#include "Common/LogicThread.h"
 #include "Common/Override.h"
 #include "WWMath/matrix3d.h"							///< @todo Decide if we're keeping the WWMath libs (MSB)
 
@@ -121,7 +122,7 @@ public:
 	// don't want this behavior? then call setTransformMatrix instead.
 	void setOrientation( Real angle );
 
-	inline const Coord3D *getPosition() const { return &m_cachedPos; }
+	inline const Coord3D *getPosition() const { LOGIC_WINDOW_READ( WINDOW_THING ); return &m_cachedPos; }
 	inline Real getOrientation() const { return m_cachedAngle; }
 	/// for a load: the angle as it stood when saved, which the one setTransformMatrix derives from the matrix is a few bits off
 	void restoreOrientation( Real angle ) { m_cachedAngle = angle; m_cacheFlags &= ~VALID_DIRVECTOR; }
@@ -143,7 +144,7 @@ public:
 	void convertBonePosToWorldPos(const Coord3D* bonePos, const Matrix3D* boneTransform, Coord3D* worldPos, Matrix3D* worldTransform) const;
 
 	void setTransformMatrix( const Matrix3D *mx );												///< set the world transformation matrix
-	const Matrix3D* getTransformMatrix() const { return &m_transform; }		///< return the world transformation matrix
+	const Matrix3D* getTransformMatrix() const { LOGIC_WINDOW_READ( WINDOW_THING ); return &m_transform; }		///< return the world transformation matrix
 
 	void transformPoint( const Coord3D *in, Coord3D *out );								///< transform this point using the m_transform matrix of this thing
 

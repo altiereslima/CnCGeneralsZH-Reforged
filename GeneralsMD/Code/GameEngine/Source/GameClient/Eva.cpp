@@ -27,6 +27,7 @@
 // GameClient/Eva.cpp /////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Common/LogicThread.h"
 #include "GameClient/Eva.h"
 
 #include "Common/Player.h"
@@ -387,6 +388,9 @@ const EvaCheckInfo *Eva::getEvaCheckInfo(AsciiString name)
 //-------------------------------------------------------------------------------------------------
 void Eva::setShouldPlay(EvaMessage messageToPlay)
 {
+	// LOGIC-THREAD.md M6: a tick's request waits for the end of it
+	LOGIC_AFTER_TICK( [=]() { setShouldPlay( messageToPlay ); } );
+	LOGIC_CENSUS( CENSUS_EVA );
 	m_shouldPlay[messageToPlay] = TRUE;
   
   // DEBUG_LOG( ( "Eva message %s play requested\n", messageToName( messageToPlay).str() ) );
@@ -395,6 +399,8 @@ void Eva::setShouldPlay(EvaMessage messageToPlay)
 //-------------------------------------------------------------------------------------------------
 void Eva::setEvaEnabled(Bool enabled)
 {
+	LOGIC_AFTER_TICK( [=]() { setEvaEnabled( enabled ); } );
+	LOGIC_CENSUS( CENSUS_EVA );
 	// clear out any waiting messages.
 	for (Int i = EVA_FIRST; i < EVA_COUNT; ++i) {
 		m_shouldPlay[i] = FALSE;

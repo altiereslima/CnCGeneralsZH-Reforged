@@ -312,6 +312,20 @@ void TransitionGroup::update( void )
 	}	
 }
 
+//-----------------------------------------------------------------------------
+/** Play every remaining frame now, ignoring the clock: the group lands exactly where it would have
+	* ended, in either direction.  isFinished() turns true once the frame passes the group's end, so
+	* this stops. */
+void TransitionGroup::finish( void )
+{
+	while( !isFinished() )
+	{
+		m_currentFrame += m_directionMultiplier;
+		for( TransitionWindowList::iterator it = m_transitionWindowList.begin(); it != m_transitionWindowList.end(); ++it )
+			(*it)->update( m_currentFrame );
+	}
+}
+
 Bool TransitionGroup::isFinished( void )
 {
 	// Past its last frame (or, reversed, before its first) no window takes another update, so
@@ -441,6 +455,8 @@ void GameWindowTransitionsHandler::load(void )
 	INI ini;
 	// Read from INI all the ControlBarSchemes
 	ini.load( AsciiString( "Data\\INI\\WindowTransitions.ini" ), INI_LOAD_OVERWRITE, NULL );
+	// the fork's own groups, new names only (the main menu's campaign mission panel)
+	ini.load( AsciiString( "Data\\INI\\WindowTransitionsReforged.ini" ), INI_LOAD_OVERWRITE, NULL );
 
 }
 
@@ -485,6 +501,31 @@ void GameWindowTransitionsHandler::update( void )
 		m_currentGroup = NULL;
 }
 
+
+//-----------------------------------------------------------------------------
+/** Cut the running group, and the one queued behind it, to their last frames.  The hand-offs are
+	* the ones update() makes, taken without waiting a frame between them. */
+void GameWindowTransitionsHandler::finish( void )
+{
+	while( m_currentGroup || m_pendingGroup )
+	{
+		if( !m_currentGroup )
+		{
+			m_currentGroup = m_pendingGroup;
+			m_pendingGroup = NULL;
+		}
+		m_currentGroup->finish();
+		if( m_pendingGroup )
+		{
+			m_currentGroup = m_pendingGroup;
+			m_pendingGroup = NULL;
+			continue;
+		}
+		if( m_currentGroup->isFireOnce() || m_currentGroup->isReversed() )
+			m_currentGroup = NULL;
+		break;
+	}
+}
 
 void GameWindowTransitionsHandler::draw( void )
 {

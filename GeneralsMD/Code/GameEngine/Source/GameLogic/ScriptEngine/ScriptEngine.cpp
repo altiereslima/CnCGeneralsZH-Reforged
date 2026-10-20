@@ -8574,7 +8574,8 @@ void ScriptEngine::particleEditorUpdate( void )
 				{
 					int newCap = _getNewCurrentParticleCap();
 					if (newCap >= 0) {
-						TheWritableGlobalData->m_maxParticleCount = newCap;
+						// the client's particle cap (LOGIC-THREAD.md hazard 24): after the tick
+						LogicThread::callAfterTick( [newCap]() { TheWritableGlobalData->m_maxParticleCount = newCap; } );
 					}
 					busyWait = false;
 				}

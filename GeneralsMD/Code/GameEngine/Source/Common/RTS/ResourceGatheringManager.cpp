@@ -33,6 +33,7 @@
 #include "Common/ResourceGatheringManager.h"
 
 #include "Common/ActionManager.h"
+#include "Common/GameState.h"
 #include "Common/PlayerList.h"
 #include "Common/Xfer.h"
 #include "GameLogic/GameLogic.h"
@@ -63,9 +64,12 @@ ResourceGatheringManager::~ResourceGatheringManager()
 	m_supplyCenters.erase( m_supplyCenters.begin(), m_supplyCenters.end() );
 }
 
+/* A load makes every object afresh, and a warehouse or a center registers on creation under the ID
+	 newObject gave it before the save's own ID is put back.  The lists were loaded already, with the
+	 real IDs, so whatever registers during a load is a stale ID that a later object gets again. */
 void ResourceGatheringManager::addSupplyCenter( Object *newCenter )
 {
-	if( newCenter == NULL )
+	if( newCenter == NULL || TheGameState->isInLoadGame() )
 		return;
 
 	m_supplyCenters.push_back( newCenter->getID() );
@@ -92,7 +96,7 @@ void ResourceGatheringManager::removeSupplyCenter( Object *oldCenter )
 
 void ResourceGatheringManager::addSupplyWarehouse( Object *newWarehouse )
 {
-	if( newWarehouse == NULL )
+	if( newWarehouse == NULL || TheGameState->isInLoadGame() )	// see addSupplyCenter
 		return;
 
 	m_supplyWarehouses.push_back( newWarehouse->getID() );

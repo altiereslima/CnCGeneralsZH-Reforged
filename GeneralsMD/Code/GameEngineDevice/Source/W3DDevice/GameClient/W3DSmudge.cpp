@@ -291,7 +291,9 @@ Bool W3DSmudgeManager::testHardwareSupport(void)
 		//not worth bothering with index/vertex buffers.
 		pDev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
-		DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+		// Both quads are read back off the Direct3D 9 target, so they go to that device even while
+		// Direct3D 11 presents.
+		DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX), true);
 
 		UnsignedInt refData[BLOCK_SIZE*BLOCK_SIZE];
 		memset(refData,0,sizeof(refData));
@@ -312,7 +314,7 @@ Bool W3DSmudgeManager::testHardwareSupport(void)
 		v[2].color = 0xffffffff;
 		v[3].color = 0xffffffff;
 
-		DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+		DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX), true);
 		bufSize=copyRect((unsigned char *)testData,sizeof(testData),0,0,BLOCK_SIZE,BLOCK_SIZE);
 
 		if (!bufSize)

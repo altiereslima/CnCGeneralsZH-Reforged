@@ -1002,7 +1002,7 @@ void StealthUpdate::disguiseAsObject( const Object *target )
 	}
 
 	Drawable *draw = self->getDrawable();
-	if( draw && draw->isSelected() )
+	if( draw && LogicThread::isSelectedForTick( draw ) )
 	{
 		TheControlBar->markUIDirty();
 	}
@@ -1017,7 +1017,7 @@ void StealthUpdate::changeVisualDisguise()
 
 	Drawable *draw = self->getDrawable();
 	// We need to maintain our selection across the un/disguise, so pull selected out here.
-	Bool selected = draw->isSelected();
+	Bool selected = LogicThread::isSelectedForTick( draw );
 
 	if( m_disguiseAsTemplate )
 	{

@@ -35,6 +35,7 @@
 #include "Lib/BaseType.h"
 
 #include "Common/Geometry.h"
+#include "Common/LogicThread.h"
 #include "Common/Snapshot.h"
 #include "Common/SpecialPowerMaskType.h"
 #include "Common/DisabledTypes.h"
@@ -236,7 +237,7 @@ public:
 	// ids and binding
 	ObjectID getID() const { return m_id; }												///< this object's unique ID
 	void friend_bindToDrawable( Drawable *draw );									///< set drawable association. for use ONLY by GameLogic!
-	Drawable* getDrawable() const { return m_drawable; }					///< drawable (if any) bound to obj
+	Drawable* getDrawable() const { return m_drawable; }	///< drawable (if any) bound to obj
 
 	ObjectID getProducerID() const { return m_producerID; }
 	void setProducer(const Object* obj);

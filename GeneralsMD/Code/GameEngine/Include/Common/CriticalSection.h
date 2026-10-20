@@ -112,6 +112,7 @@ class RecursiveLock
 	unsigned int m_depth = 0;					///< read and written by the holder only
 	std::mutex m_parkMutex;						///< guards the sleep, not the lock
 	std::condition_variable m_parkCv;
+	std::atomic<unsigned long long> m_contended{ 0 };	///< enters that found the lock held (LOGIC-THREAD.md phase 3)
 
 	static uintptr_t self()
 	{
@@ -140,6 +141,7 @@ class RecursiveLock
 
 	void lockContended()
 	{
+		m_contended.fetch_add( 1, std::memory_order_relaxed );
 		for (int spin = 0; spin < 128; ++spin)
 		{
 			cpuRelax();
@@ -168,6 +170,8 @@ class RecursiveLock
 	}
 
 public:
+	unsigned long long contended() const { return m_contended.load( std::memory_order_relaxed ); }
+
 	void lock()
 	{
 		const uintptr_t me = self();
@@ -202,10 +206,13 @@ class RecursiveUnfairLock
 	os_unfair_lock m_lock = OS_UNFAIR_LOCK_INIT;
 	std::atomic<uintptr_t> m_owner{ 0 };	///< the holder's pthread_self(), 0 when free
 	unsigned int m_depth = 0;				///< read and written by the holder only
+	std::atomic<unsigned long long> m_contended{ 0 };	///< enters that found the lock held (LOGIC-THREAD.md phase 3)
 
 	static uintptr_t self() { return reinterpret_cast<uintptr_t>( pthread_self() ); }
 
 public:
+	unsigned long long contended() const { return m_contended.load( std::memory_order_relaxed ); }
+
 	void lock()
 	{
 		const uintptr_t me = self();
@@ -216,7 +223,11 @@ public:
 			++m_depth;
 			return;
 		}
-		os_unfair_lock_lock( &m_lock );
+		if (!os_unfair_lock_trylock( &m_lock ))
+		{
+			m_contended.fetch_add( 1, std::memory_order_relaxed );
+			os_unfair_lock_lock( &m_lock );
+		}
 		m_owner.store( me, std::memory_order_relaxed );
 		m_depth = 1;
 	}
@@ -256,6 +267,11 @@ class CriticalSection
 			AutoPerfGather a(TheCritSecPerfGather);
 			#endif
 		}
+
+	public:
+		/** How many enters found another thread holding it, since the start.  The logic thread's report
+			* prints the memory pools' (LOGIC-THREAD.md hazard 13). */
+		unsigned long long getContendedCount( void ) const { return m_mutex.contended(); }
 
 	public:	// Use these when entering/exiting a critical section.
 		void enter( void )

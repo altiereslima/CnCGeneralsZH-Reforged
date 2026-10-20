@@ -149,7 +149,25 @@ public:
 	unsigned short vertex_count;			// Number of vertices used in vb
 	bool quads;									// four vertices a quad, in order from min_vertex_index; the ib is not read
 	bool glow;									// the normals hold a fire's glow (Insert_Quads)
+	// The object's Direct3D 11 look (RTS3DScene::renderOneObject) as the mesh renderer had it set
+	// when a sorted mesh queued its triangles; its draws come later, after the look is put back.
+	unsigned draw_effect;
+	float draw_effect_parameters[4];
 };
+
+// Whether two nodes are drawn in the same look; the numbers differ per object.
+static bool Same_Draw_Effect(const SortingNodeStruct* a,const SortingNodeStruct* b)
+{
+	return a->draw_effect==b->draw_effect
+		&& (a->draw_effect==0 || memcmp(a->draw_effect_parameters,b->draw_effect_parameters,sizeof(a->draw_effect_parameters))==0);
+}
+
+static void No_Draw_Effect(SortingNodeStruct* state)
+{
+	state->draw_effect=0;
+	state->draw_effect_parameters[0]=state->draw_effect_parameters[1]=0.0f;
+	state->draw_effect_parameters[2]=state->draw_effect_parameters[3]=0.0f;
+}
 
 static DLListClass<SortingNodeStruct> sorted_list;
 // Nodes that arrive with no bounding sphere have nothing to sort by; they wait here and go into
@@ -234,6 +252,7 @@ void SortingRendererClass::Insert_Triangles(
 	state->vertex_count=vertex_count;
 	state->quads=false;
 	state->glow=false;
+	state->draw_effect=Direct3D11_Requested_Draw_Effect(state->draw_effect_parameters);
 
 	SortingVertexBufferClass* vertex_buffer=static_cast<SortingVertexBufferClass*>(state->sorting_state.vertex_buffers[0]);
 	WWASSERT(vertex_buffer);
@@ -345,6 +364,7 @@ void SortingRendererClass::Insert_Quads(
 	state->vertex_count=vertex_count;
 	state->quads=true;
 	state->glow=glow;
+	No_Draw_Effect(state);
 	state->transformed_center=Vector3(0.0f,0.0f,0.0f);
 	unsorted_list.Add_Tail(state);
 }
@@ -716,11 +736,12 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 			SortingNodeStruct* next=overlapping_nodes[entry_node];
 			// A run of billboards fades into the depth behind it and a run of meshes does not, so the
 			// two never share a draw even in one state.
-			if (state->glow!=next->glow || state->quads!=next->quads ||
+			if (state->glow!=next->glow || state->quads!=next->quads || !Same_Draw_Effect(state,next) ||
 				!Same_Draw_State(state->sorting_state,next->sorting_state)) {
 				Apply_Render_State(state->sorting_state);
 				Direct3D11_Set_Smoke_Glow(state->glow);
 				Direct3D11_Set_Soft_Particles(state->quads);
+				Direct3D11_Set_Draw_Effect(state->draw_effect,state->draw_effect_parameters);
 				DX8Wrapper::Draw_Triangles(run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
 				run_first_index=index_cursor;
 				run_first_vertex=vertex_cursor;
@@ -736,9 +757,12 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 	Apply_Render_State(overlapping_nodes[node_id]->sorting_state);
 	Direct3D11_Set_Smoke_Glow(overlapping_nodes[node_id]->glow);
 	Direct3D11_Set_Soft_Particles(overlapping_nodes[node_id]->quads);
+	Direct3D11_Set_Draw_Effect(overlapping_nodes[node_id]->draw_effect,overlapping_nodes[node_id]->draw_effect_parameters);
 	DX8Wrapper::Draw_Triangles(run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
 	Direct3D11_Set_Smoke_Glow(false);
 	Direct3D11_Set_Soft_Particles(false);
+	static const float no_effect[4]={0.0f,0.0f,0.0f,0.0f};
+	Direct3D11_Set_Draw_Effect(0,no_effect);
 
 	tDrawEnd = Clock_Ticks();
 	flush_profile_draw_ms += flushProfileElapsedMS(tCopyEnd, tDrawEnd);
@@ -1058,6 +1082,7 @@ void SortingRendererClass::Insert_VolumeParticle(
 	state->vertex_count=vertex_count * layerCount;//THIS IS VOLUME_PARTICLE SPECIFIC
 	state->quads=false;
 	state->glow=false;
+	No_Draw_Effect(state);
 
 	SortingVertexBufferClass* vertex_buffer=static_cast<SortingVertexBufferClass*>(state->sorting_state.vertex_buffers[0]);
 	WWASSERT(vertex_buffer);

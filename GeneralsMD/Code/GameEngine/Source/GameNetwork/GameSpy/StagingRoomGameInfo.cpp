@@ -30,6 +30,7 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "Common/GameEngine.h"
 #include "Common/GameState.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -877,6 +878,9 @@ void GameSpyStagingRoom::launchGame( void )
 	// send a message to the logic for a new game
 	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 	msg->appendIntegerArgument(GAME_INTERNET);
+	msg->appendIntegerArgument(DIFFICULTY_NORMAL);	// not used; there so the speed can go last
+	msg->appendIntegerArgument(0);
+	msg->appendIntegerArgument(GameEngine_matchFramesPerSecond(getTurbo()));
 
 	TheWritableGlobalData->m_useFpsLimit = false;
 

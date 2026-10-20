@@ -205,7 +205,7 @@ void RiderChangeContain::onContaining( Object *rider, Bool wasSelected )
 	//that may be already selected. Note that containing the rider will automatically cause it to be 
 	//deselected, so all we have to do is select the container (if not already selected)!
 	Drawable *containDraw = getObject()->getDrawable();
-	if( containDraw && wasSelected && !containDraw->isSelected() )
+	if( containDraw && wasSelected && !LogicThread::isSelectedForTick( containDraw ) )
 	{
 		//Create the selection message
 		GameMessage *teamMsg = TheMessageStream->appendMessage( GameMessage::MSG_CREATE_SELECTED_GROUP );
@@ -336,7 +336,7 @@ void RiderChangeContain::onRemoving( Object *rider )
 		if( containDraw && riderDraw )
 		{
 			//Create the selection message for the rider if it's ours and SELECTED!
-			if( bike->getControllingPlayer() == ThePlayerList->getLocalPlayer() && containDraw->isSelected() )
+			if( bike->getControllingPlayer() == ThePlayerList->getLocalPlayer() && LogicThread::isSelectedForTick( containDraw ) )
 			{
 				GameMessage *teamMsg = TheMessageStream->appendMessage( GameMessage::MSG_CREATE_SELECTED_GROUP );
 				teamMsg->appendBooleanArgument( FALSE );// not creating new team so pass false

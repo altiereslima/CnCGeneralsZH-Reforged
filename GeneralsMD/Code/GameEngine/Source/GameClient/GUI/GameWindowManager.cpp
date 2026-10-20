@@ -54,6 +54,7 @@
 #include "GameClient/GadgetCheckBox.h"
 #include "GameClient/GlobalLanguage.h"
 #include "GameClient/GameWindowTransitions.h"
+#include "GameClient/Shell.h"
 #include "Common/NameKeyGenerator.h"
 
 // PUBLIC DATA ////////////////////////////////////////////////////////////////////////////////////
@@ -800,12 +801,23 @@ Int GameWindowManager::winSetFocus( GameWindow *window )
 }  // end WinSetFocus
 
 //-------------------------------------------------------------------------------------------------
+/** Front-end menus only: a game's own windows keep their animations whatever is pressed. */
+static void cutShellAnimations( void )
+{
+	if( TheShell && TheShell->isShellActive() )
+		TheShell->cutAnimations();
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Process key press through the GUI. */
 //-------------------------------------------------------------------------------------------------
 WinInputReturnCode GameWindowManager::winProcessKey( UnsignedByte key, 
 																										 UnsignedByte state )
 {
 	WinInputReturnCode returnCode = WIN_INPUT_NOT_USED;
+
+	if( BitTest( state, KEY_STATE_DOWN ) )
+		cutShellAnimations();
 
 	// Check for keyboard focus and a legal key for sanity
 	if( m_keyboardFocus && (key != KEY_NONE) )
@@ -858,6 +870,10 @@ WinInputReturnCode GameWindowManager::winProcessMouseEvent( GameWindowMessage ms
 	// Only right-button events may reach disabled production buttons. Left clicks and
 	// hotkeys still obey the normal availability check.
 	Bool allowDisabledCancel = msg == GWM_RIGHT_DOWN || msg == GWM_RIGHT_UP;
+
+	// a press lands on where the menu is going, not where its animation has got to
+	if( msg == GWM_LEFT_DOWN || msg == GWM_RIGHT_DOWN || msg == GWM_MIDDLE_DOWN )
+		cutShellAnimations();
 
 	// pack mouse coords into one entity for message passing
 	packedMouseCoords = SHORTTOLONG( mousePos->x, mousePos->y );

@@ -231,6 +231,9 @@ public:
 		MSG_META_SELECT_PREV_WORKER,                ///< select 'prev' worker
 		MSG_META_SELECT_NEXT_IDLE_WORKER,           ///< select 'next' idle worker
 		MSG_META_SELECT_NEXT_IDLE_UNIT,             ///< select 'next' fighting unit standing with no order
+		MSG_META_SELECT_NEXT_IDLE_AIRCRAFT,         ///< the same cycle over aircraft only
+		MSG_META_SELECT_NEXT_IDLE_VEHICLE,          ///< the same cycle over ground vehicles only
+		MSG_META_SELECT_NEXT_IDLE_INFANTRY,         ///< the same cycle over infantry only
 
 		// command-bar grid hot keys: one per place of the 6 x 3 command grid, read along the rows
 		// (01-06 the top row, 07-12 the middle one, 13-18 the bottom); see CommandPlace
@@ -268,11 +271,14 @@ public:
 		MSG_META_SELECT_HERO,                       ///< selects player's hero character, if exists...
 		MSG_META_SELECT_ALL,                        ///< selects all units across screen
 		MSG_META_SELECT_ALL_AIRCRAFT,								///< selects all air units just like select all
-		MSG_META_SELECT_ALL_MILITARY,         ///< selects foot soldiers (KINDOF_INFANTRY), screen first then map (Ctrl+Q)
+		MSG_META_SELECT_ALL_MILITARY,         ///< selects infantry (KINDOF_INFANTRY), screen first then map
 		MSG_META_SELECT_ALL_VEHICLES,         ///< selects ground vehicles (no dozers / harvesters), screen first then map (Ctrl+Q/W/Z/X/C)
 		MSG_META_SELECT_ALL_BARRACKS,         ///< selects barracks, screen first then map (Ctrl+Q/W/Z/X/C)
 		MSG_META_SELECT_ALL_WARFACTORIES,     ///< selects war factories, screen first then map (Ctrl+Q/W/Z/X/C)
 		MSG_META_SELECT_ALL_AIRFIELDS,        ///< selects airfields, screen first then map (Ctrl+Q/W/Z/X/C)
+		MSG_META_SELECT_ALL_IDLE_UNITS,       ///< selects fighting units standing with no order, screen first, pressed twice across the map
+		MSG_META_SELECT_ALL_IDLE_AIRCRAFT,    ///< the same for idle aircraft
+		MSG_META_SELECT_ALL_IDLE_VEHICLES,    ///< the same for idle ground vehicles
 		MSG_META_SCATTER,														///< selected units scatter
 		MSG_META_STOP,															///< selected units stop
 		MSG_META_DEPLOY,														///< selected units 'deploy'
@@ -662,6 +668,8 @@ public:
 		MSG_SET_STANCE,															///< (Int 0 defensive, 1 aggressive) how far the selected units go after what they see (fork)
 		MSG_VOTE_KICK,															///< (Int player index, Bool yes) a vote kick: opens one, or answers the open one (fork)
 		MSG_SET_REPEAT_UNIT,												///< (Int template ID, objectID producer, Bool on) the factory builds that unit on repeat, or stops (fork)
+		MSG_TRANSFER_MONEY,													///< (Int player index, Int amount) the sender hands that much of his money to another player (fork)
+		MSG_TEAM_REQUEST,														///< (Int AITeamRequestKind, Location) the sender asks his computer allies for help, money or to join his attack (fork)
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 

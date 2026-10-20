@@ -954,7 +954,7 @@ void SpawnBehavior::computeAggregateStates(void)
 
 			spawnDraw = currentSpawn->getDrawable();
 
-			if ( spawnDraw->isSelected() )
+			if ( LogicThread::isSelectedForTick( spawnDraw ) )
 			{
 				SomebodyIsSelected = TRUE;
 			}
@@ -976,7 +976,8 @@ void SpawnBehavior::computeAggregateStates(void)
 	// THIS WAY WE ARE ALWAYS ONE BIG HAPPY MOB
 	// BUT I ONLY PROCEED IF THERE IS ONE AMONG ALL OF US WHO IS NOT SELECTED
 
-	if ( SomebodyIsSelected && ( ! obj->getDrawable()->isSelected() || SomebodyIsNotSelected ) )
+	// the selection as the tick sees it: the sync point's, with what this tick selected since (M7)
+	if ( SomebodyIsSelected && ( ! LogicThread::isSelectedForTick( obj->getDrawable() ) || SomebodyIsNotSelected ) )
 	{
 		GameMessage *teamMsg = TheMessageStream->appendMessage( GameMessage::MSG_CREATE_SELECTED_GROUP );
 		teamMsg->appendBooleanArgument( FALSE );// not creating new team so pass false
@@ -992,7 +993,7 @@ void SpawnBehavior::computeAggregateStates(void)
 					spawnDraw = currentSpawn->getDrawable();
 
 
-					if ( ! spawnDraw->isSelected())
+					if ( ! LogicThread::isSelectedForTick( spawnDraw ) )
 					{
 						TheInGameUI->selectDrawable( spawnDraw );
 						TheInGameUI->setDisplayedMaxWarning( FALSE );
@@ -1003,7 +1004,7 @@ void SpawnBehavior::computeAggregateStates(void)
 			} // next iter
 		}
 		// if somebody is selected then I sure need to be!
-		if ( ! obj->getDrawable()->isSelected())
+		if ( ! LogicThread::isSelectedForTick( obj->getDrawable() ) )
 		{
 			TheInGameUI->selectDrawable( obj->getDrawable() );
 			TheInGameUI->setDisplayedMaxWarning( FALSE );

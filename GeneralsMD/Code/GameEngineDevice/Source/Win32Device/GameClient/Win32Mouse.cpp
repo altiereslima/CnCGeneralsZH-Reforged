@@ -489,7 +489,10 @@ void Win32Mouse::setVisibility(Bool visible)
 }
 
 /** The freecam's mouse look puts the pointer back in the middle of the window every frame.  Never
-		while another window is in front: the pointer is that window's then. */
+		while another window is in front: the pointer is that window's then.  Nor where the middle is off
+		the monitor, as it is for a window bigger than the monitor: SetCursorPos stops the pointer at the
+		edge and still says yes, so every frame read a turn from the middle to the edge, and a 3840x2160
+		-freecam take on a 1080 monitor spun round looking straight up into black. */
 Bool Win32Mouse::warpCursor( Int x, Int y )
 {
 	if( ::GetForegroundWindow() != ApplicationHWnd )
@@ -498,6 +501,9 @@ Bool Win32Mouse::warpCursor( Int x, Int y )
 	gameToWindow( windowX, windowY );
 	POINT screen = { windowX, windowY };
 	if( !::ClientToScreen( ApplicationHWnd, &screen ) || !::SetCursorPos( screen.x, screen.y ) )
+		return FALSE;
+	POINT landed;
+	if( !::GetCursorPos( &landed ) || landed.x != screen.x || landed.y != screen.y )
 		return FALSE;
 	setPosition( x, y );
 	return TRUE;

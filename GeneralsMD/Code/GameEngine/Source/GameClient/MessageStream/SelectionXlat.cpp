@@ -303,6 +303,7 @@ SelectionTranslator::SelectionTranslator()
 {
 	m_leftMouseButtonIsDown = FALSE;
 	m_dragSelecting = FALSE;
+	m_leftDragIsLine = FALSE;
 	m_dragOrderJustIssued = FALSE;
 	m_lastGroupSelTime = 0;
 	m_lastGroupSelGroup = -1;
@@ -454,10 +455,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				break;
 			}
 
-			// with attack move or guard armed a left drag draws the order line over in CommandXlat, so
-			// no selection box grows under it, whichever mouse is set.  A drag with no key armed is the box
-			const Bool leftDragIsOrder = TheInGameUI->isLineOrderArmed()
-																	&& TheInGameUI->getSelectCount() > 0;
+			// a left drag that draws an order line over in CommandXlat grows no selection box under it.
+			// A drag with no line wanted, or Shift's move line where the right button draws it, is the box
+			const Bool leftDragIsOrder = m_leftDragIsLine && TheInGameUI->getSelectCount() > 0;
 			if (m_leftMouseButtonIsDown && !leftDragIsOrder)
 			{
 				ICoord2D delta;
@@ -801,8 +801,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 
 			// A box with an army in it takes the army and leaves the dozers and trucks standing among
 			// it; a box of workers alone still takes the workers.  Drag-only, like the filters above,
-			// and not in Classic, which is the 2003 box.
-			if (!isPoint && !TheGlobalData->isClassicMouse())
+			// but in Classic too: Classic is what every player gets, and there a box round an army
+			// still came back with the dozer standing in it.
+			if (!isPoint)
 				prioritizeMilitaryBoxSelection(drawablesThatWillSelect, isSelectableMilitaryInBox);
 
 			SelectionInfo si;
@@ -1102,14 +1103,16 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			m_leftMouseButtonIsDown = true;
 			m_selectFeedbackAnchor = msg->getArgument( 0 )->pixel;
 
+			// latched here, the same moment CommandXlat latches the line, so letting go of shift
+			// mid-drag cannot grow a box under a line that is already being drawn.  Shift's move line
+			// belongs to the button that moves; where that is the right one, the left drag is the box
+			m_leftDragIsLine = TheInGameUI->isOrderDragButton( FALSE ) && TheInGameUI->wantsDragLine();
+
 			// with the attack key armed or the Force Attack hold down the left button draws a circle
-			// instead of a selection box, and everything hostile inside it becomes a target list.  An
-			// armed line key (move, attack move, guard) keeps its line under the hold.  Hold+Shift is
-			// the box: you can pick units without dropping force-fire.  Shift with the attack key
-			// armed still queues a circle.
-			if( TheInGameUI->isForceFireOn() && !TheInGameUI->isLineOrderArmed() && TheInGameUI->getSelectCount() > 0
-					&& TheInGameUI->getGUICommand() == NULL && TheInGameUI->getPendingPlaceType() == NULL
-					&& !( TheInGameUI->isInForceAttackMode() && TheKeyboard->isShift() ) )
+			// in every mouse instead of a selection box, and everything hostile inside it becomes a
+			// target list.  An armed line key (move, attack move, guard) keeps its line under the hold,
+			// and shift on top of the hold draws the attack line over in CommandXlat instead.
+			if( TheInGameUI->isOrderDragButton( FALSE ) && TheInGameUI->wantsDragCircle() )
 				TheInGameUI->beginAttackCircle( m_selectFeedbackAnchor );
 			break;
 		}
@@ -1122,7 +1125,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		{
 			m_leftMouseButtonIsDown = FALSE;
 
-			// the circle is finished on the same button that drew it: the targets go out here, and the
+			// the circle is finished on the button that drew it: the targets go out here, and the
 			// click that follows this release has to be eaten or it would reselect under the anchor
 			if( TheInGameUI->isAttackCircling() )
 			{
@@ -1149,10 +1152,10 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 					break;
 			}
 
-			// a left drag that drew an attack move or guard line is turned into its order by CommandXlat,
-			// which sees this release next.  The click behind the release would select whatever sat
-			// under it and drop the group the line was drawn for
-			if( TheInGameUI->isFormationDragging() && TheInGameUI->isLineOrderArmed() )
+			// a left drag that drew an attack move, guard or attack line is turned into its order by
+			// CommandXlat, which sees this release next.  The click behind the release would select
+			// whatever sat under it and drop the group the line was drawn for
+			if( m_leftDragIsLine && TheInGameUI->isFormationDragging() )
 			{
 				m_dragOrderJustIssued = TRUE;
 				break;

@@ -431,13 +431,18 @@ void PolygonTrigger::getCenterPoint(Coord3D* pOutCoord)	const
 		return;
 	}
 
+	getCenterXY(pOutCoord);
+	(*pOutCoord).z = TheTerrainLogic->getGroundHeight(pOutCoord->x, pOutCoord->y);
+}
+
+/** The middle of the bounds, z left alone: the render asks its own copy of the ground there */
+void PolygonTrigger::getCenterXY(Coord3D* pOutCoord)	const
+{
 	if (m_boundsNeedsUpdate) {
 		updateBounds();
 	}
 	(*pOutCoord).x = (m_bounds.lo.x + m_bounds.hi.x) / 2.0f;
 	(*pOutCoord).y = (m_bounds.lo.y + m_bounds.hi.y) / 2.0f;
-
-	(*pOutCoord).z = TheTerrainLogic->getGroundHeight(pOutCoord->x, pOutCoord->y);
 }
 
 Real PolygonTrigger::getRadius(void)	const

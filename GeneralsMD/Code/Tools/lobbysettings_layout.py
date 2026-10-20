@@ -124,7 +124,7 @@ SUPERWEAPON_CHECKBOX = ("CheckboxLimitSuperweapons", "CheckBoxLimitSuperweapons"
 # The unit limit and Pro Rules check boxes were put on all three pages by hand after the pages were
 # generated, so build() does not make them; the selfcheck still wants them on every page, because the
 # menu code names them and a missing control is as silent as the rest.
-HAND_PLACED_CHECKBOXES = ("CheckBoxUnitLimit", "CheckBoxProRules")
+HAND_PLACED_CHECKBOXES = ("CheckBoxUnitLimit", "CheckBoxProRules", "CheckBoxTurbo")
 
 # Income sharing, tech building respawn and the supply pile limit went on all three pages by hand
 # the same way.
@@ -132,8 +132,10 @@ HAND_PLACED_COMBOS = ("LabelIncomeSharing", "ComboBoxIncomeSharing", "LabelTechR
                       "LabelSupplyPileLimit", "ComboBoxSupplyPileLimit")
 
 # What build() moves out of EA's skirmish layout and a later hand edit replaced: the game speed
-# slider and its number became one dropdown in the slider's place.  None is gone without a successor.
-REPLACED_BY_HAND = {"SliderGameSpeed": "ComboBoxGameSpeed", "StaticTextGameSpeed": None}
+# slider and its number became one dropdown, and the dropdown and its label became the turbo mode box
+# (lobbyroom_layout.py, which also clones that box into the LAN room; the online room's was placed by
+# hand).  None is gone without a successor.
+REPLACED_BY_HAND = {"SliderGameSpeed": "CheckBoxTurbo", "StaticTextGameSpeed": None, "LabelGameSpeed": None}
 
 # Pro Rules are for people playing each other, so the skirmish page lost its box again for v1.0.0 and
 # the selfcheck wants it gone there rather than present.
@@ -176,6 +178,8 @@ STRINGS = [
     "TOOLTIP:SupplyPileLimit",
     "GUI:SupplyPileLimitOff",
     "GUI:SupplyPileLimitFormat",
+    "GUI:TurboMode",
+    "TOOLTIP:TurboMode",
 ]
 
 
@@ -303,7 +307,9 @@ def selfcheck():
         page = layout.find(PAGE)
         if page is None:
             problems.append("%s.wnd has no %s" % (menu, PAGE))
-        for name in (spec["other"][0], TAB_SETTINGS[0], spec["other"][2]):
+        # the tabs this script adds are taken out again by lobbyroom_layout.py, whose rooms show the
+        # settings page beside the seats; only the window a tab used to swap must still be there
+        for name in (spec["other"][2],):
             if layout.find(name) is None:
                 problems.append("%s.wnd has no %s" % (menu, name))
 

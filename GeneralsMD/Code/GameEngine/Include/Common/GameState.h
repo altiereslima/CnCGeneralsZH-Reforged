@@ -118,7 +118,7 @@ public:
 	Int version;											// GameState block version the file was written with, read with the header
 
 	/// FALSE for a save written by the original game or by a build from before logic ran at 60
-	/// ticks a second: none of them loads in this one.
+	/// ticks a second, unless it is a mission save: that one holds no frame counts and loads.
 	Bool isLoadable( void ) const;
 
 };

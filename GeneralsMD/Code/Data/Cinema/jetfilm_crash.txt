@@ -1,0 +1,21 @@
+# The jet crash blast and fire over Scenarios/jetcrash.txt on Twilight Flame. Fixed frames looking
+# down each lane from behind the plane's line (heading -60), not a follow: a follow lets go the
+# moment the plane is killed in the air and the framing offset for its height goes with it, which
+# jolts the picture. Looking along the line also forgives not knowing where along it the plane
+# comes down. The Raptor's lane from 6 s, the B-52's from 26 s, each pushing in on the fire.
+# Jets cruise high enough that a camera much below relative zoom 0.6 on this map sits level with them.
+#
+#   generals_jetfilm.exe -win -xres 1280 -yres 720 -fps 120 -noFPSLimit -particlecap 2500
+#     -quickstart -noshellmap -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario jetcrash -cinema jetfilm_crash -recordfps 120 -video 360 2460 jf_crash -maxframes 2470
+
+# Seed 7, 2026-10-16: the Raptor is killed on frame 490 (8.2 s), comes down round 2300,3650 and
+# skids burning to about 2450 along the strip; the B-52 hits on frame 1948 (32.5 s) just past its
+# lane's Avengers and leaves a row of fires from about 2250 to 2400 (read off the frame, not logged). At 2250,3650 relative 0.9 the Raptor's fire sat on
+# the top edge and the push-in lost it.
+0.0   cut     2400 3650 0.8 -60 0
+1.0   shot
+9.6   zoom    0.6 5
+26.0  cut     2280 4100 1.0 -60 0
+33.0  zoom    0.75 5

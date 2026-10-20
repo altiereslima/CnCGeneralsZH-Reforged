@@ -690,8 +690,12 @@ public:
 	// stack, and there are thirteen of them: the filter that puts the rendered scene back on the
 	// screen, the smudges, the shadow volume's darkening pass.  They went to the device directly
 	// and so were invisible to any second backend; this is the one place they pass through.
+	//
+	// While Direct3D 11 presents, Direct3D 9 draws one only for a caller that reads the Direct3D 9
+	// target back afterwards, which is what d3d9_reads_back says: the smudge hardware test.  Every
+	// other quad would cost a full flush of the deferred state and a draw nobody sees.
 	static void _Draw_DX8_Primitive_UP(D3DPRIMITIVETYPE type, unsigned primitive_count,
-		const void * vertices, unsigned stride);
+		const void * vertices, unsigned stride, bool d3d9_reads_back = false);
 
 	static void _Copy_DX8_Rects(
 			IDirect3DSurface9* pSourceSurface,
@@ -1032,6 +1036,11 @@ protected:
 	static unsigned						PendingLights;
 	static unsigned						PendingLightEnables;
 	static D3DLIGHT9						PendingLightValues[4];
+
+	// While Direct3D 11 presents, the Direct3D 9 scene is begun by the first draw that still goes to
+	// that device, not by Begin_Scene, and End_Scene ends it only if one was begun.
+	static void								Open_D3D9_Scene();
+	static bool								D3D9SceneOpen;
 
 	static unsigned long FrameCount;
 

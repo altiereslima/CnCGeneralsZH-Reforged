@@ -762,6 +762,12 @@ public:
 		Int specificBarrelToUse
 	);
 
+	/// a random point on the object's body, from the logic stream: where a shot at the object aims
+	static void randomPointOnBody(const Object* victim, Coord3D& point);
+	/// a point as an offset in the object's own frame, and back, so the point turns with the object
+	static void bodyOffsetFromPoint(const Object* victim, const Coord3D& point, Coord3D& offset);
+	static void pointFromBodyOffset(const Object* victim, const Coord3D& offset, Coord3D& point);
+
 	/**
 		special purpose call for jets in airfields: directly set the ammoinclip to a certain
 		percentage full (note that percent=1.0 is full, NOT percent=100.0!). this will end up

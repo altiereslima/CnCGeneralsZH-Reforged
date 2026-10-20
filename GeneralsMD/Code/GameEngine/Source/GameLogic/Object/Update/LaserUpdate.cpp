@@ -32,6 +32,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "Common/LogicThread.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Xfer.h"
@@ -94,6 +95,7 @@ LaserUpdate::LaserUpdate( Thing *thing, const ModuleData* moduleData ) : ClientU
 	m_decayFinishFrame = 0;
 	m_parentID = INVALID_DRAWABLE_ID;
 	m_targetID = INVALID_DRAWABLE_ID;
+	m_firedAtID = INVALID_DRAWABLE_ID;
 	m_parentBoneName.clear();
 } 
 
@@ -110,14 +112,15 @@ LaserUpdate::~LaserUpdate( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-void LaserUpdate::updateStartPos()
+void LaserUpdate::updateStartPos( const Drawable *parentDrawable )
 {
 	Coord3D oldStartPos = m_startPos;
 
 	if( m_parentID == INVALID_DRAWABLE_ID )
 		return;// Can't update if not told to update
 
-	const Drawable *parentDrawable = TheGameClient->findDrawableByID(m_parentID);
+	if( parentDrawable == NULL )
+		parentDrawable = TheGameClient->findDrawableByID(m_parentID);
 	if( parentDrawable == NULL )
 		return;// Can't update if no one to ask
 		
@@ -284,7 +287,14 @@ void LaserUpdate::initLaser( const Object *parent, const Object *target, const C
 		if( parent->getDrawable() )
 			m_parentID = parent->getDrawable()->getID();
 
-		updateStartPos();
+		// the parent's drawable as the object holds it: initLaser runs in the tick, which does not look
+		// drawables up in the client's table (LOGIC-THREAD.md M8).  Nor does it read a bone off a render
+		// object the tick has not caught up yet (phase 3): the beam starts at the drawable, and its own
+		// client update moves it to the bone before the first frame that draws it.
+		if( LogicThread::defersEffects() && m_parentBoneName.isNotEmpty() && parent->getDrawable() )
+			m_startPos = *parent->getDrawable()->getPosition();
+		else
+			updateStartPos( parent->getDrawable() );
 	}
 	else if( startPos )
 	{
@@ -302,7 +312,7 @@ void LaserUpdate::initLaser( const Object *parent, const Object *target, const C
 	{
 		// If a target object, use it (unless we override it!)
 		if( target->getDrawable() )
-			m_targetID = target->getDrawable()->getID();
+			m_targetID = m_firedAtID = target->getDrawable()->getID();
 
 		m_endPos = *target->getPosition();
 	}

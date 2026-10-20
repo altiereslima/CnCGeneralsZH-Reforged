@@ -487,6 +487,13 @@ void DynamicIBAccessClass::_Deinit()
 //
 // ----------------------------------------------------------------------------
 
+// The shared dynamic index buffer goes to its twin alone while Direct3D 11 presents, for the reason
+// on the vertex buffer's copy of this in dx8vertexbuffer.cpp.
+static bool d3d9_reads_dynamic_buffer(DX8IndexBufferClass* buffer)
+{
+	return !Direct3D11_Present_Is_Enabled() || buffer->Get_DX11_Twin()==NULL;
+}
+
 DynamicIBAccessClass::WriteLockClass::WriteLockClass(DynamicIBAccessClass* ib_access_)
 	:
 	DynamicIBAccess(ib_access_)
@@ -503,20 +510,17 @@ DynamicIBAccessClass::WriteLockClass::WriteLockClass(DynamicIBAccessClass* ib_ac
 			break;
 		}
 		DX8_Assert();
-		DX8_ErrorCode(
-			static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Lock(
-			DynamicIBAccess->IndexBufferOffset*sizeof(WORD),
-			DynamicIBAccess->Get_Index_Count()*sizeof(WORD),
-			(void**)&Indices,
-			!DynamicIBAccess->IndexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE));
 		{
-			void* mirror=DX11Lock.Begin(
-				static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX11_Twin(),
-				Indices,
-				DynamicIBAccess->IndexBufferOffset*sizeof(WORD),
-				DynamicIBAccess->Get_Index_Count()*sizeof(WORD),
-				!DynamicIBAccess->IndexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE,
-				!Direct3D11_Present_Is_Enabled());
+			DX8IndexBufferClass* buffer=static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer);
+			const bool d3d9_reads=d3d9_reads_dynamic_buffer(buffer);
+			const unsigned lock_flags=!DynamicIBAccess->IndexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE;
+			const unsigned byte_offset=DynamicIBAccess->IndexBufferOffset*sizeof(WORD);
+			const unsigned byte_count=DynamicIBAccess->Get_Index_Count()*sizeof(WORD);
+			Indices=NULL;
+			if (d3d9_reads) {
+				DX8_ErrorCode(buffer->Get_DX8_Index_Buffer()->Lock(byte_offset,byte_count,(void**)&Indices,lock_flags));
+			}
+			void* mirror=DX11Lock.Begin(buffer->Get_DX11_Twin(),Indices,byte_offset,byte_count,lock_flags,d3d9_reads);
 			if (mirror) Indices=(unsigned short*)mirror;
 		}
 		break;
@@ -538,7 +542,9 @@ DynamicIBAccessClass::WriteLockClass::~WriteLockClass()
 		if (static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()==NULL) break;
 		DX8_Assert();
 		DX11Lock.End();
-		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Unlock());
+		if (d3d9_reads_dynamic_buffer(static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer))) {
+			DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Unlock());
+		}
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		break;

@@ -715,7 +715,7 @@ def selfcheck():
     """The numbers test_gameengine's frames_to_kill_counts_shots_delays_and_reloads checks in C++."""
     gun = Shots(60.0, 60.0, 0, 0.0, 0.0)
     assert kill_frames(480.0, gun) == 480.0
-    assert kill_frames(120.0, gun._replace(damage=6.0)) == 1200.0
+    assert kill_frames(120.0, gun) == 120.0
     clip = Shots(50.0, 10.0, 2, 100.0, 0.0)
     assert kill_frames(150.0, clip) == 120.0
     assert kill_frames(150.0, clip._replace(opening=15.0)) == 135.0

@@ -151,6 +151,7 @@ public:
 	Bool isAnimFinished( void );
 	void reverseAnimatewindow( void );
 	Bool isAnimReversed( void );
+	void cutAnimations( void );		///< a click or key arrived: end every menu animation and finish a screen change waiting on one
 
 	void loadScheme( AsciiString name );
 	ShellMenuSchemeManager *getShellMenuSchemeManager( void ) { return m_schemeManager;	}

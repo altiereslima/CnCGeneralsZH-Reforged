@@ -1,0 +1,21 @@
+# Health bar look: a mixed American group (Crusaders, Rangers, a Humvee) trading fire with Chinese
+# Battlemasters and Red Guard on open ground of Twilight Flame, so a frame a few seconds in shows
+# a dozen bars, most of them partly emptied. Used for the before/after of the bar thickness.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -borderless -turbo -quickstart -noshellmap
+#     -observer -multiInstance -noFPSLimit -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario hpbar -cinema hpbar -maxframes 600
+
+30    spawn      0  AmericaTankCrusader           3   3400 3860  40
+30    spawn      0  AmericaInfantryRanger         6   3330 3800  14
+30    spawn      0  AmericaVehicleHumvee          1   3470 3800
+30    spawn      1  ChinaTankBattleMaster         3   3420 4120  40
+30    spawn      1  ChinaInfantryRedguard         6   3340 4080  14
+45    attackmove 0  *                                 3400 4100
+45    attackmove 1  *                                 3400 3820
+
+120   tally      0  *
+120   tally      1  *
+180   tally      0  *
+180   tally      1  *

@@ -368,6 +368,122 @@ TEST(dx11backend_the_same_state_resolves_to_one_pipeline)
 	backend.Shutdown();
 }
 
+// The vertex block goes into a ring of 4096 one-kilobyte entries, so 5000 draws with a world matrix
+// each wrap it once, and the draw after them reads an entry written NO_OVERWRITE past the discard.
+// Every one of the 5000 puts the quad off the target; the last puts it back over the whole of it.
+// A wrap that bound the wrong entry, or wrote into the allocation the discard threw away, draws
+// that last quad off the target too and the centre stays the clear colour.  Then the bindings are
+// forgotten and the same draw is made again with nothing changed: no block is written, and only a
+// rebind at the entry the last write went to puts the quad back.
+TEST(dx11backend_a_wrapped_constant_ring_draws_with_the_latest_block)
+{
+	const unsigned OFF_TARGET_DRAWS = 5000;
+
+	DX11DeviceClass device;
+	device.Request_Debug_Layer();
+	CHECK(device.Create_Offscreen());
+	ID3D11Device * d3d = device.Get_Device();
+
+	DX11BackendClass backend;
+	CHECK(backend.Initialise(&device));
+
+	D3D11_TEXTURE2D_DESC target_description;
+	memset(&target_description, 0, sizeof(target_description));
+	target_description.Width = TARGET_SIZE;
+	target_description.Height = TARGET_SIZE;
+	target_description.MipLevels = 1;
+	target_description.ArraySize = 1;
+	target_description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	target_description.SampleDesc.Count = 1;
+	target_description.Usage = D3D11_USAGE_DEFAULT;
+	target_description.BindFlags = D3D11_BIND_RENDER_TARGET;
+
+	ID3D11Texture2D * target = NULL;
+	CHECK(SUCCEEDED(d3d->CreateTexture2D(&target_description, NULL, &target)));
+
+	D3D11_TEXTURE2D_DESC staging_description = target_description;
+	staging_description.Usage = D3D11_USAGE_STAGING;
+	staging_description.BindFlags = 0;
+	staging_description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+	ID3D11Texture2D * staging = NULL;
+	CHECK(SUCCEEDED(d3d->CreateTexture2D(&staging_description, NULL, &staging)));
+
+	ID3D11RenderTargetView * target_view = NULL;
+	CHECK(SUCCEEDED(d3d->CreateRenderTargetView(target, NULL, &target_view)));
+
+	const float clear_colour[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
+	device.Get_Context()->OMSetRenderTargets(1, &target_view, NULL);
+
+	backend.Set_Viewport(0, 0, TARGET_SIZE, TARGET_SIZE);
+	configure_unlit_pass_through(backend);
+
+	ID3D11Buffer * vertices = NULL;
+	CHECK(DX11Resource_Create_Vertex_Buffer(d3d, sizeof(QUAD_VERTICES), D3DPOOL_MANAGED, 0,
+		QUAD_VERTICES, &vertices));
+
+	ID3D11Buffer * indices = NULL;
+	CHECK(DX11Resource_Create_Index_Buffer(d3d, sizeof(QUAD_INDICES), D3DPOOL_MANAGED, 0,
+		QUAD_INDICES, &indices));
+
+	backend.Set_Stream_Source(vertices, sizeof(BackendVertex), 0);
+	backend.Set_Indices(indices, DXGI_FORMAT_R16_UINT);
+
+	// Clip x from 2 up, a hair further each draw so every block differs from the one before.
+	float world[16];
+	for (unsigned draw = 0; draw < OFF_TARGET_DRAWS; ++draw) {
+		set_identity(world);
+		world[12] = 3.0f + 0.0001f * static_cast<float>(draw);
+		backend.Set_Transform(D3DTS_WORLD, world);
+		CHECK(backend.Draw_Indexed_Triangles(6, 0, 0));
+	}
+
+	for (unsigned pass = 0; pass < 2; ++pass) {
+		device.Get_Context()->ClearRenderTargetView(target_view, clear_colour);
+		if (pass == 0) {
+			set_identity(world);
+			backend.Set_Transform(D3DTS_WORLD, world);
+		} else {
+			backend.Forget_Bindings();
+		}
+		CHECK(backend.Draw_Indexed_Triangles(6, 0, 0));
+
+		device.Get_Context()->CopyResource(staging, target);
+		D3D11_MAPPED_SUBRESOURCE mapped;
+		CHECK(SUCCEEDED(device.Get_Context()->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)));
+		const unsigned char * centre = static_cast<const unsigned char *>(mapped.pData)
+			+ mapped.RowPitch * (TARGET_SIZE / 2) + (TARGET_SIZE / 2) * 4;
+		if (centre[0] != EXPECTED_BLUE) {
+			printf("  pass %u centre pixel bgra %02x %02x %02x %02x\n",
+				pass, centre[0], centre[1], centre[2], centre[3]);
+		}
+		CHECK_EQ(centre[0], EXPECTED_BLUE);
+		CHECK_EQ(centre[1], EXPECTED_GREEN);
+		CHECK_EQ(centre[2], EXPECTED_RED);
+		device.Get_Context()->Unmap(staging, 0);
+	}
+
+	// One vertex block a draw before the second pass, which writes none, and one pixel block.  A
+	// ring renames on its first write and on each wrap: the vertex ring twice, the pixel ring once.
+	// Without offsets every write is a rename.
+	unsigned writes = 0;
+	unsigned renames = 0;
+	backend.Take_Frame_Constant_Writes(writes, renames);
+	CHECK_EQ(writes, OFF_TARGET_DRAWS + 2);
+	if (backend.Constant_Offsets()) {
+		CHECK_EQ(renames, 3u);
+	} else {
+		CHECK_EQ(renames, writes);
+	}
+
+	indices->Release();
+	vertices->Release();
+	target_view->Release();
+	staging->Release();
+	target->Release();
+	backend.Shutdown();
+}
+
 // The sorted smoke billboards carry a fire's glow in their normals, and the backend adds it to what
 // the stages made.  The quad's normal is (0, 0, 1), so with the glow on the blue channel goes to full
 // and the other two keep the vertex colour; the glow is its own pipeline and turning it off goes

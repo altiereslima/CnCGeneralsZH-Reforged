@@ -32,7 +32,10 @@
 // Author: Mark Wilczynski, August 2002
 ///////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include "Common/Debug.h"
+#include "Common/LogicThread.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/ThingTemplate.h"
@@ -322,6 +325,7 @@ W3DGhostObject::W3DGhostObject()
 
 	m_nextSystem = NULL;
 	m_prevSystem = NULL;
+	m_dyingParentID = INVALID_ID;
 
 }
 
@@ -342,6 +346,17 @@ Should only be called when object enters the fogged state.*/
 // ------------------------------------------------------------------------------------------------
 void W3DGhostObject::snapShot(int playerIndex)
 {
+	// the shroud decides when; the drawable's render objects are read after the tick
+	if( LogicThread::defersEffects() )
+	{
+		LogicThread::callAfterTick( [this, playerIndex]() {
+			if( m_parentObject )	// the parent died in the same tick: nothing left to remember
+				snapShot( playerIndex );
+		} );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_GHOST );
+
 	//every player's memory is kept only where the fog can be handed to somebody else, an observer's
 	//machine; without it a building the new viewer saw lost its snapshot and left its shadow behind
 	if (playerIndex != TheGhostObjectManager->getLocalPlayerIndex() && !TheGhostObjectManager->trackAllPlayers())
@@ -354,7 +369,7 @@ void W3DGhostObject::snapShot(int playerIndex)
 	W3DRenderObjectSnapshot *snap=m_parentSnapshots[playerIndex],*prevSnap=NULL;
 
 	//walk through all W3D render objects used by this object
-	for (DrawModule ** dm = draw->getDrawModules(); *dm; ++dm)
+	for (DrawModule ** dm = draw->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		if (di)
@@ -429,7 +444,7 @@ void W3DGhostObject::removeParentObject(void)
 	draw->setFullyObscuredByShroud(true);
 
 	//walk through all W3D render objects used by this object
-	for (DrawModule ** dm = draw->getDrawModules(); *dm; ++dm)
+	for (DrawModule ** dm = draw->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		if (di)
@@ -465,7 +480,7 @@ void W3DGhostObject::restoreParentObject(void)
 		return;
 
 	//walk through all W3D render objects used by this object
-	for (DrawModule ** dm = draw->getDrawModules(); *dm; ++dm)
+	for (DrawModule ** dm = draw->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		if (di)
@@ -493,13 +508,23 @@ void W3DGhostObject::restoreParentObject(void)
 void W3DGhostObject::freeAllSnapShots(void)
 {
 	for (Int playerIndex=0; playerIndex<MAX_PLAYER_COUNT; playerIndex++)
-		freeSnapShot(playerIndex);
+		freeSnapShotNow(playerIndex);
 }
 
 // ------------------------------------------------------------------------------------------------
 /** Player has unfogged the object so he no longer needs the snapshot*/
 // ------------------------------------------------------------------------------------------------
 void W3DGhostObject::freeSnapShot(int playerIndex)
+{
+	// the shroud decides when; the scene work after the tick
+	LOGIC_AFTER_TICK( [this, playerIndex]() { freeSnapShot( playerIndex ); } );
+	LOGIC_CENSUS( CENSUS_GHOST );
+	freeSnapShotNow( playerIndex );
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+void W3DGhostObject::freeSnapShotNow(int playerIndex)
 {
 	if (m_parentSnapshots[playerIndex])
 	{	//if we have a snapshot for this object, remove it from
@@ -858,7 +883,7 @@ W3DGhostObjectManager::W3DGhostObjectManager(void)
 
 	m_freeModules = NULL;
 	m_usedModules = NULL;
-	
+
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -907,6 +932,9 @@ void W3DGhostObjectManager::reset(void)
 		removeGhostObject(mod);
 		mod=nextmod;
 	}
+
+	// the clear-game tick removed these from inside the tick, and its queue is thrown away after
+	freeDyingModules();
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -918,8 +946,6 @@ void W3DGhostObjectManager::removeGhostObject(GhostObject *object)
 
 	W3DGhostObject *mod = (W3DGhostObject *)object;
 
-	mod->freeAllSnapShots();
-
 	// remove module from used list
 	if( mod->m_nextSystem )
 		mod->m_nextSystem->m_prevSystem = mod->m_prevSystem;
@@ -927,6 +953,43 @@ void W3DGhostObjectManager::removeGhostObject(GhostObject *object)
 		mod->m_prevSystem->m_nextSystem = mod->m_nextSystem;
 	else
 		m_usedModules = mod->m_nextSystem;
+
+	/* LOGIC-THREAD.md phase 2, M6.  Off the used list now, so the tick's own walks (the map border's
+		 partition release) no longer meet it; the snapshots' scene work after the tick, in its place in
+		 the queue, and the free list with it, so nothing reuses the module while its queued snapshot calls
+		 wait.  Those skip a ghost with no parent, and the tick may delete the parent, so it goes now and
+		 comes back by ID at the release: a live object re-registered in the tick (a new geometry) has its
+		 render objects put back in the scene there, as the release inside the tick did. */
+	if( LogicThread::defersEffects() )
+	{
+		mod->m_dyingParentID = mod->m_parentObject ? mod->m_parentObject->getID() : INVALID_ID;
+		mod->m_parentObject = NULL;
+		mod->m_prevSystem = NULL;
+		mod->m_nextSystem = NULL;
+		m_dyingModules.push_back( mod );
+		LogicThread::callAfterTick( [this, mod]() { releaseDying( mod ); } );
+		return;
+	}
+	releaseModule( mod );
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+void W3DGhostObjectManager::releaseDying(W3DGhostObject *mod)
+{
+	std::vector<W3DGhostObject *>::iterator it = std::find( m_dyingModules.begin(), m_dyingModules.end(), mod );
+	if( it == m_dyingModules.end() )
+		return;	// reset released it already
+	m_dyingModules.erase( it );
+	mod->m_parentObject = TheGameLogic->findObjectByID( mod->m_dyingParentID );
+	releaseModule( mod );
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+void W3DGhostObjectManager::releaseModule(W3DGhostObject *mod)
+{
+	mod->freeAllSnapShots();
 
 	// add module to free list
 	mod->m_prevSystem = NULL;
@@ -937,9 +1000,19 @@ void W3DGhostObjectManager::removeGhostObject(GhostObject *object)
 }
 
 // ------------------------------------------------------------------------------------------------
+/** The ghosts the tick removed, after it; reset too, since the clear-game tick's queue is thrown away */
+// ------------------------------------------------------------------------------------------------
+void W3DGhostObjectManager::freeDyingModules(void)
+{
+	while (!m_dyingModules.empty())
+		releaseDying(m_dyingModules.back());
+}
+
+// ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 GhostObject *W3DGhostObjectManager::addGhostObject(Object *object, PartitionData *pd)
 {
+	// bookkeeping only, and logic's: a fogged object without a ghost reads as shrouded
 
 	// we disabled adding new ghost objects - used during map border resizing and loading
 	if (m_lockGhostObjects || m_saveLockGhostObjects )

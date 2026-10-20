@@ -116,7 +116,7 @@ void CreateObjectDie::onDie( const DamageInfo * damageInfo )
 		Drawable *oldDraw = getObject()->getDrawable();
 		Drawable *newDraw = newObject->getDrawable();
 
-		if( oldDraw && newDraw && oldDraw->isSelected() && !newDraw->isSelected() )
+		if( oldDraw && newDraw && LogicThread::isSelectedForTick( oldDraw ) && !LogicThread::isSelectedForTick( newDraw ) )
 		{
 			TheInGameUI->selectDrawable( newDraw );
 			TheInGameUI->deselectDrawable( oldDraw );

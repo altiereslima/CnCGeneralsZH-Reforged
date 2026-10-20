@@ -48,6 +48,8 @@ public:
 	/// scrolling, turning or tilting the camera by hand, with the mouse or the keys, right now
 	Bool isMovingCamera( void ) const { return m_isScrolling || m_isRotating || m_isPitching; }
 	void setCurrentPos( const ICoord2D& pos );
+	/// one step of the held scroll; the frame tick's, and a picture's drawn beside a tick (LOGIC-THREAD.md phase 4)
+	void scrollView( void );
 
 	void resetModes(); //Used when disabling input, so when we reenable it we aren't stuck in a mode.
 

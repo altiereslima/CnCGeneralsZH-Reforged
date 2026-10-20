@@ -203,7 +203,7 @@ INI::INI( void )
 	m_blockEndToken			= "END";
 	m_endOfFile					= FALSE;
 	m_skipUnknownFields	= FALSE;
-	m_missingSpecialPower = FALSE;
+	m_missingReference	= FALSE;
 	m_buffer[0]					= 0;
 #if defined(_DEBUG) || defined(_INTERNAL)
 	m_curBlockStart[0]	= 0;
@@ -1206,6 +1206,8 @@ void INI::parseAsciiStringVectorAppend( INI* ini, void * /*instance*/, void *sto
 /* static */void INI::parseScienceVector( INI *ini, void * /*instance*/, void *store, const void *userData )
 {
 	ScienceVec* asv = (ScienceVec*)store;
+	const ScienceVec before = *asv;
+	Bool missing = FALSE;
 	asv->clear();
 	for (const char *token = ini->getNextTokenOrNull(); token != NULL; token = ini->getNextTokenOrNull())
 	{
@@ -1217,7 +1219,13 @@ void INI::parseAsciiStringVectorAppend( INI* ini, void * /*instance*/, void *sto
 		ScienceType science = INI::scanScience( ini, token );
 		if (science != SCIENCE_INVALID)
 			asv->push_back(science);
+		else
+			missing = TRUE;
 	}
+	// a patch whose every science the mod lacks keeps the mod's own: Contra has no Chem_SCIENCE_RebelAmbush1,
+	// and an emptied list left its Toxin General's ambush buttons with nothing to buy or show
+	if (missing && asv->empty())
+		*asv = before;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1225,7 +1233,7 @@ void INI::parseAsciiStringVectorAppend( INI* ini, void * /*instance*/, void *sto
 AsciiString INI::getNextQuotedAsciiString()
 {
 	AsciiString result;
-	char buff[INI_MAX_CHARS_PER_LINE];
+	char buff[INI_MAX_CHARS_PER_PREFIXED_LINE];	// a token of m_buffer, prefixes and all
 
 	const char *token = getNextTokenOrNull();	// if null, just leave an empty string
 	if (token != NULL)
@@ -1285,7 +1293,7 @@ AsciiString INI::getNextAsciiString()
 		}
 		else
 		{
-			static char buff[INI_MAX_CHARS_PER_LINE];
+			static char buff[INI_MAX_CHARS_PER_PREFIXED_LINE];
 			buff[0] = 0;
 			if (strlen(token) > 1)
 			{
@@ -1831,6 +1839,14 @@ void INI::parseObjectCreationList( INI* ini, void * /*instance*/, void *store, c
 	ConstObjectCreationListPtr* theObjectCreationList = (ConstObjectCreationListPtr*)store;		
 
 	const ObjectCreationList *ocl = TheObjectCreationListStore->findObjectCreationList(token);	// could be null!
+	if (!ocl && strcasecmp(token, "None") != 0 && ini->getLoadType() == INI_LOAD_MULTIFILE)
+	{
+		// a patch INI loaded over a mod, as with a missing special power: FixesReforged.ini's Emperor
+		// Gattling upgrade names Tank_OCL_OverlordGattlingCannon, which Contra does not have
+		DEBUG_LOG(("[LINE: %d in '%s'] object creation list '%s' does not exist; the reference is skipped.\n", ini->getLineNum(), ini->getFilename().str(), token));
+		ini->setMissingReference( TRUE );
+		return;
+	}
 	DEBUG_ASSERTCRASH(ocl || strcasecmp(token, "None") == 0, ("ObjectCreationList %s not found!\n",token));
 	// assign it, even if null!
 	*theObjectCreationList = ocl;
@@ -1874,9 +1890,12 @@ void INI::parseSpecialPowerTemplate( INI* ini, void * /*instance*/, void *store,
 	const SpecialPowerTemplate *sPowerT = TheSpecialPowerStore->findSpecialPowerTemplate( AsciiString( token ) );
 	if( !sPowerT && strcasecmp( token, "None" ) != 0 && ini->getLoadType() == INI_LOAD_MULTIFILE )
 	{
-		// a patch INI loaded over a mod, as with a missing science (scanScience): Contra has no Nuke_ carpet bomb
-		DEBUG_LOG(("[LINE: %d in '%s'] special power '%s' does not exist; the module is skipped.\n", ini->getLineNum(), ini->getFilename().str(), token));
-		ini->setMissingSpecialPower( TRUE );
+		// a patch INI loaded over a mod, as with a missing science (scanScience): Contra has no Nuke_ carpet
+		// bomb.  A module naming it is dropped; a button keeps the mod's own power, or Contra's Toxin
+		// General lost his ambush shortcut to Chem_SuperweaponRebelAmbush.
+		DEBUG_LOG(("[LINE: %d in '%s'] special power '%s' does not exist; the reference is skipped.\n", ini->getLineNum(), ini->getFilename().str(), token));
+		ini->setMissingReference( TRUE );
+		return;
 	}
 	else if( !sPowerT && strcasecmp( token, "None" ) != 0 )
 	{

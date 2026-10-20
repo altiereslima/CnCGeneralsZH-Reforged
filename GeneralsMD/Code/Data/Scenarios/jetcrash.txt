@@ -1,0 +1,112 @@
+# A Raptor and then a B-52 shot down by Avengers over a strip of infantry from both sides, for the
+# crash blast and fire (Reforged_JetCrashImpact, Reforged_BigJetCrashImpact and Reforged_JetCrashFire
+# in BalanceReforged.ini). Seat 0 owns the planes, seat 1 the anti-air. Two lanes on Twilight Flame's
+# open middle, 450 apart so neither lane's Avengers reach the other lane's plane: the Raptor flies
+# east along y 3650 from frame 30, the B-52 along y 4100 from frame 600, each from x 900.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 2700
+#     -scenario jetcrash -logPrefix jetcrash_
+#
+# Filming it: swap -headless for -win -xres 1280 -yres 720 -particlecap 2500 -fps 120; the Raptor
+# should come down round 2200-2450,3650 near frame 300 and the B-52 round 2250-2500,4100 near frame
+# 990, each burning about 180 frames after.
+#
+# Every unit on the ground is one that cannot hurt another: Hackers carry no weapon, and an Avenger's
+# laser only shoots aircraft (its designator paints and does no damage). So nothing but the crashes
+# takes health, and the tallies read the crash alone. Pilots would have climbed into the Avengers.
+# Each lane is a strip of 11 stations 50 apart from x 2200 to 2700, four of seat 0's Hackers 10 to
+# 30 below the line in y and four of seat 1's 10 to 30 above it, with one Avenger of each seat at
+# the strip's middle, 60 off the line.
+# The anti-air stands just short of the strip, four Avengers on the Raptor's lane round x 2120 and
+# eight on the B-52's round 2100. Where a plane dies is not known before a run: the estimate is the
+# Raptor at x 1950-2100 and the B-52 at 2050-2200, each carrying on 200-450 forward while it
+# falls, so the strip runs long.
+#
+# Reading the log: the HEADLESS TALLY lines at 40, 560 and 1260 for ChinaInfantryHacker and
+# AmericaTankAvenger, both seats. 40 to 560 is the Raptor's crash, 560 to 1260 the B-52's; seat 0's
+# losses are the plane's own side. AmericaJetRaptor at 560 and AmericaJetB52 at 1260 must read 0
+# alive, or the plane got through and the delta means nothing. A Hacker inside the blast loses 80
+# (Raptor) or 160 (B-52), and the fire takes 7.5 every quarter second off one standing in it.
+# Not yet run: a crash outside the strip shows no change, and then the strip moves, not the data.
+
+# lane A: the Raptor's
+20    spawn      1  AmericaTankAvenger     4   2120 3650   40
+20    spawn      0  ChinaInfantryHacker    4   2200 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2200 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2250 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2250 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2300 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2300 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2350 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2350 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2400 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2400 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2450 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2450 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2500 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2500 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2550 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2550 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2600 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2600 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2650 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2650 3670   20
+20    spawn      0  ChinaInfantryHacker    4   2700 3630   20
+20    spawn      1  ChinaInfantryHacker    4   2700 3670   20
+20    spawn      0  AmericaTankAvenger     1   2425 3590
+20    spawn      1  AmericaTankAvenger     1   2475 3710
+
+# lane B: the B-52's, more Avengers for 1000 health
+20    spawn      1  AmericaTankAvenger     8   2100 4100   40
+20    spawn      0  ChinaInfantryHacker    4   2200 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2200 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2250 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2250 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2300 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2300 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2350 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2350 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2400 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2400 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2450 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2450 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2500 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2500 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2550 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2550 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2600 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2600 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2650 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2650 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2700 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2700 4120   20
+20    spawn      0  AmericaTankAvenger     1   2425 4040
+20    spawn      1  AmericaTankAvenger     1   2475 4160
+
+# the Raptor
+30    spawn      0  AmericaJetRaptor       1   900 3650
+31    move       0  AmericaJetRaptor           4400 3650
+
+40    tally      0  ChinaInfantryHacker
+40    tally      1  ChinaInfantryHacker
+40    tally      0  AmericaTankAvenger
+40    tally      1  AmericaTankAvenger
+
+560   tally      0  AmericaJetRaptor
+560   tally      0  ChinaInfantryHacker
+560   tally      1  ChinaInfantryHacker
+560   tally      0  AmericaTankAvenger
+560   tally      1  AmericaTankAvenger
+
+# the B-52, made on its own rather than by a power so its line is known; it climbs to cruise
+# height on the way
+600   spawn      0  AmericaJetB52          1   900 4100
+601   move       0  AmericaJetB52              4400 4100
+
+1260  tally      0  AmericaJetB52
+1260  tally      0  ChinaInfantryHacker
+1260  tally      1  ChinaInfantryHacker
+1260  tally      0  AmericaTankAvenger
+1260  tally      1  AmericaTankAvenger

@@ -102,6 +102,8 @@ public:
 
 	// for battle honor calculation.  done once at the end of each online game
 	Int getTotalUnitsBuilt( KindOfMaskType validMask, KindOfMaskType invalidMask );
+	Int getTotalUnitsBuilt( KindOfMaskType validMask, KindOfMaskType invalidMask, Bool (*accept)( const ThingTemplate * ) ) const;	///< ... of templates accept says yes to, for the AI's summary line
+	Int getTotalObjectsDestroyed( KindOfMaskType validMask, KindOfMaskType invalidMask ) const;	///< of every other player's, for the AI's summary line
 
 protected:
 	

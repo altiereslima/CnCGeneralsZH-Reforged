@@ -338,7 +338,7 @@ typedef struct _ListEntryRow
 	// The following fields are for internal use and
 	// should not be initialized by the user
 	Int							listHeight;		// calculated total Height at the bottom of this entry
-	Byte						height;				// Maintain the height of the row
+	Int							height;				// Maintain the height of the row; a Byte wrapped a 4K medal row negative
 	ListEntryCell		*cell;				// Holds the array of ListEntry Cells
 	
 } ListEntryRow;

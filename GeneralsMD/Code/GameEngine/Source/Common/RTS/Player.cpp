@@ -56,6 +56,7 @@
 #include "Common/DisabledTypes.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
+#include "Common/MatchHistory.h"
 #include "Common/MessageStream.h"
 #include "Common/MiscAudio.h"
 #include "Common/PerfTimer.h"
@@ -994,6 +995,10 @@ void Player::initFromDict(const Dict* d)
 				m_ai->setAISkillLevel((AISkillLevel)skillInt);
 			else
 				m_ai->setAISkillLevel(AIPlayer::skillLevelForDifficulty(difficulty));
+			// the personality, which only a non-Normal seat writes; after the rung, since a Rusher's rush reads it
+			Bool personaExists = false;
+			const Int personaInt = d->getInt(TheKey_skirmishAIPersonality, &personaExists);
+			m_ai->setAIPersonality(personaExists ? (AIPersonality)personaInt : AIPERSONA_NORMAL);
 		}
 
 		if (!found) 
@@ -1298,7 +1303,13 @@ Bool Player::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord3D
 //-------------------------------------------------------------------------------------------------
 Player  *Player::getCurrentEnemy( void )
 {
-	return m_ai?m_ai->getAiEnemy():NULL; 
+	return m_ai?m_ai->getAiEnemy():NULL;
+}
+
+void Player::noteTeamRequest( Int kind, Int from, Int enemy, const Coord3D *pos )
+{
+	if( m_ai )
+		m_ai->noteTeamRequest( (AITeamRequestKind)kind, from, enemy, pos );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1717,6 +1728,7 @@ void Player::onUnitCreated( Object *factory, Object *unit )
 
 	// increment our scorekeeper
 	m_scoreKeeper.addObjectBuilt(unit);
+	TheMatchHistory.noteBuilt(this, unit);
 
 	// ai notification callback
 	if( m_ai )
@@ -1783,6 +1795,8 @@ void Player::onStructureCreated( Object *builder, Object *structure )
 {
 }  // end onStructureCreated
 
+static void logSuperweaponRation( Player *player, const Object *structure );
+
 //-------------------------------------------------------------------------------------------------
 /// a structure that was under construction has become completed
 //-------------------------------------------------------------------------------------------------
@@ -1801,6 +1815,7 @@ void Player::onStructureConstructionComplete( Object *builder, Object *structure
 	if (isRebuild == FALSE) {
 		m_scoreKeeper.addObjectBuilt(structure);
 		m_scoreKeeper.addMoneySpent(structure->getTemplate()->calcCostToBuild(this));
+		TheMatchHistory.noteBuilt(this, structure);
 	}
 
 	structure->friend_adjustPowerForPlayer(TRUE);
@@ -1808,6 +1823,8 @@ void Player::onStructureConstructionComplete( Object *builder, Object *structure
 	// ai notification callback
 	if( m_ai )
 		m_ai->onStructureProduced( builder, structure );
+	if( m_ai && ( structure->isKindOf( KINDOF_FS_SUPERWEAPON ) || structure->isKindOf( KINDOF_FS_BASE_DEFENSE ) ) )
+		logSuperweaponRation( this, structure );
 
 	// the GUI needs to re-evaluate the information being displayed to the user now
 	if( TheControlBar )
@@ -2242,11 +2259,12 @@ void Player::killPlayer(void)
 		{
 			if (isPlayerActive())
 			{
-				TheControlBar->setControlBarSchemeByPlayer(this);
+				ControlBar::callFromLogic( [this]{ TheControlBar->setControlBarSchemeByPlayer(this); } );
 			}
 			else
 			{
-				TheControlBar->setControlBarSchemeByPlayerTemplate(ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY("FactionObserver")));
+				const PlayerTemplate *observer = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY("FactionObserver"));
+				ControlBar::callFromLogic( [observer]{ TheControlBar->setControlBarSchemeByPlayerTemplate(observer); } );
 			}
 		}
 
@@ -2802,7 +2820,7 @@ void Player::addSciencePurchasePoints(Int delta)
 		m_sciencePurchasePoints = 0;
 
 	if (oldSPP != m_sciencePurchasePoints && TheControlBar != NULL)
-		TheControlBar->onPlayerSciencePurchasePointsChanged(this);
+		ControlBar::callFromLogic( [this]{ TheControlBar->onPlayerSciencePurchasePointsChanged(this); } );
 
 }
 
@@ -2850,6 +2868,17 @@ AISkillLevel Player::getAISkillLevel(void) const
 AIRole Player::getAIRole(void) const
 {
 	return m_ai ? m_ai->getAIRole() : AIROLE_AGGRESSIVE;
+}
+
+AIPersonality Player::getAIPersonality(void) const
+{
+	return m_ai ? m_ai->getAIPersonality() : AIPERSONA_NORMAL;
+}
+
+void Player::logAIPersonaSummary(void)
+{
+	if (m_ai)
+		m_ai->logPersonaSummary();
 }
 
 Bool Player::isCapableOfPurchasingScience(ScienceType science) const
@@ -2965,12 +2994,14 @@ Bool Player::setRankLevel(Int newLevel)
 				TheEva->setShouldPlay( EVA_GeneralLevelUp );
 		}
 
-		// notify of rank-change first
-		TheControlBar->onPlayerRankChanged(this);
-
-		// then of SPP change, if any
-		if (oldSPP != m_sciencePurchasePoints)
-			TheControlBar->onPlayerSciencePurchasePointsChanged(this);
+		// notify of rank-change first, then of SPP change, if any
+		const Bool sppChanged = oldSPP != m_sciencePurchasePoints;
+		ControlBar::callFromLogic( [this, sppChanged]
+		{
+			TheControlBar->onPlayerRankChanged(this);
+			if (sppChanged)
+				TheControlBar->onPlayerSciencePurchasePointsChanged(this);
+		} );
 	}
 
 	return true;
@@ -3352,9 +3383,9 @@ Bool UnitCapRefuses( Int unitsTowardCap, Int unitsItAdds, UnsignedInt unitCap )
 }
 
 //=============================================================================
-Bool SuperweaponDefenseCapRefuses( Int finishedDefenses, Int superweapons )
+Bool SuperweaponDefenseCapRefuses( Int finishedDefenses, Int superweapons, Int defensesPerSuperweapon )
 {
-  return superweapons >= finishedDefenses / DEFENSES_PER_SUPERWEAPON;
+  return defensesPerSuperweapon > 0 && superweapons >= finishedDefenses / defensesPerSuperweapon;
 }
 
 Bool DefenseCountsForSuperweapons( Int buildCost )
@@ -3401,6 +3432,17 @@ static void countSuperweaponDefenses( Object *obj, void *userData )
                                       standing && !standing->isEffectivelyDead() ) )
       count->superweapons++;
   }
+}
+
+/* What the superweapon ration stands on, each time a computer player finishes a gun or a
+   superweapon: the batch reads the first superweapon's frame and the defences behind it from here. */
+static void logSuperweaponRation( Player *player, const Object *structure )
+{
+  SuperweaponDefenseCount count = { 0, 0 };
+  player->iterateObjects( countSuperweaponDefenses, &count );
+  DEBUG_LOG(( "AI RATION frame %d player %d skill %d built '%s', defences %d superweapons %d\n",
+    TheGameLogic->getFrame(), player->getPlayerIndex(), (Int)player->getAISkillLevel(),
+    structure->getTemplate()->getName().str(), count.defenses, count.superweapons ));
 }
 
 Bool RebuildHoleHoldsSuperweapon( Bool rebuildsSuperweapon, Bool rebuildStanding )
@@ -3522,7 +3564,13 @@ Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild, Int unitsPerO
   {
     SuperweaponDefenseCount count = { 0, 0 };
     iterateObjects( countSuperweaponDefenses, &count );
-    if ( SuperweaponDefenseCapRefuses( count.defenses, count.superweapons ) )
+    // a Tech computer's first superweapon is its plan, and a GLA Air one's SCUD Storm, and waits for
+    // at most this many guns, whatever the rung's own ration asks
+    static const Int TECH_FIRST_DEFENSES[ AISKILL_COUNT ] = { 8, 6, 4 };
+    const Bool techFirst = count.superweapons == 0 && m_ai->superweaponIsPlan() &&
+      count.defenses >= TECH_FIRST_DEFENSES[ getAISkillLevel() ];
+    if ( !techFirst && SuperweaponDefenseCapRefuses( count.defenses, count.superweapons,
+                                                     m_ai->getSkillProfile()->m_superweaponDefenses ) )
       return false;
   }
 
@@ -3881,6 +3929,7 @@ void Player::enableRadar()
 //-------------------------------------------------------------------------------------------------
 Bool Player::hasRadar() const
 {
+	LOGIC_WINDOW_READ( WINDOW_PLAYER_STATE );
 	if( m_radarDisabled  && (m_disableProofRadarCount == 0) )
 		return FALSE;// Nope, no matter how many you have, if I say no, you don't have it
 
@@ -3906,6 +3955,12 @@ static void doPowerDisable( Object *obj, void *userData )
 //-------------------------------------------------------------------------------------------------
 void Player::onPowerBrownOutChange( Bool brownOut )
 {
+	// A load puts every building's power back one by one, and each step would brown the player out
+	// or in again: the radar flag and every powered object's disabled state, which the save already
+	// holds as they were, came out as the last step left them.
+	if( TheGameState->isInLoadGame() )
+		return;
+
 	// Everything that changes due to Player's power supply goes in here.
 	if( brownOut )
 		disableRadar();
@@ -4647,6 +4702,7 @@ Bool Player::isPlayerDead(void) const
 // ------------------------------------------------------------------------------------------------
 Bool Player::isPlayerActive(void) const
 {
+	LOGIC_WINDOW_READ( WINDOW_PLAYER_STATE );
 	return !m_observer && !m_isPlayerDead;
 }
 
@@ -4738,7 +4794,11 @@ void Player::xfer( Xfer *xfer )
 	if( xfer->getXferMode() == XFER_SAVE )
 	{
 
-		for( upgrade = m_upgradeList; upgrade; upgrade = upgrade->friend_getNext() )
+		// back to front: loading prepends each one (addUpgrade), which puts them back in this order
+		Upgrade *last = m_upgradeList;
+		while( last && last->friend_getNext() )
+			last = last->friend_getNext();
+		for( upgrade = last; upgrade; upgrade = upgrade->friend_getPrev() )
 		{
 
 			// write upgrade name

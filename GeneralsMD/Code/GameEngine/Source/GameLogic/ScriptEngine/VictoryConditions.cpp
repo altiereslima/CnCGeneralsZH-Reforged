@@ -241,8 +241,10 @@ void VictoryConditions::update( void )
 				//MessageBoxOk(TheGameText->fetch("GUI:Defeat"), TheGameText->fetch("GUI:LocalDefeat"), NULL);
 			}
 			m_localPlayerDefeated = true;	// don't check again
-			TheRadar->forceOn(TRUE);
-			SetInGameChatType( INGAME_CHAT_EVERYONE ); // can't chat to allies after death.  Only to other observers.
+			LogicThread::callAfterTick( []() {
+				TheRadar->forceOn(TRUE);
+				SetInGameChatType( INGAME_CHAT_EVERYONE ); // can't chat to allies after death.  Only to other observers.
+			} );
 		}
 	}
 }

@@ -78,6 +78,15 @@
 
 // PRIVATE FUNCTIONS //////////////////////////////////////////////////////////
 
+// The open list's height for this many lines.  A list row is a line of text and one pixel
+// (GadgetListBox's computeTotalHeight); EA allowed two, so a list that scrolls showed the top of one
+// more row under its last, cut in half.  A list that fits keeps EA's slack.
+static Int dropDownHeight( WinInstanceData *listInstData, Int lines, Bool scrolls )
+{
+	const Int fontHeight = TheWindowManager->winFontHeight( listInstData->getFont() );
+	return (fontHeight + (scrolls ? 1 : 2)) * lines + (scrolls ? 6 : 4);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -215,7 +224,7 @@ WindowMsgHandledType GadgetComboBoxInput( GameWindow *window, UnsignedInt msg,
 							
 						}
 						
-						newSize.y = ((TheWindowManager->winFontHeight( listInstData->getFont() ) ) * multiplier) + multiplier * 2 + 4;
+						newSize.y = dropDownHeight( listInstData, multiplier, comboData->entryCount > comboData->maxDisplay );
 						window->winSetSize(winSize.x , winSize.y + newSize.y );
 						listBox->winSetPosition(0, winSize.y);
 
@@ -560,7 +569,7 @@ WindowMsgHandledType GadgetComboBoxSystem( GameWindow *window, UnsignedInt msg,
 					if(listData->slider)
 						listData->slider->winHide(FALSE);
 				}
-				newSize.y = ((TheWindowManager->winFontHeight( listInstData->getFont() ) ) * multiplier) + multiplier * 2 + 4;
+				newSize.y = dropDownHeight( listInstData, multiplier, comboData->entryCount > comboData->maxDisplay );
 				listBox->winSetPosition(0, editBoxSize.y);
 				listBox->winSetSize(listX , newSize.y);
 			}
@@ -700,7 +709,7 @@ WindowMsgHandledType GadgetComboBoxSystem( GameWindow *window, UnsignedInt msg,
 							
 						}
 						
-						newSize.y = ((TheWindowManager->winFontHeight( listInstData->getFont() ) ) * multiplier) + multiplier * 2 + 4;
+						newSize.y = dropDownHeight( listInstData, multiplier, comboData->entryCount > comboData->maxDisplay );
 						window->winSetSize(winSize.x , winSize.y + newSize.y );
 						listBox->winSetPosition(0, winSize.y);
 

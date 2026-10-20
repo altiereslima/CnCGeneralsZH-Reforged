@@ -513,6 +513,12 @@ enum LayoutPlacement
 	LAYOUT_FIT				///< one scale, the smaller, its 800x600 standing at theLayoutAnchor
 };
 static LayoutPlacement theLayoutPlacement = LAYOUT_STRETCH;
+/// a shell screen: stretched when authored at 4:3 as EA's were, fitted when authored wider (the
+/// staging rooms at 1920x1080), so a crest, a map preview and its start spots keep their shape
+static Bool theLayoutIsShellScreen = FALSE;
+/// for a wide shell screen being fitted, what its lettering is multiplied by: the window's own scale
+/// in 800x600 terms, which is what every point size in a .wnd was picked at.  0 for every other layout.
+static Real theWideFontScale = 0.0f;
 /// where a fitted layout stands: the same fraction of the screen and of the layout, (0.5,0.5) centred
 static Coord2D theLayoutAnchor = { 0.5f, 0.5f };
 
@@ -592,12 +598,15 @@ static Bool layoutIsShellScreen( const char *filename )
 static LayoutPlacement layoutPlacement( const char *filename )
 {
 	theLayoutAnchor.x = theLayoutAnchor.y = 0.5f;
+	theLayoutIsShellScreen = FALSE;
+	theWideFontScale = 0.0f;
 	if( filename == NULL )
 		return LAYOUT_STRETCH;
 	// "Menus/X.wnd" as the shell names them, or the whole "Window\\Menus\\X.wnd"
 	if( startsWithFolder( filename, "window" ) )
 		filename += 7;
-	if( layoutIsShellScreen( filename ) || barLaysOutItself( filename ) )
+	theLayoutIsShellScreen = layoutIsShellScreen( filename );
+	if( theLayoutIsShellScreen || barLaysOutItself( filename ) )
 		return LAYOUT_STRETCH;
 	theLayoutAnchor = classicLayoutAnchor( filename );
 	return LAYOUT_FIT;
@@ -642,9 +651,19 @@ static Bool parseScreenRect( char *token, char *buffer,
 	// panel, a logo or a medal keeps the shape it was drawn in.  A root authored as the
 	// whole 800x600 is the veil behind that panel: stretch it to the display so a wide
 	// screen is covered, while the children stay fitted.  At 4:3 the scales are equal
-	// and the offsets nothing, and this is the stretch to the pixel.
+	// and the offsets nothing, and this is the stretch to the pixel.  A shell screen authored wider
+	// than 4:3 is fitted the same way: on a 16:9 display it is exact, on 4:3 or 16:10 it stands
+	// centred between bands of its own veil instead of being squashed.
 	//
-	if( theLayoutPlacement == LAYOUT_FIT )
+	const Bool wideShellScreen = theLayoutIsShellScreen && createRes.x * 3 > createRes.y * 4;
+	// The lettering has to shrink and grow with the fitted window, not with the 800x600 rule
+	// adjustFontSize applies: on 4:3 that rule made the text a third too big for its boxes, and its 2x
+	// cap left 4K text at half the size of the panel.  Below 1080 it shrinks with the boxes too.
+	// 1.4 is the lettering the 1080-high rooms are drawn for: a 10 point face comes out 19 pixels
+	// tall at 1080p, as the stretched rooms had it, and the columns are measured for that.
+	theWideFontScale = wideShellScreen
+		? min( xScale, yScale ) * (Real)createRes.y / 1080.0f * 1.4f : 0.0f;
+	if( theLayoutPlacement == LAYOUT_FIT || wideShellScreen )
 	{
 		const Bool fullAuthored = parent == NULL
 			&& screenRegion.lo.x <= 1 && screenRegion.lo.y <= 1
@@ -769,7 +788,9 @@ static Bool parseFont( char *token, WinInstanceData *instData,
 	// adjusted this way (HeaderTemplateManager::populateGameFonts); the ones that name only a
 	// FONT never were.
 	//
-	if( TheGlobalLanguageData )
+	if( theWideFontScale > 0.0f )
+		fontSize = REAL_TO_INT_FLOOR( fontSize * theWideFontScale );
+	else if( TheGlobalLanguageData )
 		fontSize = TheGlobalLanguageData->adjustFontSize( fontSize );
 
 	if( TheFontLibrary )
@@ -1195,6 +1216,12 @@ static Bool parseText( char *token, WinInstanceData *instData,
 	while( *ptr != '"' )
 		ptr++;
 	ptr++;  // skip the "
+	// TEXT = ""; is an empty label: strtok would skip the closing quote and find nothing
+	if( *ptr == '"' )
+	{
+		instData->m_textLabelString.clear();
+		return TRUE;
+	}
 	c = strtok( ptr, stringSeps );  // value
 	if( strlen( c ) >= MAX_TEXT_LABEL )
 	{
@@ -2598,7 +2625,16 @@ static GameWindow *parseWindow( File *inFile, char *buffer )
 			{
 				// Check to see if we have a header template, if so, set the font equal to that.
 				if(TheHeaderTemplateManager->getFontFromTemplate(instData.m_headerTemplateName))
+				{
 					instData.m_font = TheHeaderTemplateManager->getFontFromTemplate(instData.m_headerTemplateName);
+					// the template's face at the fitted window's scale, as parseFont does for a FONT
+					if( theWideFontScale > 0.0f )
+					{
+						const HeaderTemplate *ht = TheHeaderTemplateManager->findHeaderTemplate( instData.m_headerTemplateName );
+						instData.m_font = TheFontLibrary->getFont( ht->m_fontName,
+							REAL_TO_INT_FLOOR( ht->m_point * theWideFontScale ), ht->m_bold );
+					}
+				}
 
 				// Create a window using the current description
 				if( window == NULL )

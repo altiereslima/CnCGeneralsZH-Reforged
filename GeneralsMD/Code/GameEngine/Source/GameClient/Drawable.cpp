@@ -33,6 +33,8 @@
 #include "Lib/Clock.h"
 
 #include "Common/AudioEventInfo.h"
+#include "Common/LogicThread.h"
+#include "Common/LatchRestore.h"
 #include "Common/DynamicAudioEventInfo.h"
 #include "Common/AudioSettings.h"
 #include "Common/BitFlagsIO.h"
@@ -79,6 +81,7 @@
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/DrawGroupInfo.h"
+#include "GameClient/FXList.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/GlobalLanguage.h"
 #include "GameClient/InGameUI.h"
@@ -227,6 +230,9 @@ DrawableLocoInfo::DrawableLocoInfo()
 	m_airPitch = 0.0f;
 	m_airRoll = 0.0f;
 	m_airYaw = 0.0f;
+	m_jetHeading = 0.0f;
+	m_jetBank = 0.0f;
+	m_jetPitch = 0.0f;
 	for (Int i = 0; i < 3; ++i)
 		m_groundLeanStages[0][i] = m_groundLeanStages[1][i] = 0.0f;
 	m_groundFrame = 0;
@@ -526,15 +532,42 @@ Bool Drawable_disabledShowsBlueHealthBar( DisabledMaskType disabledFlags )
 /** The silhouette is the finished building, not a foundation: the construction model conditions are
 	* left alone until the builder arrives, so what stands on the map is the shape that was under the
 	* cursor.  A drawable with no object behind it is the placement preview itself, which carries the
-	* same opacity explicitly. */
+	* same opacity explicitly.  The render asks this, so the object's half is the sync point's
+	* (setObjectForDraw). */
 //-------------------------------------------------------------------------------------------------
 Real Drawable::getEffectiveOpacity() const
 {
-	const Object *obj = getObject();
-	Bool awaitingBuilder = obj && Object_isAwaitingBuilder( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ),
-																													 obj->getConstructionPercent() );
+	if( LogicThread::isInsideWindow() )
+		return m_lookForDraw.effectiveOpacity;
+	return Drawable_effectiveOpacity( m_explicitOpacity, m_effectiveStealthOpacity, m_objectForDraw.awaitingBuilder );
+}
 
-	return Drawable_effectiveOpacity( m_explicitOpacity, m_effectiveStealthOpacity, awaitingBuilder );
+//-------------------------------------------------------------------------------------------------
+/** LOGIC-THREAD.md phase 3, step 3b: see LookForDraw.  Outside the window, so every getter reads the
+	* drawable's own fields. */
+//-------------------------------------------------------------------------------------------------
+void Drawable::takeLookForDraw( void )
+{
+	LookForDraw &look = m_lookForDraw;
+	look.hidden = isDrawableEffectivelyHidden();
+	look.fullyObscured = m_drawableFullyObscuredByShroud;
+	look.drawsInMirror = getDrawsInMirror();
+	look.receivesDynamicLights = m_receivesDynamicLights;
+	look.stealthLook = m_stealthLook;
+	look.stealthDrawnLook = m_stealthDrawnLook;
+	look.stealthFade = m_stealthFade;
+	look.stealthSolid = getStealthSolid();
+	look.secondMaterialPassOpacity = m_secondMaterialPassOpacity;
+	look.effectiveOpacity = getEffectiveOpacity();
+	look.tintStatus = m_tintStatus;
+	const Vector3 *tint = getTintColor();
+	look.hasTintColor = tint != NULL;
+	if( tint )
+		look.tintColor = *tint;
+	const Vector3 *selection = getSelectionColor();
+	look.hasSelectionColor = selection != NULL;
+	if( selection )
+		look.selectionColor = *selection;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -543,13 +576,16 @@ Real Drawable::getEffectiveOpacity() const
  * graphical side of a logical object, whereas GameLogic objects encapsulate
  * behaviors and physics.  */
 //-------------------------------------------------------------------------------------------------
-Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBits ) 
+Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBits )
 				: Thing( thingTemplate )
 {
 
 	// assign status bits before anything else can be done
 	m_status = statusBits;
-	
+	m_clientWorkQueued = FALSE;
+	m_transformPending = FALSE;
+	m_renderPending = FALSE;
+
 	// Added By Sadullah Nader
 	// Initialization missing and needed
 	m_nextDrawable = NULL;
@@ -585,13 +621,7 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 	m_lastSupplyCashDisplayed = -1;
 	m_productionTimeDisplayString = NULL;
 	m_chargeTimeDisplayString = NULL;
-	
-	//Added By Sadullah Nader
-	//Fix for the building percent
-	m_constructDisplayString = TheDisplayStringManager->newDisplayString();
-	m_constructDisplayString->setFont(TheFontLibrary->getFont(TheInGameUI->getDrawableCaptionFontName(),
-																TheGlobalLanguageData->adjustFontSize(TheInGameUI->getDrawableCaptionPointSize()),
-																TheInGameUI->isDrawableCaptionBold() ));
+	m_constructDisplayString = NULL;	// buildRenderObjects
 
 	m_ambientSound = NULL;
   m_ambientSoundEnabled = true;
@@ -611,6 +641,32 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 	m_timeToFade = 0;
 
 	m_shroudClearFrame = 0;
+	m_shroudForDraw = OBJECTSHROUD_CLEAR;
+	m_objectDeadForDraw = FALSE;
+	m_objectForDraw.hasObject = FALSE;
+	m_objectForDraw.awaitingBuilder = FALSE;
+	m_objectForDraw.empDisabled = FALSE;
+	m_objectForDraw.outage = FALSE;
+	m_objectForDraw.playerIndex = 0;
+	m_objectForDraw.playerColor = 0;
+	m_objectForDraw.safeOcclusionFrame = 0;
+	m_objectForDraw.layer = LAYER_GROUND;
+	m_objectForDraw.layerHeight = 0.0f;
+	m_lookForDraw.hidden = FALSE;
+	m_lookForDraw.fullyObscured = FALSE;
+	m_lookForDraw.drawsInMirror = FALSE;
+	m_lookForDraw.receivesDynamicLights = TRUE;
+	m_lookForDraw.hasTintColor = FALSE;
+	m_lookForDraw.hasSelectionColor = FALSE;
+	m_lookForDraw.stealthLook = STEALTHLOOK_NONE;
+	m_lookForDraw.stealthDrawnLook = STEALTHLOOK_NONE;
+	m_lookForDraw.stealthFade = 0.0f;
+	m_lookForDraw.stealthSolid = 1.0f;
+	m_lookForDraw.secondMaterialPassOpacity = 0.0f;
+	m_lookForDraw.effectiveOpacity = 1.0f;
+	m_lookForDraw.tintStatus = 0;
+	m_lookForDraw.tintColor.Set( 0.0f, 0.0f, 0.0f );
+	m_lookForDraw.selectionColor.Set( 0.0f, 0.0f, 0.0f );
 
 	for (i = 0; i < NUM_DRAWABLE_MODULE_TYPES; ++i)
 		m_modules[i] = NULL;
@@ -716,9 +772,20 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 	m_selectionFlashEnvelope = NULL;	// lazily allocate!
 	m_colorTintEnvelope = NULL;				// lazily allocate!
 
-	initStaticImages(); 
+	initStaticImages();
 
-  // If we are inside GameLogic::startNewGame(), then starting the ambient sound 
+	// a drawable logic makes in a tick is a shell until the flush after it: its modules exist, so
+	// everything logic asks of them (bones, barrels, launch points, the laser's client update) is
+	// answered, and only the render objects wait
+	if (tickDefersLifetime())
+	{
+		m_renderPending = TRUE;
+		queueClientWork();
+	}
+	else
+		buildRenderObjects();
+
+  // If we are inside GameLogic::startNewGame(), then starting the ambient sound
   // will be taken care of by Drawable::onLevelStart(). It's important that we 
   // wait until Drawable::onLevelStart(), because we may have a customized ambient
   // sound which we'll only learn about after the constructor is finished. The
@@ -777,7 +844,9 @@ Drawable::~Drawable()
 		m_modules[i] = NULL;
 	}
 
-	stopAmbientSound();
+	// now, even inside a tick: nothing is left to stop it after the flush
+	if (m_ambientSound)
+		TheAudio->removeAudioEvent(m_ambientSound->m_event.getPlayingHandle());
 	if (m_ambientSound)
 	{
 		m_ambientSound->deleteInstance();
@@ -897,10 +966,21 @@ Bool Drawable::clientOnly_getFirstRenderObjInfo(Coord3D* pos, Real* boundingSphe
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The bones, launch offsets and barrel counts logic reads skip a draw module the player's "extra
+	* animations" option (m_useDrawModuleLOD) can leave out, on every machine, so one player's option
+	* cannot change where another machine's shot leaves from.  Only logic's reads skip it, the tick's
+	* and the map load's: an FX at a bone or a supply box count on the client reads every module drawn. */
+static Bool skipsForLogic( const DrawModule *dm )
+{
+	return dm->isLODOptional() && ( TheGameLogic->isInGameLogicUpdate() || TheGameLogic->isLoadingMap() );
+}
+
 Bool Drawable::getProjectileLaunchOffset(WeaponSlotType wslot, Int specificBarrelToUse, Matrix3D* launchPos, WhichTurretType tur, Coord3D* turretRotPos, Coord3D* turretPitchPos) const
 {
 	for (const DrawModule** dm = getDrawModules(); *dm; ++dm)
 	{
+		if (skipsForLogic(*dm))
+			continue;
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		if (di && di->getProjectileLaunchOffset(m_conditionState, wslot, specificBarrelToUse, launchPos, tur, turretRotPos, turretPitchPos))
 			return true;
@@ -911,59 +991,68 @@ Bool Drawable::getProjectileLaunchOffset(WeaponSlotType wslot, Int specificBarre
 //-------------------------------------------------------------------------------------------------
 void Drawable::setAnimationLoopDuration(UnsignedInt numFrames)
 {
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->setAnimationLoopDuration(numFrames);
-	}
+	// on the state the tick's condition flush builds, which the step list puts in front of it
+	doClientWork( [this, numFrames]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->setAnimationLoopDuration(numFrames);
+		}
+	}, WORK_AFTER_FLUSH, TRUE );
 }
 
 //-------------------------------------------------------------------------------------------------
 void Drawable::setAnimationCompletionTime(UnsignedInt numFrames)
 {
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->setAnimationCompletionTime(numFrames);
-	}
+	doClientWork( [this, numFrames]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->setAnimationCompletionTime(numFrames);
+		}
+	}, WORK_AFTER_FLUSH, TRUE );
 }
 
 //Kris: Manually set a drawable's current animation to specific frame.
 //-------------------------------------------------------------------------------------------------
 void Drawable::setAnimationFrame( int frame )
 {
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->setAnimationFrame( frame );
-	}
+	doClientWork( [this, frame]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->setAnimationFrame( frame );
+		}
+	}, WORK_AFTER_FLUSH, TRUE );
 }
 
 //-------------------------------------------------------------------------------------------------
 void Drawable::updateSubObjects()
 {
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->updateSubObjects();
-	}
+	doClientWork( [this]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->updateSubObjects();
+		}
+	}, WORK_AFTER_FLUSH );
 }
 
 //-------------------------------------------------------------------------------------------------
 void Drawable::showSubObject( const AsciiString& name, Bool show )
 {
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
+	doClientWork( [this, name, show]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
 		{
-			di->showSubObject( name, show );
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->showSubObject( name, show );
 		}
-	}
+	}, WORK_AFTER_FLUSH );
 }
 
 #ifdef ALLOW_ANIM_INQUIRIES
@@ -997,10 +1086,13 @@ Int Drawable::getPristineBonePositions(const char* boneNamePrefix, Int startInde
 		if (maxBones <= 0)
 			break;
 
+		if (skipsForLogic(*dm))
+			continue;
+
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		if (di)
 		{
-			Int subcount = 
+			Int subcount =
 				di->getPristineBonePositionsForConditionState(m_conditionState, boneNamePrefix, startIndex, positions, transforms, maxBones);
 
 			if (subcount > 0)
@@ -1021,10 +1113,14 @@ Int Drawable::getPristineBonePositions(const char* boneNamePrefix, Int startInde
 Int Drawable::getCurrentClientBonePositions(const char* boneNamePrefix, Int startIndex, Coord3D* positions, Matrix3D* transforms, Int maxBones) const
 {
 	Int count = 0;
-	for (const DrawModule** dm = getDrawModules(); *dm; ++dm)
+	// the bones as drawn; asked after the tick (the uplink cannon's raised antenna, FX at bones), where
+	// what the tick deferred on this drawable is applied first
+	for (DrawModule** dm = const_cast<Drawable*>(this)->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		if (maxBones <= 0)
 			break;
+		if (skipsForLogic(*dm))
+			continue;
 
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		if (di)
@@ -1049,8 +1145,11 @@ Int Drawable::getCurrentClientBonePositions(const char* boneNamePrefix, Int star
 //-------------------------------------------------------------------------------------------------
 Bool Drawable::getCurrentWorldspaceClientBonePositions(const char* boneName, Matrix3D& transform) const
 {
-	for (const DrawModule** dm = getDrawModules(); *dm; ++dm)
+	// a laser's client update and the attached models ask; the bones have to be where the tick left the drawable
+	for (DrawModule** dm = const_cast<Drawable*>(this)->getDrawModulesFlushed(); *dm; ++dm)
 	{
+		if (skipsForLogic(*dm))
+			continue;
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		if (di && di->getCurrentWorldspaceClientBonePositions(boneName, transform))
 			return true;
@@ -1066,23 +1165,27 @@ void Drawable::setTerrainDecal(TerrainDecalType type)
 
 	m_terrainDecalType=type;
 
-	DrawModule** dm = getDrawModules();
+	doClientWork( [this, type]() {
+		DrawModule** dm = getDrawModulesNonDirty();
 
-	//Only the first draw module gets a decal to prevent stacking.
-	//Should be okay as long as we keep the primary object in the
-	//first module.
-	if (*dm)
-		(*dm)->setTerrainDecal(type);
+		//Only the first draw module gets a decal to prevent stacking.
+		//Should be okay as long as we keep the primary object in the
+		//first module.
+		if (*dm)
+			(*dm)->setTerrainDecal(type);
+	}, WORK_AFTER_FLUSH );
 
 }
 
 //-------------------------------------------------------------------------------------------------
 void Drawable::setTerrainDecalSize(Real x, Real y)
 {
-	DrawModule** dm = getDrawModules();
+	doClientWork( [this, x, y]() {
+		DrawModule** dm = getDrawModulesNonDirty();
 
-	if (*dm)
-		(*dm)->setTerrainDecalSize(x,y);
+		if (*dm)
+			(*dm)->setTerrainDecalSize(x,y);
+	}, WORK_AFTER_FLUSH );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1107,10 +1210,12 @@ void Drawable::setShadowsEnabled(Bool enable)
 	else
 		clearDrawableStatus( DRAWABLE_STATUS_SHADOWS );
 
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		(*dm)->setShadowsEnabled(enable);
-	}
+	doClientWork( [this, enable]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			(*dm)->setShadowsEnabled(enable);
+		}
+	}, WORK_AFTER_FLUSH );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1141,10 +1246,12 @@ void Drawable::setFullyObscuredByShroud(Bool fullyObscured)
 	// or its snapshot is taken or freed
 	if (m_drawableFullyObscuredByShroud != fullyObscured || fullyObscured)
 	{
-		for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-		{
-			(*dm)->setFullyObscuredByShroud(fullyObscured);
-		}
+		doClientWork( [this, fullyObscured]() {
+			for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+			{
+				(*dm)->setFullyObscuredByShroud(fullyObscured);
+			}
+		}, WORK_AFTER_FLUSH );
 		m_drawableFullyObscuredByShroud = fullyObscured;
 	}
 }
@@ -1261,6 +1368,8 @@ void Drawable::onUnselected()
 //-------------------------------------------------------------------------------------------------
 const Vector3 * Drawable::getTintColor( void ) const
 {
+	if( LogicThread::isInsideWindow() )
+		return m_lookForDraw.hasTintColor ? &m_lookForDraw.tintColor : NULL;
 	if ( m_colorTintEnvelope )
 	{
 		if (m_colorTintEnvelope->isEffective())
@@ -1277,6 +1386,8 @@ const Vector3 * Drawable::getTintColor( void ) const
 //-------------------------------------------------------------------------------------------------
 const Vector3 * Drawable::getSelectionColor( void )	const
 {
+	if( LogicThread::isInsideWindow() )
+		return m_lookForDraw.hasSelectionColor ? &m_lookForDraw.selectionColor : NULL;
 	if (m_selectionFlashEnvelope)
 	{
 		if (m_selectionFlashEnvelope->isEffective())
@@ -1828,7 +1939,88 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 		info.m_totalZ = 0.0f;
 		return;
 	}
+	UnsignedInt elapsed = now - m_locoInfo->m_airFrame;
 	m_locoInfo->m_airFrame = now;
+
+	/* A jet banks into its turn and pitches with its climb. The bank is the lateral acceleration of
+		 the turn, speed times turn rate, against the full pull of its wings (Locomotor::getJetPull):
+		 JET_MAX_BANK at the full pull and level flying straight. The logic eases the turn in and out,
+		 so the bank rolls with it, and through level when a turn reverses. The pitch is the climb
+		 angle, clamped, plus a few degrees of nose-up while it flies slow, the attitude it comes in to
+		 land with, fading out over the last few feet so the nose comes down after the wheels touch.
+		 Both are eased again here against single-frame jumps. The springs below are left holding
+		 the same attitude, so a jet that dies falls from where it was. */
+	if (locomotor->isJet(obj))
+	{
+		const Real JET_MAX_BANK = 1.1f;				// radians, about 63 degrees, at the full pull of the wings
+		const Real JET_MAX_CLIMB = 0.35f;			// radians, about 20 degrees, nose up or down
+		const Real JET_SLOW_NOSE_UP = 0.12f;	// radians, about 7 degrees, at MinSpeed and below, none from twice that
+		const Real JET_NOSE_UP_HEIGHT = 5.0f;	// the nose-up fades out below this height
+		const Real JET_EASE_FRAMES = 3.0f;		// retail frames
+		const UnsignedInt MAX_GAP = 4;				// retail frames; after a longer gap (taxiing, hidden) the turn rate is not known
+
+		BodyDamageType bdt = obj->getBodyModule()->getDamageState();
+		Real speed = sqrt(sqr(vel->x) + sqr(vel->y));	// per logic frame
+		Real heading = obj->getOrientation();
+		Real bank = 0.0f;
+		Real pull = locomotor->getJetPull(bdt);
+		if (elapsed <= MAX_GAP && pull > 0.0f)
+		{
+			Real turnRate = stdAngleDiff(heading, m_locoInfo->m_jetHeading) / (Real)(elapsed * LOGICFRAMES_PER_RETAIL_FRAME);
+			bank = JET_MAX_BANK * speed * turnRate / pull;
+			if (bank > JET_MAX_BANK)
+				bank = JET_MAX_BANK;
+			else if (bank < -JET_MAX_BANK)
+				bank = -JET_MAX_BANK;
+		}
+		m_locoInfo->m_jetHeading = heading;
+
+		Real pitch = 0.0f;	// nose up
+		if (speed > 0.01f || fabs(vel->z) > 0.01f)
+			pitch = atan2(vel->z, speed);
+		if (pitch > JET_MAX_CLIMB)
+			pitch = JET_MAX_CLIMB;
+		else if (pitch < -JET_MAX_CLIMB)
+			pitch = -JET_MAX_CLIMB;
+		Real height = obj->getHeightAboveTerrain();
+		if (obj->getStatusBits().test( OBJECT_STATUS_DECK_HEIGHT_OFFSET ))
+			height -= obj->getCarrierDeckHeight();
+		Real minSpeed = locomotor->getMinSpeed();
+		if (height > 0.0f && minSpeed > 0.0f)
+		{
+			Real slow = (2.0f * minSpeed - speed) / minSpeed;
+			if (slow > 1.0f)
+				slow = 1.0f;
+			if (slow > 0.0f)
+			{
+				Real fade = height / JET_NOSE_UP_HEIGHT;
+				if (fade > 1.0f)
+					fade = 1.0f;
+				pitch += JET_SLOW_NOSE_UP * slow * fade;
+			}
+		}
+
+		m_locoInfo->m_jetBank += (bank - m_locoInfo->m_jetBank) / JET_EASE_FRAMES;
+		m_locoInfo->m_jetPitch += (pitch - m_locoInfo->m_jetPitch) / JET_EASE_FRAMES;
+
+		info.m_totalRoll = m_locoInfo->m_jetBank;		// positive rolls the left wing down, into a turn to the left
+		info.m_totalPitch = -m_locoInfo->m_jetPitch;	// negative lifts the nose
+		info.m_totalYaw = 0.0f;
+		info.m_totalZ = 0.0f;
+
+		m_locoInfo->m_pitch = info.m_totalPitch;
+		m_locoInfo->m_roll = info.m_totalRoll;
+		m_locoInfo->m_pitchRate = 0.0f;
+		m_locoInfo->m_rollRate = 0.0f;
+		m_locoInfo->m_accelerationPitch = 0.0f;
+		m_locoInfo->m_accelerationPitchRate = 0.0f;
+		m_locoInfo->m_accelerationRoll = 0.0f;
+		m_locoInfo->m_accelerationRollRate = 0.0f;
+		m_locoInfo->m_airPitch = info.m_totalPitch;
+		m_locoInfo->m_airRoll = info.m_totalRoll;
+		m_locoInfo->m_airYaw = info.m_totalYaw;
+		return;
+	}
 
 	m_locoInfo->m_pitchRate += ((-PITCH_STIFFNESS * m_locoInfo->m_pitch) + (-PITCH_DAMPING * m_locoInfo->m_pitchRate));		// spring/damper
 	m_locoInfo->m_rollRate += ((-ROLL_STIFFNESS * m_locoInfo->m_roll) + (-ROLL_DAMPING * m_locoInfo->m_rollRate));		// spring/damper
@@ -3197,7 +3389,10 @@ static Bool computeHealthRegion( const Drawable *draw, IRegion2D& region )
 
 	// do this so health bar doesn't get too skinny or fat after scaling
 	//healthBoxHeight = max(3.0f, healthBoxHeight);
-	healthBoxHeight = 3.0f * uiScale;
+	// two thirds of the thickness it had: at full height a screen of bars drew the eye away from the
+	// units under them.  drawHealthBar still floors it at three pixels, a one pixel fill inside its
+	// outline, and gives the lost health a dark slot so a thin bar still reads.
+	healthBoxHeight = 2.0f * uiScale;
 
 	// figure out the final region for the health box
 	region.lo.x = screenCenter.x - healthBoxWidth * 0.45f;
@@ -3333,27 +3528,34 @@ DrawableIconInfo* Drawable::getIconInfo()
 //------------------------------------------------------------------------------------------------
 void Drawable::clearEmoticon()
 {
-	if (!hasIconInfo())
-		return;
+	// in order with setEmoticon's work
+	doClientWork( [this]() {
+		if (!hasIconInfo())
+			return;
 
-	killIcon(ICON_EMOTICON);
+		killIcon(ICON_EMOTICON);
+	}, WORK_AFTER_APPLIED );
 }
 
 //------------------------------------------------------------------------------------------------
 void Drawable::setEmoticon( const AsciiString &name, Int duration )
 {
 	//A duration of -1 means FOREVER
-	clearEmoticon();
-	Anim2DTemplate *animTemplate = TheAnim2DCollection->findTemplate( name );
-	if( animTemplate )
-	{
-		DEBUG_ASSERTCRASH( getIconInfo()->m_icon[ ICON_EMOTICON ] == NULL, ("Drawable::setEmoticon - Emoticon isn't empty, need to refuse to set or destroy the old one in favor of the new one\n") );
-		if( getIconInfo()->m_icon[ ICON_EMOTICON ] == NULL )
+	// an Anim2D in the client's collection, made after the tick; the frame it keeps till is the call's
+	const UnsignedInt keepTill = duration >= 0 ? TheGameLogic->getFrame() + duration : FOREVER;
+	doClientWork( [this, name, keepTill]() {
+		clearEmoticon();
+		Anim2DTemplate *animTemplate = TheAnim2DCollection->findTemplate( name );
+		if( animTemplate )
 		{
-			getIconInfo()->m_icon[ ICON_EMOTICON ] = newInstance(Anim2D)( animTemplate, TheAnim2DCollection );
-			getIconInfo()->m_keepTillFrame[ ICON_EMOTICON ] = duration >= 0 ? TheGameLogic->getFrame() + duration : FOREVER;
+			DEBUG_ASSERTCRASH( getIconInfo()->m_icon[ ICON_EMOTICON ] == NULL, ("Drawable::setEmoticon - Emoticon isn't empty, need to refuse to set or destroy the old one in favor of the new one\n") );
+			if( getIconInfo()->m_icon[ ICON_EMOTICON ] == NULL )
+			{
+				getIconInfo()->m_icon[ ICON_EMOTICON ] = newInstance(Anim2D)( animTemplate, TheAnim2DCollection );
+				getIconInfo()->m_keepTillFrame[ ICON_EMOTICON ] = keepTill;
+			}
 		}
-	}
+	}, WORK_AFTER_APPLIED );
 }
 
 //------------------------------------------------------------------------------------------------
@@ -4326,7 +4528,7 @@ void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 	}
 
 	// shrouded ground keeps its secrets: what was there when you last looked is not news
-	if( obj->getShroudedStatus( TheObserverCamera.getShroudPlayerIndex() ) != OBJECTSHROUD_CLEAR )
+	if( getShroudForDraw() != OBJECTSHROUD_CLEAR )
 		return;
 
 	// only a SupplyWarehouseDockUpdate answers getSupplyCashValue with cash, so this finds one
@@ -4822,9 +5024,16 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 																healthBoxOutlineSize, GameMakeColor( 255, 255, 255, 255 ) );
 
 		// draw a filled bar for the health
+		const Int healthFillWidth = (Int)((healthBoxWidth - 2) * healthRatio);
 		TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, healthBarRegion->lo.y + 1,
-															(healthBoxWidth - 2) * healthRatio, healthBoxHeight - 2,
+															healthFillWidth, healthBoxHeight - 2,
 															color );
+
+		// the health already lost is a near black slot rather than bare ground, so the length of the
+		// fill reads at a glance on a thin bar, and in owner colour on a map of the same colour
+		TheDisplay->drawFillRect( healthBarRegion->lo.x + 1 + healthFillWidth, healthBarRegion->lo.y + 1,
+															(healthBoxWidth - 2) - healthFillWidth, healthBoxHeight - 2,
+															GameMakeColor( 10, 10, 10, 190 ) );
 
 		// bars stack upwards from just above the health bar, each clearing the seconds written over
 		// the one below it
@@ -4987,27 +5196,18 @@ DrawModule** Drawable::getDrawModulesNonDirty()
 //-------------------------------------------------------------------------------------------------
 DrawModule** Drawable::getDrawModules() 
 { 
-	DrawModule** dm = (DrawModule**)getModuleList(MODULETYPE_DRAW); 
+	DrawModule** dm = (DrawModule**)getModuleList(MODULETYPE_DRAW);
 #ifdef DIRTY_CONDITION_FLAGS
+	// LOGIC-THREAD.md phase 3, step 3b: inside the overlap window the tick may be setting this drawable's
+	// conditions; W3DDisplay's takeReadsForRender flushed the client's at the sync point
+	if (LogicThread::isInsideWindow())
+		return dm;
 	if (m_isModelDirty)
 	{
-		if (s_modelLockCount > 0)
-		{
-			DEBUG_CRASH(("Should not need to update dirty stuff while locked-for-iteration. Ignoring."));
-			// this shouldn't happen, but if it does, just return the current (dirty) scenario.
-			// we must NOT update the condition state, as someone is relying on the current
-			// list of W3D render objects not being munged. (srj)
-		}
+		if (TheGameLogic->isInGameLogicUpdate())
+			deferModelConditionFlush();
 		else
-		{
-			for (DrawModule** dm2 = dm; *dm2; ++dm2)
-			{
-				ObjectDrawInterface* di = (*dm2)->getObjectDrawInterface();
-				if (di)
-					di->replaceModelConditionState( m_conditionState );
-			}
-			m_isModelDirty = false;
-		}
+			flushModelCondition( FALSE );
 	}
 #endif
 	return dm;
@@ -5016,31 +5216,262 @@ DrawModule** Drawable::getDrawModules()
 //-------------------------------------------------------------------------------------------------
 DrawModule const** Drawable::getDrawModules() const 
 { 
-	DrawModule const** dm = (DrawModule const**)getModuleList(MODULETYPE_DRAW); 
+	DrawModule const** dm = (DrawModule const**)getModuleList(MODULETYPE_DRAW);
 #ifdef DIRTY_CONDITION_FLAGS
+	if (LogicThread::isInsideWindow())
+		return dm;
 	if (m_isModelDirty)
 	{
-		if (s_modelLockCount > 0)
-		{
-			DEBUG_CRASH(("Should not need to update dirty stuff while locked-for-iteration. Ignoring."));
-			// this shouldn't happen, but if it does, just return the current (dirty) scenario.
-			// we must NOT update the condition state, as someone is relying on the current
-			// list of W3D render objects not being munged. (srj)
-		}
+		if (TheGameLogic->isInGameLogicUpdate())
+			deferModelConditionFlush();
 		else
-		{
-			// yeah, yeah, yeah... I know (srj)
-			for (DrawModule** dm2 = (DrawModule**)dm; *dm2; ++dm2)
-			{
-				ObjectDrawInterface* di = (*dm2)->getObjectDrawInterface();
-				if (di)
-					di->replaceModelConditionState( m_conditionState );
-			}
-			m_isModelDirty = false;
-		}
+			flushModelCondition( FALSE );
 	}
 #endif
 	return dm;
+}
+
+//-------------------------------------------------------------------------------------------------
+/* LOGIC-THREAD.md phase 2, M1.  Inside a logic tick a drawable takes its new transform and model
+	condition bits at once, so everything logic reads stays as it was, but the work they cause on the
+	draw modules (render object transforms, tread edges, model and render object swaps) waits for
+	LogicThread::runTick, which calls flushPendingClientWork right after the tick on the main thread.
+	It keys on isInGameLogicUpdate rather than on the thread, so -logicthread 0 and 1 run one path. */
+static std::vector<DrawableID> s_clientWorkQueue;
+
+//-------------------------------------------------------------------------------------------------
+void Drawable::queueClientWork() const
+{
+	if (m_clientWorkQueued)
+		return;
+	m_clientWorkQueued = TRUE;
+	s_clientWorkQueue.push_back( getID() );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The map load makes, places and throws away the batched trees and props in one go, and builds
+	its loading screen and every render object of the map on the main thread anyway (LogicThread's
+	tickNeedsMainThread), so it keeps the drawable lifetime it always had. */
+Bool Drawable::tickDefersLifetime()
+{
+	return TheGameLogic != NULL && TheGameLogic->isInGameLogicUpdate() && !TheGameLogic->isLoadingMap();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The second half of the constructor: what the draw modules make on the device, the asset manager
+	and the scene, and the construction percent's string.  The census counts it from the logic
+	thread, where only an on-demand flush of a shell inside the tick can run it. */
+void Drawable::buildRenderObjects()
+{
+	LOGIC_CENSUS( CENSUS_NEW_DRAWABLE );
+	const Bool madeInTick = m_renderPending;
+	m_renderPending = FALSE;
+
+	//Added By Sadullah Nader
+	//Fix for the building percent
+	m_constructDisplayString = TheDisplayStringManager->newDisplayString();
+	m_constructDisplayString->setFont(TheFontLibrary->getFont(TheInGameUI->getDrawableCaptionFontName(),
+																TheGlobalLanguageData->adjustFontSize(TheInGameUI->getDrawableCaptionPointSize()),
+																TheInGameUI->isDrawableCaptionBold() ));
+
+	for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		(*dm)->buildRenderObjects( madeInTick );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The state the drawable holds now, as the next step, unless the last state step already is it. */
+void Drawable::recordConditionStep() const
+{
+	for (size_t i = m_pendingSteps.size(); i-- > 0; )
+	{
+		if (m_pendingSteps[i].work)
+			continue;
+		if (m_pendingSteps[i].condition == m_conditionState)
+			return;
+		break;
+	}
+	PendingStep step;
+	step.condition = m_conditionState;
+	step.movesBones = FALSE;
+	m_pendingSteps.push_back( step );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Where a flush used to run inside the tick, the state it would have applied is kept, so the flush
+	after the tick walks the same states in the same order and W3DModelDraw picks the same transition
+	animations (a door, a deploy, an unpack set A then B in one tick) as an immediate flush did. */
+void Drawable::deferModelConditionFlush() const
+{
+	recordConditionStep();
+	queueClientWork();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The drawable whose step's work is running: a doClientWork it calls on itself in turn is already
+	in its place in the order and runs at once. */
+static const Drawable* s_clientWorkOwner = NULL;
+
+//-------------------------------------------------------------------------------------------------
+/** The model condition flush, and phase 2 M3's deferred client work in its place between the states.
+	The census counts it from the logic thread: on its own channel when a caller asked for it on
+	demand, under modelcondition when anything else made it run there. */
+void Drawable::flushModelCondition( Bool onDemand ) const
+{
+	// a work that sets a condition and then reaches getDrawModules: the state goes to the end of
+	// the walk below rather than ahead of the older steps still in it
+	if (s_clientWorkOwner == this)
+	{
+		recordConditionStep();
+		m_isModelDirty = false;
+		return;
+	}
+	// a shell another drawable's work reaches before its own turn in the flush: the render objects
+	// come first, as they did in the constructor
+	if (m_renderPending)
+		const_cast<Drawable*>(this)->buildRenderObjects();
+	LogicThread::census( onDemand ? LogicThread::CENSUS_ON_DEMAND_FLUSH : LogicThread::CENSUS_MODEL_CONDITION );
+	if (s_modelLockCount > 0)
+	{
+		DEBUG_CRASH(("Should not need to update dirty stuff while locked-for-iteration. Ignoring."));
+		// this shouldn't happen, but if it does, just return the current (dirty) scenario.
+		// we must NOT update the condition state, as someone is relying on the current
+		// list of W3D render objects not being munged. (srj)
+		return;
+	}
+	// the states a flush inside the tick would have applied first, then the one the tick ended on
+	if (m_isModelDirty)
+		recordConditionStep();
+	m_isModelDirty = false;
+	// a caller inside the tick that reads bones or barrels needs the states and the work that moves
+	// bones; everything else stays for after the tick, in its order, on the newest state
+	const Bool keepForLater = onDemand && TheGameLogic->isInGameLogicUpdate();
+	std::vector<PendingStep> kept;
+	// yeah, yeah, yeah... I know (srj)
+	while (!m_pendingSteps.empty())
+	{
+		std::vector<PendingStep> steps;
+		steps.swap( m_pendingSteps );
+		for (size_t i = 0; i < steps.size(); ++i)
+		{
+			if (steps[i].work && keepForLater && !steps[i].movesBones)
+			{
+				kept.push_back( steps[i] );
+				continue;
+			}
+			if (steps[i].work)
+			{
+				// client work on the logic thread: a bone read inside the tick needed it, which is the
+				// on-demand flush's count, or it ran there for no reader, which is a push
+				LogicThread::census( onDemand ? LogicThread::CENSUS_ON_DEMAND_FLUSH : LogicThread::CENSUS_DRAWABLE_PUSH );
+				LatchRestore<const Drawable*> inWork( s_clientWorkOwner, this );
+				steps[i].work();
+				continue;
+			}
+			for (DrawModule** dm = (DrawModule**)getModuleList(MODULETYPE_DRAW); *dm; ++dm)
+			{
+				ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+				if (di)
+					di->replaceModelConditionState( steps[i].condition );
+			}
+		}
+	}
+	m_pendingSteps.swap( kept );
+}
+
+//-------------------------------------------------------------------------------------------------
+void Drawable::doPendingClientWork( Bool onDemand )
+{
+	if (m_renderPending)
+		buildRenderObjects();
+	if (m_isModelDirty || !m_pendingSteps.empty())
+		flushModelCondition( onDemand );
+	flushPendingTransform( onDemand );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** LOGIC-THREAD.md phase 2, M3.  What logic tells a drawable keeps landing in the drawable's own
+	fields at once, so a read from logic sees it; what that does to the draw modules, the render
+	objects, the selection and the audio goes into the step list where the order puts it, and runs
+	after the tick.  The census counts a work that runs on the logic thread all the same. */
+void Drawable::doClientWork( const std::function<void()>& work, ClientWorkOrder order, Bool movesBones )
+{
+	if (s_clientWorkOwner == this)
+	{
+		work();
+		return;
+	}
+	if (TheGameLogic->isInGameLogicUpdate())
+	{
+		PendingStep step;
+		step.work = work;
+		step.movesBones = movesBones;
+		if (order == WORK_BEFORE_STATES)
+		{
+			size_t at = 0;
+			while (at < m_pendingSteps.size() && m_pendingSteps[at].work)
+				++at;
+			m_pendingSteps.insert( m_pendingSteps.begin() + at, step );
+		}
+		else
+		{
+			if (order == WORK_AFTER_FLUSH && m_isModelDirty)
+				recordConditionStep();
+			m_pendingSteps.push_back( step );
+		}
+		queueClientWork();
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_DRAWABLE_PUSH );
+	if (order == WORK_AFTER_FLUSH)
+		getDrawModules();
+	work();
+}
+
+//-------------------------------------------------------------------------------------------------
+void Drawable::flushPendingTransform( Bool onDemand )
+{
+	if (m_transformPending)
+	{
+		m_transformPending = FALSE;
+		LogicThread::census( onDemand ? LogicThread::CENSUS_ON_DEMAND_FLUSH : LogicThread::CENSUS_DRAWABLE );
+		// no draw module reads the old transform, so the one the tick ended on stands in for it
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+			(*dm)->reactToTransformChange( getTransformMatrix(), getPosition(), getOrientation() );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The draw modules with whatever the tick has deferred applied now.  For the callers inside a tick
+	that act on the render object as it stands (animation timing, weapon fire FX, live bones, ghost
+	snapshots): the census counts these on their own channel, the list phase 3 has to resolve. */
+DrawModule** Drawable::getDrawModulesFlushed()
+{
+	doPendingClientWork( TRUE );
+	return getDrawModulesNonDirty();
+}
+
+//-------------------------------------------------------------------------------------------------
+void Drawable::flushPendingClientWork()
+{
+	for (size_t i = 0; i < s_clientWorkQueue.size(); ++i)
+	{
+		Drawable* draw = TheGameClient->findDrawableByID( s_clientWorkQueue[i] );
+		if (draw == NULL)
+			continue;		// destroyed in the tick
+		draw->m_clientWorkQueued = FALSE;
+		draw->doPendingClientWork( FALSE );
+	}
+	s_clientWorkQueue.clear();
+	// LogicThread's flushAfterTick deletes the drawables the tick destroyed after this and the
+	// tick's effects, so a work above or an effect that holds one runs before it is deleted
+}
+
+//-------------------------------------------------------------------------------------------------
+void Drawable::markModelDirty()
+{
+	m_isModelDirty = true;
+	if (TheGameLogic->isInGameLogicUpdate())
+		queueClientWork();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5050,12 +5481,12 @@ void Drawable::clearAndSetModelConditionFlags(const ModelConditionFlags& clr, co
 	ModelConditionFlags oldFlags = m_conditionState;
 
 	m_conditionState.clearAndSet(clr, setf);
-	
+
 	if (m_conditionState == oldFlags)
 		return;
 
 #ifdef DIRTY_CONDITION_FLAGS
-	m_isModelDirty = true;
+	markModelDirty();
 #else
 	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 	{
@@ -5084,6 +5515,8 @@ void Drawable::replaceModelConditionFlags( const ModelConditionFlags &flags, Boo
 	// when forcing a replace we won't use dirty flags, we will immediately do an update now
 	if( forceReplace == TRUE )
 	{
+		if (!m_pendingSteps.empty())
+			flushModelCondition( FALSE );
 		for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 		{
 			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
@@ -5092,8 +5525,8 @@ void Drawable::replaceModelConditionFlags( const ModelConditionFlags &flags, Boo
 		}
 		m_isModelDirty = false;
 	}
-	else 
-		m_isModelDirty = true;
+	else
+		markModelDirty();
 #else
 	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 	{
@@ -5115,12 +5548,16 @@ void Drawable::setIndicatorColor(Color color)
 	m_indicatorColorAsked = color;
 	color = clientColor( color );
 
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->replaceIndicatorColor(color);
-	}
+	// in front of the tick's condition states, as since 1f213c44: replaceIndicatorColor rebuilds the
+	// current state and drops a transition the states have started
+	doClientWork( [this, color]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->replaceIndicatorColor(color);
+		}
+	}, WORK_BEFORE_STATES, TRUE );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5210,11 +5647,11 @@ void Drawable::friend_bindToObject( Object *obj ) ///< bind this drawable to an 
 		}
 	}
 
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		(*dm)->onDrawableBoundToObject();
-	}
-}					
+	doClientWork( [this]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+			(*dm)->onDrawableBoundToObject();
+	}, WORK_AFTER_FLUSH );
+}
 //-------------------------------------------------------------------------------------------------
 	// when our Object changes teams, it calls us to let us know, so
 	// we can update our model, etc., if necessary. NOTE, we don't guarantee
@@ -5252,6 +5689,16 @@ void Drawable::setPosition(const Coord3D *pos)
 //-------------------------------------------------------------------------------------------------
 void Drawable::reactToTransformChange(const Matrix3D* oldMtx, const Coord3D* oldPos, Real oldAngle)
 {
+	if (TheGameLogic->isInGameLogicUpdate())
+	{
+		m_transformPending = TRUE;
+		if (m_isModelDirty)
+			deferModelConditionFlush();		// the getDrawModules below flushed here
+		else
+			queueClientWork();
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_DRAWABLE );
 	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 	{
 		(*dm)->reactToTransformChange(oldMtx, oldPos, oldAngle);
@@ -5268,36 +5715,46 @@ void Drawable::reactToGeometryChange()
 } 
 
 //-------------------------------------------------------------------------------------------------
-Bool Drawable::handleWeaponFireFX(WeaponSlotType wslot, Int specificBarrelToUse, const FXList* fxl, Real weaponSpeed, Real recoilAmount, Real recoilAngle, const Coord3D* victimPos, Real damageRadius)
-{	  
-	if (recoilAmount != 0.0f)
-	{
-		// adjust recoil from absolute to relative.
-		if (getObject())
-			recoilAngle -= getObject()->getOrientation();
-		// flip direction 180 degrees.
-		recoilAngle += PI;
-		if (m_locoInfo)
-		{
-			m_locoInfo->m_accelerationPitchRate += recoilAmount * Cos(recoilAngle);
-			m_locoInfo->m_accelerationRollRate += recoilAmount * Sin(recoilAngle);
-		}
-	}
+void Drawable::handleWeaponFireFX(WeaponSlotType wslot, Int specificBarrelToUse, const FXList* fxl, Real weaponSpeed, Real recoilAmount, Real recoilAngle, const Coord3D* victimPos, Real damageRadius, Bool fxAtVictim)
+{
+	// adjust recoil from absolute to relative, against the way the object faced when it fired
+	if (recoilAmount != 0.0f && getObject())
+		recoilAngle -= getObject()->getOrientation();
+	const Coord3D victim = *victimPos;
 
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
+	// After the tick, in its place among the condition states the tick set: the barrels, muzzle flash
+	// and FX bone are the state the shot set, and the tick never flushes a render object to read them
+	// (LOGIC-THREAD.md phase 3).  A drawable made in this tick has its render objects by then.
+	doClientWork([=]()
 	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di && di->handleWeaponFireFX(wslot, specificBarrelToUse, fxl, weaponSpeed, victimPos, damageRadius))
-			return true;
-	}
-	return false;
-} 
+		if (recoilAmount != 0.0f && m_locoInfo)
+		{
+			// flip direction 180 degrees.
+			const Real angle = recoilAngle + PI;
+			m_locoInfo->m_accelerationPitchRate += recoilAmount * Cos(angle);
+			m_locoInfo->m_accelerationRollRate += recoilAmount * Sin(angle);
+		}
+
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di && di->handleWeaponFireFX(wslot, specificBarrelToUse, fxl, weaponSpeed, &victim, damageRadius))
+				return;
+		}
+
+		// bah. just play it at the drawable's pos.
+		if (fxl)
+			FXList::doFXPos(fxl, fxAtVictim ? &victim : getPosition(), getTransformMatrix(), weaponSpeed, &victim, damageRadius);
+	}, WORK_AFTER_FLUSH, TRUE );
+}
 
 //-------------------------------------------------------------------------------------------------
 Int Drawable::getBarrelCount(WeaponSlotType wslot) const
 {
 	for (const DrawModule** dm = getDrawModules(); *dm; ++dm)
 	{
+		if (skipsForLogic(*dm))
+			continue;
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
 		Int count = di ? di->getBarrelCount(wslot) : 0;
 		if (count != 0)
@@ -5386,35 +5843,40 @@ void Drawable::setCaptionText( const UnicodeString& captionText )
 		return;
 	}
 
-	UnicodeString sanitizedString = captionText;
-	TheLanguageFilter->filterLine(sanitizedString);
+	// a display string and a font: a beacon's text arrives in the tick's message dispatch
+	doClientWork( [this, captionText]() {
+		UnicodeString sanitizedString = captionText;
+		TheLanguageFilter->filterLine(sanitizedString);
 
-	if( m_captionDisplayString == NULL )
-	{
-		m_captionDisplayString = TheDisplayStringManager->newDisplayString();
-		GameFont *font = TheFontLibrary->getFont(
-			TheInGameUI->getDrawableCaptionFontName(),
-			TheGlobalLanguageData->adjustFontSize(TheInGameUI->getDrawableCaptionPointSize()),
-			TheInGameUI->isDrawableCaptionBold() );
-		m_captionDisplayString->setFont( font );
-		m_captionDisplayString->setText( sanitizedString );
-	}
-	else
-	{
-		// set the string if the value has changed
-		if( m_captionDisplayString->getText().compare(sanitizedString) != 0 )
+		if( m_captionDisplayString == NULL )
 		{
+			m_captionDisplayString = TheDisplayStringManager->newDisplayString();
+			GameFont *font = TheFontLibrary->getFont(
+				TheInGameUI->getDrawableCaptionFontName(),
+				TheGlobalLanguageData->adjustFontSize(TheInGameUI->getDrawableCaptionPointSize()),
+				TheInGameUI->isDrawableCaptionBold() );
+			m_captionDisplayString->setFont( font );
 			m_captionDisplayString->setText( sanitizedString );
 		}
-	}
+		else
+		{
+			// set the string if the value has changed
+			if( m_captionDisplayString->getText().compare(sanitizedString) != 0 )
+			{
+				m_captionDisplayString->setText( sanitizedString );
+			}
+		}
+	}, WORK_AFTER_APPLIED );
 }
 
 //-------------------------------------------------------------------------------------------------
 void Drawable::clearCaptionText( void )
 {
-	if (m_captionDisplayString)
-		TheDisplayStringManager->freeDisplayString(m_captionDisplayString);
-	m_captionDisplayString = NULL;
+	doClientWork( [this]() {
+		if (m_captionDisplayString)
+			TheDisplayStringManager->freeDisplayString(m_captionDisplayString);
+		m_captionDisplayString = NULL;
+	}, WORK_AFTER_APPLIED );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5524,6 +5986,9 @@ void Drawable::clearCustomSoundAmbient( bool restartSound )
 //-------------------------------------------------------------------------------------------------
 void Drawable::startAmbientSound(BodyDamageType dt, TimeOfDay tod, Bool onlyIfPermanent)
 {
+	// where the drawable stood at the call: one made in the tick is still at the origin here
+	const Coord3D callPos = *getPosition();
+	doClientWork( [this, dt, tod, onlyIfPermanent, callPos]() {
 	stopAmbientSound();
 
   Bool trySound = FALSE;
@@ -5589,7 +6054,7 @@ void Drawable::startAmbientSound(BodyDamageType dt, TimeOfDay tod, Bool onlyIfPe
 			  else
 			  {
 				  //Check if it's close enough to try playing (optimization)
-				  Coord3D vector = *getPosition();
+				  Coord3D vector = callPos;
 				  vector.sub( TheAudio->getListenerPosition() );
 				  Real distSqr = vector.lengthSqr();
 				  if( distSqr < sqr( info->m_maxDistance ) )
@@ -5608,6 +6073,7 @@ void Drawable::startAmbientSound(BodyDamageType dt, TimeOfDay tod, Bool onlyIfPe
 			m_ambientSound = NULL;
 		}
 	}
+	}, WORK_AFTER_APPLIED );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5634,10 +6100,12 @@ void Drawable::startAmbientSound( Bool onlyIfPermanent )
 //-------------------------------------------------------------------------------------------------
 void	Drawable::stopAmbientSound( void )
 {
+	doClientWork( [this]() {
 	if (m_ambientSound)
   {
 		TheAudio->removeAudioEvent(m_ambientSound->m_event.getPlayingHandle());
   }
+	}, WORK_AFTER_APPLIED );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5717,22 +6185,23 @@ void Drawable::removeFromList(Drawable **pListHead)
 void Drawable::updateHiddenStatus()
 {
 	Bool hidden = m_hidden || m_hiddenByStealth;
-	if( hidden )
-	{
-		if( isSelected() )
-			TheInGameUI->holdSelectionThroughTunnel( this );
-		TheInGameUI->deselectDrawable( this );
-	}
-	else
-		TheInGameUI->restoreSelectionAfterTunnel( this );
+	doClientWork( [this, hidden]() {
+		if( hidden )
+		{
+			if( isSelected() )
+				TheInGameUI->holdSelectionThroughTunnel( this );
+			TheInGameUI->deselectDrawable( this );
+		}
+		else
+			TheInGameUI->restoreSelectionAfterTunnel( this );
 
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->setHidden(hidden != 0);
-	}
-	
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->setHidden(hidden != 0);
+		}
+	}, WORK_AFTER_FLUSH );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5750,23 +6219,41 @@ void Drawable::setDrawableHidden( Bool hidden )
 //-------------------------------------------------------------------------------------------------
 void Drawable::updateDrawableClipStatus( UnsignedInt shotsRemaining, UnsignedInt maxShots, WeaponSlotType slot )
 {
-	for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->updateProjectileClipStatus(shotsRemaining, maxShots, slot);
-	}
+	doClientWork( [this, shotsRemaining, maxShots, slot]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->updateProjectileClipStatus(shotsRemaining, maxShots, slot);
+		}
+	}, WORK_AFTER_APPLIED );
 }
 
 //-------------------------------------------------------------------------------------------------
 void Drawable::updateDrawableSupplyStatus( Int maxSupply, Int currentSupply )
 {
+	// a model draw answers with the CARRYING condition, a condition like any other and so set here at
+	// once, after the flush the call made, rather than by the draw module when the work runs after the
+	// tick; the work (W3DSupplyDraw's bones) follows that flush and no new state, as it did in retail
+	Bool modelDraw = FALSE;
 	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
+		modelDraw = modelDraw || (*dm)->getObjectDrawInterface() != NULL;
+	if( modelDraw )
 	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->updateDrawModuleSupplyStatus( maxSupply, currentSupply );
+		if( currentSupply > 0 )
+			setModelConditionState( MODELCONDITION_CARRYING );
+		else
+			clearModelConditionState( MODELCONDITION_CARRYING );
 	}
+
+	doClientWork( [this, maxSupply, currentSupply]() {
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->updateDrawModuleSupplyStatus( maxSupply, currentSupply );
+		}
+	}, WORK_AFTER_APPLIED );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5785,16 +6272,19 @@ void Drawable::notifyDrawableDependencyCleared()
 //-------------------------------------------------------------------------------------------------
 void Drawable::setSelectable( Bool selectable )
 {
-	// unselct drawable if it is no longer selectable.
-	if( !selectable )
-		TheInGameUI->deselectDrawable( this );
+	// onto the render object the tick's model condition builds; setModelState takes it from the template
+	doClientWork( [this, selectable]() {
+		// unselct drawable if it is no longer selectable.
+		if( !selectable )
+			TheInGameUI->deselectDrawable( this );
 
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
-		if (di)
-			di->setSelectable(selectable);
-	}
+		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+		{
+			ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+			if (di)
+				di->setSelectable(selectable);
+		}
+	}, WORK_AFTER_FLUSH );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5873,7 +6363,7 @@ void Drawable::xferDrawableModules( Xfer *xfer )
 	//
 #ifdef DIRTY_CONDITION_FLAGS
 	if( xfer->getXferMode() == XFER_SAVE )
-		getDrawModules();  // will re-evaluate modules that are dirty and update them
+		getDrawModulesFlushed();  // will re-evaluate modules that are dirty and update them
 #endif
 
 	// xfer number of module types
@@ -6526,6 +7016,9 @@ void Drawable::loadPostProcess( void )
 #ifdef DIRTY_CONDITION_FLAGS
 /*static*/ void Drawable::friend_lockDirtyStuffForIteration()
 {
+	// the walk ran at the sync point, and the tick reads s_modelLockCount beside the render
+	if (LogicThread::isInsideWindow())
+		return;
 	if (s_modelLockCount == 0)
 	{
 		if (TheGameClient)	// WB has no GameClient!
@@ -6546,6 +7039,8 @@ void Drawable::loadPostProcess( void )
 #ifdef DIRTY_CONDITION_FLAGS
 /*static*/ void Drawable::friend_unlockDirtyStuffForIteration()
 {
+	if (LogicThread::isInsideWindow())
+		return;
 	if (s_modelLockCount > 0)
 		--s_modelLockCount;
 }

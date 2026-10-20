@@ -120,6 +120,7 @@ public:
 
 	Int getMinimumCushion();
 	void addNetworkStall(time_t ms) { m_frameMetrics.addNetworkStall(ms); }
+	Int getMatchFps() const { return m_frameMetrics.getMatchFps(); }	///< the game's speed, from parseUserList
 
 	void flushConnections();
 

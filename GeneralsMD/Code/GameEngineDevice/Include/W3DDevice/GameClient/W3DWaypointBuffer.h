@@ -79,11 +79,25 @@ public:
 	W3DWaypointBuffer(void);
 	~W3DWaypointBuffer(void);
 
-	void drawWaypoints(RenderInfoClass &rinfo);
+	void takeReadsForRender(void);	///< the order hints, rally lines and pucks, read at the render's sync point
+	void drawWaypoints(RenderInfoClass &rinfo);	///< draws what takeReadsForRender took
 	void freeWaypointBuffers();
 
 
 private:
+	enum DrawKind { DRAW_PUCK, DRAW_LINE, DRAW_OUTPOST_LINE };
+	struct WaypointDraw
+	{
+		DrawKind kind;
+		Bool orderHint;		///< not in the water's mirror pass
+		Int first;
+		Int count;
+	};
+	void record( DrawKind kind, Bool orderHint, Int count, const Vector3 *points );
+
+	std::vector<WaypointDraw> m_draws;		///< this picture's pucks and lines, in the order they render
+	std::vector<Vector3> m_drawPoints;
+
   void setDefaultLineStyle();
 	void queueLine( Int numPoints, Vector3 *points );				///< hand the points to a pooled line object (not rendered yet)
 	void renderQueuedLines( RenderInfoClass &rinfo );			///< render every queued line; all stay deferred on the static sort list together

@@ -40,6 +40,10 @@ public:
 
 	void init();
 	void reset();
+	/// The match's logic frames a second, turbo mode included: the history starts full of it and no
+	/// sample reads above it.  Starts again as init() does.
+	void setMatchFps(Int fps);
+	Int getMatchFps() const { return m_matchFps; }
 
 	void doPerFrameMetrics(UnsignedInt frame);
 	void processLatencyResponse(UnsignedInt frame);
@@ -51,6 +55,8 @@ public:
 	Int getMinimumCushion();
 
 protected:
+	Int m_matchFps;																						///< see setMatchFps
+
 	// These are used for keeping track of parameters to the run ahead equation.
 	// frames per second history variables.
 	Real *m_fpsList;								///< A record of how many game logic frames per second there were for the last 60 seconds.

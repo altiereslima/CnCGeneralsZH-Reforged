@@ -189,9 +189,9 @@ static const Int K_SCRIPT_LIST_DATA_VERSION_1 = 1;
 #define RMG_TOWN_JITTER			2.0f	///< cells a building sits off its own frontage line
 #define RMG_TOWN_DRY_MARGIN		4.0f	///< cells a building or a street keeps off the water
 #define RMG_TOWN_REROLLS		6		///< plans a map with no town yet tries for its last one
-// A street is laid in dry runs: what crosses water is dropped rather than driven into the lake.
-#define RMG_ROAD_STEP			2.0f	///< cells between two wet-or-dry samples along a segment
-#define RMG_ROAD_MIN_RUN		8.0f	///< shorter than this and the run is not worth a road
+// A street is laid a block at a time, and a block that reaches water stops at the bank.
+#define RMG_ROAD_STEP			2.0f	///< cells between two wet-or-dry samples along a block
+#define RMG_ROAD_MIN_RUN		12.0f	///< cells; a street from a crossing to the bank shorter than this is a stub
 
 // Bunkers go on the ramps, which is the ground worth holding.
 #define RMG_BUNKER_CLEARANCE	10.0f
@@ -697,6 +697,7 @@ struct RMGObject
 	list here is written, never read back through MapObject. */
 #define RMG_FLAG_ROAD_POINT1	0x00000002
 #define RMG_FLAG_ROAD_POINT2	0x00000004
+#define RMG_FLAG_ROAD_CORNER_TIGHT	0x00000040	///< on POINT1: a corner turns on half a road width, a town corner
 
 /// A spot flat and dry enough for a base, found before any seat is chosen.
 struct RMGStartCandidate
@@ -954,7 +955,7 @@ private:
 	void plantGroves( const char *const *theTreeNames, Int *propID, Int *treeBudget );
 	void flattenPad( Real cellX, Real cellY, Real radius, Real blend );
 	void addRoad( Real fromX, Real fromY, Real toX, Real toY );
-	void addRoadClipped( Real fromX, Real fromY, Real toX, Real toY );
+	void addRoadIfDry( Real fromX, Real fromY, Real toX, Real toY );
 	Bool dryAt( Real cellX, Real cellY, Real margin ) const;
 
 	Real cellSpanWorld( Int x, Int y ) const;
@@ -4908,7 +4909,7 @@ void RMGLayout::addRoad( Real fromX, Real fromY, Real toX, Real toY )
 
 	point.m_worldX = fromX * MAP_XY_FACTOR;
 	point.m_worldY = fromY * MAP_XY_FACTOR;
-	point.m_flags = RMG_FLAG_ROAD_POINT1;
+	point.m_flags = RMG_FLAG_ROAD_POINT1 | RMG_FLAG_ROAD_CORNER_TIGHT;
 	m_objects.push_back( point );
 
 	point.m_worldX = toX * MAP_XY_FACTOR;
@@ -4926,45 +4927,43 @@ Bool RMGLayout::dryAt( Real cellX, Real cellY, Real margin ) const
 	return distanceToShore >= margin;
 }
 
-/** The dry parts of a street. A town beside a lake has streets that run at the water, and a road
-	object pair does not care whether the ground under it is a lake bed - it paves it, and what the
-	player sees is tarmac going into the water. This walks the line, keeps the runs that stay on dry
-	ground and drops the rest, so the street stops at the bank. */
-void RMGLayout::addRoadClipped( Real fromX, Real fromY, Real toX, Real toY )
+/** One block of street, between two crossings. A road object pair does not care whether the ground
+	under it is a lake bed - it paves it, and what the player sees is tarmac going into the water. So
+	a block that reaches the water keeps only the dry run from each crossing it starts at, and the run
+	stops at the bank. Whatever dry ground lies between two wet stretches is left bare: it touches no
+	crossing, and a few cells of street on their own are what the old clip left lying about. */
+void RMGLayout::addRoadIfDry( Real fromX, Real fromY, Real toX, Real toY )
 {
 	Real spanX = toX - fromX;
 	Real spanY = toY - fromY;
 	Real length = sqrtf( spanX * spanX + spanY * spanY );
-	if( length < RMG_ROAD_MIN_RUN )
-		return;
-
 	Int steps = (Int)(length / RMG_ROAD_STEP) + 1;
-	Real runStart = -1.0f;
+	Int firstWet = -1, lastWet = -1;
 
 	for( Int step = 0; step <= steps; step++ )
 	{
-		Real along = (Real)step * length / (Real)steps;
-		Real x = fromX + spanX * (along / length);
-		Real y = fromY + spanY * (along / length);
-		Bool dry = (step < steps) && dryAt( x, y, RMG_TOWN_DRY_MARGIN );
-
-		if( dry && runStart < 0.0f )
-		{
-			runStart = along;
+		Real along = (Real)step / (Real)steps;
+		if( dryAt( fromX + spanX * along, fromY + spanY * along, RMG_TOWN_DRY_MARGIN ) )
 			continue;
-		}
-
-		if( dry || runStart < 0.0f )
-			continue;
-
-		if( along - runStart >= RMG_ROAD_MIN_RUN )
-		{
-			addRoad( fromX + spanX * (runStart / length), fromY + spanY * (runStart / length),
-							 fromX + spanX * (along / length), fromY + spanY * (along / length) );
-		}
-
-		runStart = -1.0f;
+		if( firstWet < 0 )
+			firstWet = step;
+		lastWet = step;
 	}
+
+	if( firstWet < 0 )
+	{
+		addRoad( fromX, fromY, toX, toY );
+		return;
+	}
+
+	// the crossing ends keep their exact numbers, which is what joins them to the other streets
+	Real dryFrom = (Real)(firstWet - 1) / (Real)steps;
+	if( firstWet > 0 && dryFrom * length >= RMG_ROAD_MIN_RUN )
+		addRoad( fromX, fromY, fromX + spanX * dryFrom, fromY + spanY * dryFrom );
+
+	Real dryTo = (Real)(lastWet + 1) / (Real)steps;
+	if( lastWet < steps && ( 1.0f - dryTo ) * length >= RMG_ROAD_MIN_RUN )
+		addRoad( fromX + spanX * dryTo, fromY + spanY * dryTo, toX, toY );
 }
 
 /** The flattest buildable spot in a ring around a point, whatever else is on the map. This is how
@@ -5750,25 +5749,35 @@ void RMGLayout::placeTowns( void )
 
 		gradeTown( site.m_cellX, site.m_cellY, plan, acrossStart, acrossEnd, downStart, downEnd );
 
+		/* The streets are a lattice of blocks between crossings, and every crossing is one point worked
+			out once. W3DRoadBuffer joins segments only where their ends are the same numbers: four ends
+			on a point make a crossroads, three a tee, two at a right angle a corner it rounds off. A
+			street laid end to end across the others, as they used to be, is drawn as strips of tarmac
+			laid over each other with no junction at all. The outermost streets end at the corners, so
+			the town is ringed by a street with its four corners turned. */
 		Int line;
-		Real fromX, fromY, toX, toY;
-
-		for( line = 0; line < plan.m_streetsAcross; line++ )
+		Int across, down;
+		Real crossingX[RMG_TOWN_MAX_STREETS][RMG_TOWN_MAX_STREETS];
+		Real crossingY[RMG_TOWN_MAX_STREETS][RMG_TOWN_MAX_STREETS];
+		for( across = 0; across < plan.m_streetsAcross; across++ )
 		{
-			townToWorld( site.m_cellX, site.m_cellY, plan, plan.m_acrossAt[line], downStart,
-									 &fromX, &fromY );
-			townToWorld( site.m_cellX, site.m_cellY, plan, plan.m_acrossAt[line], downEnd,
-									 &toX, &toY );
-			addRoadClipped( fromX, fromY, toX, toY );
+			for( down = 0; down < plan.m_streetsDown; down++ )
+				townToWorld( site.m_cellX, site.m_cellY, plan, plan.m_acrossAt[across], plan.m_downAt[down],
+										 &crossingX[across][down], &crossingY[across][down] );
 		}
 
-		for( line = 0; line < plan.m_streetsDown; line++ )
+		for( across = 0; across < plan.m_streetsAcross; across++ )
 		{
-			townToWorld( site.m_cellX, site.m_cellY, plan, acrossStart, plan.m_downAt[line],
-									 &fromX, &fromY );
-			townToWorld( site.m_cellX, site.m_cellY, plan, acrossEnd, plan.m_downAt[line],
-									 &toX, &toY );
-			addRoadClipped( fromX, fromY, toX, toY );
+			for( down = 0; down + 1 < plan.m_streetsDown; down++ )
+				addRoadIfDry( crossingX[across][down], crossingY[across][down],
+											crossingX[across][down + 1], crossingY[across][down + 1] );
+		}
+
+		for( down = 0; down < plan.m_streetsDown; down++ )
+		{
+			for( across = 0; across + 1 < plan.m_streetsAcross; across++ )
+				addRoadIfDry( crossingX[across][down], crossingY[across][down],
+											crossingX[across + 1][down], crossingY[across + 1][down] );
 		}
 
 		/* Buildings stand back from a street on both sides, facing it, down its whole length. The

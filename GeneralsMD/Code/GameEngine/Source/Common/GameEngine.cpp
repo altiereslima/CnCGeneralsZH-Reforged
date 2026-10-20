@@ -42,6 +42,7 @@
 #include "Common/ActionManager.h"
 #include "Common/AudioAffect.h"
 #include "Common/BuildAssistant.h"
+#include "Common/CommandStore.h"
 #include "Common/CRCDebug.h"
 #include "Common/crc.h"
 #include "Common/Radar.h"
@@ -64,6 +65,7 @@
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
 #include "Common/JobSystem.h"
+#include "Common/LogicThread.h"
 #include "GameLogic/TerrainLogic.h"		// -autocamera needs the map extent and the ground height
 #include "Common/RandomValue.h"
 #include "Common/NameKeyGenerator.h"
@@ -542,6 +544,7 @@ GameEngine::~GameEngine()
 		 there is nothing to drain here - but a worker parked on the semaphore still has to be told
 		 to leave, or the process waits on it at exit. */
 	JobSystem::shutdown();
+	LogicThread::shutdown();
 
 #ifdef PERF_TIMERS
 	PerfGather::termPerfDump();
@@ -616,7 +619,11 @@ static void startPendingSaveGame( void )
 		return;
 	}
 
-	TheGameLogic->prepareNewGame( GAME_SINGLE_PLAYER, DIFFICULTY_NORMAL, 0 );
+	// A mission save starts its map afresh with a new game message of its own.  Prepared here as
+	// well, loadGame clears that prepared game first, and clearing a game in a run started from the
+	// command line quits it.
+	if (gameInfo.saveGameInfo.saveFileType != SAVE_FILE_TYPE_MISSION)
+		TheGameLogic->prepareNewGame( GAME_SINGLE_PLAYER, DIFFICULTY_NORMAL, 0 );
 
 	if (TheGameState->loadGame( gameInfo ) != SC_OK)
 	{
@@ -738,6 +745,7 @@ static void startAutoSkirmish( Int numPlayersWanted )
 			if ((i & 1) && TheGlobalData->m_autoSkirmishAIStateOdd != 0)
 				state = TheGlobalData->m_autoSkirmishAIStateOdd;
 			slot.setState( (SlotState)state );
+			slot.setAIPersonality( TheGlobalData->autoSkirmishPersona( i ) );
 			if (TheGlobalData->m_autoSkirmishSeatName[ i ].isNotEmpty())
 			{
 				UnicodeString seatName;
@@ -773,6 +781,7 @@ static void startAutoSkirmish( Int numPlayersWanted )
 	TheSkirmishGameInfo->setTechRespawn( TheGlobalData->m_techRespawn );
 	TheSkirmishGameInfo->setSupplyPileLimit( TheGlobalData->m_supplyPileLimit );
 	TheSkirmishGameInfo->setSuperweaponRestriction( (UnsignedShort)TheGlobalData->m_superweapons );
+	TheSkirmishGameInfo->setTurbo( TheGlobalData->m_turboMatch );
 	if (TheGlobalData->m_startingCash > 0)
 	{
 		Money cash;
@@ -790,15 +799,9 @@ static void startAutoSkirmish( Int numPlayersWanted )
 	TheWritableGlobalData->m_shellMapOn = FALSE;
 	TheWritableGlobalData->m_playIntro = FALSE;
 
-	/* The menu passes the game speed slider's position here, so pass the same thing and clamp it
-		 the same way reallyDoStart() does: MSG_NEW_GAME rejects anything outside 1..1000 by falling
-		 back to m_framesPerSecondLimit *unclamped*, which is how a stray -fps would still get through.
-		 -noFPSLimit deliberately does not appear here - it uncaps the renderer, not the simulation. */
-	Int maxFPS = TheGlobalData->m_framesPerSecondLimit;
-	if (maxFPS < ConvertRetailFrames( 15 ))
-		maxFPS = DEFAULT_MAX_FPS;
-	if (maxFPS > 1000)
-		maxFPS = 1000;
+	/* The speed reallyDoStart() passes for the lobby's turbo box, -fps included.  -noFPSLimit
+		 deliberately does not appear here - it uncaps the renderer, not the simulation. */
+	const Int maxFPS = GameEngine_matchFramesPerSecond( TheSkirmishGameInfo->getTurbo() );
 
 	InitRandom( seed );
 	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
@@ -941,6 +944,9 @@ void GameEngine::init( int argc, char *argv[] )
 		/* THREADING-ROADMAP.md 3.1.  Started before anything can fork and joined in ~GameEngine.
 			 Costs one thread per spare core sitting on a semaphore until something uses it. */
 		JobSystem::init();
+
+		// LOGIC-THREAD.md phase 1: -logicthread 1 starts the thread the ticks run on.
+		LogicThread::init();
 
 		TheSubsystemList = MSGNEW("GameEngineSubsystem") SubsystemInterfaceList;
 		
@@ -1230,6 +1236,10 @@ void GameEngine::init( int argc, char *argv[] )
 		initFactionSubsystem(TheUpgradeCenter,"TheUpgradeCenter", MSGNEW("GameEngineSubsystem") UpgradeCenter, &xferCRC, "Data\\INI\\Default\\Upgrade.ini", "Data\\INI\\Upgrade.ini");
 		// An upgrade parsed again is edited in place, so this file names only what changes
 		ini.load( AsciiString( "Data\\INI\\UpgradeReforged.ini" ), INI_LOAD_MULTIFILE, &xferCRC );
+		/* Command buttons and sets, which the AI, the scripts and the build checks read: logic's, so
+			 before the client and the logic (LOGIC-THREAD.md phase 2, M2).  A button names objects,
+			 upgrades and special powers, so after them; the INI CRC takes the files at the end. */
+		initSubsystem(TheCommandStore,"TheCommandStore", MSGNEW("GameEngineSubsystem") CommandStore, NULL);
 		initSubsystem(TheGameClient,"TheGameClient", createGameClient(), NULL);
 
 
@@ -1302,7 +1312,7 @@ void GameEngine::init( int argc, char *argv[] )
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 
 
-		// the control bar parses these without the checksum, and the AI builds and hunts from them
+		// TheCommandStore parses these without the checksum, and the AI builds and hunts from them
 		checksumFileContents( xferCRC, "Data\\INI\\Default\\CommandButton.ini" );
 		checksumFactionFile( xferCRC, "Data\\INI\\CommandButton.ini" );
 		checksumFactionFile( xferCRC, "Data\\INI\\CommandSet.ini" );
@@ -1551,7 +1561,11 @@ void GameEngine::reset( void )
 	if (TheGameLogic->isInMultiplayerGame())
 		deleteNetwork = true;
 
+	// the clear-game tick resets from inside the tick; its sounds and effects have no game to play in
+	LogicThread::discardEffects();
 	TheSubsystemList->resetAll();
+	// and what the objects' teardown asked for, GameLogic resetting last
+	LogicThread::discardEffects();
 
 	if (deleteNetwork)
 	{
@@ -1594,6 +1608,19 @@ Int GameEngine_logicCatchupMaxFrames( Int logicFps )
 	return frames < 1 ? 1 : frames;
 }
 
+/* MSG_NEW_GAME refuses anything outside 1..1000 and falls back to m_framesPerSecondLimit
+	 unclamped, so the answer stays inside that.  A FramesPerSecondLimit below retail's 15, or none at
+	 all, is normal speed. */
+Int GameEngine_matchFramesPerSecond( Bool turbo )
+{
+	Int fps = TheGlobalData->m_framesPerSecondLimit;
+	if (fps < ConvertRetailFrames( 15 ))
+		fps = LOGICFRAMES_PER_SECOND;
+	if (turbo)
+		fps *= 2;
+	return fps > 1000 ? 1000 : fps;
+}
+
 Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real elapsedMsInLoop )
 {
 	if (ticksSoFar >= maxTicks)
@@ -1623,6 +1650,14 @@ static Bool isVideoFrame( Int frame )
 	if (TheGlobalData->m_videoEndFrame <= 0 || TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
 		return FALSE;
 	return frame >= TheGlobalData->m_videoStartFrame && frame <= TheGlobalData->m_videoEndFrame;
+}
+
+/* A pass that draws a recorded picture or runs the tick into the first one: one logic frame a pass
+	 (fast mode in planLogicPass), and never a tick beside the draw (planOverlappedTick). */
+static Bool isVideoPass( void )
+{
+	const Int frame = (Int)TheGameLogic->getFrame();
+	return isVideoFrame( frame ) || isVideoFrame( frame + 1 );
 }
 
 /* -recordfps's pictures of a recorded logic frame.  A network game's clock is the network's, one logic
@@ -1868,6 +1903,46 @@ static FrameTimeHistogram theFrameTimes;
 static FrameTimeHistogram theLogicTimes;
 static Bool theFrameTimesStarted = FALSE;
 
+/* The pass split the way a logic thread would split it (docs/plans/LOGIC-THREAD.md, phase 0).
+	 A pass that ran a tick and one that did not are two different frames, and the mixed tail hides
+	 which of them is long.  Inside a pass, "render" is what a logic thread could run beside: the scene
+	 render and present, W3DDisplay::draw from after the particle update to after End_Render.  "Sync"
+	 is the rest of the pass minus the tick: input, the drawable walk, the view update, the particles,
+	 audio, radar, UI.  "Overlapped" is what the pass would cost with the tick beside the render,
+	 sync + max(render, tick), and for a pass without a tick the pass itself. */
+Real TheOverlapWindowMS = 0.0f;			///< W3DDisplay::draw, after the particle update to after End_Render
+static Real thePassLogicMS = 0.0f;
+static Int thePassLogicTicks = 0;
+static FrameTimeHistogram theTickPass, theTickSync, theTickRender, theTickLogic;
+static FrameTimeHistogram theRenderPass, theRenderSync, theRenderRender, theOverlapped;
+#ifdef DEBUG_LOGGING
+/* The sun's depth pass a picture (W3DVolumetricShadowManager::renderShadowMap), for HEADLESS SHADOWMAP:
+	 the scene timer holds it and cannot say how much of it, and a crowd's tail is in it. */
+static FrameTimeHistogram theShadowPassTimes;
+static double theShadowCasterSum = 0.0;
+static double theShadowDrawSum = 0.0;
+static Real theShadowNotedMS = 0.0f;			///< what this pass's earlier pictures noted, zeroed with the pass's counters
+static Int theShadowNotedCasters = 0;
+static UnsignedInt theShadowNotedDraws = 0;
+#endif
+static Int64 thePassStart = 0;			///< execute's pass start, moved on by every extra picture
+static Int thePassPictures = 0;			///< the extra pictures this pass presented before its last
+
+void GameEngine_noteFrameTime( Real ms, UnsignedInt logicFrame );
+
+void GameEngine_noteExtraPicture( void )
+{
+	Int64 now;
+	now = Clock_Ticks();
+	// the pass's first picture is the one its tick ran beside; a later one ran beside the rest of it
+	thePassLogicMS = 0.0f;
+	thePassLogicTicks = thePassPictures == 0 ? 1 : 0;
+	GameEngine_noteFrameTime( engineElapsedMS( thePassStart, now ), TheGameClient->getFrame() );
+	++thePassPictures;
+	thePassStart = now;
+	TheOverlapWindowMS = 0.0f;
+}
+
 void GameEngine_noteFrameTime( Real ms, UnsignedInt logicFrame )
 {
 	/* The histogram deliberately ignores the opening second of a match, and the opening second of a
@@ -1902,6 +1977,33 @@ void GameEngine_noteFrameTime( Real ms, UnsignedInt logicFrame )
 	if( !theFrameTimesStarted )
 		return;
 	theFrameTimes.note( ms, logicFrame );
+#ifdef DEBUG_LOGGING
+	// the sun's depth pass of this picture alone: an extra picture noted its share of the pass already
+	theShadowPassTimes.note( TheShadowMapMS - theShadowNotedMS, logicFrame );
+	theShadowCasterSum += TheShadowMapCasters - theShadowNotedCasters;
+	theShadowDrawSum += TheShadowMapDraws - theShadowNotedDraws;
+	theShadowNotedMS = TheShadowMapMS;
+	theShadowNotedCasters = TheShadowMapCasters;
+	theShadowNotedDraws = TheShadowMapDraws;
+#endif
+
+	const Real render = TheOverlapWindowMS;
+	const Real sync = ms - thePassLogicMS - render;
+	if( thePassLogicTicks > 0 )
+	{
+		theTickPass.note( ms, logicFrame );
+		theTickSync.note( sync, logicFrame );
+		theTickRender.note( render, logicFrame );
+		theTickLogic.note( thePassLogicMS, logicFrame );
+		theOverlapped.note( sync + ( render > thePassLogicMS ? render : thePassLogicMS ), logicFrame );
+	}
+	else
+	{
+		theRenderPass.note( ms, logicFrame );
+		theRenderSync.note( sync, logicFrame );
+		theRenderRender.note( render, logicFrame );
+		theOverlapped.note( ms, logicFrame );
+	}
 }
 
 /* The world's object count once a logic tick, debris and dying objects included, so a data change
@@ -1935,6 +2037,8 @@ static void startFrameTimeStats( void )
 {
 	theFrameTimes.reset();
 	theLogicTimes.reset();
+	theTickPass.reset(); theTickSync.reset(); theTickRender.reset(); theTickLogic.reset();
+	theRenderPass.reset(); theRenderSync.reset(); theRenderRender.reset(); theOverlapped.reset();
 	theObjectPeak = 0;
 	theObjectPeakFrame = 0;
 	theObjectSum = 0.0;
@@ -1942,6 +2046,8 @@ static void startFrameTimeStats( void )
 	theFrameTimesStarted = TRUE;
 #ifdef DEBUG_LOGGING
 	memset( &theParticleCost, 0, sizeof(theParticleCost) );
+	theShadowPassTimes.reset();
+	theShadowCasterSum = theShadowDrawSum = 0.0;
 #endif
 }
 
@@ -1952,13 +2058,27 @@ static void reportFrameTimeStats( void )
 
 	const Real over16 = 100.0f * theFrameTimes.countOver( 16.7f ) / theFrameTimes.count();
 	const Real over33 = 100.0f * theFrameTimes.countOver( 33.3f ) / theFrameTimes.count();
-	DEBUG_LOG(("HEADLESS FRAMETIME: %d frames | mean %.2f p50 %.2f p95 %.2f p99 %.2f p99.9 %.2f worst %.2f ms (frame %d) | over 16.7ms %d (%.2f%%) | over 33.3ms %d (%.2f%%)\n",
+	// over 25 ms is a picture that missed a refresh on a vsynced 60 Hz screen, where every frame is a
+	// multiple of 16.7 and the 16.7 count catches the on-time ones that ran a fraction long
+	DEBUG_LOG(("HEADLESS FRAMETIME: %d frames | mean %.2f p50 %.2f p95 %.2f p99 %.2f p99.9 %.2f worst %.2f ms (frame %d) | over 16.7ms %d (%.2f%%) | over 33.3ms %d (%.2f%%) | over 25.0ms %d\n",
 						 theFrameTimes.count(), theFrameTimes.meanMS(),
 						 theFrameTimes.percentileMS( 0.50f ), theFrameTimes.percentileMS( 0.95f ),
 						 theFrameTimes.percentileMS( 0.99f ), theFrameTimes.percentileMS( 0.999f ),
 						 theFrameTimes.worstMS(), theFrameTimes.worstAtFrame(),
 						 theFrameTimes.countOver( 16.7f ), over16,
-						 theFrameTimes.countOver( 33.3f ), over33));
+						 theFrameTimes.countOver( 33.3f ), over33,
+						 theFrameTimes.countOver( 25.0f )));
+	// the same passes split for the logic thread plan: mean/p50/p99 of each part
+	#define PASS_SPLIT(h) (h).meanMS(), (h).percentileMS( 0.50f ), (h).percentileMS( 0.99f )
+	DEBUG_LOG(("HEADLESS PASSES TICK: %d | pass %.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f | render %.2f/%.2f/%.2f | logic %.2f/%.2f/%.2f ms mean/p50/p99\n",
+						 theTickPass.count(), PASS_SPLIT( theTickPass ), PASS_SPLIT( theTickSync ),
+						 PASS_SPLIT( theTickRender ), PASS_SPLIT( theTickLogic )));
+	DEBUG_LOG(("HEADLESS PASSES NOTICK: %d | pass %.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f | render %.2f/%.2f/%.2f ms mean/p50/p99\n",
+						 theRenderPass.count(), PASS_SPLIT( theRenderPass ), PASS_SPLIT( theRenderSync ),
+						 PASS_SPLIT( theRenderRender )));
+	DEBUG_LOG(("HEADLESS PASSES OVERLAPPED: %d | %.2f/%.2f/%.2f p99.9 %.2f ms mean/p50/p99, every pass with the tick beside the render\n",
+						 theOverlapped.count(), PASS_SPLIT( theOverlapped ), theOverlapped.percentileMS( 0.999f )));
+	#undef PASS_SPLIT
 	if (TheGlobalData)
 	{
 		const char *lodName = "off";
@@ -1983,6 +2103,16 @@ static void reportFrameTimeStats( void )
 	}
 
 #ifdef DEBUG_LOGGING
+	if( theShadowPassTimes.count() > 0 )
+	{
+		DEBUG_LOG(("HEADLESS SHADOWMAP: %d pictures | mean %.2f p50 %.2f p95 %.2f p99 %.2f worst %.2f ms (frame %d) | %.0f casters, %.0f draws a picture\n",
+							 theShadowPassTimes.count(), theShadowPassTimes.meanMS(),
+							 theShadowPassTimes.percentileMS( 0.50f ), theShadowPassTimes.percentileMS( 0.95f ),
+							 theShadowPassTimes.percentileMS( 0.99f ), theShadowPassTimes.worstMS(),
+							 theShadowPassTimes.worstAtFrame(),
+							 theShadowCasterSum / theShadowPassTimes.count(),
+							 theShadowDrawSum / theShadowPassTimes.count()));
+	}
 	if( theParticleCost.m_passes > 0 )
 	{
 		const double passes = (double)theParticleCost.m_passes;
@@ -2530,7 +2660,8 @@ static void updateHeadlessRun( void )
 	/* The frame times start a second in, not at frame 0.  The first counted pass carries the tail
 		 of the map load and came out at two full seconds, which then *is* the worst frame of the
 		 match and buries the 60ms hitch that somebody could actually do something about. */
-	if( !theFrameTimesStarted && frame > runStartFrame + LOGICFRAMES_PER_SECOND )
+	if( !theFrameTimesStarted && frame > runStartFrame + LOGICFRAMES_PER_SECOND
+			&& frame > TheGlobalData->m_noDraw + LOGICFRAMES_PER_SECOND )		// -jumpToFrame counts from its first drawn second
 		startFrameTimeStats();
 
 	/* The biggest army each side ever fielded, sampled once a second.  The end-of-match counts are
@@ -2666,6 +2797,9 @@ static void updateHeadlessRun( void )
 	DEBUG_LOG(("HEADLESS JOBS: %d worker threads, %d allocations from a job\n",
 						 JobSystem::workerCount(), JobSystem::workerAllocationCount()));
 
+	// LOGIC-THREAD.md phase 1: the handoff cost, and the client calls phase 2 has to take off the tick.
+	LogicThread::report();
+
 	// THREADING-ROADMAP.md section 0 step 3.  Only a PERF_TIMERS build has anything to say here.
 #ifdef PERF_TIMERS
 	PerfGather::dumpSummary();
@@ -2702,6 +2836,8 @@ static void updateHeadlessRun( void )
 		// spent counts buildings and upgrades and never a unit, and that sum read a Hard AI ending on
 		// under 2,000 as one sitting on 52,000
 		DEBUG_LOG(("HEADLESS BANK %d: %d in the bank\n", i, p->getMoney()->countMoney()));
+		if (p->isSkirmishAIPlayer())
+			p->logAIPersonaSummary();
 	}
 
 	if (scouting)
@@ -2720,6 +2856,142 @@ static void updateHeadlessRun( void )
 	TheGameEngine->setQuitting( TRUE );
 }
 
+/* The pacer's debt, and the pass's plan when planOverlappedTick asked for it in front of the draw. */
+static Real s_logicAccumMs = 0.0f;
+static Bool s_passPlanned = FALSE;
+static GameEngine::LogicPassPlan s_passPlan;
+static UnsignedInt s_frameBeforeOverlap = 0;
+static UnsignedInt s_planTimeMs = 0;		///< when the pacer last spent the time since the one before
+
+void GameEngine::planLogicPass( LogicPassPlan &plan )
+{
+	// Fast-forward modes run a logic frame on every call; otherwise logic ticks at
+	// m_maxFPS Hz of wall clock, however fast the client/renderer above is running.
+#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
+	Bool fastMode = TheGlobalData->m_TiVOFastMode;
+#else
+	Bool fastMode = TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame();
+#endif
+	fastMode = fastMode || TheTacticalView->getTimeMultiplier() > 1 || TheScriptEngine->isTimeFast();
+
+	/* -headless has no picture to pace the tick against and nobody watching it go by, so it runs
+		 a logic frame every pass and the match plays out as fast as the machine manages.  Same
+		 branch as fast-forward, different reason: this one is not a cheat, it is the whole point
+		 of an unattended run. */
+	fastMode = fastMode || TheGlobalData->m_headless;
+
+	/* -jumpToFrame n: undrawn and as fast as the machine goes up to frame n, then paced.  EA's loop
+		 ran a tick a pass anyway; paced on the wall clock, jumping to minute 24 took 24 minutes. */
+	fastMode = fastMode || TheGlobalData->m_noDraw > TheGameLogic->getFrame();
+
+	/* -turbo: the same for a run that draws, unless a network owns the clock.  A -wav recording does
+		 not: its mix moves with the logic frames, not the wall clock (updateSoundCapture).  The five seconds before a -screenshot run at the real rate.  Taken straight out of
+		 fast-forward, a shot differed from its own repeat on 5.6% of the pixels; settled first, on
+		 0.01%, where two paced runs differ on 0.1%. */
+	const Int TURBO_SETTLE_FRAMES = 5 * LOGICFRAMES_PER_SECOND;
+	const Int turboFrame = (Int)TheGameLogic->getFrame();
+	const Bool turboSettling = TheGlobalData->m_screenShotFrame > 0
+		&& turboFrame + TURBO_SETTLE_FRAMES >= TheGlobalData->m_screenShotFrame
+		&& turboFrame <= TheGlobalData->m_screenShotFrame;
+	fastMode = fastMode || ( TheGlobalData->m_turbo && !turboSettling && TheNetwork == NULL );
+
+	/* -video: one logic frame a pass across the range being recorded, so the draw in front of each
+		 logic frame is the one picture of it.  Paced by the wall clock, a pass that fell behind would
+		 run two logic frames back to back and the video would jump over one. */
+	fastMode = fastMode || isVideoPass();
+
+	static UnsignedInt prevLogicTime = Clock_Milliseconds();
+	UnsignedInt now = Clock_Milliseconds();
+	Real elapsedMs = (Real)(now - prevLogicTime);
+	prevLogicTime = now;
+	s_planTimeMs = now;
+
+	const Bool logicMayRun =
+			((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady()));
+
+	Bool logicFrameDue;
+	Bool mayCatchUp = FALSE;
+	const Bool networkPaced = TheNetwork != NULL && TheNetwork->isPacingLogicFrames();
+	if (networkPaced)
+	{
+		// A network game already has a clock: Network::timeForNewFrame() paces the tick against
+		// the negotiated frame rate and only then publishes the frame's commands.  Gating a
+		// second time here against m_maxFPS beats two independent clocks against each other -
+		// a frame needs both to say yes, so the effective rate settles *below* either one and
+		// drifts, which is a systematic multiplayer-only slowdown.  Let the network own it and
+		// keep the accumulator clean for when the game drops back to single player.
+		//
+		// It owns the debt as well.  Each logic frame this machine manages a second is what it
+		// reports to the room, and the room runs at the slowest report, so a pass that ran one
+		// logic frame per picture made a slow graphics card everybody's frame rate: 60ms of
+		// drawing on one of two machines held both at 15 logic frames a second.  This one runs
+		// ahead in this machine's own simulation by as many frames as the network has ready
+		// and due, and headless is here too, since the network paces it all the same.
+		s_logicAccumMs = 0.0f;
+		logicFrameDue = TRUE;
+		mayCatchUp = TRUE;
+	}
+	else if (fastMode)
+	{
+		s_logicAccumMs = 0.0f;
+		// -recordfps: a recorded frame is drawn as many times as it has pictures, the logic waiting
+		// for the last of them.  A paused game draws its last picture again
+		if (logicMayRun)
+			s_videoPicture = (s_videoPicture + 1) % GameEngine_videoPictures();
+		logicFrameDue = s_videoPicture == 0;
+	}
+	else
+	{
+		logicFrameDue = GameEngine_isLogicFrameDue(s_logicAccumMs, elapsedMs, m_maxFPS);
+		// Fast mode means exactly one logic frame per call, by its own definition.
+		mayCatchUp = (m_maxFPS > 0);
+	}
+
+	if (!logicMayRun)
+	{
+		// A paused game, or one waiting on the network, is not falling behind - it is stopped.
+		// Drop the debt so resuming does not open with a catch-up burst.
+		s_logicAccumMs = 0.0f;
+	}
+
+	plan.fastMode = fastMode;
+	plan.mayRun = logicMayRun;
+	plan.due = logicFrameDue;
+	plan.mayCatchUp = mayCatchUp;
+	plan.networkPaced = networkPaced;
+}
+
+/* LOGIC-THREAD.md phase 3, step 3b.  The pass that overlaps: the client update up to the draw, then
+	 here the message stream and the pacer, which a pass that does not overlap runs after the client
+	 update; then the draw's sync point, and the tick goes to the logic thread as the overlap window
+	 opens (LogicThread::OverlapWindow).  A network game keeps its own order, the network's update
+	 between the message stream and the tick, and stays serialised until phase 5.  So does a -video pass:
+	 planned here, the pacer moved the -recordfps picture on in front of the draw, and the picture that
+	 should have opened the next frame was drawn on the old one, numbered as a picture already taken and
+	 dropped: one picture of every recorded frame, half of them at -recordfps 120.  A tick beside the
+	 draw would move the frame the picture is numbered by while it is drawn. */
+Bool GameEngine::planOverlappedTick( void )
+{
+	if (TheNetwork != NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame()
+			|| TheGameLogic->isLoadingMap() || isVideoPass())
+		return FALSE;
+
+	TheMessageStream->propagateMessages();
+	planLogicPass( s_passPlan );
+	s_passPlanned = TRUE;
+	s_frameBeforeOverlap = TheGameLogic->getFrame();
+	return s_passPlan.mayRun && s_passPlan.due;
+}
+
+/* The pacer's next tick is due once its debt and the time since it last looked make a whole tick:
+	 GameEngine_isLogicFrameDue, asked without spending anything. */
+Real GameEngine::msUntilNextTickDue( void )
+{
+	if (!s_passPlanned || s_passPlan.fastMode || s_passPlan.networkPaced || m_maxFPS <= 0)
+		return 0.0f;
+	return 1000.0f / m_maxFPS - s_logicAccumMs - (Real)( Clock_Milliseconds() - s_planTimeMs );
+}
+
 void GameEngine::update( void )
 {
 	USE_PERF_TIMER(GameEngine_update)
@@ -2729,7 +3001,8 @@ void GameEngine::update( void )
 		static Int fpsFrames = 0;
 		static Real fpsClientTotal = 0.0f, fpsClientMax = 0.0f;
 		static Real fpsLogicTotal = 0.0f, fpsLogicMax = 0.0f;
-		static Int fpsLogicTicks = 0, fpsCatchupPasses = 0;
+		static Int fpsLogicTicks = 0, fpsCatchupPasses = 0, fpsNoTickPasses = 0;
+		static Real fpsNoTickClientTotal = 0.0f;
 		static UnsignedInt fpsWindowStart = Clock_Milliseconds();
 		static Real fpsRadarTotal = 0.0f, fpsAudioTotal = 0.0f, fpsDrawTotal = 0.0f, fpsDrawMax = 0.0f;
 		static Real fpsSceneTotal = 0.0f, fpsUITotal = 0.0f, fpsPostTotal = 0.0f, fpsWinTotal = 0.0f;
@@ -2743,6 +3016,7 @@ void GameEngine::update( void )
 		Real clientMS = 0.0f, logicMS = 0.0f, radarMS = 0.0f, audioMS = 0.0f;
 		Int logicTicks = 0;
 		TheClientDrawMS = TheSceneDrawMS = TheUIDrawMS = TheUIPostDrawMS = TheWindowRepaintMS = 0.0f;
+		TheOverlapWindowMS = 0.0f;
 		TheParticleUpdateMS = TheParticleFillMS = TheTranslucentMS = 0.0f;
 		TheTranslucentDraws = TheSortingPolygonsRefused = TheParticlesPastGroupLimit = 0;
 		TheShadowMapMS = ThePostChainMS = TheIconDrawMS = 0.0f;
@@ -2750,6 +3024,9 @@ void GameEngine::update( void )
 		TheSortingEntries = 0;
 		TheShadowMapCasters = 0;
 		TheShadowMapDraws = TheSceneDrawCalls = 0;
+		theShadowNotedMS = 0.0f;
+		theShadowNotedCasters = 0;
+		theShadowNotedDraws = 0;
 		tClientStart = Clock_Ticks();
 #endif
 
@@ -2780,7 +3057,9 @@ void GameEngine::update( void )
 					? (Int)( now % ( TheGlobalData->m_drawDelayJitterMS + 1 ) ) : 0;
 				sleepMilliseconds( TheGlobalData->m_drawDelayMS + jitter );
 			}
-			TheMessageStream->propagateMessages();
+			// planOverlappedTick ran it in front of the draw on a pass that may overlap
+			if (!s_passPlanned)
+				TheMessageStream->propagateMessages();
 
 			if (TheNetwork != NULL)
 			{
@@ -2801,95 +3080,21 @@ void GameEngine::update( void )
 #endif
 
 
-		// Fast-forward modes run a logic frame on every call; otherwise logic ticks at
-		// m_maxFPS Hz of wall clock, however fast the client/renderer above is running.
-#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
-		Bool fastMode = TheGlobalData->m_TiVOFastMode;
-#else
-		Bool fastMode = TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame();
-#endif
-		fastMode = fastMode || TheTacticalView->getTimeMultiplier() > 1 || TheScriptEngine->isTimeFast();
-
-		/* -headless has no picture to pace the tick against and nobody watching it go by, so it runs
-			 a logic frame every pass and the match plays out as fast as the machine manages.  Same
-			 branch as fast-forward, different reason: this one is not a cheat, it is the whole point
-			 of an unattended run. */
-		fastMode = fastMode || TheGlobalData->m_headless;
-
-		/* -turbo: the same for a run that draws, unless a network owns the clock.  A -wav recording does
-			 not: its mix moves with the logic frames, not the wall clock (updateSoundCapture).  The five seconds before a -screenshot run at the real rate.  Taken straight out of
-			 fast-forward, a shot differed from its own repeat on 5.6% of the pixels; settled first, on
-			 0.01%, where two paced runs differ on 0.1%. */
-		const Int TURBO_SETTLE_FRAMES = 5 * LOGICFRAMES_PER_SECOND;
-		const Int turboFrame = (Int)TheGameLogic->getFrame();
-		const Bool turboSettling = TheGlobalData->m_screenShotFrame > 0
-			&& turboFrame + TURBO_SETTLE_FRAMES >= TheGlobalData->m_screenShotFrame
-			&& turboFrame <= TheGlobalData->m_screenShotFrame;
-		fastMode = fastMode || ( TheGlobalData->m_turbo && !turboSettling && TheNetwork == NULL );
-
-		/* -video: one logic frame a pass across the range being recorded, so the draw in front of each
-			 logic frame is the one picture of it.  Paced by the wall clock, a pass that fell behind would
-			 run two logic frames back to back and the video would jump over one. */
-		const Int videoLogicFrame = (Int)TheGameLogic->getFrame();
-		fastMode = fastMode || ( TheGlobalData->m_videoEndFrame > 0 && TheGameLogic->isInGame()
-														 && !TheGameLogic->isInShellGame()
-														 && videoLogicFrame + 1 >= TheGlobalData->m_videoStartFrame
-														 && videoLogicFrame <= TheGlobalData->m_videoEndFrame );
-
-		static UnsignedInt prevLogicTime = Clock_Milliseconds();
-		static Real logicAccumMs = 0.0f;
-		UnsignedInt now = Clock_Milliseconds();
-		Real elapsedMs = (Real)(now - prevLogicTime);
-		prevLogicTime = now;
-
-		const Bool logicMayRun =
-				((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady()));
-
-		Bool logicFrameDue;
-		Bool mayCatchUp = FALSE;
-		const Bool networkPaced = TheNetwork != NULL && TheNetwork->isPacingLogicFrames();
-		if (networkPaced)
-		{
-			// A network game already has a clock: Network::timeForNewFrame() paces the tick against
-			// the negotiated frame rate and only then publishes the frame's commands.  Gating a
-			// second time here against m_maxFPS beats two independent clocks against each other -
-			// a frame needs both to say yes, so the effective rate settles *below* either one and
-			// drifts, which is a systematic multiplayer-only slowdown.  Let the network own it and
-			// keep the accumulator clean for when the game drops back to single player.
-			//
-			// It owns the debt as well.  Each logic frame this machine manages a second is what it
-			// reports to the room, and the room runs at the slowest report, so a pass that ran one
-			// logic frame per picture made a slow graphics card everybody's frame rate: 60ms of
-			// drawing on one of two machines held both at 15 logic frames a second.  This one runs
-			// ahead in this machine's own simulation by as many frames as the network has ready
-			// and due, and headless is here too, since the network paces it all the same.
-			logicAccumMs = 0.0f;
-			logicFrameDue = TRUE;
-			mayCatchUp = TRUE;
-		}
-		else if (fastMode)
-		{
-			logicAccumMs = 0.0f;
-			// -recordfps: a recorded frame is drawn as many times as it has pictures, the logic waiting
-			// for the last of them.  A paused game draws its last picture again
-			if (logicMayRun)
-				s_videoPicture = (s_videoPicture + 1) % GameEngine_videoPictures();
-			logicFrameDue = s_videoPicture == 0;
-		}
+		// the pacer, asked once a pass: here, or in front of the draw by planOverlappedTick
+		LogicPassPlan plan;
+		if (s_passPlanned)
+			plan = s_passPlan;
 		else
-		{
-			logicFrameDue = GameEngine_isLogicFrameDue(logicAccumMs, elapsedMs, m_maxFPS);
-			// Fast mode means exactly one logic frame per call, by its own definition.
-			mayCatchUp = (m_maxFPS > 0);
-		}
+			planLogicPass( plan );
+		s_passPlanned = FALSE;
+		const Bool fastMode = plan.fastMode;
+		const Bool networkPaced = plan.networkPaced;
+		const Bool mayCatchUp = plan.mayCatchUp;
+		// LOGIC-THREAD.md phase 3, step 3b: this pass's first tick ran beside the render and was flushed
+		// at the end of the draw
+		const Bool overlapped = LogicThread::takeOverlappedTick();
 
-		if (!logicMayRun)
-		{
-			// A paused game, or one waiting on the network, is not falling behind - it is stopped.
-			// Drop the debt so resuming does not open with a catch-up burst.
-			logicAccumMs = 0.0f;
-		}
-		else if (logicFrameDue)
+		if (plan.mayRun && plan.due)
 		{
 #ifdef DEBUG_LOGGING
 			tLogicStart = Clock_Ticks();
@@ -2900,17 +3105,19 @@ void GameEngine::update( void )
 			// count and the pacer's own accumulator cap stop at LOGIC_CATCHUP_MAX_FRAMES, so a logic
 			// frame that is itself over budget cannot pull the loop into a spiral.
 			Int logicTicksThisPass = 0;
-			const Int maxTicksThisPass = GameEngine_logicCatchupMaxFrames(
-				networkPaced ? TheGlobalData->m_framesPerSecondLimit : m_maxFPS );
+			const Int maxTicksThisPass = GameEngine_logicCatchupMaxFrames( m_maxFPS );
 			/* Bounded by the clock as well as by the count - see LOGIC_CATCHUP_BUDGET_MS.  Three
 				 25ms ticks back to back with no picture in between is the 113ms freeze; one of them
 				 plus the render is a dropped frame nobody files a bug about. */
 			Int64 tCatchupStart, tCatchupNow;
 			tCatchupStart = Clock_Ticks();
-			const UnsignedInt frameBeforeTicks = TheGameLogic->getFrame();
+			const UnsignedInt frameBeforeTicks = overlapped ? s_frameBeforeOverlap : TheGameLogic->getFrame();
 			for( ;; )
 			{
-				TheGameLogic->UPDATE();
+				// TheGameLogic->UPDATE(), on the logic thread at -logicthread 1; the first of an overlapped
+				// pass has run already, beside the render
+				if (logicTicksThisPass > 0 || !overlapped)
+					LogicThread::runTick();
 				++logicTicksThisPass;
 
 				// -maxframes' frame ends the burst, its CRC logged as it finishes (noteFrameLimit)
@@ -2918,6 +3125,12 @@ void GameEngine::update( void )
 					break;
 
 				if (!mayCatchUp)
+					break;
+				/* -video: the recorded frames run one a pass (fast mode in planLogicPass), but a burst that
+					 started in front of them ran on into them, over frames nobody drew.  The recording then
+					 opened a few frames late and every file after was numbered that much early: a laserlook
+					 shot on frame 207 sat in the file for 199.  The burst stops on the first one instead. */
+				if (!networkPaced && isVideoFrame( (Int)TheGameLogic->getFrame() ))
 					break;
 				tCatchupNow = Clock_Ticks();
 				if (!GameEngine_mayStartAnotherCatchupTick( logicTicksThisPass, maxTicksThisPass,
@@ -2949,10 +3162,10 @@ void GameEngine::update( void )
 						break;
 				}
 				// Asked last, because it is the one with a side effect: it spends the debt it reports.
-				else if (!GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS))
+				else if (!GameEngine_isLogicFrameDue(s_logicAccumMs, 0.0f, m_maxFPS))
 					break;
 			}
-			GameEngine_noteLogicTickDone( networkPaced ? TheGlobalData->m_framesPerSecondLimit : m_maxFPS, fastMode );
+			GameEngine_noteLogicTickDone( m_maxFPS, fastMode );
 			// a frame held by a scripted freeze keeps showing its last picture, rather than going back
 			// half a frame every other pass
 			if (TheGameLogic->getFrame() == frameBeforeTicks)
@@ -2962,8 +3175,13 @@ void GameEngine::update( void )
 			logicMS = engineElapsedMS( tLogicStart, tLogicEnd );
 			logicTicks = logicTicksThisPass;
 			// One pass can pay off several ticks of debt; charge the histogram per tick, or a
-			// catch-up burst reads as one enormous logic frame that never actually happened.
-			GameEngine_noteLogicTime( logicMS / (Real)logicTicksThisPass, TheGameLogic->getFrame() );
+			// catch-up burst reads as one enormous logic frame that never actually happened.  The tick
+			// beside the render is charged at its own length, the pass at the wait for it.
+			Real overlapTickMS = 0.0f, overlapWaitMS = 0.0f;
+			if (overlapped)
+				LogicThread::takeOverlapTimes( overlapTickMS, overlapWaitMS );
+			GameEngine_noteLogicTime( ( logicMS + overlapTickMS ) / (Real)logicTicksThisPass, TheGameLogic->getFrame() );
+			logicMS += overlapWaitMS;
 #endif
 		}
 
@@ -2980,6 +3198,14 @@ void GameEngine::update( void )
 		ControlServer_poll();
 
 #ifdef DEBUG_LOGGING
+		thePassLogicMS = logicMS;
+		// the overlapped tick was charged to the pass's first picture when there were more
+		thePassLogicTicks = thePassPictures > 0 && overlapped ? logicTicks - 1 : logicTicks;
+		if( logicTicks == 0 )
+		{
+			fpsNoTickPasses++;
+			fpsNoTickClientTotal += clientMS;
+		}
 		fpsFrames++;
 		fpsClientTotal += clientMS;
 		fpsRadarTotal += radarMS;
@@ -3036,7 +3262,7 @@ void GameEngine::update( void )
 					// 'hz' is the rate the simulation actually achieved and 'catchup' how many render
 					// frames were dropped to hold it there; hz short of m_maxFPS with catchup passes
 					// present is the logic side being genuinely over budget, not the pacer.
-					DEBUG_LOG(("FPS %.0f over %dms (%d frames, %d hz, %d catchup, logic frame %d) | client avg %.1f max %.1f (render avg %.1f max %.1f [scene %.1f, ui %.1f (post %.1f, win %.1f), present %.1f], radar %.1f, audio %.1f, rest %.1f) | logic avg %.1f max %.1f | unaccounted %.1fms\n",
+					DEBUG_LOG(("FPS %.0f over %dms (%d frames, %d hz, %d catchup, logic frame %d) | client avg %.1f max %.1f (render avg %.1f max %.1f [scene %.1f, ui %.1f (post %.1f, win %.1f), present %.1f], radar %.1f, audio %.1f, rest %.1f) | logic avg %.1f max %.1f | unaccounted %.1fms | %d passes without a tick, client avg %.1f\n",
 										 fps, (Int)windowMS, fpsFrames,
 										 (Int)((Real)fpsLogicTicks * 1000.0f / (Real)windowMS + 0.5f), fpsCatchupPasses,
 										 TheGameLogic->getFrame(),
@@ -3049,7 +3275,8 @@ void GameEngine::update( void )
 										 fpsRadarTotal / fpsFrames, fpsAudioTotal / fpsFrames,
 										 ( fpsClientTotal - fpsDrawTotal - fpsRadarTotal - fpsAudioTotal ) / fpsFrames,
 										 fpsLogicTotal / fpsFrames, fpsLogicMax,
-										 (Real)windowMS - fpsClientTotal - fpsLogicTotal));
+										 (Real)windowMS - fpsClientTotal - fpsLogicTotal,
+										 fpsNoTickPasses, fpsNoTickPasses ? fpsNoTickClientTotal / fpsNoTickPasses : 0.0f));
 					DEBUG_LOG(("SCENE SPLIT frame %d: shadow %.1f ms, %d casters, %u shadow draws | fill %.1f translucent %.1f (%u draws) | sort %.1f copy %.1f draw %.1f (%u entries, %u on screen) | icons %.1f | postchain %.1f | scene draws %u\n",
 										 TheGameLogic->getFrame(),
 										 fpsShadowTotal / fpsFrames, fpsCasterTotal / fpsFrames, fpsShadowDrawTotal / fpsFrames,
@@ -3061,7 +3288,8 @@ void GameEngine::update( void )
 										 fpsSceneDrawTotal / fpsFrames));
 				}
 				fpsFrames = 0;
-				fpsLogicTicks = fpsCatchupPasses = 0;
+				fpsLogicTicks = fpsCatchupPasses = fpsNoTickPasses = 0;
+				fpsNoTickClientTotal = 0.0f;
 				fpsClientTotal = fpsLogicTotal = 0.0f;
 				fpsRadarTotal = fpsAudioTotal = fpsDrawTotal = fpsDrawMax = 0.0f;
 				fpsSceneTotal = fpsUITotal = fpsPostTotal = fpsWinTotal = 0.0f;
@@ -3141,6 +3369,8 @@ void GameEngine::execute( void )
 					 QueryPerformanceCounter reads a frame, which is why this is not behind a switch. */
 				Int64 tFrameStart, tFrameEnd;
 				tFrameStart = Clock_Ticks();
+				thePassStart = tFrameStart;
+				thePassPictures = 0;
 				try
 				{
 					// compute a frame
@@ -3168,7 +3398,8 @@ void GameEngine::execute( void )
 					RELEASE_CRASH(("Uncaught Exception in GameEngine::update"));
 				}	// catch
 				tFrameEnd = Clock_Ticks();
-				thisFrameMS = engineElapsedMS( tFrameStart, tFrameEnd );
+				// from the last picture an earlier part of the pass presented, if it presented any
+				thisFrameMS = engineElapsedMS( thePassStart, tFrameEnd );
 				GameEngine_noteFrameTime( thisFrameMS,
 																	TheGameLogic ? TheGameLogic->getFrame() : 0 );
 			}	// perf

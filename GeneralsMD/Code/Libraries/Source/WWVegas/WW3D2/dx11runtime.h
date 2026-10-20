@@ -177,9 +177,23 @@ void Direct3D11_Set_Smoke_Glow(bool glow);
 void Direct3D11_Set_Draw_Effect(unsigned effect, const float parameters[4]);
 
 // Whether the looks are drawn at all: a Direct3D 11 frame is presenting and the Classic graphics
-// setting is off.  The scene asks before it leaves the heat vision pass out for one of them.
+// setting is off.
 bool Direct3D11_Draw_Effects();
 void Direct3D11_Allow_Draw_Effects(bool allowed);
+
+// Whether one look asked for now would be drawn (DX11BackendClass::Takes_Draw_Effect).  The scene
+// asks before it leaves the heat vision pass or the disabled tint out for it.
+bool Direct3D11_Takes_Draw_Effect(unsigned effect);
+
+// The look the mesh renderer has set and its numbers, zero and zeros with none.  The sorting pool
+// keeps it with a sorted mesh's triangles and sets it again when it draws them.
+unsigned Direct3D11_Requested_Draw_Effect(float parameters[4]);
+
+// The post chain's ambient occlusion, applied to the scene where it stands, once a frame: called
+// after the opaque world and before the particles, so fire and smoke, which write no depth, are
+// not shaded by the corners of what is behind them.  The chain then skips its own occlusion pass.
+// Nothing happens without "ao" in the chain or while a filter or a mirror holds the target.
+void Direct3D11_Occlude_Scene();
 
 // Whether the draws that follow take the Glow option's additive gain (DX11BackendClass::
 // Set_Glow_Draw).  ShaderClass::Apply sends it from the shader's GLOW_ENABLE bit.
@@ -345,9 +359,26 @@ void Direct3D11_Statistics(unsigned & pipelines_built, unsigned long long & draw
 void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held);
 
 // What the frame since the last call spent building pipelines and copying textures, and how many
-// of each, and how many times the soft particles copied the scene's depth.  Taking it resets it.
+// of each, how many times the soft particles copied the scene's depth, and how many constant blocks
+// were written and how many of those writes renamed their buffer.  Taking it resets it.
 void Direct3D11_Take_Frame_Cost(double & pipeline_milliseconds, unsigned & pipelines,
-	double & texture_milliseconds, unsigned & textures, unsigned & depth_copies);
+	double & texture_milliseconds, unsigned & textures, unsigned & depth_copies,
+	unsigned & constant_writes, unsigned & constant_renames);
+
+// One line for the log once a second, null in between: the frame rate, the GPU's own time for a
+// presented frame (average and worst, split into shadow map, world, and post chain with interface),
+// the GPU's idle gap between two frames, busy as GPU time over wall time, how many frames were read
+// back and how many were dropped, the time the top of the frame waited for the swap chain's queue,
+// and the constant writes and renames a second.  Timestamp queries read back a few frames late and
+// never waited on, so it costs the frame nothing it can measure.  Taking it resets it.
+const char * Direct3D11_Take_GPU_Report();
+
+// The swap chain holds its queue with a wait at the top of the frame rather than inside Present.
+bool Direct3D11_Has_Frame_Wait();
+
+// How the backend writes its constant blocks (DX11BackendClass::Constant_Path), for the shutdown
+// report.  Empty with no backend.
+const char * Direct3D11_Constant_Path();
 
 // The refusals split by cause: no buffer bound, no texture stage enabled, a vertex format with no
 // input layout, and a program that could not be generated or compiled.

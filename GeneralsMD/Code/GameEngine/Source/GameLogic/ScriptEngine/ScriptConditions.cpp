@@ -1405,11 +1405,15 @@ Bool ScriptConditions::evaluateNamedSelected(Condition *pCondition, Parameter *p
 	}
 
 
+	// the selection as it stood at the sync point, with what this tick's scripts selected since
+	// (LogicThread::ClientBlock, LOGIC-THREAD.md M7)
+	const LogicThread::ClientBlock &client = LogicThread::clientBlock();
+
 	Bool anyChanges = false;
 	if (pCondition->getCustomData() == 0) anyChanges = true;
 
 
-	if (TheInGameUI->getFrameSelectionChanged() != pCondition->getCustomFrame()) {
+	if (client.frameSelectionChanged != pCondition->getCustomFrame()) {
 		anyChanges = true; // Selection changed since we cached the value.  jba.
 	}
 	if (!anyChanges) {
@@ -1418,15 +1422,12 @@ Bool ScriptConditions::evaluateNamedSelected(Condition *pCondition, Parameter *p
 	}
 
 	Bool isSelected = false;
-	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 
-	// loop through all the selected drawables
-	Drawable *draw;
-	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	// loop through all the selected objects
+	for( size_t i = 0; i < client.selection.size(); ++i )
 	{
-		draw = *it;
-
-		if (draw->getObject()->getName() == (pUnitParm->getString())) { 
+		const Object *obj = TheGameLogic->findObjectByID( client.selection[ i ].object );
+		if (obj->getName() == (pUnitParm->getString())) {
 			isSelected = true;
 			break;
 		}
@@ -1437,7 +1438,7 @@ Bool ScriptConditions::evaluateNamedSelected(Condition *pCondition, Parameter *p
 	if (isSelected) {
 		pCondition->setCustomData(1); // true.
 	}
-	pCondition->setCustomFrame(TheInGameUI->getFrameSelectionChanged());
+	pCondition->setCustomFrame(client.frameSelectionChanged);
 	return isSelected;
 }
 
@@ -2302,7 +2303,7 @@ Bool ScriptConditions::evaluateSkirmishCommandButtonIsReady( Parameter * /* pSki
 		return false;
 	}
 
-	const CommandButton *commandButton = TheControlBar->findCommandButton( pCommandButtonParm->getString() );
+	const CommandButton *commandButton = TheCommandStore->findCommandButton( pCommandButtonParm->getString() );
 	if( !commandButton ) {
 		return false;
 	}
@@ -2764,7 +2765,7 @@ Bool ScriptConditions::evaluateCondition( Condition *pCondition )
 			// multiplayer or skirmish session it counts as finished at once on every machine.
 			if (TheGameEngine->isMultiplayerSession())
 				return TRUE;
-			return TheTacticalView->isCameraMovementFinished();
+			return LogicThread::isCameraMovementFinishedForTick();
 		case Condition::TEAM_STATE_IS: 
 			return evaluateTeamStateIs(pCondition->getParameter(0), pCondition->getParameter(1));
 		case Condition::TEAM_STATE_IS_NOT: 

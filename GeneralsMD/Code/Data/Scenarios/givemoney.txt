@@ -1,0 +1,10 @@
+# Money transfer: the Tab screen's Send, as MSG_TRANSFER_MONEY onto the message stream. Seat 0 is the
+# human, seat 1 his ally, seat 2 the enemy. The first send moves $500 to the ally; the second asks to pay
+# the enemy, which the screen never offers, and GameLogic refuses it. Read the MONEY TRANSFER lines.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -autoskirmish 3 -team 0 0 -team 1 0
+#     -team 2 1 -aidiff easy -startingcash 10000 -peacetime 10 -seed 7
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -scenario givemoney -maxframes 600 -logPrefix givemoney
+
+60 givemoney 0 1 500
+120 givemoney 0 2 500

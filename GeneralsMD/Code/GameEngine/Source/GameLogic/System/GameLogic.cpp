@@ -47,6 +47,7 @@
 #include "Common/INI.h"
 #include "Common/LatchRestore.h"
 #include "Common/MapObject.h"
+#include "Common/MatchHistory.h"
 #include "Common/MultiplayerSettings.h"
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
@@ -123,6 +124,20 @@
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 
 #include <rts/profile.h>
+
+/* A hint that a cache line is about to be read, as PM_PREFETCH in PartitionManager.cpp. It decides
+	 nothing, so the sleepy heap's walk and the order the modules run in cannot depend on it. */
+#if defined(__GNUC__) || defined(__clang__)
+	#define GL_PREFETCH(addr) __builtin_prefetch(addr)
+#elif defined(_M_X64) || defined(_M_IX86)
+	#include <xmmintrin.h>
+	#define GL_PREFETCH(addr) _mm_prefetch((const char *)(addr), _MM_HINT_T0)
+#elif defined(_M_ARM64)
+	#include <intrin.h>
+	#define GL_PREFETCH(addr) __prefetch(addr)
+#else
+	#define GL_PREFETCH(addr) ((void)0)
+#endif
 
 DECLARE_PERF_TIMER(SleepyMaintenance)
 
@@ -208,16 +223,18 @@ static Waypoint * findNamedWaypoint(AsciiString name)
 	 test can call it without linking the whole of GameLogic. */
 
 
+thread_local Bool GameLogic::s_isInUpdate = FALSE;
+
 // ------------------------------------------------------------------------------------------------
 /** GameLogic class constructor */
 // ------------------------------------------------------------------------------------------------
 GameLogic::GameLogic( void )
 {
 	//Added By Sadullah Nader
-	//Initializations missing and necessary 
+	//Initializations missing and necessary
 	m_background = NULL;
 	m_CRC = 0;
-	m_isInUpdate = FALSE;
+	s_isInUpdate = FALSE;
 
 	m_rankPointsToAddAtGameStart = 0;
 
@@ -233,6 +250,7 @@ GameLogic::GameLogic( void )
 	//
 
 	m_frame = 0;
+	m_frameForClient = 0;
 	m_frameObjectsChangedTriggerAreas = 0;
 	m_width = 0;
 	m_height = 0;
@@ -251,6 +269,8 @@ GameLogic::GameLogic( void )
 	m_incomeSharing = INCOME_SHARING_OFF;
 	m_techRespawnDelay = 0;
 	m_supplyPileLimit = 0;
+	m_loadedRandomPending = FALSE;
+	m_loadedSleepyPending = FALSE;
 	m_gamePaused = FALSE;
 	m_inputEnabledMemory = TRUE;
 	m_mouseVisibleMemory = TRUE;
@@ -424,8 +444,8 @@ void GameLogic::init( void )
 	m_drawIconUI = TRUE;
 	m_showDynamicLOD = TRUE;
 	m_scriptHulkMaxLifetimeOverride = -1;
-	
-	m_isInUpdate = FALSE;
+
+	s_isInUpdate = FALSE;
 
 	m_rankPointsToAddAtGameStart = 0;
 }
@@ -442,11 +462,17 @@ void GameLogic::reset( void )
 	m_thingTemplateBuildableOverrides.clear();
 	m_controlBarOverrides.clear();
 
+	// a load that failed part way must not hand its stream or heap order to the next one
+	m_loadedRandomPending = FALSE;
+	m_loadedSleepyPending = FALSE;
+	m_loadedSleepyOrder.clear();
+
 	// set the hash to be rather large. We need to optimize this value later.
 //	m_objHash.clear();
 //	m_objHash.resize(OBJ_HASH_SIZE);
 	m_objVector.clear();
 	m_objVector.resize(OBJ_HASH_SIZE, NULL);
+	m_frameForClient = 0;
 
 	/* Unpause properly rather than just clearing the flag.  Loading a save from the in-game menu
 		 resets while the game is paused, and setGamePaused is where the mouse comes back, the audio
@@ -1225,6 +1251,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	}  // end if
 
 	m_rankLevelLimit = 1000;	// this is reset every game.
+	// the score screen's graphs are the last match's: a match clears them, the shell map never does
+	if( m_gameMode != GAME_SHELL )
+		TheMatchHistory.reset();
 	setDefaults( loadingSaveGame );
 	TheWritableGlobalData->m_loadScreenRender = TRUE;	///< mark it so only a few select things are rendered during load	
 	TheWritableGlobalData->m_TiVOFastMode = FALSE;	//always disable the TIVO fast-forward mode at the start of a new game.
@@ -1583,6 +1612,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 						d.setInt(TheKey_skirmishAISkill, AISKILL_BRUTAL); break;
 					default: break;	 // no setting.
 				}
+				// absent for Normal, so a Normal seat's dict is the one it always was
+				if (slot->getAIPersonality() != AIPERSONA_NORMAL)
+					d.setInt(TheKey_skirmishAIPersonality, slot->getAIPersonality());
 			}
 
 			// by index: the name went through an ASCII translate and back, which no name with a
@@ -3171,81 +3203,50 @@ Int GameLogic::rebalanceChildSleepyUpdate(Int i)
 
 	DEBUG_ASSERTCRASH(i >= 0 && i < m_sleepyUpdates.size(), ("bad sleepy idx"));
 
-// this function gets the brunt of the work (we frequently
-// balance down, not up), so this one is hand-unrolled for
-// max efficiency. I have left the pristine non-unrolled
-// version present for clarity. (Yes, this is worth doing.) (srj) 
-#if 1
-	SleepyEntry* pI = &m_sleepyUpdates[i];
+	/* Every sleepy module that runs sinks from the top of this heap again, so this is the busiest loop
+		 of the scheduler. The sinking entry moves down through a hole: each child that has to rise moves
+		 up one slot and takes its new index, and the sinking entry is written once, where it stops.
+		 Swapping at every level wrote both entries and both modules' indices each time, and every module
+		 is a cache line of its own. The comparisons are the ones the swapping walk made, so every entry
+		 ends in the same slot, ties included, and the modules run in the same order. Which child sorts
+		 first is a coin toss a branch keeps guessing wrong, so the pick is a sum instead. */
+	SleepyEntry *entries = m_sleepyUpdates.data();
+	const Int sz = (Int)m_sleepyUpdates.size();
+	const SleepyEntry sinking = entries[i];
+	const Int start = i;
 
-	// our children are i*2 and i*2+1
-  Int child = ((i+1)<<1)-1;
-	// data() + n, not &m_sleepyUpdates[n]: both are only addresses until the loop below has checked
-	// them against pSZ, and the same addresses in a release build, but a Debug build's checked
-	// operator[] aborts on any n past the end, which child and size() often are (W3).
-	SleepyEntry* pChild = m_sleepyUpdates.data() + child;
-	SleepyEntry* pSZ = m_sleepyUpdates.data() + m_sleepyUpdates.size();	// yes, this is off the end.
-
-  while (pChild < pSZ) 
+	// our children are i*2+1 and i*2+2
+	Int child = ((i+1)<<1)-1;
+	while (child < sz)
 	{
+		/* The level below is read next, and which half of it depends on the comparison about to be made.
+			 Its four entries are one or two cache lines, so asking for both now has them in by then: a late
+			 heap holds a few thousand entries and each level of the walk was a miss waiting on the last. */
+		const Int grandchild = ((child+1)<<1)-1;
+		if (grandchild < sz)
+			GL_PREFETCH(&entries[grandchild]);
+		if (grandchild + 3 < sz)
+			GL_PREFETCH(&entries[grandchild + 3]);
+
 		// choose the higher-priority of the two children; we must be higher-pri than that.
-		if (pChild < pSZ-1 && isLowerPriority(*pChild, *(pChild+1)))
-		{
-      ++pChild;
-			++child;
-		}
+		if (child < sz-1)
+			child += (Int)isLowerPriority(entries[child], entries[child+1]);
 
 		// if we're higher-pri than our children, we're done.
-		if (!isLowerPriority(*pI, *pChild))
-		{
+		if (!isLowerPriority(sinking, entries[child]))
 			break;
-		}
 
-		// doh. swap with the highest-pri child we have.
-		SleepyEntry a = *pChild;
-		SleepyEntry b = *pI;
-
-		*pI = a;
-		*pChild = b;
-
-		a.module->friend_setIndexInLogic(i);
-		b.module->friend_setIndexInLogic(child);
-
+		entries[i] = entries[child];
+		entries[i].module->friend_setIndexInLogic(i);
 		i = child;
-		pI = pChild;
-
 		child = ((i+1)<<1)-1;
-		pChild = m_sleepyUpdates.data() + child;
-  }
-#else
-	// our children are i*2 and i*2+1
-	Int sz = m_sleepyUpdates.size();
-  Int child = ((i+1)<<1)-1;
-  while (child < sz) 
+	}
+
+	if (i != start)
 	{
-		// choose the higher-priority of the two children; we must be higher-pri than that.
-		if (child < sz-1 && isLowerPriority(m_sleepyUpdates[child], m_sleepyUpdates[child+1]))
-      ++child;
-		
-		// if we're higher-pri than our children, we're done.
-		if (!isLowerPriority(m_sleepyUpdates[i], m_sleepyUpdates[child]))
-		{
-			break;
-		}
-
-		// doh. swap with the highest-pri child we have.
-		SleepyEntry a = m_sleepyUpdates[child];
-		SleepyEntry b = m_sleepyUpdates[i];
-
-		m_sleepyUpdates[i] = a;
-		m_sleepyUpdates[child] = b;
-
-		a.module->friend_setIndexInLogic(i);
-		b.module->friend_setIndexInLogic(child);
-		i = child;
-		child = ((i+1)<<1)-1;
-  }
-#endif
+		entries[i] = sinking;
+		sinking.module->friend_setIndexInLogic(i);
+	}
 	return i;
 }
 
@@ -4621,7 +4622,7 @@ void GameLogic::update( void )
 	USE_PERF_TIMER(GameLogic_update)
 
 
-	LatchRestore<Bool> inUpdateLatch(m_isInUpdate, TRUE);
+	LatchRestore<Bool> inUpdateLatch(s_isInUpdate, TRUE);
 #ifdef DO_UNIT_TIMINGS
 	unitTimings();
 #endif
@@ -4634,10 +4635,10 @@ void GameLogic::update( void )
 		 this stands - before a new game starts, before the scripts, before anything in the frame reads
 		 or writes the grid.  The logic catch-up runs frames with no client pass in front of them, and
 		 there the grid fell a step behind for each: grid heights depended on the machine's frame rate.
-		 The gate stays: a frozen or held frame, which does not advance, does not step twice. */
-	if (TheTerrainVisual)
-		TheTerrainVisual->updateWaterGrid( m_frame );
-	
+		 The gate stays: a frozen or held frame, which does not advance, does not step twice.  The grid is
+		 TerrainLogic's now (M7); the render object only draws it. */
+	TheTerrainLogic->getWaterGrid()->update( m_frame );
+
 	/// @todo remove this hack
 	if ( m_startNewGame && !TheDisplay->isMoviePlaying())
 	{
@@ -4693,10 +4694,10 @@ void GameLogic::update( void )
 	if (isIntroMoviePlaying())
 		return;
 
-	// send the current time to the GameClient
+	// the current time for the GameClient, which LogicThread::runTick hands it (LOGIC-THREAD.md M7)
 	DEBUG_ASSERTCRASH(TheGameLogic == this, ("hmm, TheGameLogic is not right"));
 	UnsignedInt now = TheGameLogic->getFrame();
-	TheGameClient->setFrame(now);
+	m_frameForClient = now;
 
 	/* A logic frame that runs long is a hitch the player feels, and a release build has no
 		 profiler to ask about it.  Time the frame's own phases and, when the frame runs over
@@ -4727,7 +4728,7 @@ void GameLogic::update( void )
 		 counted its script timers down further.  There the camera freezes nothing, as the camera
 		 condition in ScriptConditions already reports every move finished. */
 	Bool freezeTime = !TheGameEngine->isMultiplayerSession()
-										&& TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
+										&& LogicThread::isTimeFrozenForTick() && !LogicThread::isCameraMovementFinishedForTick();
 	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
 
 	if (freezeTime)
@@ -4870,6 +4871,13 @@ void GameLogic::update( void )
 				break;
 			}
 
+			// unless this module sorts first again, one of the two below it is the next to run, and its
+			// first read is its own fields; the update in between is long enough to have the line in
+			if (m_sleepyUpdates.size() > 1)
+				GL_PREFETCH(m_sleepyUpdates[1].module);
+			if (m_sleepyUpdates.size() > 2)
+				GL_PREFETCH(m_sleepyUpdates[2].module);
+
 			UpdateSleepTime sleepLen = UPDATE_SLEEP_NONE;	// default, if it is disabled.
 
 			DisabledMaskType dis = u->friend_getObject()->getDisabledFlags();
@@ -4993,6 +5001,10 @@ void GameLogic::update( void )
 
 	TheVictoryConditions->UPDATE();
 
+	// the score screen's graphs: written here, read only by the score screen
+	if( isInGame() && !isInShellGame() )
+		TheMatchHistory.update( m_frame );
+
 	tVictory = Clock_Ticks();
 
 #ifdef DO_COPY_PROTECTION
@@ -5069,6 +5081,7 @@ void GameLogic::update( void )
 // ------------------------------------------------------------------------------------------------
 Object *GameLogic::getFirstObject( void )
 {
+	LOGIC_WINDOW_READ( WINDOW_OBJECT_LIST );
 	return m_objList;
 }
 
@@ -5460,7 +5473,7 @@ void GameLogic::sendObjectDestroyed( Object *obj )
 // ------------------------------------------------------------------------------------------------
 Bool GameLogic::isGamePaused( void )
 {
-	return m_gamePaused;
+	return LogicThread::isInsideWindow() ? m_pausedForDraw : m_gamePaused;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -5976,13 +5989,14 @@ void GameLogic::prepareLogicForObjectLoad( void )
 	* 15: xfer m_incomeSharing
 	* 16: xfer m_techRespawnDelay and m_pendingTechBuildings
 	* 17: xfer m_supplyPileLimit
+	* 18: xfer the logic random stream and the pathfinder's request queue and flow maps
 	*/
 // ------------------------------------------------------------------------------------------------
 void GameLogic::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 17;
+	const XferVersion currentVersion = 18;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -6308,7 +6322,7 @@ void GameLogic::xfer( Xfer *xfer )
 				ConstCommandButtonPtr button = NULL;
 				if (value.isNotEmpty())
 				{
-					button = TheControlBar->findCommandButton(value);
+					button = TheCommandStore->findCommandButton(value);
 					DEBUG_ASSERTCRASH(button != NULL, ("Could not find button %s\n",value.str()));
 				}
 				m_controlBarOverrides[name] = button;
@@ -6406,7 +6420,66 @@ void GameLogic::xfer( Xfer *xfer )
   {
     m_supplyPileLimit = 0;
   }
+
+  // Without the stream two loads of one save go on differently: the engine reset before the load
+  // seeded it from the clock.  A save older than 18 keeps that.
+  if ( version >= 18 )
+  {
+    GameLogicRandomState state = GetGameLogicRandomState();
+    for ( Int i = 0; i < 6; ++i )
+      xfer->xferUnsignedInt( &state.seed[ i ] );
+    xfer->xferUnsignedInt( &state.baseSeed );
+    if ( xfer->getXferMode() == XFER_LOAD )
+    {
+      m_loadedRandomState = state;
+      m_loadedRandomPending = TRUE;
+    }
+
+    TheAI->pathfinder()->xferFlowState( xfer );
+
+    // The sleepy update heap as it stands.  Modules due on the same frame and phase run in the order
+    // the heap gives them up, which depends on how it was built; a heap rebuilt from the object list
+    // on load runs them in another order than the game that was saved.
+    UnsignedInt sleepyCount = (UnsignedInt)m_sleepyUpdates.size();
+    xfer->xferUnsignedInt( &sleepyCount );
+    if ( xfer->getXferMode() == XFER_SAVE )
+    {
+      std::map< UpdateModulePtr, std::pair< ObjectID, Int > > where;
+      for ( Object *owner = getFirstObject(); owner; owner = owner->getNextObject() )
+      {
+        Int moduleIndex = 0;
+        for ( BehaviorModule **b = owner->getBehaviorModules(); *b; ++b, ++moduleIndex )
+          if ( (*b)->getUpdate() )
+            where[ (UpdateModulePtr)( (*b)->getUpdate() ) ] = std::make_pair( owner->getID(), moduleIndex );
+      }
+      for ( UnsignedInt i = 0; i < sleepyCount; ++i )
+      {
+        std::pair< ObjectID, Int > entry = where[ m_sleepyUpdates[ i ].module ];
+        xfer->xferObjectID( &entry.first );
+        xfer->xferInt( &entry.second );
+      }
+    }
+    else
+    {
+      m_loadedSleepyOrder.resize( sleepyCount );
+      for ( UnsignedInt i = 0; i < sleepyCount; ++i )
+      {
+        xfer->xferObjectID( &m_loadedSleepyOrder[ i ].first );
+        xfer->xferInt( &m_loadedSleepyOrder[ i ].second );
+      }
+      m_loadedSleepyPending = TRUE;
+    }
+  }
 }  // end xfer
+
+// ------------------------------------------------------------------------------------------------
+void GameLogic::restoreLoadedRandomState( void )
+{
+  if ( !m_loadedRandomPending )
+    return;
+  SetGameLogicRandomState( m_loadedRandomState );
+  m_loadedRandomPending = FALSE;
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Load post process entry point */
@@ -6442,6 +6515,24 @@ void GameLogic::loadPostProcess( void )
 		now = 1;
 #endif
 
+	// a save from version 18 on gives the heap entry by entry, which is a heap already
+	const Bool sleepyFromSave = m_loadedSleepyPending;
+	if( sleepyFromSave )
+	{
+		for( std::vector< std::pair< ObjectID, Int > >::const_iterator it = m_loadedSleepyOrder.begin(); it != m_loadedSleepyOrder.end(); ++it )
+		{
+			Object *owner = findObjectByID( it->first );
+			if( owner == NULL )
+				throw SC_INVALID_DATA;
+			UpdateModulePtr u = (UpdateModulePtr)( owner->getBehaviorModules()[ it->second ]->getUpdate() );
+			SleepyEntry e = { u->friend_getPriority(), u };
+			m_sleepyUpdates.push_back( e );
+			u->friend_setIndexInLogic( m_sleepyUpdates.size() - 1 );
+		}
+		m_loadedSleepyOrder.clear();
+		m_loadedSleepyPending = FALSE;
+	}
+
 	// go through all objects, examine each update module and put it on the appropriate update list
 	for( obj = getFirstObject(); obj; obj = obj->getNextObject() )
 	{
@@ -6457,7 +6548,11 @@ void GameLogic::loadPostProcess( void )
 #endif
 			if (!u)
 				continue;
-			
+
+			// already on the heap the save gave
+			if (sleepyFromSave && u->friend_getIndexInLogic() != -1)
+				continue;
+
 			DEBUG_ASSERTCRASH(u->friend_getIndexInLogic() == -1, ("Hmm, expected index to be -1 here"));
 
 			// check each update module
@@ -6475,17 +6570,23 @@ void GameLogic::loadPostProcess( void )
 				u->friend_setNextCallFrame(now);
 #endif
 			{
+				if (sleepyFromSave)
+				{
+					pushSleepyUpdate(u);
+					continue;
+				}
 				SleepyEntry e = { u->friend_getPriority(), u };
 				m_sleepyUpdates.push_back(e);
 				u->friend_setIndexInLogic(m_sleepyUpdates.size() - 1);
 			}
-				
+
 		}  // end for, u
 
 	}  // end for, obj
 
 	// re-sort the priority queue all at once now that all modules are on it
-	remakeSleepyUpdate();
+	if (!sleepyFromSave)
+		remakeSleepyUpdate();
 
 }  // end loadPostProcess
 

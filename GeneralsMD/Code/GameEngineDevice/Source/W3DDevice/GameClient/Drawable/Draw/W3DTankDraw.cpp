@@ -101,7 +101,12 @@ W3DTankDraw::W3DTankDraw( Thing *thing, const ModuleData* moduleData )
 		m_treads[i].m_robj = NULL;
 
 	m_treadCount=0;
+}
 
+//-------------------------------------------------------------------------------------------------
+void W3DTankDraw::buildRenderObjects( Bool madeInTick )
+{
+	W3DModelDraw::buildRenderObjects( madeInTick );
 	createEmitters();
 }
 

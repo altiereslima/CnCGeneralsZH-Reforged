@@ -109,11 +109,12 @@ static Bool wearsCloak( const Drawable *draw )
 		// mines force opacity 0 and must not become a lens on the ground
 		if( draw->isKindOf( KINDOF_MINE ) )
 			return FALSE;
-		return TRUE;
+		// a frame that cannot draw the cloak (a screen filter holds the target) draws him by opacity
+		return Direct3D11_Takes_Draw_Effect( DRAW_EFFECT_CLOAK );
 	}
 	// revealed fades in the translucent pass so the heat can come up from nothing
 	if( look == STEALTHLOOK_VISIBLE_DETECTED && fade < 0.99f )
-		return TRUE;
+		return Direct3D11_Takes_Draw_Effect( DRAW_EFFECT_REVEALED );
 	return FALSE;
 }
 
@@ -278,6 +279,9 @@ RTS3DScene::~RTS3DScene()
 	for (i=0; i<MAX_PLAYER_COUNT; i++)
 	{	REF_PTR_RELEASE(m_occludedMaterialPass[i]);
 	}
+
+	for (size_t spent = 0; spent < m_spentDynamicLights.size(); ++spent)
+		m_spentDynamicLights[spent]->Release_Ref();
 
 }  // end ~RTS3DScene
 
@@ -573,9 +577,9 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 								drawInfo->m_flags |= DrawableInfo::ERF_POTENTIAL_OCCLUDER;
 							}
 							else
-							if (draw->getObject() &&
+							if (draw->getObjectForDraw().hasObject &&
 									(draw->isKindOf(KINDOF_SCORE) || draw->isKindOf(KINDOF_SCORE_CREATE) || draw->isKindOf(KINDOF_SCORE_DESTROY) || draw->isKindOf(KINDOF_MP_COUNT_FOR_VICTORY)) &&
-									(draw->getObject()->getSafeOcclusionFrame()) <= currentFrame && m_numPotentialOccludees < TheGlobalData->m_maxVisibleOccludeeObjects)
+									draw->getObjectForDraw().safeOcclusionFrame <= currentFrame && m_numPotentialOccludees < TheGlobalData->m_maxVisibleOccludeeObjects)
 							{	//object which could be occluded but still needs to be visible.
 								//We process transucent units twice (also in m_translucentObjectsBuffer) because we need to see them when occluded.
 								m_potentialOccludees[m_numPotentialOccludees++]=robj;
@@ -656,8 +660,8 @@ void RTS3DScene::renderSpecificDrawables(RenderInfoClass &rinfo, Int numDrawable
 //=============================================================================
 /** Which of the Direct3D 11 frame's own looks a drawable wears this frame, and its four numbers
 	* (DRAW_EFFECT_SAMPLING in ffshader.h): seconds, strength, a seed from the drawable's id and the
-	* drawable's opacity.  Only reads the object, which the renderer is allowed to do; nothing here
-	* goes back into the logic.  None under -d3d9, -headless or Classic graphics, where the heat
+	* drawable's opacity.  The object's half is the sync point's copy (Drawable::getObjectForDraw);
+	* nothing here goes back into the logic.  None under -d3d9, -headless or Classic graphics, where the heat
 	* vision pass and the disabled tint draw what they always drew.
 	*
 	* An enemy a detector found is revealed, and an own stealthed unit is cloaked whatever its opacity
@@ -666,7 +670,7 @@ void RTS3DScene::renderSpecificDrawables(RenderInfoClass &rinfo, Int numDrawable
 	* markers draw an occluded unit early, mid-way through the opaque world.  Mines keep the heat vision's old exception.
 	* An EMP takes precedence over power: an EMP'd building is out of power as well. */
 //=============================================================================
-static unsigned chooseDrawEffect( const Drawable *draw, const Object *obj, Bool translucentPass, float parameters[4] )
+static unsigned chooseDrawEffect( const Drawable *draw, Bool translucentPass, float parameters[4] )
 {
 	if ( !Direct3D11_Draw_Effects() )
 		return DRAW_EFFECT_NONE;
@@ -693,15 +697,18 @@ static unsigned chooseDrawEffect( const Drawable *draw, const Object *obj, Bool 
 		effect = DRAW_EFFECT_CLOAK;
 		strength = ( look == STEALTHLOOK_VISIBLE_FRIENDLY_DETECTED ) ? MAX( 0.6f, pulse ) : 0.0f;
 	}
-	else if ( obj && !obj->isEffectivelyDead() )
+	else if ( draw->getObjectForDraw().hasObject && !draw->isObjectDeadForDraw() )
 	{
-		if ( obj->isDisabledByType( DISABLED_EMP ) )
+		if ( draw->getObjectForDraw().empDisabled )
 			effect = DRAW_EFFECT_EMP;
-		else if ( obj->isKindOf( KINDOF_STRUCTURE )
-			&& ( obj->isDisabledByType( DISABLED_UNDERPOWERED ) || obj->isDisabledByType( DISABLED_SCRIPT_UNDERPOWERED )
-				|| obj->isDisabledByType( DISABLED_HACKED ) ) )
+		else if ( draw->getObjectForDraw().outage )
 			effect = DRAW_EFFECT_OUTAGE;
 	}
+
+	// A frame the backend would draw the look in nowhere (a screen filter or a mirror holds the
+	// target, or the device made no copy for the cloak) keeps the heat vision and the tint instead.
+	if ( effect != DRAW_EFFECT_NONE && !Direct3D11_Takes_Draw_Effect( effect ) )
+		return DRAW_EFFECT_NONE;
 
 	if ( effect != DRAW_EFFECT_NONE )
 	{
@@ -725,7 +732,6 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 	Drawable *draw = NULL;
 	DrawableInfo *drawInfo = NULL;
 	Bool drawableHidden=FALSE;
-	Object* obj = NULL;
 	ObjectShroudStatus ss=OBJECTSHROUD_INVALID;
 	Bool doExtraMaterialPop=FALSE;
 	Bool doExtraFlagsPop=FALSE;
@@ -761,17 +767,18 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 		if (drawAmbient)
 			ambient.Add(ambient, *drawAmbient, &ambient);
 #endif
-		obj = draw->getObject();
-		if (obj) {
-			ss = obj->getShroudedStatus(localPlayerIndex);
-			// For objects like planes, that pop out of the shroud, fire, then head back, 
-			// we keep drawing them for 2 seconds after they return to the fogged area, 
+		// the shroud as GameClient::update's pass asked it for this player, ahead of the draw
+		// (LOGIC-THREAD.md phase 3: the draw does not call into the partition, nor into the object)
+		if (draw->getObjectForDraw().hasObject) {
+			ss = draw->getShroudForDraw();
+			// For objects like planes, that pop out of the shroud, fire, then head back,
+			// we keep drawing them for 2 seconds after they return to the fogged area,
 			// so the player can see them and missiles chasing them.  jba.
 			if (ss == OBJECTSHROUD_CLEAR) {
 				draw->setShroudClearFrame(TheGameLogic->getFrame());
 			}	else if (ss >= OBJECTSHROUD_FOGGED && draw->getShroudClearFrame()!=0) {
 				UnsignedInt limit = 2*LOGICFRAMES_PER_SECOND;
-				if (obj->isEffectivelyDead()) {
+				if (draw->isObjectDeadForDraw()) {
 					limit += 3*LOGICFRAMES_PER_SECOND;
 				}
 				if (TheGameLogic->getFrame() < limit + draw->getShroudClearFrame()) {
@@ -779,19 +786,13 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 					ss = OBJECTSHROUD_PARTIAL_CLEAR;
 				}
 			}
- 			if (!robj->Peek_Scene())
- 				return;	//this object was removed by the getShroudedStatus() call.
 		}
 		else
 		{	//drawable with no object so no way to know if it's shrouded.
-			ss = OBJECTSHROUD_CLEAR;	//assume not shrouded/fogged.
-			//Check to see if there is another unrelated object which controls the shroud status
-			//(Hack for prison camps which contain enemy prisoner drawables)
-			if (drawInfo->m_shroudStatusObjectID != INVALID_ID)
-			{	Object *shroudObject=TheGameLogic->findObjectByID(drawInfo->m_shroudStatusObjectID);
-				if (shroudObject && shroudObject->getShroudedStatus(localPlayerIndex) >= OBJECTSHROUD_FOGGED)
-					ss = OBJECTSHROUD_SHROUDED;	//we will assume that drawables without objects are 'particle' like and therefore don't need drawing if fogged/shrouded.
-			}
+			//Unless another unrelated object controls the shroud status
+			//(Hack for prison camps which contain enemy prisoner drawables): we will assume that drawables
+			//without objects are 'particle' like and therefore don't need drawing if fogged/shrouded.
+			ss = draw->getShroudForDraw() >= OBJECTSHROUD_FOGGED ? OBJECTSHROUD_SHROUDED : OBJECTSHROUD_CLEAR;
 		}
 
 		if (draw->isKindOf(KINDOF_INFANTRY))
@@ -805,7 +806,7 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 		// The Direct3D 11 frame's own look for this object, if it is in one of the four states that
 		// have one.  The two that replace the disabled tint skip it: the dark grey under them only
 		// muddied the cold grey they draw.
-		rinfo.drawEffect = chooseDrawEffect( draw, obj, theTranslucentPass, rinfo.drawEffectParameters );
+		rinfo.drawEffect = chooseDrawEffect( draw, theTranslucentPass, rinfo.drawEffectParameters );
 
 		// HANDLE THE SPECIAL DRAWABLE-LEVEL COLORING SETTINGS FIRST
 
@@ -1049,7 +1050,13 @@ void RTS3DScene::Flush(RenderInfoClass & rinfo)
 
 		//don't draw transparent in this mode because they interfere with destination alpha
 		if (m_customPassMode == SCENE_PASS_DEFAULT && Get_Extra_Pass_Polygon_Mode() == EXTRA_PASS_DISABLE)
+		{
+			// The Direct3D 11 chain's ambient occlusion goes on here, over the world with every
+			// corner in its depth and under the fire and smoke, which write none: put on the
+			// finished frame it shaded a fireball by the chimneys and trees behind it.
+			Direct3D11_Occlude_Scene();
 			DoParticles(rinfo);	//queue up particles for rendering.
+		}
 
 		SortingRendererClass::Flush();	//draw sorted translucent polys like particles.
 #ifdef DEBUG_LOGGING
@@ -1373,10 +1380,12 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 	   flagOccludedObjects(&rinfo.Camera);
 #endif
    }
-   Visibility_Checked = false;	
-	
+   Visibility_Checked = false;
 
-	RefRenderObjListIterator it(&UpdateList);	
+	if (m_customPassMode == SCENE_PASS_DEFAULT && !ShaderClass::Is_Backface_Culling_Inverted())
+		parkSpentDynamicLights();
+
+	RefRenderObjListIterator it(&UpdateList);
 	// allow all objects in the update list to do their "every frame" processing
 	for (it.First(); !it.Is_Done(); it.Next()) {
 		RenderObjClass * robj = it.Peek_Obj();
@@ -1640,9 +1649,7 @@ void RTS3DScene::flushOccludedObjectsIntoStencil(RenderInfoClass & rinfo)
 			robj=m_potentialOccludees[i];
 
 			draw = ((DrawableInfo *)robj->Get_User_Data())->m_drawable;
-			Object *object=draw->getObject();
-
-			Int index=object->getControllingPlayer()->getPlayerIndex();
+			Int index=draw->getObjectForDraw().playerIndex;
 
 			if ((lastPlayerObject[index]-&playerObjects[index][0]) >= MAX_VISIBLE_OCCLUDED_PLAYER_OBJECTS)
 			{
@@ -1680,9 +1687,7 @@ void RTS3DScene::flushOccludedObjectsIntoStencil(RenderInfoClass & rinfo)
 					//assign a color to this index by copying it from the controlling player
 					//of all objects in this list.
 					draw = ((DrawableInfo *)playerObjects[i][0]->Get_User_Data())->m_drawable;
-					Object *object=draw->getObject();
-
-					Int color=clientPlayerColor(object->getControllingPlayer());
+					Int color=draw->getObjectForDraw().playerColor;
 					RGB_To_HSV(hsv,Vector3(((color>>16)&0xff)/255.0f,((color>>8)&0xff)/255.0f,(color &0xff)/255.0f));
 					hsv.Z*=TheGlobalData->m_occludedLuminanceScale;
 					HSV_To_RGB(rgb,hsv);
@@ -1851,9 +1856,7 @@ void RTS3DScene::flushOccludedObjects(RenderInfoClass & rinfo)
 			robj=m_potentialOccludees[i];
 
 			draw = ((DrawableInfo *)robj->Get_User_Data())->m_drawable;
-			Object *object=draw->getObject();
-
-			Int index=object->getControllingPlayer()->getPlayerIndex();
+			Int index=draw->getObjectForDraw().playerIndex;
 
 			rinfo.Push_Material_Pass(m_occludedMaterialPass[index]);
 			robj->Render(rinfo);
@@ -1974,11 +1977,42 @@ W3DDynamicLight * RTS3DScene::getADynamicLight(void)
 				return(pLight);
 			}
 		}
-		pLight = NEW_REF(W3DDynamicLight, ());
+		if (m_spentDynamicLights.empty())
+			pLight = NEW_REF(W3DDynamicLight, ());
+		else
+		{
+			pLight = m_spentDynamicLights.back();
+			m_spentDynamicLights.pop_back();
+		}
 		addDynamicLight( pLight );
 		pLight->Release_Ref();
 		pLight->setEnabled(true);
 		return(pLight);
+}
+
+//=============================================================================
+// RTS3DScene::parkSpentDynamicLights
+//=============================================================================
+/** Takes the lights that are off and out of the terrain's tiles out of both lists.  The pool used
+	* to keep every light the busiest moment of the match had needed, mostly off, and the five walks
+	* over it a frame (the fade, the terrain, the blast lights, the smoke's pulses, a model's own
+	* lights under -d3d9) read each one: a late match had thousands to step over, all of it cache
+	* misses the logic thread's own walks then had to share the memory with. */
+//=============================================================================
+void RTS3DScene::parkSpentDynamicLights(void)
+{
+	RefRenderObjListIterator dynaLightIt(&m_dynamicLightList);
+	for (dynaLightIt.First(); !dynaLightIt.Is_Done(); )
+	{
+		W3DDynamicLight *pLight = (W3DDynamicLight*)dynaLightIt.Peek_Obj();
+		dynaLightIt.Next();
+		if (!pLight->isSpent())
+			continue;
+		pLight->Add_Ref();
+		m_spentDynamicLights.push_back(pLight);
+		UpdateList.Remove(pLight);
+		m_dynamicLightList.Remove(pLight);
+	}
 }
 
 //=============================================================================
@@ -2250,9 +2284,9 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 								drawInfo->m_flags |= DrawableInfo::ERF_POTENTIAL_OCCLUDER;
 							}
 							else
-							if (draw->getObject() &&
+							if (draw->getObjectForDraw().hasObject &&
 									(draw->isKindOf(KINDOF_SCORE) || draw->isKindOf(KINDOF_SCORE_CREATE) || draw->isKindOf(KINDOF_SCORE_DESTROY) || draw->isKindOf(KINDOF_MP_COUNT_FOR_VICTORY)) &&
-									(draw->getObject()->getSafeOcclusionFrame()) <= currentFrame && m_numPotentialOccludees < TheGlobalData->m_maxVisibleOccludeeObjects)
+									draw->getObjectForDraw().safeOcclusionFrame <= currentFrame && m_numPotentialOccludees < TheGlobalData->m_maxVisibleOccludeeObjects)
 							{	//object which could be occluded but still needs to be visible.
 								//We process transucent units twice (also in m_translucentObjectsBuffer) because we need to see them when occluded.
 								m_potentialOccludees[m_numPotentialOccludees++]=robj;

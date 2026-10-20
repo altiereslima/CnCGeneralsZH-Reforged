@@ -34,6 +34,7 @@
 #define _GAME_INTERFACE_H_
 
 #include "Common/GameType.h"
+#include "Common/LogicThread.h"
 #include "Common/MessageStream.h"		// for GameMessageTranslator
 #include "Common/Snapshot.h"
 #include "Common/STLTypedefs.h"
@@ -110,7 +111,7 @@ public:
 	virtual void update( void );																				///< Updates the GUI, display, audio, etc
 	virtual void reset( void );																					///< reset system
 
-	virtual void setFrame( UnsignedInt frame ) { m_frame = frame; }			///< Set the GameClient's internal frame number
+	virtual void setFrame( UnsignedInt frame ) { LOGIC_CENSUS( CENSUS_GAMECLIENT ); m_frame = frame; }	///< Set the GameClient's internal frame number
 	virtual void registerDrawable( Drawable *draw );										///< Given a drawable, register it with the GameClient and give it a unique ID
 
 	void addDrawableToLookupTable( Drawable *draw );			///< add drawable ID to hash lookup table
@@ -148,13 +149,19 @@ public:
 
 	virtual Drawable *friend_createDrawable( const ThingTemplate *thing, DrawableStatus statusBits = DRAWABLE_STATUS_NONE ) = 0;
 	virtual void destroyDrawable( Drawable *draw );											///< Destroy the given drawable
+	void flushDestroyedDrawables( void );		///< delete what destroyDrawable left for after the tick (Drawable::tickDefersLifetime)
+	void linkDrawablesOfTick( void );				///< after the tick: what it destroyed leaves the list and the lookup, what it made joins them
 
 	virtual void setTimeOfDay( TimeOfDay tod );													///< Tell all the drawables what time of day it is now
 
 	virtual void selectDrawablesInGroup( Int group );									///< select all drawables belong to the specifies group
 	virtual void assignSelectedDrawablesToGroup( Int group );						///< assign all selected drawables to the specified group
 	//---------------------------------------------------------------------------------------
-	virtual UnsignedInt getFrame( void ) { return m_frame; }						///< Returns the current simulation frame number
+	virtual UnsignedInt getFrame( void ) { return LogicThread::isInsideWindow() ? m_frameForDraw : m_frame; }	///< Returns the current simulation frame number
+	/** LOGIC-THREAD.md phase 3, step 3b: the frame the render draws.  A tick handed over beside the render
+		* moves m_frame to its own frame first (LogicThread::runTick), and the window's clocks (tree sway,
+		* move hints, string caches) read the frame they read when the tick ran after the draw. */
+	void takeFrameForDraw( void ) { m_frameForDraw = m_frame; }
 
 	//---------------------------------------------------------------------------
 	virtual void setTeamColor( Int red, Int green, Int blue ) = 0;  ///< @todo superhack for demo, remove!!!
@@ -182,10 +189,13 @@ protected:
 
 	// @todo Should there be a separate GameClient frame counter?
 	UnsignedInt m_frame;																				///< Simulation frame number from server
+	UnsignedInt m_frameForDraw = 0;																///< see takeFrameForDraw
 
 	Drawable *m_drawableList;																		///< All of the drawables in the world
 //	DrawablePtrHash m_drawableHash;															///< Used for DrawableID lookups
 	DrawablePtrVector m_drawableVector;
+	std::vector<Drawable*> m_destroyedInTick;										///< destroyed inside a tick: unlinked by linkDrawablesOfTick, deleted by flushDestroyedDrawables
+	std::vector<Drawable*> m_madeInTick;												///< made inside a tick: neither in the list nor in the lookup until linkDrawablesOfTick
 
 	DrawableID m_nextDrawableID;																///< For allocating drawable id's
 	DrawableID allocDrawableID( void );													///< Returns a new unique drawable id
@@ -266,29 +276,6 @@ private:
 		} \
 	} while (0);
 
-/** -----------------------------------------------------------------------------------------------
- * Given an object id, return the associated object.
- * This method is the primary interface for accessing objects, and should be used
- * instead of pointers to "attach" objects to each other.
- */
-inline Drawable* GameClient::findDrawableByID( const DrawableID id )
-{
-	if( id == INVALID_DRAWABLE_ID )
-		return NULL;
-
-//	DrawablePtrHashIt it = m_drawableHash.find(id);
-//	if (it == m_drawableHash.end()) {
-//		// no such drawable	
-//		return NULL;
-//	}
-//
-//	return (*it).second;
-
-	if( (Int)id < m_drawableVector.size() )
-		return m_drawableVector[(Int)id];
-
-	return NULL;
-}
 
 
 // the singleton

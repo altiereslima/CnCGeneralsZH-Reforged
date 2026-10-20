@@ -35,7 +35,10 @@
 
 class GameWindow;
 class GameInfo;
+class GameSlot;
 
+// Hides the named windows of a room while a popup (a map list) lies over them; showing brings back
+// only the ones the last hide took down, so a box hidden for its own reason stays hidden.
 void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const char *parentName,
 															 const char **gadgetsToHide, const char **perPlayerGadgetsToHide );
 
@@ -112,6 +115,40 @@ void InitLobbyTabs(GameWindow *parent, const char *layoutFilename,
 									 const char *otherTabName, const char *otherWindowName);
 Bool LobbyTabClicked(NameKeyType controlID);
 void ShutdownLobbyTabs(void);
+
+// The personality column: one combo box a seat, one entry per AIPersonality in enum order with the
+// value as item data, shown only on a computer player's seat and changed only by the host; on any
+// other seat UpdateAIPersonaComboBoxes widens the player box over the empty column.  The
+// layout in a stale Run/Window may not have the column, so a box that is not there stays NULL and
+// its seat plays Normal.  HandleAIPersonaSelection answers TRUE when the click was one of the boxes
+// and changed its slot, so a network lobby knows to send the options round.
+void InitAIPersonaComboBoxes(GameWindow *parent, const char *layoutFilename,
+														 GameWindow *comboPersona[], NameKeyType comboPersonaID[]);
+void UpdateAIPersonaComboBoxes(GameInfo *myGame, GameWindow *comboPersona[]);
+Bool HandleAIPersonaSelection(GameInfo *myGame, GameWindow *comboPersona[], NameKeyType comboPersonaID[],
+															NameKeyType controlID);
+
+// What a seat row shows beside its combo boxes: a bar and a swatch in the seat's colour, a swatch in
+// the team's colour (both framed like the check boxes), and in the network rooms a green card for
+// a player who is ready and a gold edge round the host's.  All of it is drawn from the slot on every
+// update and none of it takes input.  A layout without the windows (a stale Run/Window) leaves them
+// NULL and the room looks as it did.
+void InitLobbySeatVisuals(GameWindow *parent, const char *layoutFilename);
+void UpdateLobbySeatVisuals(GameInfo *myGame);
+void ShutdownLobbySeatVisuals(void);
+// Team 0 to 3 (shown as 1 to 4) each have a colour none of the players can pick; no team is the
+// empty seat's slate.  The map's start spots wear
+// them too.
+Color LobbyTeamColor(Int team);
+Color LobbySeatColor(const GameSlot *slot);
+// Black or white, whichever has the higher WCAG contrast on this fill.
+Color LobbyTextColorOn(Color fill);
+// A taken start spot over EA's PlayerStart drawn in this rectangle: its middle in the colour and its
+// ring as EA drew it.  The room's spot buttons and the load screen's map both draw it.
+void LobbyStartSpotFill(Int x, Int y, Int width, Int height, Color fill);
+// The map pickers' Official / Unofficial radio buttons drawn as UIStyle tabs: the open one's label
+// ACTIVE, a disabled one's MUTED.  The pickers' init sets it as both buttons' draw function.
+void DrawMapListTab(GameWindow *window, class WinInstanceData *instData);
 
 void EnableSlotListUpdates( Bool val );
 Bool AreSlotListUpdatesEnabled( void );

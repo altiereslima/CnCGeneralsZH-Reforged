@@ -183,17 +183,25 @@ static void normAngle(Real &angle)
 }
 
 #define TERRAIN_SAMPLE_SIZE 40.0f
+/* What W3DTerrainLogic::getGroundHeight answers, asked of the terrain object directly: the camera of a
+	 picture drawn beside a tick (LOGIC-THREAD.md phase 4) builds inside the overlap window, where the
+	 object reads the drawn map, and the logic accessor would count it as a read of logic's heights. */
+static Real cameraGroundHeight(Real x, Real y)
+{
+	return TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(x, y, NULL) : 0.0f;
+}
+
 static Real getHeightAroundPos(Real x, Real y)
 {
 	// terrain height + desired height offset == cameraOffset * actual zoom
-	Real terrainHeight = TheTerrainLogic->getGroundHeight(x, y);
+	Real terrainHeight = cameraGroundHeight(x, y);
 
 	// find best approximation of max terrain height we can see
 	Real terrainHeightMax = terrainHeight;
-	terrainHeightMax = max(terrainHeightMax, TheTerrainLogic->getGroundHeight(x+TERRAIN_SAMPLE_SIZE, y-TERRAIN_SAMPLE_SIZE));
-	terrainHeightMax = max(terrainHeightMax, TheTerrainLogic->getGroundHeight(x-TERRAIN_SAMPLE_SIZE, y-TERRAIN_SAMPLE_SIZE));
-	terrainHeightMax = max(terrainHeightMax, TheTerrainLogic->getGroundHeight(x+TERRAIN_SAMPLE_SIZE, y+TERRAIN_SAMPLE_SIZE));
-	terrainHeightMax = max(terrainHeightMax, TheTerrainLogic->getGroundHeight(x-TERRAIN_SAMPLE_SIZE, y+TERRAIN_SAMPLE_SIZE));
+	terrainHeightMax = max(terrainHeightMax, cameraGroundHeight(x+TERRAIN_SAMPLE_SIZE, y-TERRAIN_SAMPLE_SIZE));
+	terrainHeightMax = max(terrainHeightMax, cameraGroundHeight(x-TERRAIN_SAMPLE_SIZE, y-TERRAIN_SAMPLE_SIZE));
+	terrainHeightMax = max(terrainHeightMax, cameraGroundHeight(x+TERRAIN_SAMPLE_SIZE, y+TERRAIN_SAMPLE_SIZE));
+	terrainHeightMax = max(terrainHeightMax, cameraGroundHeight(x-TERRAIN_SAMPLE_SIZE, y+TERRAIN_SAMPLE_SIZE));
 
 	return terrainHeightMax;
 }
@@ -1254,6 +1262,8 @@ const Coord3D& W3DView::get3DCameraPosition() const
 void W3DView::reset( void )
 {
 	View::reset();
+	// the recording outlives its replays now (Display::replay); its strings go with Display::reset
+	m_postDraw.clear();
 
 	// a match that ends in the freecam leaves it there; the next one starts on the player's camera
 	if (m_freeCamera)
@@ -1581,12 +1591,12 @@ static void drawablePostDraw( Drawable *draw, void *userData )
 	if (CinemaDirector_hidesHud() && !TheGlobalData->m_directorRecord)
 		return;
 
+	// the shroud as GameClient::update's pass asked it, ahead of the draw (LOGIC-THREAD.md phase 3)
 	Object* obj = draw->getObject();
-	Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 #if defined(_DEBUG) || defined(_INTERNAL)
-	ObjectShroudStatus ss = (!obj || !TheGlobalData->m_shroudOn) ? OBJECTSHROUD_CLEAR : obj->getShroudedStatus(localPlayerIndex);
+	ObjectShroudStatus ss = (!obj || !TheGlobalData->m_shroudOn) ? OBJECTSHROUD_CLEAR : draw->getShroudForDraw();
 #else
-	ObjectShroudStatus ss = (!obj) ? OBJECTSHROUD_CLEAR : obj->getShroudedStatus(localPlayerIndex);
+	ObjectShroudStatus ss = (!obj) ? OBJECTSHROUD_CLEAR : draw->getShroudForDraw();
 #endif
 	if (ss > OBJECTSHROUD_PARTIAL_CLEAR)
 		return;
@@ -1668,6 +1678,26 @@ Bool W3DView::updateCameraMovements()
 void W3DView::updateView(void)
 {
 	UPDATE();
+}
+
+void W3DView::updateCameraBesideTick( void )
+{
+	// a slaved camera (the 3DS Max playback) looks its unit up through the script engine as it builds
+	if (m_recalcCamera && !m_freeCamera && !m_isCameraSlaved)
+		setCameraTransform();
+	m_recalcCamera = false;
+}
+
+ICoord2D W3DView::overlayShift( void )
+{
+	ICoord2D shift = { 0, 0 };
+	ICoord2D anchorNow;
+	if( m_postDrawAnchorProjected && worldToScreenTriReturn( &m_postDrawAnchor, &anchorNow ) != WTS_INVALID )
+	{
+		shift.x = anchorNow.x - m_postDrawAnchorAt.x;
+		shift.y = anchorNow.y - m_postDrawAnchorAt.y;
+	}
+	return shift;
 }
 
 DECLARE_PERF_TIMER(W3DView_updateView)
@@ -2243,6 +2273,7 @@ Bool W3DView::setViewFilterMode(enum FilterModes filterMode)
 //-------------------------------------------------------------------------------------------------
 Bool W3DView::setViewFilter(enum FilterTypes filter)
 {
+	LOGIC_CENSUS( CENSUS_TACTICALVIEW );
 	FilterTypes oldFilter = m_viewFilter;	//save previous filter in case setup fails.
 
 	m_viewFilter = filter;
@@ -2322,6 +2353,56 @@ static Real viewElapsedMS( const Int64 &from, const Int64 &to )
 }
 #endif
 
+//-------------------------------------------------------------------------------------------------
+/** LOGIC-THREAD.md phase 3.  The post draw over the finished world - health bars, ranks, ammo, the
+	* capture clock, captions, group numbers - asks each object what to show, so it runs here, at the
+	* sync point before the render, and records what it draws; draw replays it where it always went.
+	* The view's camera is the one updateViews left, which the render draws with. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::recordPostDraw( void )
+{
+	// a view filter draws the camera's locked object on its own, over the filtered scene (draw)
+	const Object *cameraLockObj = getCameraLock() != INVALID_ID ? TheGameLogic->findObjectByID( getCameraLock() ) : NULL;
+	m_cameraLockDrawForDraw = cameraLockObj ? cameraLockObj->getDrawable() : NULL;
+
+	Region3D axisAlignedRegion;
+	getAxisAlignedViewRegion(axisAlignedRegion);
+
+	TheGameClient->resetRenderedObjectCount();
+	// the post draw is where health bars are drawn, and each one records where it landed
+	TheGameClient->clearHealthBarPickRegions();
+#ifdef DEBUG_LOGGING
+	Int64 tIconStart = Clock_Ticks();
+#endif
+	TheDisplay->beginRecording( &m_postDraw );
+	TheGameClient->iterateDrawablesInRegion( &axisAlignedRegion, drawablePostDraw, this );
+	TheGameClient->flushTextBearingDrawables();
+	TheDisplay->endRecording();
+
+	// a picture drawn again beside the tick (phase 4) moves this list with its camera, by how far
+	// the ground under the camera moved on the screen
+	getPosition( &m_postDrawAnchor );
+	m_postDrawAnchor.z = cameraGroundHeight( m_postDrawAnchor.x, m_postDrawAnchor.y );
+	m_postDrawAnchorProjected = worldToScreenTriReturn( &m_postDrawAnchor, &m_postDrawAnchorAt ) != WTS_INVALID;
+#ifdef DEBUG_LOGGING
+	TheIconDrawMS = viewElapsedMS( tIconStart, Clock_Ticks() );
+#endif
+}
+
+/* LOGIC-THREAD.md phase 3, step 3b: the locked drawable is left out of a filtered scene and drawn alone
+	 over it by hiding its render objects.  It used to go through Drawable::setDrawableHidden, which writes
+	 a field the tick writes beside the render and deselected the unit for the frame; shown again, the
+	 render objects take the drawable's own look. */
+static void hideLockedDrawable( Drawable *draw, Bool hide )
+{
+	for( DrawModule **dm = draw->getDrawModulesNonDirty(); *dm; ++dm )
+	{
+		ObjectDrawInterface *di = (*dm)->getObjectDrawInterface();
+		if( di )
+			di->setHidden( hide );
+	}
+}
+
 void W3DView::draw( void )
 {
 	USE_PERF_TIMER(W3DView_drawView)
@@ -2336,15 +2417,8 @@ void W3DView::draw( void )
 	{	
 		// Most likely will redirect rendering to a texture.
 		preRenderResult=W3DShaderManager::filterPreRender(m_viewFilter, skipRender, customScenePassMode);
-		if (!skipRender && getCameraLock()) 
-		{
-			Object* cameraLockObj = TheGameLogic->findObjectByID(getCameraLock());
-			if (cameraLockObj) 
-			{
-				Drawable *drawable = cameraLockObj->getDrawable();
-				drawable->setDrawableHidden(true);
-			}
-		}
+		if (!skipRender && m_cameraLockDrawForDraw)
+			hideLockedDrawable( m_cameraLockDrawForDraw, TRUE );
 	}
 
 	if (!skipRender) 
@@ -2385,13 +2459,11 @@ void W3DView::draw( void )
 									 (Int)m_viewFilter, (Int)m_viewFilterMode));
 			}
 		}
-		if (!skipRender && getCameraLock()) 
+		if (!skipRender && m_cameraLockDrawForDraw)
 		{
-			Object* cameraLockObj = TheGameLogic->findObjectByID(getCameraLock());
-			if (cameraLockObj) 
 			{
-				Drawable *drawable = cameraLockObj->getDrawable();
-				drawable->setDrawableHidden(false);
+				Drawable *drawable = m_cameraLockDrawForDraw;
+				hideLockedDrawable( drawable, drawable->isDrawableEffectivelyHidden() );
 				RenderInfoClass rinfo(*m_3DCamera);
 				// Apply the camera and viewport (including depth range)
 				m_3DCamera->Apply();
@@ -2648,13 +2720,6 @@ void W3DView::draw( void )
   }
 #endif // DEBUG or INTERNAL
 
-	Region3D axisAlignedRegion;
-	getAxisAlignedViewRegion(axisAlignedRegion);
-
-	//
-	// there are several things we might want to do as a post pass on the objects after
-	// they are all drawn
-	/// @todo we might want to consider wiping this iterate out if there is nothing to post draw
 	//
 	// The world is finished here and everything below this line is drawn over it: health bars,
 	// veterancy chevrons, unit names, the 2D scene.  So this is where -dx11post's chain runs, and
@@ -2666,7 +2731,7 @@ void W3DView::draw( void )
 	//
 	// Nothing happens here unless a chain was asked for, and only the first view of a frame runs it.
 #ifdef DEBUG_LOGGING
-	Int64 tPostChainStart, tPostChainEnd, tIconStart, tIconEnd;
+	Int64 tPostChainStart, tPostChainEnd;
 	tPostChainStart = Clock_Ticks();
 #endif
 	updateScreenDistortions();
@@ -2676,19 +2741,13 @@ void W3DView::draw( void )
 	ThePostChainMS = viewElapsedMS( tPostChainStart, tPostChainEnd );
 #endif
 
-	TheGameClient->resetRenderedObjectCount();
-	// the post draw is where health bars are drawn, and each one records where it landed
-	TheGameClient->clearHealthBarPickRegions();
-#ifdef DEBUG_LOGGING
-	tIconStart = Clock_Ticks();
-#endif
-	TheGameClient->iterateDrawablesInRegion( &axisAlignedRegion, drawablePostDraw, this );
-#ifdef DEBUG_LOGGING
-	tIconEnd = Clock_Ticks();
-	TheIconDrawMS = viewElapsedMS( tIconStart, tIconEnd );
-#endif
-
-	TheGameClient->flushTextBearingDrawables();
+	// the health bars and the rest of the post draw, recorded at the sync point by recordPostDraw.  A
+	// picture drawn again beside the tick has a camera that scrolled since, so the list moves with
+	// the ground under the camera.  ponytail: one shift for the whole screen, so on a scroll a bar
+	// near the camera or far from it is off by the perspective difference for one picture, and a
+	// rotation or zoom keeps the sync point's layout; recording world anchors per entry fixes both
+	const ICoord2D shift = overlayShift();
+	TheDisplay->replayShifted( m_postDraw, shift.x, shift.y );
 
 	// Render 2D scene
 	W3DDisplay::m_2DScene->doRender( m_2DCamera );
@@ -3289,8 +3348,9 @@ Bool W3DView::screenToTerrain( const ICoord2D *screen, Coord3D *world )
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-void W3DView::lookAt( const Coord3D *o ) 
+void W3DView::lookAt( const Coord3D *o )
 {
+	LOGIC_CENSUS( CENSUS_TACTICALVIEW );
 	Coord3D pos = *o;
 
 
@@ -3399,6 +3459,7 @@ void W3DView::initHeightForMap( void )
 //-------------------------------------------------------------------------------------------------
 void W3DView::moveCameraTo(const Coord3D *o, Int milliseconds, Int shutter, Bool orient, Real easeIn, Real easeOut)
 {
+	LOGIC_CENSUS( CENSUS_TACTICALVIEW );
 	m_mcwpInfo.waypoints[0] = *getPosition();	
 	m_mcwpInfo.cameraAngle[0] = getAngle();	
 	m_mcwpInfo.waySegLength[0] = 0;	
@@ -3814,18 +3875,22 @@ void W3DView::resetCamera(const Coord3D *location, Int milliseconds, Real easeIn
 // ------------------------------------------------------------------------------------------------
 Bool W3DView::isCameraMovementFinished(void)
 {
-	if (m_viewFilter == FT_VIEW_MOTION_BLUR_FILTER) {
-		// Several of the motion blur effects are similar to camera movements.
-		if (m_viewFilterMode == FM_VIEW_MB_IN_AND_OUT_ALPHA ||
-				m_viewFilterMode == FM_VIEW_MB_IN_AND_OUT_SATURATE ||
-				m_viewFilterMode == FM_VIEW_MB_IN_ALPHA ||
-				m_viewFilterMode == FM_VIEW_MB_OUT_ALPHA ||
-				m_viewFilterMode == FM_VIEW_MB_IN_SATURATE ||
-				m_viewFilterMode == FM_VIEW_MB_OUT_SATURATE ) {
-			return true;
-		}
-	}
-	return !m_doingMoveCameraOnWaypointPath && !m_doingRotateCamera && !m_doingPitchCamera && !m_doingZoomCamera;
+	LOGIC_CENSUS( CENSUS_CLIENT_READ );
+	return isCameraMotionBlurring() || !isCameraMoving();
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+Bool W3DView::isCameraMotionBlurring(void)
+{
+	// Several of the motion blur effects are similar to camera movements.
+	return m_viewFilter == FT_VIEW_MOTION_BLUR_FILTER &&
+		(m_viewFilterMode == FM_VIEW_MB_IN_AND_OUT_ALPHA ||
+		 m_viewFilterMode == FM_VIEW_MB_IN_AND_OUT_SATURATE ||
+		 m_viewFilterMode == FM_VIEW_MB_IN_ALPHA ||
+		 m_viewFilterMode == FM_VIEW_MB_OUT_ALPHA ||
+		 m_viewFilterMode == FM_VIEW_MB_IN_SATURATE ||
+		 m_viewFilterMode == FM_VIEW_MB_OUT_SATURATE);
 }
 
 
@@ -4249,6 +4314,7 @@ void W3DView::moveAlongWaypointPath(Int milliseconds)
 // ------------------------------------------------------------------------------------------------
 void W3DView::shake( const Coord3D *epicenter, CameraShakeType shakeType )
 {
+	LOGIC_CENSUS( CENSUS_TACTICALVIEW );
 	Real angle = GameClientRandomValueReal( 0, 2*PI );
 
 	m_shakeAngleCos = (Real)cos( angle );

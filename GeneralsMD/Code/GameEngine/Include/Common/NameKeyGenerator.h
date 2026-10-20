@@ -40,6 +40,7 @@
 #include "Common/GameMemory.h"
 #include "Common/AsciiString.h"
 
+#include <mutex>
 #include <vector>
 
 //------------------------------------------------------------------------------------------------- 
@@ -130,6 +131,9 @@ private:
 	/// Every bucket again, at its key less one.  keyToName used to walk all 45007 sockets for each
 	/// call, and a player's AI scripts ask it thousands of times: a fifth of a replay rewind.
 	std::vector<Bucket*> m_bucketsByKey;
+	/// LOGIC-THREAD.md hazard 12: both threads mint keys at run time, and two inserts at once break a
+	/// socket's chain.  Taken by every lookup; it is a leaf, apart from the pool lock a new Bucket takes.
+	std::mutex		m_lock;
 
 };  // end class NameKeyGenerator
 

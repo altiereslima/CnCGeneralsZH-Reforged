@@ -35,6 +35,7 @@
 #include "GameClient/FXList.h"
 
 #include "Common/DrawModule.h"
+#include "Common/LogicThread.h"
 #include "Common/GameAudio.h"
 #include "Common/INI.h"
 #include "Common/Player.h"
@@ -86,12 +87,25 @@ static void adjustVector(Coord3D *vec, const Matrix3D* mtx)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 //-------------------------------------------------------------------------------------------------
-void FXNugget::doFXObj(const Object* primary, const Object* secondary) const
+void FXObjectView::take( const Object *obj )
 {
-	const Coord3D* p = primary ? primary->getPosition() : NULL;
-	const Matrix3D* mtx = primary ? primary->getTransformMatrix() : NULL;
+	id = obj->getID();
+	position = *obj->getPosition();
+	transform = *obj->getTransformMatrix();
+	const Player *player = obj->getControllingPlayer();
+	playerIndex = player ? player->getPlayerIndex() : -1;
+	boundingCircleRadius = obj->getGeometryInfo().getBoundingCircleRadius();
+	alwaysClear = obj->isKindOf(KINDOF_ALWAYS_VISIBLE) || obj->friend_getPartitionData() == NULL;
+	drawable = obj->getDrawable();
+}
+
+//-------------------------------------------------------------------------------------------------
+void FXNugget::doFXObj(const FXObjectView* primary, const FXObjectView* secondary) const
+{
+	const Coord3D* p = primary ? &primary->position : NULL;
+	const Matrix3D* mtx = primary ? &primary->transform : NULL;
 	const Real speed = 0.0f;	// yes, that's right -- NOT the object's speed.
-	const Coord3D* s = secondary ? secondary->getPosition() : NULL;
+	const Coord3D* s = secondary ? &secondary->position : NULL;
 	doFXPos(p, mtx, speed, s);
 }
 
@@ -114,13 +128,13 @@ public:
 		TheAudio->addAudioEvent(&sound);
 	}
 
-	virtual void doFXObj(const Object* primary, const Object* secondary = NULL) const
+	virtual void doFXObj(const FXObjectView* primary, const FXObjectView* secondary = NULL) const
 	{
 		AudioEventRTS sound(m_soundName);
 		if (primary)
 		{
-			sound.setPlayerIndex(primary->getControllingPlayer()->getPlayerIndex());
-			sound.setPosition(primary->getPosition());
+			sound.setPlayerIndex(primary->playerIndex);
+			sound.setPosition(&primary->position);
 		}
 
 		TheAudio->addAudioEvent(&sound);
@@ -327,16 +341,16 @@ public:
 		m_color.red = m_color.green = m_color.blue = 0;
 	}
 
-	virtual void doFXObj(const Object* primary, const Object* /*secondary*/) const
+	virtual void doFXObj(const FXObjectView* primary, const FXObjectView* /*secondary*/) const
 	{
 		if (primary)
 		{
 			Real radius = m_radius;
 
 			if (m_boundingCirclePct > 0)
-				radius = (primary->getGeometryInfo().getBoundingCircleRadius() * m_boundingCirclePct);
+				radius = (primary->boundingCircleRadius * m_boundingCirclePct);
 
-			TheDisplay->createLightPulse(primary->getPosition(), &m_color, 1, radius, m_increaseFrames, m_decreaseFrames);
+			TheDisplay->createLightPulse(&primary->position, &m_color, 1, radius, m_increaseFrames, m_decreaseFrames);
 		}
 		else
 		{
@@ -584,11 +598,11 @@ public:
 		if (m_atTarget)
 		{
 			DEBUG_ASSERTCRASH(secondary, ("ParticleSystem %s is AtTarget but the FX has no target\n", m_name.str()));
-			reallyDoFX(secondary, NULL, NULL, overrideRadius);
+			reallyDoFX(secondary, NULL, INVALID_ID, overrideRadius);
 		}
 		else if (primary)
 		{
-			reallyDoFX(primary, primaryMtx, NULL, overrideRadius);
+			reallyDoFX(primary, primaryMtx, INVALID_ID, overrideRadius);
 		}
 		else
 		{
@@ -596,7 +610,7 @@ public:
 		}
 	}
 
-	virtual void doFXObj(const Object* primary, const Object* secondary) const
+	virtual void doFXObj(const FXObjectView* primary, const FXObjectView* secondary) const
 	{
 		if (primary)
 		{
@@ -605,18 +619,18 @@ public:
 			{
 				// HERE WE MUST BUILD A MATRIX WHICH WILL ORIENT THE NEW PARTICLE SYSTEM TO FACE AWAY FROM THE SECONDARY OBJECT
 				// THE RESULT SHOULD LOOK LIKE THE DIRECTION OF THE "ATTACK" IS CARRIED THROUGH LIKE A RICOCHET
-				Real deltaX = primary->getPosition()->x - secondary->getPosition()->x;
-				Real deltaY = primary->getPosition()->y - secondary->getPosition()->y;
+				Real deltaX = primary->position.x - secondary->position.x;
+				Real deltaY = primary->position.y - secondary->position.y;
 				Real aimingAngle = atan2(deltaY, deltaX);
 				Matrix3D aimingMatrix(1);
 				aimingMatrix.Rotate_Z( aimingAngle );
 
-				reallyDoFX(primary->getPosition(), &aimingMatrix, primary, 0.0f);
+				reallyDoFX(&primary->position, &aimingMatrix, primary->id, 0.0f);
 			}
 			else
 				// if we have an object, then adjust the offset and direction by the object's transformation
 				// matrix, so that (say) an offset of +10 in the z axis "follows" the orientation of the object.
-				reallyDoFX(primary->getPosition(), primary->getTransformMatrix(), primary, 0.0f);
+				reallyDoFX(&primary->position, &primary->transform, primary->id, 0.0f);
 		}
 		else
 		{
@@ -653,7 +667,7 @@ public:
 
 protected:
 
-	void reallyDoFX(const Coord3D *primary, const Matrix3D* mtx, const Object* thingToAttachTo, Real overrideRadius ) const
+	void reallyDoFX(const Coord3D *primary, const Matrix3D* mtx, ObjectID thingToAttachTo, Real overrideRadius ) const
 	{
 		Coord3D offset = m_offset;
 		if (mtx)
@@ -701,8 +715,10 @@ protected:
 					if (m_rotateZ != 0.0f)
 						sys->rotateLocalTransformZ(m_rotateZ);
 
-					if (m_attachToObject && thingToAttachTo)
-						sys->attachToObject(thingToAttachTo);
+					// by ID: an object the tick destroyed after asking for this is gone now, and the
+					// system lets go of it on its first update as it did of a dying one
+					if (m_attachToObject && thingToAttachTo != INVALID_ID)
+						sys->attachToObjectID(thingToAttachTo);
 					else
 						sys->setPosition( &newPos );
 
@@ -763,7 +779,7 @@ public:
 		DEBUG_CRASH(("You must use the object form for this effect"));
 	}
 
-	virtual void doFXObj(const Object* primary, const Object* /*secondary*/) const
+	virtual void doFXObj(const FXObjectView* primary, const FXObjectView* /*secondary*/) const
 	{
 		if (primary)
 		{
@@ -796,21 +812,27 @@ public:
 
 protected:
 
-	void doFxAtBones(const Object* obj, Int start) const
+	void doFxAtBones(const FXObjectView* obj, Int start) const
 	{
     Coord3D bonePos[MAX_BONE_POINTS];
     Matrix3D boneMtx[MAX_BONE_POINTS];
 
-    Drawable* draw = obj->getDrawable();
+    const Drawable* draw = obj->drawable;
 		if (draw)
 		{
 			// yes, BONEPOS_CURRENT_CLIENT_ONLY -- this is client-only, so should be safe to do.
 			Int count = draw->getCurrentClientBonePositions(m_boneName.str(), start, bonePos, boneMtx, MAX_BONE_POINTS);
 			for (Int i = 0; i < count; ++i)
 			{
+				// Thing::convertBonePosToWorldPos, on the transform the object had at the call
 				Coord3D p;
 				Matrix3D m;
-				obj->convertBonePosToWorldPos(&bonePos[i], &boneMtx[i], &p, &m);
+				m.mul(obj->transform, boneMtx[i]);
+				Vector3 v(bonePos[i].x, bonePos[i].y, bonePos[i].z);
+				Matrix3D::Transform_Vector(obj->transform, v, &v);
+				p.x = v.X;
+				p.y = v.Y;
+				p.z = v.Z;
 				FXList::doFXPos(m_fx, &p, &m, 0.0f, NULL, 0.0f);
 			}
 		}
@@ -870,6 +892,28 @@ void FXList::clear()
 //-------------------------------------------------------------------------------------------------
 void FXList::doFXPos(const Coord3D *primary, const Matrix3D* primaryMtx, const Real primarySpeed, const Coord3D *secondary, const Real overrideRadius ) const
 {
+	if (!LogicThread::defersEffects())
+	{
+		doFXPosNow(primary, primaryMtx, primarySpeed, secondary, overrideRadius);
+		return;
+	}
+
+	// LOGIC-THREAD.md phase 2, M5: after the tick, in order with its other effects, at the points the
+	// call named.  Every nugget dereferences the primary, so it is always there.
+	const Coord3D p = *primary;
+	const Bool hasMtx = primaryMtx != NULL;
+	const Matrix3D mtx = hasMtx ? *primaryMtx : Matrix3D(1);
+	const Bool hasSecondary = secondary != NULL;
+	const Coord3D s = hasSecondary ? *secondary : p;
+	LogicThread::callAfterTick( [this, p, hasMtx, mtx, primarySpeed, hasSecondary, s, overrideRadius]() {
+		doFXPosNow(&p, hasMtx ? &mtx : NULL, primarySpeed, hasSecondary ? &s : NULL, overrideRadius);
+	} );
+}
+
+//-------------------------------------------------------------------------------------------------
+void FXList::doFXPosNow(const Coord3D *primary, const Matrix3D* primaryMtx, const Real primarySpeed, const Coord3D *secondary, const Real overrideRadius ) const
+{
+	LOGIC_CENSUS( CENSUS_FXLIST );
 	if (ThePartitionManager->getShroudStatusForPlayer(TheObserverCamera.getShroudPlayerIndex(), primary) != CELLSHROUD_CLEAR)
 		return;
 
@@ -882,8 +926,60 @@ void FXList::doFXPos(const Coord3D *primary, const Matrix3D* primaryMtx, const R
 //-------------------------------------------------------------------------------------------------
 void FXList::doFXObj(const Object* primary, const Object* secondary) const
 {
-	if (primary && primary->getShroudedStatus(TheObserverCamera.getShroudPlayerIndex()) > OBJECTSHROUD_PARTIAL_CLEAR)
-		return;	//the primary object is fogged or shrouded so don't bother with the effect.
+	FXObjectView p = {}, s = {};
+	if (primary)
+		p.take(primary);
+	if (secondary)
+		s.take(secondary);
+
+	// LOGIC-THREAD.md phase 2, M5: inside a tick the FX plays after it, as the objects stood here
+	if (!LogicThread::defersEffects())
+	{
+		doFXObjNow(primary ? &p : NULL, secondary ? &s : NULL, primary);
+		return;
+	}
+	const Bool hasPrimary = primary != NULL;
+	const Bool hasSecondary = secondary != NULL;
+	LogicThread::callAfterTick( [this, p, s, hasPrimary, hasSecondary]() {
+		doFXObjNow(hasPrimary ? &p : NULL, hasSecondary ? &s : NULL, hasPrimary ? TheGameLogic->findObjectByID(p.id) : NULL);
+	} );
+}
+
+//-------------------------------------------------------------------------------------------------
+void FXList::doFXObjNow(const FXObjectView* primary, const FXObjectView* secondary, const Object* primaryObject) const
+{
+	LOGIC_CENSUS( CENSUS_FXLIST );
+	if (primary)
+	{
+		// The shroud is asked here and not at the call: the object's answer is a cache that can take a
+		// ghost snapshot into the scene.  An object the tick destroyed after asking is gone; the cells
+		// under its centre and its edge answer instead, any one clear being the object's partial clear.
+		const Int shroudPlayer = TheObserverCamera.getShroudPlayerIndex();
+		Bool hidden;
+		if (primaryObject)
+			hidden = primaryObject->getShroudedStatus(shroudPlayer) > OBJECTSHROUD_PARTIAL_CLEAR;
+		else if (primary->alwaysClear)
+			hidden = FALSE;
+		else
+		{
+			const Real r = primary->boundingCircleRadius;
+			const Coord3D &c = primary->position;
+			const Coord3D footprint[] = { c, { c.x + r, c.y, c.z }, { c.x - r, c.y, c.z }, { c.x, c.y + r, c.z }, { c.x, c.y - r, c.z } };
+			hidden = TRUE;
+			for (size_t i = 0; i < ARRAY_SIZE(footprint) && hidden; ++i)
+				hidden = ThePartitionManager->getShroudStatusForPlayer(shroudPlayer, &footprint[i]) != CELLSHROUD_CLEAR;
+		}
+		// An enemy's stealth this screen has not found plays nothing either, or the sparks, flare and
+		// light pulse of a hit mark the empty spot.  Its drawable's look is the screen's answer, the
+		// one its attached fire and smoke follow.  A dying one plays, as StealthUpdate shows it.
+		if (!hidden && primaryObject && !primaryObject->isEffectivelyDead())
+		{
+			const Drawable *draw = primaryObject->getDrawable();
+			hidden = draw && draw->getStealthLook() == STEALTHLOOK_INVISIBLE;
+		}
+		if (hidden)
+			return;	//the primary object is fogged, shrouded or unseen stealth so don't bother with the effect.
+	}
 
 	for (FXNuggetList::const_iterator it = m_nuggets.begin(); it != m_nuggets.end(); ++it)
 	{

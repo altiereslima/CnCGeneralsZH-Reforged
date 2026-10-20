@@ -1086,24 +1086,29 @@ UpdateSleepTime ProductionUpdate::update( void )
 
 			player->getAcademyStats()->recordUpgrade( upgrade, FALSE );
 			
-			//Also mark the UI dirty -- incase object with upgrade cameo is selected.
-			Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
-			Object *selectedObject = draw ? draw->getObject() : NULL;
-			if( selectedObject )
+			//Also mark the UI dirty -- incase object with upgrade cameo is selected.  The selection is
+			//the client's, so the client asks it after the tick (LOGIC-THREAD.md M7).
+			const UpgradeTemplate *finished = upgrade;
+			LogicThread::callAfterTick( [finished]()
 			{
-				const ThingTemplate *thing = selectedObject->getTemplate();
-				for( Int i = 0; i < MAX_UPGRADE_CAMEO_UPGRADES; i++ )
+				Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
+				Object *selectedObject = draw ? draw->getObject() : NULL;
+				if( selectedObject )
 				{
-					AsciiString upgradeName = thing->getUpgradeCameoName( i );
-					const UpgradeTemplate *testUpgrade = TheUpgradeCenter->findUpgrade( upgradeName );
-					if( testUpgrade == upgrade )
+					const ThingTemplate *thing = selectedObject->getTemplate();
+					for( Int i = 0; i < MAX_UPGRADE_CAMEO_UPGRADES; i++ )
 					{
-						//Our selected object has the upgrade
-						TheControlBar->markUIDirty();
-						break;
+						AsciiString upgradeName = thing->getUpgradeCameoName( i );
+						const UpgradeTemplate *testUpgrade = TheUpgradeCenter->findUpgrade( upgradeName );
+						if( testUpgrade == finished )
+						{
+							//Our selected object has the upgrade
+							TheControlBar->markUIDirty();
+							break;
+						}
 					}
 				}
-			}
+			} );
 
 			// remove this production entry so we can go on to the next
 			removeFromProductionQueue( production );

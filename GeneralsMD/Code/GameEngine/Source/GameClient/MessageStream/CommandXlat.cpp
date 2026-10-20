@@ -1455,7 +1455,9 @@ CommandTranslator::CommandTranslator() :
 	m_teamExists(false),
 	m_mouseRightDown(0),
 	m_mouseRightUp(0),
-	m_formationDragArmed(FALSE)
+	m_formationDragArmed(FALSE),
+	m_formationDragForceLine(FALSE),
+	m_formationDragRight(FALSE)
 {
 	m_mouseRightDragAnchor.x = 0;
 	m_mouseRightDragAnchor.y = 0;
@@ -1476,6 +1478,17 @@ CommandTranslator::~CommandTranslator()
  * line becomes the order its armed mode names; one that never did was a click, and the click
  * message behind this release gives that order instead.
  */
+void CommandTranslator::armFormationDrag( const ICoord2D& press, Bool rightButton )
+{
+	if( !TheInGameUI->wantsDragLine() )
+		return;
+	m_formationDragAnchor = press;
+	m_formationDragArmed = isFormationDragArmed();
+	m_formationDragForceLine = TheInGameUI->isForceLineHeld();
+	m_formationDragRight = rightButton;
+}
+
+//-------------------------------------------------------------------------------------------------
 void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 {
 	const Bool wasDrag = TheInGameUI->isFormationDragging();
@@ -1499,7 +1512,7 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 	// walks it and shoots what it meets; the attack key fires on the line where it stands
 	const GameMessage::Type formationType =
 		Command_formationMessage( TheInGameUI->isInAttackMoveToMode(),
-															TheInGameUI->isForceAttackArmed(),
+															TheInGameUI->isForceAttackArmed() || m_formationDragForceLine,
 															TheInGameUI->isGuardArmed() );
 
 	// the traced curve becomes world points; who stands where along it is decided on
@@ -2884,8 +2897,26 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		}		// end select next idle worker
 
 		case GameMessage::MSG_META_SELECT_NEXT_IDLE_UNIT:
+		case GameMessage::MSG_META_SELECT_NEXT_IDLE_AIRCRAFT:
+		case GameMessage::MSG_META_SELECT_NEXT_IDLE_VEHICLE:
+		case GameMessage::MSG_META_SELECT_NEXT_IDLE_INFANTRY:
 		{
-			TheInGameUI->selectNextIdleUnit();
+			// isIdleCombatUnit narrowed by kind; vehicles are ground vehicles only, as for the
+			// select-all vehicles key. The cycle keeps its own filter: no IGNORES_SELECT_ALL,
+			// mass-selectable or off-map test.
+			KindOfMaskType mustBeSet;
+			KindOfMaskType mustBeClear;
+			if( t == GameMessage::MSG_META_SELECT_NEXT_IDLE_AIRCRAFT )
+				mustBeSet.set( KINDOF_AIRCRAFT );
+			else if( t == GameMessage::MSG_META_SELECT_NEXT_IDLE_VEHICLE )
+			{
+				mustBeSet.set( KINDOF_VEHICLE );
+				mustBeClear.set( KINDOF_AIRCRAFT );
+			}
+			else if( t == GameMessage::MSG_META_SELECT_NEXT_IDLE_INFANTRY )
+				mustBeSet.set( KINDOF_INFANTRY );
+
+			TheInGameUI->selectNextIdleUnit( mustBeSet, mustBeClear );
 
 			disp = DESTROY_MESSAGE;
 			break;
@@ -3231,9 +3262,18 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_SELECT_ALL_BARRACKS:
 		case GameMessage::MSG_META_SELECT_ALL_WARFACTORIES:
 		case GameMessage::MSG_META_SELECT_ALL_AIRFIELDS:
+		case GameMessage::MSG_META_SELECT_ALL_IDLE_UNITS:
+		case GameMessage::MSG_META_SELECT_ALL_IDLE_AIRCRAFT:
+		case GameMessage::MSG_META_SELECT_ALL_IDLE_VEHICLES:
 		{
 			// one category per key; selectAllUnitsByType takes the screen first and the
-			// whole map when the screen has nothing new left, so a second press widens
+			// whole map when the screen has nothing new left, so a second press widens.
+			// The idle keys take only units standing with no order, the screen first; pressed
+			// twice inside half a second they take the whole map, the way SELECT_MATCHING_UNITS
+			// does.
+			const Bool idleOnly = t == GameMessage::MSG_META_SELECT_ALL_IDLE_UNITS
+				|| t == GameMessage::MSG_META_SELECT_ALL_IDLE_AIRCRAFT
+				|| t == GameMessage::MSG_META_SELECT_ALL_IDLE_VEHICLES;
 			KindOfMaskType requiredKindofs;
 			KindOfMaskType disqualifyingKindofs;
 			disqualifyingKindofs.set(KINDOF_IGNORES_SELECT_ALL);
@@ -3247,21 +3287,19 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					disqualifyingKindofs.set(KINDOF_DOZER);
 					disqualifyingKindofs.set(KINDOF_HARVESTER);
 					disqualifyingKindofs.set(KINDOF_STRUCTURE);
-					if( t == GameMessage::MSG_META_SELECT_ALL_AIRCRAFT )
+					if( t == GameMessage::MSG_META_SELECT_ALL_AIRCRAFT || t == GameMessage::MSG_META_SELECT_ALL_IDLE_AIRCRAFT )
 						requiredKindofs.set(KINDOF_AIRCRAFT);
 					else if( t == GameMessage::MSG_META_SELECT_ALL_MILITARY )
 					{
 						//
-						// Q W E under the left hand is infantry / vehicles / aircraft - one key per
-						// arm, so each one narrows the selection to something you can give a single
-						// order to. This used to be KINDOF_CAN_ATTACK, which is every armed unit
-						// there is: it swept up the tanks and the aircraft the other two keys are
-						// for and left no way to grab the foot soldiers on their own. Ctrl+A is
-						// still there for everything at once.
+						// Infantry only. This used to be KINDOF_CAN_ATTACK, which is every armed
+						// unit there is: it swept up the tanks and the aircraft the vehicle and
+						// aircraft keys are for and left no way to grab the foot soldiers on their
+						// own. SELECT_ALL is still there for everything at once.
 						//
 						requiredKindofs.set(KINDOF_INFANTRY);
 					}
-					else if( t == GameMessage::MSG_META_SELECT_ALL_VEHICLES )
+					else if( t == GameMessage::MSG_META_SELECT_ALL_VEHICLES || t == GameMessage::MSG_META_SELECT_ALL_IDLE_VEHICLES )
 					{
 						requiredKindofs.set(KINDOF_VEHICLE);
 						disqualifyingKindofs.set(KINDOF_AIRCRAFT);
@@ -3275,14 +3313,31 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			const DrawableList *drawList = TheInGameUI->getAllSelectedDrawables();
 			for( DrawableListCIt it = drawList->begin(); it != drawList->end(); ++it )
 			{
-				if( !(*it)->isKindOfMulti( requiredKindofs, disqualifyingKindofs ) )
+				if( !(*it)->isKindOfMulti( requiredKindofs, disqualifyingKindofs )
+						|| ( idleOnly && !InGameUI::isIdleCombatUnit( (*it)->getObject() ) ) )
 				{
 					TheInGameUI->deselectAllDrawables();
 					break;
 				}
 			}
 
-			TheInGameUI->selectAllUnitsByType(requiredKindofs, disqualifyingKindofs);
+			if( idleOnly )
+			{
+				enum { SELECT_IDLE_AGAIN_MS = 500 };		///< real time: the client frame rate is uncapped
+				static UnsignedInt s_lastIdleMs = 0;
+				static GameMessage::Type s_lastIdleType = GameMessage::MSG_INVALID;
+
+				const UnsignedInt now = Clock_Milliseconds();
+				const Bool again = ( s_lastIdleType == t && now - s_lastIdleMs <= SELECT_IDLE_AGAIN_MS );
+				s_lastIdleMs = now;
+				s_lastIdleType = t;
+
+				// a screen with none of them on it widens in the same press, as selectAllUnitsByType does
+				if( again || TheInGameUI->selectAllUnitsByTypeAcrossScreen(requiredKindofs, disqualifyingKindofs, TRUE) == 0 )
+					TheInGameUI->selectAllUnitsByTypeAcrossMap(requiredKindofs, disqualifyingKindofs, TRUE);
+			}
+			else
+				TheInGameUI->selectAllUnitsByType(requiredKindofs, disqualifyingKindofs);
 
 			disp = DESTROY_MESSAGE;
 			break;
@@ -3917,6 +3972,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_BEGIN_WAYPOINTS:
 //			DEBUG_ASSERTCRASH( !TheInGameUI->isInWaypointMode(), ("Setting m_waypointMode but it's already set!") );
 			TheInGameUI->setWaypointMode( true );
+			DEBUG_LOG(( "HOTKEYS: waypoint mode on\n" ));	// a rebound hold reads back from the log
 			break;
 
 		//-----------------------------------------------------------------------------------------
@@ -3933,6 +3989,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_END_WAYPOINTS:
 //			DEBUG_ASSERTCRASH( TheInGameUI->isInWaypointMode(), ("Clearing m_waypointMode but it's already clear!") );
 			TheInGameUI->setWaypointMode( false );
+			DEBUG_LOG(( "HOTKEYS: waypoint mode off\n" ));
 			break;
 
 
@@ -4095,29 +4152,32 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			m_mouseRightDragAnchor = msg->getArgument( 0 )->pixel;
 			m_mouseRightDown = (UnsignedInt) msg->getArgument( 2 )->integer;
 
-			// a right drag pans the camera (LookAtXlat) and never draws a formation line
+			// a plain right drag pans the camera (LookAtXlat).  Where the right button gives the move
+			// order, a drag with Shift's move line wanted draws that line instead, and LookAtXlat leaves
+			// it alone.  An armed key's line is the left button's in every mouse
+			if( TheInGameUI->isOrderDragButton( TRUE ) )
+				armFormationDrag( msg->getArgument( 0 )->pixel, TRUE );
 			break;
 		}
 
 		//-----------------------------------------------------------------------------
-		// A formation line is drawn with the left button, and only once the move, attack move or guard
-		// key is armed: a left drag without one is a selection box.  The attack key keeps its left
-		// drag for the attack circle.
+		// A formation line is drawn with the left button in every mouse once the move, attack move or
+		// guard key is armed: a drag without one is a selection box.  The attack key and the Force
+		// Attack hold keep their drag for the attack circle; shift on the hold draws the attack line
+		// here instead, aimed at the enemies near it.  Shift alone draws the move line, with the button
+		// that gives the move order.
 		case GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK:
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
 		{
-			if( TheInGameUI->isLineOrderArmed() )
-			{
-				m_formationDragAnchor = msg->getArgument( 0 )->pixel;
-				m_formationDragArmed = isFormationDragArmed();
-			}
+			if( TheInGameUI->isOrderDragButton( FALSE ) )
+				armFormationDrag( msg->getArgument( 0 )->pixel, FALSE );
 			break;
 		}
 
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP:
 		{
-			if( m_formationDragArmed )
+			if( m_formationDragArmed && !m_formationDragRight )
 				finishFormationDrag( msg->getArgument( 0 )->pixel );
 			break;
 		}
@@ -4152,6 +4212,11 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			// register this event for determining if the click was fast or short enough not to be a drag
 			m_mouseRightDragLift = msg->getArgument( 0 )->pixel;
 			m_mouseRightUp = (UnsignedInt) msg->getArgument( 2 )->integer;
+
+			// a line drawn with the right button.  A drag is never a click, so the right click behind
+			// this release gives no order of its own
+			if( m_formationDragArmed && m_formationDragRight )
+				finishFormationDrag( m_mouseRightDragLift );
 
 			// a structure waiting to be placed is dropped by the same release, over in
 			// SelectionXlat, unless the release ended a pan.  The Classic mouse drops it here on a click,
@@ -4289,7 +4354,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
  												|| command->getCommandType() == GUI_COMMAND_FIRE_WEAPON
 												|| command->getCommandType() == GUI_COMMAND_COMBATDROP
 												|| command->getCommandType() == GUICOMMANDMODE_HIJACK_VEHICLE
-												|| command->getCommandType() == GUICOMMANDMODE_CONVERT_TO_CARBOMB));
+												|| command->getCommandType() == GUICOMMANDMODE_CONVERT_TO_CARBOMB
+												|| command->getCommandType() == GUICOMMANDMODE_SABOTAGE_BUILDING));
 
 			// Where the right button gives the orders (Reforged, and Classic under EA's Alternate Mouse
 			// Setup) the left button selects and nothing else.  The exceptions are a GUI command that is
@@ -5742,6 +5808,11 @@ static Bool isSystemMessage( const GameMessage *msg )
 		case GameMessage::MSG_LOGIC_CRC:
 		case GameMessage::MSG_SET_REPLAY_CAMERA:
 		case GameMessage::MSG_FRAME_TICK:
+		/* A preference the logic itself posts once a second (Player::update), not an order.  Destroyed
+			 while a cinematic held input off, it got through or not on whether a client pass ran between
+			 the post and the script that disabled input, which is the machine's load: USA mission one read
+			 a different CRC in 2 of 10 runs, an AIGroup id short from the dispatch it never reached. */
+		case GameMessage::MSG_ENABLE_RETALIATION_MODE:
 			return TRUE;
 	}
 	return FALSE;

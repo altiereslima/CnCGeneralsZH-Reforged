@@ -37,6 +37,7 @@
 #include "Common/DrawModule.h"
 //#include "WW3D2/Line3D.h"
 #include "GameClient/Color.h"
+#include "WWMath/vector3.h"
 
 class SegmentedLineClass;
 class TextureClass;
@@ -82,6 +83,8 @@ public:
 	// virtual destructor prototype provided by memory pool declaration
 
 	virtual void doDrawModule(const Matrix3D* transformMtx);
+	virtual void smoothMotionApply(Real alpha);	///< every -recordfps picture: the head and the flicker move on W3D's clock
+	virtual void buildRenderObjects( Bool madeInTick );
 	virtual void releaseShadows(void) {};	///< we don't care about preserving temporary shadows.	
 	virtual void allocateShadows(void) {};	///< we don't care about preserving temporary shadows.
 	virtual void setShadowsEnabled(Bool enable) { }
@@ -96,8 +99,19 @@ public:
 
 protected:
 
+	void drawGlow( Real widthScale, Real sinceArrivalMs );
+
 	SegmentedLineClass **m_line3D;  ///< line 3D for effect
-	SegmentedLineClass **m_glow3D;  ///< halo and hot core per segment, NULL for beams that do not glow
+	SegmentedLineClass **m_glow3D;  ///< halo, body and hot core per segment, NULL for beams that do not glow
+	SegmentedLineClass *m_flare3D[ 4 ];	///< muzzle glow and core, impact glow and core; made beside m_glow3D
+	Vector3 m_beamStart;						///< the first segment's start and the last one's end, for the flares
+	Vector3 m_beamEnd;
+	UnsignedInt m_birthFrame;				///< logic frame the lines were built on, for the fade in and out
+	UnsignedInt m_lifetimeFrames;		///< the template's LifetimeUpdate, 0 when it has none (no fade out)
+	UnsignedInt m_birthMs;					///< picture clock of the first draw, for the travel
+	Bool m_started;									///< drawn once, so m_birthMs and m_travels are set
+	Bool m_travels;									///< travels out from the muzzle; false when it carries on from a beam just drawn
+	Bool m_travelDrawn;							///< the last draw had the head on its way, so this one places the whole beam
 	TextureClass *m_texture;
 	Real m_textureAspectRatio;			///< aspect ratio of texture
 	Bool m_selfDirty;								// not saved

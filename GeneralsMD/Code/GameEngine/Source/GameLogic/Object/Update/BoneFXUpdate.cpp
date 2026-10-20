@@ -459,16 +459,8 @@ void BoneFXUpdate::doParticleSystemAtBone(const ParticleSystemTemplate *particle
 	ParticleSystem *psys = TheParticleSystemManager->createParticleSystem(particleSystemTemplate);
 	if (psys != NULL)
 	{
-		// drop the systems that have already died: a repeating emitter otherwise grows this list for
-		// the whole match, and its saved count is only an UnsignedShort
-		std::vector<ParticleSystemID>::iterator live = m_particleSystemIDs.begin();
-		while (live != m_particleSystemIDs.end())
-		{
-			if (TheParticleSystemManager->findParticleSystem(*live) == NULL)
-				live = m_particleSystemIDs.erase(live);
-			else
-				++live;
-		}
+		// The dead ones are dropped when the game is saved, outside the tick: logic may not ask the client
+		// which systems still live inside one (LOGIC-THREAD.md M5).
 		m_particleSystemIDs.push_back(psys->getSystemID());
 		psys->setPosition(bonePosition);
 		psys->attachToObject(building);
@@ -506,11 +498,7 @@ void BoneFXUpdate::computeNextLogicFXTime(const BaseBoneListInfo *info, Int &nex
 //-------------------------------------------------------------------------------------------------
 void BoneFXUpdate::killRunningParticleSystems() {
 	for (std::vector<ParticleSystemID>::iterator it = m_particleSystemIDs.begin(); it != m_particleSystemIDs.end(); ++it)
-	{
-		ParticleSystem *sys = TheParticleSystemManager->findParticleSystem(*it);
-		if( sys )
-			sys->destroy();
-	}
+		TheParticleSystemManager->destroyParticleSystemByID(*it);
 
 	m_particleSystemIDs.clear();
 }
@@ -598,6 +586,19 @@ void BoneFXUpdate::xfer( Xfer *xfer )
 
 	// extend base class
 	UpdateModule::xfer( xfer );
+
+	// a repeating emitter grows the list for the whole body state, and the saved count is only an UnsignedShort
+	if( xfer->getXferMode() == XFER_SAVE )
+	{
+		std::vector<ParticleSystemID>::iterator live = m_particleSystemIDs.begin();
+		while( live != m_particleSystemIDs.end() )
+		{
+			if( TheParticleSystemManager->findParticleSystem( *live ) == NULL )
+				live = m_particleSystemIDs.erase( live );
+			else
+				++live;
+		}
+	}
 
 	// particle system vector count and data
 	UnsignedShort particleSystemCount = m_particleSystemIDs.size();

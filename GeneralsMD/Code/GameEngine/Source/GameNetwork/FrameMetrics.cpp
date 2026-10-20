@@ -49,6 +49,7 @@ FrameMetrics::FrameMetrics()
 {
 	//Added By Sadullah Nader
 	//Initializations missing and needed
+	m_matchFps = LOGICFRAMES_PER_SECOND;
 	m_averageFps = 0.0f;
 	m_averageLatency = 0.0f;
 	m_cushionIndex = 0;
@@ -86,14 +87,16 @@ FrameMetrics::~FrameMetrics() {
 }
 
 void FrameMetrics::init() {
-	m_averageFps = LOGICFRAMES_PER_SECOND;
+	// Full of the match's own speed: thirty seconds of history seeded at normal speed held a turbo
+	// room near normal speed for most of a minute.
+	m_averageFps = (Real)m_matchFps;
 	m_averageLatency = (Real)0.2;
 	m_minimumCushion = -1;
 
 	// i is used after the loop; VC6 for-scope let it escape.
 	Int i;
 	for (i = 0; i < TheGlobalData->m_networkFPSHistoryLength; ++i) {
-		m_fpsList[i] = (Real)LOGICFRAMES_PER_SECOND;
+		m_fpsList[i] = (Real)m_matchFps;
 	}
 	m_fpsListIndex = 0;
 	// The fps window has to open on a real time and a real frame.  Left at zero, the first sample
@@ -109,6 +112,11 @@ void FrameMetrics::init() {
 }
 
 void FrameMetrics::reset() {
+	init();
+}
+
+void FrameMetrics::setMatchFps(Int fps) {
+	m_matchFps = fps;
 	init();
 }
 
@@ -144,8 +152,8 @@ void FrameMetrics::doPerFrameMetrics(UnsignedInt frame) {
 		if (busyMS < windowMS / 4)
 			busyMS = windowMS / 4;
 		Real logicFps = FrameMetrics_logicFpsSample(frame, m_fpsStartingFrame, busyMS);
-		if (logicFps > (Real)TheGlobalData->m_framesPerSecondLimit)
-			logicFps = (Real)TheGlobalData->m_framesPerSecondLimit;
+		if (logicFps > (Real)m_matchFps)
+			logicFps = (Real)m_matchFps;
 		m_fpsStallMS = 0;
 		m_averageFps -= ((m_fpsList[m_fpsListIndex])) / TheGlobalData->m_networkFPSHistoryLength; // subtract out the old value from the average.
 		m_fpsList[m_fpsListIndex] = logicFps;

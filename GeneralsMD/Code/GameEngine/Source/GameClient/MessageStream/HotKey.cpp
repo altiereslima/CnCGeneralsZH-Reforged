@@ -190,7 +190,7 @@ void HotKeyManager::reset( void )
 	m_hotKeyMap.clear();
 }
 
-static Bool ownsFixedKey( GameWindow *win, const AsciiString& key );
+static Int keyClaim( GameWindow *win, const AsciiString& key );
 
 //-----------------------------------------------------------------------------
 void HotKeyManager::addHotKey( GameWindow *win, const AsciiString& keyIn)
@@ -198,9 +198,9 @@ void HotKeyManager::addHotKey( GameWindow *win, const AsciiString& keyIn)
 	AsciiString key = keyIn;
 	key.toLower();
 	HotKeyMap::iterator it = m_hotKeyMap.find(key);
-	// two buttons on one letter is the player's choice on the Hotkeys page, which marks it: the
-	// first keeps the key, except that a fixed order takes its own letter back
-	if( it != m_hotKeyMap.end() && !ownsFixedKey( win, key ) )
+	// two buttons on one letter, which the Hotkeys page marks: a fixed order on its own letter keeps
+	// it, a letter the player gave beats a label's, and between equals the first keeps it
+	if( it != m_hotKeyMap.end() && keyClaim( win, key ) <= keyClaim( it->second.m_win, key ) )
 	{
 		DEBUG_LOG(( "HOTKEYS: %s already on %s, not on %s\n", key.str(), it->second.m_win->winGetInstanceData()->m_decoratedNameString.str(), win->winGetInstanceData()->m_decoratedNameString.str() ));
 		return;
@@ -334,10 +334,11 @@ static std::map< std::string, WideChar > s_playerButtonKeys;
 
 /** The owner's fixed keys, 2026-10-12, on every bar: A attack move, S stop, G guard, Y rally
 	* point, V evacuate, N sell, C combat drop, and H for land mines, camo netting and the GLA's fake
-	* and real switches, which go by button name.  No button keeps one of these letters from its
-	* label; the player may give one to any button on the launcher's Hotkeys page, and on a bar where
-	* the fixed order stands too, the order gets the key (addHotKey).  The launcher holds the same
-	* table (hotkeys.js, FIXED_KEYS). */
+	* and real switches, which go by button name.  They are defaults: the player may move any of these
+	* orders to another letter, or none, like every other button.  No button keeps one of these
+	* letters from its label; the player may give one to any button, and on a bar where the fixed order
+	* stands too, the order gets the key (addHotKey).  The launcher holds the same table (hotkeys.js,
+	* FIXED_KEYS). */
 static const WideChar FIXED_KEYS[] = { 'A', 'S', 'G', 'Y', 'V', 'N', 'C', 'H' };
 static const char *const FIXED_H_BUTTONS[] =
 {
@@ -398,16 +399,23 @@ static std::string withoutModPrefix( const char *lowerName, Int *mod )
 	return tilde + 1;
 }
 
-/** Whether win is a command button whose fixed letter (fixedButtonKey) is key, the map's lower
-	* case name. */
-static Bool ownsFixedKey( GameWindow *win, const AsciiString& key )
+static Bool findPlayerKey( const std::map< std::string, WideChar >& keys, const std::string& bare, Int ownMod, WideChar *letter );
+
+/** How strongly the command button win holds key, the map's lower case name: 2 when it is the
+	* button's fixed letter (fixedButtonKey) and the player left the button alone, 1 when the player
+	* gave it that letter in Hotkeys.ini, 0 for the label's. */
+static Int keyClaim( GameWindow *win, const AsciiString& key )
 {
 	const CommandButton *command = (const CommandButton *)GadgetButtonGetData( win );
 	AsciiString lower = command->getName();
 	lower.toLower();
 	Int mod = -1;
-	const WideChar fixed = fixedButtonKey( AsciiString( withoutModPrefix( lower.str(), &mod ).c_str() ), command->getCommandType() );
-	return fixed != 0 && HotKeyManager::nameOf( fixed ) == key;
+	const std::string bare = withoutModPrefix( lower.str(), &mod );
+	WideChar letter = 0;
+	if( findPlayerKey( s_playerButtonKeys, bare, mod, &letter ) )
+		return letter != 0 && HotKeyManager::nameOf( letter ) == key ? 1 : 0;
+	const WideChar fixed = fixedButtonKey( AsciiString( bare.c_str() ), command->getCommandType() );
+	return fixed != 0 && HotKeyManager::nameOf( fixed ) == key ? 2 : 0;
 }
 
 /** The player's key for a button, into *letter; FALSE leaves it alone.  A mod's own button (ownMod,
@@ -487,12 +495,15 @@ WideChar HotKeyManager::buttonKeyIn( const AsciiString& button, WideChar labelKe
 	lower.toLower();
 	Int ownMod = -1;
 	const std::string bare = withoutModPrefix( lower.str(), &ownMod );
-	const WideChar fixed = fixedButtonKey( AsciiString( bare.c_str() ), commandType );
-	if( fixed != 0 )
-		return fixed;
-
+	// the player's letter first, a fixed order's included: the fixed letter is only its default
 	WideChar letter = labelKey;
 	const Bool chosen = findPlayerKey( keys, bare, ownMod, &letter );
+	if( !chosen )
+	{
+		const WideChar fixed = fixedButtonKey( AsciiString( bare.c_str() ), commandType );
+		if( fixed != 0 )
+			return fixed;
+	}
 	if( letter >= 'a' && letter <= 'z' )
 		letter -= 'a' - 'A';
 	// a label's own fixed letter gives way; one the player chose stays, and the bar's fixed order
@@ -732,6 +743,7 @@ static HotkeyCommandRow commandRow( const std::string& id, const std::string& ca
 	row.usableIn = "GAME";
 	row.category = category;
 	row.barOnly = FALSE;
+	row.hold = FALSE;
 	row.launcherDefault = FALSE;
 	return row;
 }
@@ -758,7 +770,9 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 	// UNBOUND_COMMANDS in hotkeys.js: commands the engine knows that the shipped map binds to nothing
 	std::vector< HotkeyCommandRow > unbound;
 	static const char *const SELECTION[] = { "SELECT_ALL", "SELECT_ALL_MILITARY", "SELECT_ALL_VEHICLES", "SELECT_ALL_AIRCRAFT",
-		"SELECT_ALL_BARRACKS", "SELECT_ALL_WARFACTORIES", "SELECT_ALL_AIRFIELDS", "SELECT_NEXT_IDLE_WORKER", "SELECT_NEXT_IDLE_UNIT" };
+		"SELECT_ALL_BARRACKS", "SELECT_ALL_WARFACTORIES", "SELECT_ALL_AIRFIELDS", "SELECT_NEXT_IDLE_WORKER", "SELECT_NEXT_IDLE_UNIT",
+		"SELECT_NEXT_IDLE_AIRCRAFT", "SELECT_NEXT_IDLE_VEHICLE", "SELECT_NEXT_IDLE_INFANTRY", "SELECT_ALL_IDLE_UNITS",
+		"SELECT_ALL_IDLE_AIRCRAFT", "SELECT_ALL_IDLE_VEHICLES" };
 	for( size_t each = 0; each < sizeof( SELECTION ) / sizeof( SELECTION[ 0 ] ); each++ )
 		unbound.push_back( commandRow( SELECTION[ each ], "SELECTION" ) );
 	unbound.push_back( commandRow( "TOGGLE_PAUSE", "INTERFACE" ) );
@@ -785,8 +799,19 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 			unbound[ each ].launcherDefault = TRUE;
 		}
 
+	// HOLD_COMMANDS: KEY_NONE and a modifier in the shipped file, which the rows above leave out.
+	// Force Attack's is set from its command bar button, the other two on the commands list.
+	static const char *const HOLDS[][ 2 ] = { { "FORCEATTACK", "CTRL" }, { "WAYPOINTS", "ALT" }, { "PREFER_SELECTION", "SHIFT" } };
+	for( size_t each = 0; each < sizeof( HOLDS ) / sizeof( HOLDS[ 0 ] ); each++ )
+	{
+		HotkeyCommandRow hold = commandRow( std::string( "BEGIN_" ) + HOLDS[ each ][ 0 ], "CONTROL", "", HOLDS[ each ][ 1 ] );
+		hold.pair = std::string( "END_" ) + HOLDS[ each ][ 0 ];
+		hold.barOnly = each == 0;
+		hold.hold = TRUE;
+		unbound.push_back( hold );
+	}
+
 	std::vector< HotkeyCommandRow > all = rows;
-	Bool forceAttack = FALSE;
 	for( size_t each = 0; each < unbound.size(); each++ )
 	{
 		Bool known = FALSE;
@@ -794,16 +819,6 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 			known = known || rows[ row ].id == unbound[ each ].id;
 		if( !known )
 			all.push_back( unbound[ each ] );
-	}
-	for( size_t row = 0; row < rows.size(); row++ )
-		forceAttack = forceAttack || rows[ row ].id == "BEGIN_FORCEATTACK";
-	if( !forceAttack )
-	{
-		// FORCE_ATTACK_HOLD: KEY_NONE + Ctrl in the shipped file, set from the command bar page
-		HotkeyCommandRow hold = commandRow( "BEGIN_FORCEATTACK", "CONTROL", "", "CTRL" );
-		hold.pair = "END_FORCEATTACK";
-		hold.barOnly = TRUE;
-		all.push_back( hold );
 	}
 	return all;
 }

@@ -625,13 +625,16 @@ void ThingTemplate::parseModuleName(INI* ini, void *instance, void* store, const
 		throw INI_INVALID_DATA;
 	}
 
-	ini->setMissingSpecialPower(FALSE);
+	ini->setMissingReference(FALSE);
 	ModuleData* data = TheModuleFactory->newModuleDataFromINI(ini, tokenStr, type, moduleTagStr);
-	if (ini->hasMissingSpecialPower())
+	if (ini->hasMissingReference())
 	{
-		// read to its End and dropped: a special power module with no template faults placing the object
+		/* read to its End and dropped: a special power module with no template faults placing the
+			 object, and an upgrade with no list does nothing.  Inside ReplaceModule the module it was
+			 to replace comes back, so the mod's own stands. */
 		DEBUG_LOG(("[LINE: %d - FILE: '%s'] %s %s on %s is skipped.\n",
 			ini->getLineNum(), ini->getFilename().str(), tokenStr.str(), moduleTagStr.str(), self->getName().str()));
+		self->m_replaceModuleSkipped = TRUE;
 		return;
 	}
 

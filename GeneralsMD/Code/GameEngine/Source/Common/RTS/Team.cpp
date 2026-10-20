@@ -1455,11 +1455,7 @@ void Team::getTeamAsAIGroup(AIGroup *pAIGroup)
 	// Should this clear out the pAIGroup that it receives? I don't think so, but that 
 	// would go here if so. jkmcd
 
-	for (DLINK_ITERATOR<Object> iter = iterate_TeamMemberList(); !iter.done(); iter.advance()) {
-		if (iter.cur()) {
-			pAIGroup->add(iter.cur());
-		}
-	}
+	pAIGroup->addTeam(this);
 }
 
 
@@ -1526,6 +1522,10 @@ PlayerMaskType Team::getEnemyPlayerMask() const
 	for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
 	{
 		Player *player = ThePlayerList->getNthPlayer(i);
+		// a default team a script handed to another player (doTransferTeamToPlayer) answers for that
+		// player instead, and no longer for its own player's other teams
+		if (player->getDefaultTeam()->getControllingPlayer() != player)
+			return PLAYERMASK_ALL;
 		if (getRelationship(player->getDefaultTeam()) == ENEMIES)
 			mask |= player->getPlayerMask();
 	}

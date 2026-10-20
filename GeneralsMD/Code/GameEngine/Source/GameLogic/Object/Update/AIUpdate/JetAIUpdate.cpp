@@ -50,6 +50,119 @@
 
 const Real BIGNUM = 99999.0f;
 
+/*
+	A runway is flown, not followed point to point. Taking off, the jet rolls down the centre line at
+	full throttle, the wheels leave at JET_LIFTOFF_SHARE of the runway and the climb builds up over
+	JET_ROTATE_SHARE more of it to a steady JET_CLIMB_SLOPE; the takeoff is done at the airfield's
+	approach height. Landing, it steers for a point on the extended centre line ahead of it, down a
+	JET_GLIDE_SLOPE glide that rounds out over JET_FLARE_DIST to a level touchdown on the runway's
+	threshold, and rolls out slowing to JET_ROLLOUT_END_SHARE of MinSpeed at its far end. A jet that
+	cannot line up from where it is (beside the runway, past it, across it, or too high) flies a
+	circuit first, at its corner speed: out along the side of the runway two turn radii off the centre
+	line, round onto a JET_FINAL_DIST final, and in, slowing to MinSpeed over the threshold. Its
+	height follows the same glide measured along the circuit, so it comes down through the turns, and
+	a jet above the glide comes down to it no steeper than JET_STEEPEST_DESCENT.
+*/
+static const Real JET_LIFTOFF_SHARE = 0.55f;
+static const Real JET_ROTATE_SHARE = 0.25f;
+static const Real JET_CLIMB_SLOPE = 0.21f;		// tan 12 degrees
+static const Real JET_GLIDE_SLOPE = 0.176f;		// tan 10 degrees
+static const Real JET_FLARE_DIST = 50.0f;
+static const Real JET_ROLLOUT_END_SHARE = 0.2f;
+static const Real JET_MIN_LOOKAHEAD = 60.0f;		// the steering point runs at least this far ahead on the centre line
+static const Real JET_GO_AROUND_HEIGHT = 10.0f;	// past the threshold higher than this, it goes round
+static const Real JET_LINE_UP_SLACK = 8.0f;			// this far off the centre line it lands anyway
+static const Real JET_LINE_UP_ROOM = 3.0f;			// otherwise it needs this many times its distance off it to line up in
+static const Real JET_HIGH_ON_FINAL = 20.0f;		// more than this above the glide, it flies the circuit instead of diving
+static const Real JET_STEEPEST_DESCENT = 0.27f;	// tan 15 degrees: a jet above its glide comes down to it no steeper
+static const Real JET_FINAL_DIST = 150.0f;			// the straight final after the circuit's turn in
+// the jet's height servo settles this many frames of travel short of a height target moving away
+// under it, so a target this far ahead holds the jet on a slope (measured: 10 u/s down at 60 u/s)
+static const Real JET_HEIGHT_LAG_FRAMES = LOGICFRAMES_PER_SECOND * 0.1f;
+
+/**
+	Height above the runway, dist before the point where it meets it, of a straight slope that rounds
+	out over roundDist into the level, capped at maxHeight: the glide down to a touchdown, or read the
+	other way, the climb from a liftoff. No Object involved, so test_gameengine can link to it.
+*/
+Real JetRunway_slopeHeight( Real dist, Real maxHeight, Real slope, Real roundDist )
+{
+	if (dist <= 0.0f)
+		return 0.0f;
+	Real height = (dist < roundDist) ? slope * dist * dist / (2.0f * roundDist) : slope * (dist - 0.5f * roundDist);
+	return (height < maxHeight) ? height : maxHeight;
+}
+
+static const Real JET_TAXI_ARC_STEP = PI / 8.0f;		// a rounded taxi corner gets a route point every this much of its turn
+static const Real JET_TAXI_LEG_SHARE = 0.45f;			// and takes no more than this share of either leg beside it
+static const Real JET_TAXI_HAIRPIN = 0.01f;				// one plus the cosine of a turn this near to straight back is left a corner
+
+/**
+	Round every corner of a taxi route (the first point where the jet stands) into an arc of radius,
+	or of as much of one as fits in JET_TAXI_LEG_SHARE of the shorter leg beside it, laid down as
+	route points JET_TAXI_ARC_STEP apart round the turn. A jet follows its route point to point, so
+	it turns along the arc instead of reaching the corner and swinging round it. The ends stay put,
+	and so does a corner that turns straight back. No Object involved, so test_gameengine can link
+	to it.
+*/
+void JetTaxi_roundCorners( std::vector<Coord3D>& route, Real radius )
+{
+	if (route.size() < 3)
+		return;
+
+	std::vector<Coord3D> rounded;
+	rounded.push_back(route.front());
+	for (size_t i = 1; i + 1 < route.size(); ++i)
+	{
+		const Coord3D& from = route[i - 1];
+		const Coord3D& corner = route[i];
+		const Coord3D& to = route[i + 1];
+		Real inX = corner.x - from.x;
+		Real inY = corner.y - from.y;
+		Real outX = to.x - corner.x;
+		Real outY = to.y - corner.y;
+		Real inLength = sqrt(inX*inX + inY*inY);
+		Real outLength = sqrt(outX*outX + outY*outY);
+		Real cross = (inX*outY - inY*outX) / (inLength * outLength);	// positive turning left
+		Real dot = (inX*outX + inY*outY) / (inLength * outLength);
+		Real turn = ATan2(fabs(cross), dot);
+		if (turn < 0.5f * JET_TAXI_ARC_STEP || 1.0f + dot < JET_TAXI_HAIRPIN)
+		{
+			rounded.push_back(corner);
+			continue;
+		}
+		inX /= inLength;
+		inY /= inLength;
+
+		Real halfTurnTan = fabs(cross) / (1.0f + dot);
+		Real shorterLeg = (inLength < outLength) ? inLength : outLength;
+		Real tangent = radius * halfTurnTan;
+		if (tangent > JET_TAXI_LEG_SHARE * shorterLeg)
+			tangent = JET_TAXI_LEG_SHARE * shorterLeg;
+		Real arcRadius = tangent / halfTurnTan;
+		Real side = (cross > 0.0f) ? 1.0f : -1.0f;
+
+		// the arc leaves the leg in where it is tangent to it, round a centre a radius to the side
+		Real startX = corner.x - inX * tangent;
+		Real startY = corner.y - inY * tangent;
+		Real centreX = startX - inY * arcRadius * side;
+		Real centreY = startY + inX * arcRadius * side;
+		Real startAngle = ATan2(startY - centreY, startX - centreX);
+		Int steps = (Int)ceil(turn / JET_TAXI_ARC_STEP);
+		for (Int step = 0; step <= steps; ++step)
+		{
+			Real angle = startAngle + side * turn * step / steps;
+			Coord3D point;
+			point.x = centreX + arcRadius * Cos(angle);
+			point.y = centreY + arcRadius * Sin(angle);
+			point.z = corner.z;
+			rounded.push_back(point);
+		}
+	}
+	rounded.push_back(route.back());
+	route.swap(rounded);
+}
+
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -632,7 +745,23 @@ public:
 			}
 		}
 
-		m_waitingForPath = FALSE;	 
+		// a jet on its wheels turns along each corner instead of reaching it and swinging round
+		Locomotor* taxiLoco = jetAI->getCurLocomotor();
+		if (taxiLoco->isGroundVehicle(jet))
+		{
+			std::vector<Coord3D> route;
+			for (const PathNode* node = movePath->getFirstNode(); node; node = node->getNext())
+				route.push_back(*node->getPosition());
+			JetTaxi_roundCorners(route, taxiLoco->calcWheelTurnRadius(jet));
+			movePath->deleteInstance();
+			movePath = newInstance(Path);
+			movePath->prependNode( &route[0], LAYER_GROUND );
+			movePath->markOptimized();
+			for (size_t i = 1; i < route.size(); ++i)
+				movePath->appendNode( &route[i], LAYER_GROUND );
+		}
+
+		m_waitingForPath = FALSE;
 		TheAI->pathfinder()->setDebugPath(movePath);
 
 		setAdjustsDestination(false);	// precision is necessary
@@ -709,7 +838,6 @@ class JetTakeoffOrLandingState : public AIFollowPathState
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(JetTakeoffOrLandingState, "JetTakeoffOrLandingState")		
 private:
-	Real			m_maxLift;
 	Real			m_maxSpeed;
 #ifdef CIRCLE_FOR_LANDING
 	Coord3D		m_circleForLandingPos;
@@ -738,7 +866,6 @@ public:
 		DEBUG_ASSERTCRASH(loco, ("no loco"));
 		loco->setMaxLift(BIGNUM);
 		BodyDamageType bdt = jet->getBodyModule()->getDamageState();
-		m_maxLift = loco->getMaxLift(bdt);
 		m_maxSpeed = loco->getMaxSpeedForCondition(bdt);
 		m_landingSoundPlayed = FALSE;
 		if (m_landing)
@@ -747,7 +874,8 @@ public:
 		}
 		else
 		{
-			loco->setMaxLift(0);
+			// full throttle down the runway; the height it is sent to keeps it on the wheels until liftoff
+			loco->setNoSlowDownAsApproachingDest(true);
 		}
 		loco->setUsePreciseZPos(true);
 		loco->setUltraAccurate(true);
@@ -857,47 +985,187 @@ public:
 				if( zPos - zSlop <= groundZ )
 				{
 					m_landingSoundPlayed = TRUE;
-					AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_aircraftWheelScreech;	
+					AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_aircraftWheelScreech;
 					soundToPlay.setPosition( jet->getPosition() );
 					TheAudio->addAudioEvent( &soundToPlay );
 				}
 			}
+
+			ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
+			if (pp)
+				return flyLanding(jet, jetAI, pp);
 		}
 		else
 		{
 			ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
 			if (pp)
+			{
 				pp->transferRunwayReservationToNextInLineForTakeoff(jet->getID());
+				return flyTakeoff(jet, jetAI, pp);
+			}
 
-			//Calculate the distance of the jet from the end of the runway as a ratio from the start.
-			//As it approaches the end of the runway, the plane will gain more lift, even if it's already
-			//going quickly. Using speed for lift is bad in the case of the aircraft carrier, because
-			//we don't want it to take off quickly.
 			// the airfield can be sold or destroyed under a jet on its takeoff roll: no runway left
 			// to measure against, so give it full lift and let it go
-			if (pp)
-			{
-				ParkingPlaceBehaviorInterface::PPInfo ppinfo;
-				pp->calcPPInfo( jet->getID(), &ppinfo );
-				Coord3D vector = ppinfo.runwayEnd;
-				vector.sub( jet->getPosition() );
-				Real dist = vector.length();
-
-				Real ratio = 1.0f - (dist / ppinfo.runwayTakeoffDist);
-				ratio *= ratio; //dampen it....
-				if (ratio < 0.0f) ratio = 0.0f;
-				if (ratio > 1.0f) ratio = 1.0f;
-				jetAI->getCurLocomotor()->setMaxLift(m_maxLift * ratio);
-			}
-			else
-			{
-				jetAI->getCurLocomotor()->setMaxLift(m_maxLift);
-			}
+			jetAI->getCurLocomotor()->setMaxLift(BIGNUM);
 		}
 
 		StateReturnType ret = AIFollowPathState::update();
 		return ret;
 	}
+
+private:
+
+	/// steer down the runway's centre line and climb off it (see JET_LIFTOFF_SHARE)
+	StateReturnType flyTakeoff(Object* jet, JetAIUpdate* jetAI, ParkingPlaceBehaviorInterface* pp)
+	{
+		ParkingPlaceBehaviorInterface::PPInfo ppinfo;
+		pp->calcPPInfo( jet->getID(), &ppinfo );
+		const Coord3D& start = ppinfo.runwayStart;
+		const Coord3D& end = ppinfo.runwayEnd;
+		Real ux = end.x - start.x;
+		Real uy = end.y - start.y;
+		Real length = sqrt(ux*ux + uy*uy);
+		if (length < 1.0f)
+			return STATE_SUCCESS;
+		ux /= length;
+		uy /= length;
+
+		// runwayStart may be the prep spot of a jet that was in line; the runway itself is runwayTakeoffDist long
+		Real runway = ppinfo.runwayTakeoffDist;
+		const Coord3D* pos = jet->getPosition();
+		Real along = runway + (pos->x - end.x) * ux + (pos->y - end.y) * uy;
+		Real runwayZ = end.z;
+		if (along < runway && runway > 0.0f)
+			runwayZ = start.z + (end.z - start.z) * ((along > 0.0f) ? along / runway : 0.0f);
+		// off a deck, the climb starts from the deck the jet is drawn on
+		Real deckOffset = pp->getLandingDeckHeightOffset();
+		Real climbHeight = ppinfo.runwayExit.z - end.z - deckOffset;
+		if (climbHeight < JET_GO_AROUND_HEIGHT)
+			climbHeight = JET_GO_AROUND_HEIGHT;
+
+		// a few frames of travel ahead, for the height to lead the lift that has to reach it
+		Real speed = jet->getPhysics()->getForwardSpeed2D();
+		Real lead = speed * JET_HEIGHT_LAG_FRAMES;
+		Real height = JetRunway_slopeHeight(along + lead - JET_LIFTOFF_SHARE * runway, climbHeight, JET_CLIMB_SLOPE,
+																				JET_ROTATE_SHARE * runway);
+		if (height >= climbHeight)
+			return STATE_SUCCESS;
+
+		Coord3D goal;
+		Real ahead = along - runway + calcLookAhead(jet, jetAI->getCurLocomotor());
+		goal.x = end.x + ux * ahead;
+		goal.y = end.y + uy * ahead;
+		goal.z = (height > 0.0f) ? runwayZ + deckOffset + height : runwayZ;
+		jetAI->setLocomotorGoalPositionExplicit(goal);
+		return STATE_CONTINUE;
+	}
+
+	/// fly the circuit onto the final, down the glide slope, and roll out (see JET_GLIDE_SLOPE)
+	StateReturnType flyLanding(Object* jet, JetAIUpdate* jetAI, ParkingPlaceBehaviorInterface* pp)
+	{
+		ParkingPlaceBehaviorInterface::PPInfo ppinfo;
+		pp->calcPPInfo( jet->getID(), &ppinfo );
+		// a carrier lands on its own strip; an airfield the way it took off, the other way round
+		Bool deck = jet->testStatus( OBJECT_STATUS_DECK_HEIGHT_OFFSET );
+		const Coord3D& touch = deck ? ppinfo.runwayLandingStart : ppinfo.runwayEnd;
+		const Coord3D& stop = deck ? ppinfo.runwayLandingEnd : ppinfo.runwayStart;
+		Real ux = stop.x - touch.x;
+		Real uy = stop.y - touch.y;
+		Real runway = sqrt(ux*ux + uy*uy);
+		if (runway < 1.0f)
+			return STATE_SUCCESS;
+		ux /= runway;
+		uy /= runway;
+
+		Locomotor* loco = jetAI->getCurLocomotor();
+		BodyDamageType bdt = jet->getBodyModule()->getDamageState();
+		Real minSpeed = loco->getMinSpeed();
+		Real circuitSpeed = loco->getJetCornerSpeed(bdt);
+		if (circuitSpeed < minSpeed)
+			circuitSpeed = minSpeed;
+		Real rate = loco->getJetMaxYawRate(bdt, circuitSpeed);
+		Real radius = (rate > 0.0f) ? circuitSpeed / rate : 0.0f;
+		Real deckOffset = pp->getLandingDeckHeightOffset();
+		// the turn onto the final starts a radius further out than the final itself
+		Real turnIn = JET_FINAL_DIST + radius;
+
+		const Coord3D* pos = jet->getPosition();
+		Real along = (pos->x - touch.x) * ux + (pos->y - touch.y) * uy;	// negative short of the threshold
+		Real across = (pos->y - touch.y) * ux - (pos->x - touch.x) * uy;	// positive to the left
+		Real runwayZ = stop.z;
+		if (along < runway)
+			runwayZ = touch.z + (stop.z - touch.z) * ((along > 0.0f) ? along / runway : 0.0f);
+		Real height = pos->z - runwayZ - deckOffset;
+		Real offLine = stdAngleDiff(jet->getOrientation(), ATan2(uy, ux));
+		Real speed = jet->getPhysics()->getForwardSpeed2D();
+		Real lead = speed * JET_HEIGHT_LAG_FRAMES;
+
+		// the distance flown to the threshold, round what is left of the turn onto the centre line
+		Real toThreshold = -along + radius * fabs(offLine);
+		Real glide = JetRunway_slopeHeight(toThreshold - lead, BIGNUM, JET_GLIDE_SLOPE, JET_FLARE_DIST);
+		Bool linedUp = along < 0.0f && fabs(offLine) < PI / 2.0f && height <= glide + JET_HIGH_ON_FINAL &&
+			(fabs(across) <= JET_LINE_UP_SLACK || -along >= JET_LINE_UP_ROOM * fabs(across));
+		Bool rollingOut = along >= 0.0f && height <= JET_GO_AROUND_HEIGHT;
+
+		Coord3D goal;
+		Real wantSpeed = circuitSpeed;
+		if (linedUp || rollingOut || along <= -turnIn)
+		{
+			// on the final, or far enough out to come round onto it: steer for a point ahead on the centre line
+			Real ahead = along + calcLookAhead(jet, loco);
+			goal.x = touch.x + ux * ahead;
+			goal.y = touch.y + uy * ahead;
+
+			if (along >= 0.0f)
+			{
+				if (along >= runway - JET_LINE_UP_SLACK)
+					return STATE_SUCCESS;
+				// slow down the length of the runway, to a crawl at its end
+				Real endSpeed = JET_ROLLOUT_END_SHARE * minSpeed;
+				wantSpeed = endSpeed + (minSpeed - endSpeed) * (runway - along) / runway;
+			}
+			else if (-along < turnIn)
+			{
+				// down the final from the circuit speed to MinSpeed over the threshold
+				wantSpeed = minSpeed + (circuitSpeed - minSpeed) * (-along / turnIn);
+			}
+		}
+		else
+		{
+			// the circuit: out along the side of the runway the jet is heading for, two radii off the
+			// centre line, to where the turn in starts
+			Real sideways = across + 2.0f * radius * Sin(offLine);
+			Real side = (sideways >= 0.0f) ? 2.0f * radius : -2.0f * radius;
+			goal.x = touch.x - ux * turnIn - uy * side;
+			goal.y = touch.y - uy * turnIn + ux * side;
+			Real toTurn = sqrt(sqr(goal.x - pos->x) + sqr(goal.y - pos->y));
+			glide = JetRunway_slopeHeight(toTurn + PI * radius + turnIn - lead, BIGNUM, JET_GLIDE_SLOPE, JET_FLARE_DIST);
+		}
+
+		// never climb back up to the glide, and come down to it no steeper than JET_STEEPEST_DESCENT
+		Real wantHeight = (glide < height) ? glide : height;
+		Real steepest = height - JET_HEIGHT_LAG_FRAMES * JET_STEEPEST_DESCENT * speed;
+		if (wantHeight < steepest && !rollingOut)
+			wantHeight = steepest;
+		goal.z = (wantHeight > 0.0f) ? runwayZ + deckOffset + wantHeight : runwayZ;
+
+		loco->setMaxSpeed(wantSpeed);
+		jetAI->setLocomotorGoalPositionExplicit(goal);
+		return STATE_CONTINUE;
+	}
+
+	/// how far ahead on the centre line to steer for: twice the jet's turn radius at its speed, at least JET_MIN_LOOKAHEAD
+	static Real calcLookAhead(Object* jet, Locomotor* loco)
+	{
+		Real speed = jet->getPhysics()->getForwardSpeed2D();
+		if (speed < loco->getMinSpeed())
+			speed = loco->getMinSpeed();
+		Real rate = loco->getJetMaxYawRate(jet->getBodyModule()->getDamageState(), speed);
+		Real look = (rate > 0.0f) ? 2.0f * speed / rate : JET_MIN_LOOKAHEAD;
+		return (look > JET_MIN_LOOKAHEAD) ? look : JET_MIN_LOOKAHEAD;
+	}
+
+public:
 
 	virtual void onExit( StateExitType status )
 	{
@@ -921,6 +1189,7 @@ public:
 		{
 			loco->setUsePreciseZPos(false);
 			loco->setUltraAccurate(false);
+			loco->setNoSlowDownAsApproachingDest(false);
 			// don't restore lift if dead -- this may fight with JetSlowDeathBehavior!
 			if (!jet->isEffectivelyDead())
 				loco->setMaxLift(BIGNUM);

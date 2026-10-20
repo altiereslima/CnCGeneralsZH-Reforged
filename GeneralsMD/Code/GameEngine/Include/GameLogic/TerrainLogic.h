@@ -38,6 +38,7 @@
 #include "Common/Snapshot.h"
 #include "Common/STLTypedefs.h"
 #include "GameClient/TerrainRoads.h"
+#include "GameLogic/WaterGridMotion.h"
 
 typedef std::vector<ICoord2D> VecICoord2D;
 
@@ -311,6 +312,7 @@ public:
 	PathfindLayerEnum getHighestLayerForDestination(const Coord3D *pos, Bool onlyHealthyBridges = false);
 
 	void enableWaterGrid( Bool enable );			///< enable/disable the water grid
+	WaterGrid *getWaterGrid( void ) { return &m_waterGrid; }	///< the vertex animated water grid, logic's (WaveGuideUpdate pushes it, the renderer draws it)
 
 	// This is stuff to get the currently active boundary information
 	Int getActiveBoundary(void) { return m_activeBoundary; }
@@ -378,6 +380,7 @@ protected:
 	AsciiString m_filenameString;  ///< filename for terrain data
 
 	Bool m_waterGridEnabled;			 ///< TRUE when water grid is enabled
+	WaterGrid m_waterGrid;				 ///< the grid itself, mesh and settings (was in the water render object)
 
 	static WaterHandle m_gridWaterHandle;		///< water handle for the grid water (we only presently have one)
 

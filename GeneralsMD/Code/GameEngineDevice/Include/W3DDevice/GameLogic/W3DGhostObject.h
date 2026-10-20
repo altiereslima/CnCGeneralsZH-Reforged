@@ -39,6 +39,8 @@
 #include "Common/GameCommon.h"
 #include "GameClient/DrawableInfo.h"
 
+#include <vector>
+
 class Object;
 class W3DGhostObjectManager;
 class W3DRenderObjectSnapshot;
@@ -65,12 +67,14 @@ protected:
 	void release(void);			///< used by manager to return object to free store.
 	void getShroudStatus(int playerIndex);	///< used to get the partition manager to update ghost objects without parent objects.
 	void freeAllSnapShots(void);				///< used to free all snapshots from all players.
+	void freeSnapShotNow(int playerIndex);	///< freeSnapShot's body, never queued: the manager's own teardown
 	W3DRenderObjectSnapshot *m_parentSnapshots[MAX_PLAYER_COUNT];
 	DrawableInfo	m_drawableInfo;
 
 	///@todo this list should really be part of the device independent base class (CBD 12-3-2002)
 	W3DGhostObject *m_nextSystem;
 	W3DGhostObject *m_prevSystem;
+	ObjectID m_dyingParentID;	///< LOGIC-THREAD.md M6: the parent of a ghost removed inside a tick, found again at its release
 };
 
 class W3DGhostObjectManager : public GhostObjectManager
@@ -90,10 +94,14 @@ protected:
 	virtual void crc( Xfer *xfer );
 	virtual void xfer( Xfer *xfer );
 	virtual void loadPostProcess( void );
+	void releaseModule(W3DGhostObject *mod);	///< free its snapshots and put it on the free list
+	void releaseDying(W3DGhostObject *mod);		///< one the tick removed, unless reset released it
+	void freeDyingModules(void);							///< release every one the tick removed
 
 	///@todo this list should really be part of the device independent base class (CBD 12-3-2002)
 	W3DGhostObject	*m_freeModules;
 	W3DGhostObject	*m_usedModules;
+	std::vector<W3DGhostObject *> m_dyingModules;	///< LOGIC-THREAD.md M6: removed inside a tick, released after it
 };
 
 #endif // _W3DGHOSTOBJECT_H_

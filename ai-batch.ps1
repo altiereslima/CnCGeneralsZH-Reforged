@@ -35,6 +35,11 @@ param(
 	[string] $Difficulty = "brutal",
 	# rung for the odd-numbered slots; empty means the same as -Difficulty, so a rung plays itself
 	[string] $Difficulty2 = "",
+	# AI personality for every slot by name (Normal, Attacker, Turtle, ... Random); empty is Normal
+	[string] $Persona = "",
+	# personality for the odd-numbered slots; empty means the same as -Persona, so a personality
+	# plays itself
+	[string] $Persona2 = "",
 	# split the slots into this many allied teams instead of a free-for-all: 2 with -Players 8 is
 	# 4v4. Free-for-all spreads the fighting over the whole map; teams put every unit on one of two
 	# fronts, which is the load a player actually complains about
@@ -136,6 +141,9 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	)
 	# a second rung for the odd slots, so one rung can be played against another
 	if ($Difficulty2) { $args += "-aidiff2"; $args += $Difficulty2 }
+	# and personalities the same way, so one can be played against another
+	if ($Persona) { $args += "-aipersonaall"; $args += $Persona }
+	if ($Persona2) { $args += "-aipersona2"; $args += $Persona2 }
 	if ($Teams -gt 1) { $args += "-teams"; $args += $Teams }
 	if ($Scenario) { $args += "-scenario"; $args += $Scenario }
 	if ($Takeover -ge 0) { $args += "-takeover"; $args += $Takeover }

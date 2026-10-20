@@ -79,6 +79,7 @@ public:
 	//Actually puts the laser in the world.
 	void initLaser( const Object *parent, const Object *target, const Coord3D *startPos, const Coord3D *endPos, AsciiString parentBoneName, Int sizeDeltaFrames = 0 );
 	void setDecayFrames( UnsignedInt decayFrames );
+	void moveEnds( const Coord3D *startPos, const Coord3D *endPos ) { m_startPos = *startPos; m_endPos = *endPos; m_dirty = TRUE; }
 
 	const Coord3D* getStartPos() { return &m_startPos; }
 	const Coord3D* getEndPos() { return &m_endPos; }
@@ -88,11 +89,17 @@ public:
 
 	Real getWidthScale() const { return m_currentWidthScalar; }
 
+	// for W3DLaserDraw's travel: who fired at whom (the target as initLaser found it, kept after a kill
+	// clears m_targetID), and the target effect it holds back until the beam's head lands
+	DrawableID getParentID() const { return m_parentID; }
+	DrawableID getFiredAtID() const { return m_firedAtID; }
+	ParticleSystemID getTargetParticleSystemID() const { return m_targetParticleSystemID; }
+
 	virtual void clientUpdate();
 
 protected:
 
-	void updateStartPos(); ///< figures out and sets startPos
+	void updateStartPos( const Drawable *parentDrawable = NULL ); ///< figures out and sets startPos; NULL looks the parent up by m_parentID
 	void updateEndPos(); ///< figures out and sets endPos
 	Real computeWidthScalar( UnsignedInt frame ) const; ///< the width on that logic frame, from the frames alone
 
@@ -102,6 +109,7 @@ protected:
 
 	DrawableID m_parentID;
 	DrawableID m_targetID;
+	DrawableID m_firedAtID;	///< client only, not saved: the drawing reads it in the first passes of a beam
 
 	Bool m_dirty;
 	ParticleSystemID m_particleSystemID;

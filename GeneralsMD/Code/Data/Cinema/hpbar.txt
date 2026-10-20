@@ -1,0 +1,9 @@
+# Scenarios/hpbar.txt: the two groups meeting at 3400,3960, held at a play-like zoom so the bars
+# read at their real size. Several shots because the frame with the most damaged survivors is only
+# known to a second.
+
+0.5   cut     3400 3960 0.8 0 0
+4.0   shot
+5.0   shot
+6.0   shot
+7.0   shot

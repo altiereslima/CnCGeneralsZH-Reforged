@@ -424,6 +424,8 @@ void Network::parseUserList( const GameInfo *game )
 	}
 
 	m_conMgr->parseUserList(game);
+	// run at the game's speed, turbo mode included, until the router's first run-ahead command
+	m_frameRate = m_conMgr->getMatchFps();
 
 	// Now that we have the players in this game, we need to reset the FrameData stuff.
 	m_conMgr->destroyGameMessages();
@@ -837,8 +839,9 @@ Bool Network::timeForNewFrame() {
 			 only ever ran one; a slow picture then lost the frames it owed and the whole room slowed
 			 down to its rate.  The count comes from the game speed and not from the room's rate: tied
 			 to the room, a room that slowed down could pay back less and slowed down further, and a
-			 250ms picture took two machines from 30 frames a second to 4. */
-		if ((m_nextFrameTime + (GameEngine_logicCatchupMaxFrames(TheGlobalData->m_framesPerSecondLimit) * frameDelay)) < curTime) {
+			 250ms picture took two machines from 30 frames a second to 4.  The game speed is the
+			 match's, turbo mode included, read from the game options in parseUserList. */
+		if ((m_nextFrameTime + (GameEngine_logicCatchupMaxFrames(m_conMgr->getMatchFps()) * frameDelay)) < curTime) {
 			// If we get too far behind on our framerate we need to reset the nextFrameTime thing.
 			m_nextFrameTime = curTime;
 //			DEBUG_LOG(("Initializing m_nextFrameTime to %I64d\n", m_nextFrameTime));

@@ -34,6 +34,8 @@
 #define _GAME_DISPLAY_H_
 
 #include <stdio.h>
+#include <functional>
+#include <vector>
 #include "Common/SubsystemInterface.h"
 #include "View.h"
 #include "GameClient/Color.h"
@@ -166,7 +168,28 @@ public:
 		* first, or the batch it did not join lands on top of it when it is finally drawn. */
 	virtual void flushBatch2D( void ) { }
 
-	/// FullScreen video playback 
+	/** LOGIC-THREAD.md phase 3.  The overlays drawn over the world read logic as they draw: the health
+		* bar asks the object its health, the superweapon clock asks the module its frame.  Those run at
+		* the sync point instead, recording what they draw: between beginRecording and endRecording every
+		* 2D call above and every DisplayString draw goes into the list with its arguments, and replay
+		* draws the list where the overlay used to be drawn, inside the render, in the same order.  A
+		* string freed while recording is freed by freeDeferred, at the next sync point, after the replay
+		* that draws it or the pass that skipped the render. */
+	typedef std::vector< std::function<void()> > DrawCalls;
+	void beginRecording( DrawCalls *into ) { into->clear(); m_recording = into; }
+	void endRecording( void ) { m_recording = NULL; }
+	Bool isRecording( void ) const { return m_recording != NULL; }
+	void record( std::function<void()> call ) { m_recording->push_back( std::move( call ) ); }
+	/// kept for another replay: LOGIC-THREAD.md phase 4 draws the same pass's picture again; the next recording clears it
+	static void replay( DrawCalls &calls ) { for( size_t i = 0; i < calls.size(); ++i ) calls[ i ](); }
+	/// replay moved by (dx, dy) pixels, for a list recorded under a camera that has scrolled since
+	virtual void replayShifted( DrawCalls &calls, Int dx, Int dy ) { replay( calls ); }
+	/// the shift replayShifted is drawing with; a recorded string adds it to where it draws
+	const ICoord2D &getReplayShift( void ) const { return m_replayShift; }
+	void deferFree( DisplayString *string ) { m_deferredFrees.push_back( string ); }
+	void freeDeferred( void );
+
+	/// FullScreen video playback
 	virtual void playLogoMovie( AsciiString movieName, Int minMovieLength, Int minCopyrightLength );
 	virtual void playMovie( AsciiString movieName );
 	virtual void stopMovie( void );
@@ -235,6 +258,9 @@ protected:
 	UnsignedInt m_elapsedMovieTime;					///< used to make sure we show the stuff long enough
 	UnsignedInt m_elapsedCopywriteTime;			///< Hold on the last frame until both have expired
 	DisplayString *m_copyrightDisplayString;///< this'll hold the display string
+	DrawCalls *m_recording = NULL;					///< see beginRecording
+	ICoord2D m_replayShift = { 0, 0 };				///< see replayShifted
+	std::vector< DisplayString * > m_deferredFrees;	///< see beginRecording
 };
 
 // the singleton

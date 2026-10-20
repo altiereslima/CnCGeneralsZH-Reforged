@@ -330,20 +330,23 @@ struct ShroudStatusStoreRestore
 class PartitionCell : public Snapshot	// not MPO: allocated in an array
 {
 private:
+	// A cell is near 300 bytes and the walks over cells - range queries, collision passes, sight
+	// tests, moving an Object's coverage - read only these first few fields of each, so they sit
+	// together at the front where one cache line holds them; the per-player arrays follow.
 	CellAndObjectIntersection*		m_firstCoiInCell;	///< list of COIs in this cell (may be null).
-	ShroudLevel										m_shroudLevel[MAX_PLAYER_COUNT];
-	Short													m_airLookers[MAX_PLAYER_COUNT];	///< lookers whose circle takes in the air over this cell, hills and roofs or not
+	Short													m_coiCount;					///< number of COIs in this cell.
+	PlayerMaskType								m_playerCoiMask;		///< players whose m_playerCoiCount is nonzero
+	Short													m_cellX;						///< x-coord of this cell within the Partition Mgr coords (NOT in world coords)
+	Short													m_cellY;						///< y-coord of this cell within the Partition Mgr coords (NOT in world coords)
 #ifdef PM_CACHE_TERRAIN_HEIGHT
 	Real													m_loTerrainZ;			///< lowest terrain-pt in this cell
 	Real													m_hiTerrainZ;			///< highest terrain-pt in this cell
 #endif
+	UnsignedShort									m_playerCoiCount[MAX_PLAYER_COUNT];	///< COIs in this cell whose Object belongs to each player
+	ShroudLevel										m_shroudLevel[MAX_PLAYER_COUNT];
+	Short													m_airLookers[MAX_PLAYER_COUNT];	///< lookers whose circle takes in the air over this cell, hills and roofs or not
 	Int														m_threatValue[MAX_PLAYER_COUNT];
 	Int														m_cashValue[MAX_PLAYER_COUNT];
-	Short													m_coiCount;					///< number of COIs in this cell.
-	UnsignedShort									m_playerCoiCount[MAX_PLAYER_COUNT];	///< COIs in this cell whose Object belongs to each player
-	PlayerMaskType								m_playerCoiMask;		///< players whose m_playerCoiCount is nonzero
-	Short													m_cellX;						///< x-coord of this cell within the Partition Mgr coords (NOT in world coords)
-	Short													m_cellY;						///< y-coord of this cell within the Partition Mgr coords (NOT in world coords)
 
 public:
 
@@ -397,6 +400,7 @@ public:
 	void getCellCenterPos(Real& x, Real& y);
 
 	inline CellAndObjectIntersection *getFirstCoiInCell() { return m_firstCoiInCell; }
+	inline const void *getHotFieldsAddress() const { return &m_firstCoiInCell; }	///< for a prefetch hint only
 
 	#ifdef _DEBUG
 	void validateCoiList();
@@ -429,6 +433,8 @@ private:
 	};
 
 	Object											*m_object;								///< Object this module is for
+	Int													m_doneFlag;								///< beside m_object: a range query reads both of every COI it walks
+	Int													m_coiInUseCount;					///< number of COIs that are actually in use; the whole-map walk reads it with m_object and m_next
 	GhostObject										*m_ghostObject;							///< Temporary object used when real object is gone but player thinks it's there because of fog.
 	PartitionData								*m_next;									///< next module in master list
 	PartitionData								*m_prev;									///< prev module in master list
@@ -436,9 +442,7 @@ private:
 	PartitionData								*m_prevDirty;
 
 	Int													m_coiArrayCount;					///< number of COIs allocated (may be more than are in use)
-	Int													m_coiInUseCount;					///< number of COIs that are actually in use
-	CellAndObjectIntersection		*m_coiArray;							///< The array of COIs 
-	Int													m_doneFlag;
+	CellAndObjectIntersection		*m_coiArray;							///< The array of COIs
 	Int													m_countedPlayer;					///< player index this module's COIs are counted under in their cells, -1 for none
 	DirtyStatus									m_dirtyStatus;
 	ObjectShroudStatus					m_shroudedness[MAX_PLAYER_COUNT];						
@@ -1309,6 +1313,7 @@ private:
 	PartitionCell*	m_cells;					///< array of cells
 	PartitionData*	m_dirtyModules;
 	Bool						m_updatedSinceLastReset;	///< Used to force a return of OBJECTSHROUD_INVALID before update has been called.
+	Bool						m_cellsFromSave;					///< see isKeepingCellsFromSave
 
 	std::queue<SightingInfo *> m_pendingUndoShroudReveals;	///< Anything can queue up an Undo to happen later. This is a queue, because "later" is a constant
 
@@ -1407,6 +1412,15 @@ public:
 
 	void processEntirePendingUndoShroudRevealQueue(); ///< process every pending one regardless of timestamp
 
+	/** A load of a save from version 3 on has every cell's shroud, air sight, threat and value as
+			saved, each object's last look, shroud, threat and value with them, and the undo queue.  The
+			first update after it only notes the cell each object stands in: the cell change it sees for
+			every object would otherwise undo each sighting late, through the queue, and do it again at
+			once, so every looker counted twice for a few seconds and a look the save did not have was
+			added.  GameState clears it again after that update. */
+	Bool isKeepingCellsFromSave( void ) const { return m_cellsFromSave; }
+	void stopKeepingCellsFromSave( void ) { m_cellsFromSave = FALSE; }
+
 	/// return the number of PartitionCells in the x-dimension.
 	Int getCellCountX() { DEBUG_ASSERTCRASH(m_cellCountX != 0, ("partition not inited")); return m_cellCountX; }
 
@@ -1447,17 +1461,19 @@ public:
 	// given a distance in world coords, return the number of cells needed to cover that distance (rounding up)
 	Int worldToCellDist(Real w);
 
+	/** onlyPlayers, here and on the overloads below that take it, skips every cell no Object of those
+		players touches. Pass it only when the filters already reject every Object outside them (an
+		ALLOW_ENEMIES relationship filter with the asker's Team::getEnemyPlayerMask), so the answer is
+		the one a full search gives. */
 	Object *getClosestObject(
-		const Object *obj, 
-		Real maxDist, 
-		DistanceCalculationType dc, 
-		PartitionFilter **filters = NULL, 
+		const Object *obj,
+		Real maxDist,
+		DistanceCalculationType dc,
+		PartitionFilter **filters = NULL,
 		Real *closestDist = NULL,
-		Coord3D *closestDistVec = NULL
+		Coord3D *closestDistVec = NULL,
+		PlayerMaskType onlyPlayers = PLAYERMASK_ALL
 	);
-	/** onlyPlayers skips every cell no Object of those players touches. Pass it only when the filters
-		already reject every Object outside them (an ALLOW_ENEMIES relationship filter with the asker's
-		Team::getEnemyPlayerMask), so the answer is the one a full search gives. */
 	Object *getClosestObject(
 		const Coord3D *pos,
 		Real maxDist,
@@ -1494,11 +1510,12 @@ public:
 #endif
 
 	SimpleObjectIterator *iterateObjectsInRange(
-		const Object *obj, 
-		Real maxDist, 
-		DistanceCalculationType dc, 
-		PartitionFilter **filters = NULL, 
-		IterOrderType order = ITER_FASTEST
+		const Object *obj,
+		Real maxDist,
+		DistanceCalculationType dc,
+		PartitionFilter **filters = NULL,
+		IterOrderType order = ITER_FASTEST,
+		PlayerMaskType onlyPlayers = PLAYERMASK_ALL	///< as for getClosestObject
 	);
 
 	SimpleObjectIterator *iterateObjectsInRange(

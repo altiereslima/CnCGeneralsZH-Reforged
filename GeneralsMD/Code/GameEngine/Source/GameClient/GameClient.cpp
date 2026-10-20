@@ -31,6 +31,7 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include <algorithm>
 #include "Platform/SleepMilliseconds.h"
 #include "Lib/Clock.h"
 #include "GameClient/GameClient.h"
@@ -85,6 +86,7 @@
 #include "GameClient/Shell.h"
 #include "GameClient/Snow.h"
 #include "GameClient/TerrainVisual.h"
+#include "GameLogic/TerrainLogic.h"
 #include "GameClient/View.h"
 #include "GameClient/VideoPlayer.h"
 #include "GameClient/WindowXlat.h"
@@ -239,6 +241,7 @@ GameClient::~GameClient()
 		destroyDrawable( draw );
 	}
 	m_drawableList = NULL;
+	flushDestroyedDrawables();
 
 	// delete the ray effects
 	delete TheRayEffects;
@@ -531,7 +534,7 @@ void GameClient::init( void )
 /** Reset the game client for a new game */
 void GameClient::reset( void )
 {
-	Drawable *draw, *nextDraw;
+	Drawable *draw;
 //	m_drawableHash.clear();
 //	m_drawableHash.resize(DRAWABLE_HASH_SIZE);
 
@@ -553,13 +556,29 @@ void GameClient::reset( void )
 	if (TheSelectionTranslator)
 		TheSelectionTranslator->forgetPendingSquads();
 
-	// destroy all Drawables
-	for( draw = m_drawableList; draw; draw = nextDraw )
+	// destroy all Drawables.  The clear-game tick resets from inside the tick, where what the tick
+	// destroyed before it stays on the list until the sync point; destroying one of those again queued
+	// it twice, and the flush below deleted it twice: the "Pure virtual function called" box on
+	// leaving a match.
+	std::vector<Drawable *> listed;
+	for( draw = m_drawableList; draw; draw = draw->getNextDrawable() )
 	{
-		nextDraw = draw->getNextDrawable();
-		destroyDrawable( draw );
+		if( std::find( m_destroyedInTick.begin(), m_destroyedInTick.end(), draw ) == m_destroyedInTick.end() )
+			listed.push_back( draw );
 	}
+	for( size_t i = 0; i < listed.size(); ++i )
+		destroyDrawable( listed[ i ] );
+	// the clear-game tick resets from inside the tick: what it made before that was never linked
+	for( size_t i = 0; i < m_madeInTick.size(); ++i )
+	{
+		if( std::find( m_destroyedInTick.begin(), m_destroyedInTick.end(), m_madeInTick[ i ] ) == m_destroyedInTick.end() )
+			destroyDrawable( m_madeInTick[ i ] );
+	}
+	m_madeInTick.clear();
 	m_drawableList = NULL;
+	// the clear-game tick resets from inside the tick, and what it and the ticks before left goes
+	// before the scene does
+	flushDestroyedDrawables();
 
 	TheDisplay->reset();
 	TheTerrainVisual->reset();
@@ -588,11 +607,17 @@ DrawableID GameClient::allocDrawableID( void )
 /** -----------------------------------------------------------------------------------------------
  * Given a drawable, register it with the GameClient and give it a unique ID.
  */
-void GameClient::registerDrawable( Drawable *draw ) 
+void GameClient::registerDrawable( Drawable *draw )
 {
 
 	// assign this drawable a unique ID, this will add it to the fast lookup table too
 	draw->setID( allocDrawableID() );
+
+	// LOGIC-THREAD.md phase 3: the list and the lookup do not change inside a tick, which the render
+	// will run beside.  What a tick makes waits in m_madeInTick (addDrawableToLookupTable put it there)
+	// for linkDrawablesOfTick, and only the tick's own lookups find it before that.
+	if( Drawable::tickDefersLifetime() )
+		return;
 
 	// add the drawable to the master list
 	draw->prependToList( &m_drawableList );
@@ -885,13 +910,47 @@ void GameClient::update( void )
 		}
 	}
 
-#if defined(_INTERNAL) || defined(_DEBUG)
-	// need to draw the first frame, then don't draw again until TheGlobalData->m_noDraw
-	if (TheGlobalData->m_noDraw > TheGameLogic->getFrame() && TheGameLogic->getFrame() > 0) 
+	// LOGIC-THREAD.md phase 3: what the draw below asks of the shroud, asked here, on every pass and
+	// frozen time included, as the draw asked it.  The walk above has filled the cache for this player,
+	// so this reads it; the draw no longer calls into the partition beside a tick.
+	for( Drawable *draw = m_drawableList; draw; draw = draw->getNextDrawable() )
 	{
-		return;
+		Object *object = draw->getObject();
+		Drawable::ObjectForDraw forDraw = draw->getObjectForDraw();
+		forDraw.hasObject = object != NULL;
+		if( object )
+		{
+			draw->setShroudForDraw( object->getShroudedStatus( localPlayerIndex ), object->isEffectivelyDead() );
+			// and the rest of what the scene asks of it
+			forDraw.awaitingBuilder = Object_isAwaitingBuilder( object->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ),
+																													object->getConstructionPercent() );
+			forDraw.empDisabled = object->isDisabledByType( DISABLED_EMP );
+			forDraw.outage = object->isKindOf( KINDOF_STRUCTURE )
+				&& ( object->isDisabledByType( DISABLED_UNDERPOWERED ) || object->isDisabledByType( DISABLED_SCRIPT_UNDERPOWERED )
+					|| object->isDisabledByType( DISABLED_HACKED ) );
+			const Player *player = object->getControllingPlayer();
+			forDraw.playerIndex = player->getPlayerIndex();
+			forDraw.playerColor = clientPlayerColor( player );
+			forDraw.safeOcclusionFrame = object->getSafeOcclusionFrame();
+			forDraw.layer = object->getLayer();
+			if( forDraw.layer != LAYER_GROUND )
+				forDraw.layerHeight = TheTerrainLogic->getLayerHeight( draw->getPosition()->x, draw->getPosition()->y, forDraw.layer );
+			draw->setObjectForDraw( forDraw );
+			continue;
+		}
+		forDraw.awaitingBuilder = FALSE;
+		draw->setObjectForDraw( forDraw );
+		//Hack for prison camps which contain enemy prisoner drawables: another object holds the shroud
+		ObjectShroudStatus status = OBJECTSHROUD_CLEAR;
+		const ObjectID shroudObjectID = draw->getDrawableInfo()->m_shroudStatusObjectID;
+		if( shroudObjectID != INVALID_ID )
+		{
+			const Object *shroudObject = TheGameLogic->findObjectByID( shroudObjectID );
+			if( shroudObject )
+				status = shroudObject->getShroudedStatus( localPlayerIndex );
+		}
+		draw->setShroudForDraw( status, FALSE );
 	}
-#endif
 
 	// update all particle systems
 	if( !freezeTime )
@@ -920,13 +979,18 @@ void GameClient::update( void )
 
 		/* -headless never draws.  The device and every drawable stay alive - this skips the frame,
 			 not the client - which is what makes an unattended run fast: rendering is the larger half
-			 of the loop's wall clock in a normal match. */
-		if (!TheGlobalData->m_headless)
+			 of the loop's wall clock in a normal match.  -jumpToFrame skips it the same way until its
+			 frame, past the first, which draws the load away. */
+		const Bool jumping = TheGlobalData->m_noDraw > TheGameLogic->getFrame() && TheGameLogic->getFrame() > 0;
+		if (!TheGlobalData->m_headless && !jumping)
 		{
 #ifdef DEBUG_LOGGING
 			Int64 drawStart, drawEnd;
 			drawStart = Clock_Ticks();
 #endif
+			// LOGIC-THREAD.md phase 3, step 3b: at 1 and 2 the message stream and the pacer run here, so a
+			// due tick can go to the logic thread when the draw's sync point is done
+			LogicThread::prepareOverlap();
 			/* -directorrecord's panes: every pane past the first is drawn first, for the recording only
 				 and never presented, then the frame everybody sees.  W3D's clock stands still for every
 				 draw after the first on one client frame, so nothing animates twice. */
@@ -1026,12 +1090,8 @@ void GameClient::updateFakeDrawables(void)
  */
 void GameClient::destroyDrawable( Drawable *draw )
 {
-
 	// remove any notion of the Drawable in the in-game user interface
 	TheInGameUI->disregardDrawable( draw );
-
-	// remove from the master list
-	draw->removeFromList(&m_drawableList);
 
 	//
 	// because drawables and objects are tightly coupled, not only MUST we maintain
@@ -1047,12 +1107,111 @@ void GameClient::destroyDrawable( Drawable *draw )
 
 	}  // end if
 
+	/* LOGIC-THREAD.md phase 2, M4.  Inside a tick the drawable forgets its object, which the tick may
+		 delete before the flush, and leaves the selection after the tick (disregardDrawable queues it).
+		 Phase 3: it stays in the list and the lookup, which the render walks beside the tick, and only
+		 the tick's own lookups stop finding it; linkDrawablesOfTick takes it out after the tick.  Its draw
+		 modules, render objects, shadows and sounds go in flushDestroyedDrawables, once the flush has run
+		 the work other drawables deferred. */
+	if( Drawable::tickDefersLifetime() )
+	{
+		draw->friend_forgetObject();
+		m_destroyedInTick.push_back( draw );
+		return;
+	}
+
+	// remove from the master list
+	draw->removeFromList(&m_drawableList);
+
+	LOGIC_CENSUS( CENSUS_DESTROY_DRAWABLE );
+
+	// what the tick deferred on it happens now or never: the batched trees and props are made, placed
+	// and destroyed in one go by startNewGame, and placing them is what hands them to the terrain
+	draw->flushPendingTransform( TRUE );
+
 	// remove the drawable from our hash of drawables
 	removeDrawableFromLookupTable( draw );
 
 	// free storage
 	draw->deleteInstance();
 
+}
+
+//-------------------------------------------------------------------------------------------------
+void GameClient::flushDestroyedDrawables( void )
+{
+	for( size_t i = 0; i < m_destroyedInTick.size(); ++i )
+	{
+		LOGIC_CENSUS( CENSUS_DESTROY_DRAWABLE );
+		// what the tick deferred on it before it died, which flushPendingClientWork no longer finds by ID:
+		// the last mine's detonation FX, and the model's last place as on the immediate path above.  One
+		// the same tick made was never drawn, and building its render objects only to delete them is not
+		// worth the effect: it keeps the transform alone, as before
+		Drawable *draw = m_destroyedInTick[ i ];
+		if( draw->isRenderPending() )
+			draw->flushPendingTransform( FALSE );
+		else
+			draw->doPendingClientWork( FALSE );
+		draw->deleteInstance();
+	}
+	m_destroyedInTick.clear();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** LOGIC-THREAD.md phase 3: the list and the lookup take the tick's changes here, at the sync point,
+	in the order the tick made them, so the list ends up as it did when they were made at the call.
+	First of the flush: the drawables' deferred work and the effects look drawables up. */
+void GameClient::linkDrawablesOfTick( void )
+{
+	for( size_t i = 0; i < m_destroyedInTick.size(); ++i )
+	{
+		Drawable *draw = m_destroyedInTick[ i ];
+		// one the same tick made was never linked
+		if( draw->getID() < m_drawableVector.size() && m_drawableVector[ draw->getID() ] == draw )
+		{
+			draw->removeFromList( &m_drawableList );
+			removeDrawableFromLookupTable( draw );
+		}
+	}
+	for( size_t i = 0; i < m_madeInTick.size(); ++i )
+	{
+		Drawable *draw = m_madeInTick[ i ];
+		// ponytail: a linear search per drawable made, a few dozen a tick; a flag on the drawable if it ever shows
+		if( std::find( m_destroyedInTick.begin(), m_destroyedInTick.end(), draw ) != m_destroyedInTick.end() )
+			continue;
+		addDrawableToLookupTable( draw );
+		draw->prependToList( &m_drawableList );
+	}
+	m_madeInTick.clear();
+}
+
+/** -----------------------------------------------------------------------------------------------
+ * Given an object id, return the associated object.
+ * This method is the primary interface for accessing objects, and should be used
+ * instead of pointers to "attach" objects to each other.
+ */
+Drawable* GameClient::findDrawableByID( const DrawableID id )
+{
+	LOGIC_CENSUS( CENSUS_GAMECLIENT );
+	if( id == INVALID_DRAWABLE_ID )
+		return NULL;
+
+	Drawable *draw = (Int)id < m_drawableVector.size() ? m_drawableVector[(Int)id] : NULL;
+
+	// inside the tick the table has not taken the tick's changes yet (linkDrawablesOfTick): the tick
+	// still finds what it made and no longer what it destroyed, as when the table changed at the call
+	if( Drawable::tickDefersLifetime() )
+	{
+		if( draw == NULL )
+		{
+			for( size_t i = 0; i < m_madeInTick.size(); ++i )
+				if( m_madeInTick[ i ]->getID() == id )
+					draw = m_madeInTick[ i ];
+		}
+		if( draw && std::find( m_destroyedInTick.begin(), m_destroyedInTick.end(), draw ) != m_destroyedInTick.end() )
+			return NULL;
+	}
+	return draw;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1064,6 +1223,13 @@ void GameClient::addDrawableToLookupTable(Drawable *draw )
 	// sanity
 	if( draw == NULL )
 		return;
+
+	// made inside a tick: linkDrawablesOfTick adds it (registerDrawable)
+	if( Drawable::tickDefersLifetime() )
+	{
+		m_madeInTick.push_back( draw );
+		return;
+	}
 
 	// add to lookup
 //	m_drawableHash[ draw->getID() ] = draw;
@@ -1398,8 +1564,12 @@ void GameClient::preloadAssets( TimeOfDay timeOfDay )
 	{
 		++considered;
 
-		// if this isn't one of the objects that can be preloaded ignore it
-		if( tTemplate->isKindOf( KINDOF_PRELOAD ) == FALSE && !TheGlobalData->m_preloadEverything )
+		// if this isn't one of the objects that can be preloaded ignore it.  A parachute and what hangs
+		// under it (a Supply Drop Zone crate) are made in the tick and asked for their bones in the same
+		// tick (ParachuteContain), before their flush; made here first, their module data has the bones
+		// already and the tick loads no model (LOGIC-THREAD.md M8)
+		if( tTemplate->isKindOf( KINDOF_PRELOAD ) == FALSE && tTemplate->isKindOf( KINDOF_PARACHUTE ) == FALSE
+				&& tTemplate->isKindOf( KINDOF_PARACHUTABLE ) == FALSE && !TheGlobalData->m_preloadEverything )
 			continue;
 
 		// create the drawable and do the preloading

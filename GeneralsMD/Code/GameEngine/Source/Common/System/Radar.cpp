@@ -32,6 +32,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/GameAudio.h"
+#include "Common/LogicThread.h"
 #include "Common/GameState.h"
 #include "Common/MiscAudio.h"
 #include "Common/Radar.h"
@@ -81,8 +82,9 @@ void Radar::deleteListResources( void )
 		// get next object
 		nextObject = m_localObjectList->friend_getNext();
 
-		// remove radar data from object
-		m_localObjectList->friend_getObject()->friend_setRadarData( NULL );
+		// remove radar data from object; none when a tick's remove was still queued (removeObject)
+		if( m_localObjectList->friend_getObject() )
+			m_localObjectList->friend_getObject()->friend_setRadarData( NULL );
 
 		// delete the head of the list
 		m_localObjectList->deleteInstance();
@@ -99,8 +101,9 @@ void Radar::deleteListResources( void )
 		// get next object
 		nextObject = m_objectList->friend_getNext();
 
-		// remove radar data from object
-		m_objectList->friend_getObject()->friend_setRadarData( NULL );
+		// remove radar data from object; none when a tick's remove was still queued (removeObject)
+		if( m_objectList->friend_getObject() )
+			m_objectList->friend_getObject()->friend_setRadarData( NULL );
 
 		// delete the head of the list
 		m_objectList->deleteInstance();
@@ -129,6 +132,7 @@ RadarObject::RadarObject( void )
 	m_object = NULL;
 	m_next = NULL;
 	m_color = GameMakeColor( 255, 255, 255, 255 );
+	m_priority = 0;
 
 }
 
@@ -189,6 +193,7 @@ void RadarObject::xfer( Xfer *xfer )
 
 		// tell the object we now have some radar data
 		m_object->friend_setRadarData( this );
+		m_priority = m_object->getRadarPriority();
 
 	}  // end if
 
@@ -401,6 +406,20 @@ void Radar::newMap( TerrainLogic *terrain )
 //-------------------------------------------------------------------------------------------------
 void Radar::addObject( Object *obj )
 {
+	/* LOGIC-THREAD.md phase 2, M6.  The tick's adds and removes wait for its end, in order.  By ID,
+		 since the tick may destroy the object first; then it never goes on, and a remove queued after
+		 the add finds it on and takes it off again. */
+	if( LogicThread::defersEffects() )
+	{
+		const ObjectID id = obj->getID();
+		LogicThread::callAfterTick( [this, id]() {
+			Object *live = TheGameLogic->findObjectByID( id );
+			if( live && live->friend_getRadarData() == NULL )
+				addObject( live );
+		} );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_RADAR );
 
 	// get the radar priority for this object
 	RadarPriorityType newPriority = obj->getRadarPriority();
@@ -473,6 +492,7 @@ void Radar::addObject( Object *obj )
 
 	// set a chunk of radar data in the object
 	obj->friend_setRadarData( newObj );
+	newObj->friend_setPriority( newPriority );
 
 	//
 	// we will put this on either the local object list for objects that belong to the
@@ -500,7 +520,7 @@ void Radar::addObject( Object *obj )
 			nextObject = currObject->friend_getNext();
 
 			// get the priority of this entry in the list (currPriority)
-			currPriority = currObject->friend_getObject()->getRadarPriority();
+			currPriority = (RadarPriorityType)currObject->friend_getPriority();
 
 			//
 			// if there is no previous object, or the previous priority is less than the
@@ -596,10 +616,57 @@ Bool Radar::deleteFromList( Object *obj, RadarObject **list )
 }  // end deleteFromList
 
 //-------------------------------------------------------------------------------------------------
+/** Take `entry` off `list` by its own address, never reading its object. TRUE if it was there. */
+//-------------------------------------------------------------------------------------------------
+Bool Radar::unlinkEntry( RadarObject *entry, RadarObject **list )
+{
+	RadarObject *prev = NULL;
+	for( RadarObject *at = *list; at; prev = at, at = at->friend_getNext() )
+	{
+		if( at != entry )
+			continue;
+		if( prev == NULL )
+			*list = at->friend_getNext();
+		else
+			prev->friend_setNext( at->friend_getNext() );
+		return TRUE;
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Remove an object from the radar, the object may reside in any list */
 //-------------------------------------------------------------------------------------------------
 void Radar::removeObject( Object *obj )
 {
+	if( LogicThread::defersEffects() )
+	{
+		// an entry the object has is taken from it now and off the list after the tick, without a look
+		// at the object, which the tick may free; one it has not got yet may be an add still queued
+		RadarObject *entry = obj->friend_getRadarData();
+		if( entry )
+		{
+			// a list torn down before the flush (the game cleared) then frees the entry without its object
+			obj->friend_setRadarData( NULL );
+			entry->friend_setObject( NULL );
+			LogicThread::callAfterTick( [this, entry]() {
+				if( !unlinkEntry( entry, &m_localObjectList ) )
+					unlinkEntry( entry, &m_objectList );
+				entry->deleteInstance();
+			} );
+		}
+		else
+		{
+			const ObjectID id = obj->getID();
+			LogicThread::callAfterTick( [this, id]() {
+				Object *live = TheGameLogic->findObjectByID( id );
+				if( live && live->friend_getRadarData() )
+					removeObject( live );
+			} );
+		}
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_RADAR );
 
 	// sanity
 	if( obj->friend_getRadarData() == NULL )
@@ -1030,10 +1097,17 @@ static RadarColorLookup radarColorLookupTable[] =
 //-------------------------------------------------------------------------------------------------
 void Radar::createEvent( const Coord3D *world, RadarEventType type, Real secondsToLive )
 {
-		
 	// sanity
 	if( world == NULL )
 		return;
+
+	if( LogicThread::defersEffects() )
+	{
+		const Coord3D at = *world;
+		LogicThread::callAfterTick( [=]() { createEvent( &at, type, secondsToLive ); } );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_RADAR );
 
 	// lookup the colors we are to used based on the event 
 	RGBAColorInt color[ 2 ];
@@ -1081,6 +1155,14 @@ void Radar::createPlayerEvent( Player *player, const Coord3D *world,
 	// sanity
 	if( player == NULL || world == NULL )
 		return;
+
+	if( LogicThread::defersEffects() )
+	{
+		const Coord3D at = *world;
+		LogicThread::callAfterTick( [=]() { createPlayerEvent( player, &at, type, secondsToLive ); } );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_RADAR );
 
 	// figure out the two colors we should use
 	Color c;
@@ -1198,12 +1280,24 @@ void Radar::tryUnderAttackEvent( const Object *obj )
 	if( obj->isKindOf( KINDOF_NO_ATTACK_WARNING ) )
 		return;
 
-	// try to create the event
-	Bool eventCreated = tryEvent( RADAR_EVENT_UNDER_ATTACK, obj->getPosition() );
+	/* LOGIC-THREAD.md phase 2, M6.  What the warning says is read from the object at the call, since the
+		 hit may kill it; whether it is given at all, and everything it shows and plays, waits for the end
+		 of the tick (callAfterTick runs it at once outside one). */
+	enum { WARN_HARVESTER, WARN_UNIT, WARN_BASE, WARN_OTHER } kind = WARN_OTHER;
+	if( obj->isKindOf( KINDOF_INFANTRY ) || obj->isKindOf( KINDOF_VEHICLE ) )
+		kind = obj->isKindOf( KINDOF_HARVESTER ) ? WARN_HARVESTER : WARN_UNIT;
+	else if( obj->isKindOf( KINDOF_STRUCTURE ) && obj->isKindOf( KINDOF_MP_COUNT_FOR_VICTORY ) )
+		kind = WARN_BASE;
+	const Bool ours = obj->getControllingPlayer()->isLocalPlayer();
+	const Bool allied = ThePlayerList->getLocalPlayer()->getRelationship( obj->getTeam() ) == ALLIES;
+	const Coord3D at = *obj->getPosition();
 
-	// if event created, do some more feedback
-	if( eventCreated )
+	LogicThread::callAfterTick( [this, kind, ours, allied, at]()
 	{
+		// try to create the event
+		if( !tryEvent( RADAR_EVENT_UNDER_ATTACK, &at ) )
+			return;
+
 		// the lamp beside the radar
 		if( TheControlBar )
 			TheControlBar->triggerRadarAttackGlow();
@@ -1216,60 +1310,45 @@ void Radar::tryUnderAttackEvent( const Object *obj )
 		Player *player = ThePlayerList->getLocalPlayer();
 
 		// create a message for the attack event
-		if( obj->isKindOf( KINDOF_INFANTRY ) || obj->isKindOf( KINDOF_VEHICLE ) )
+		if( kind == WARN_HARVESTER || kind == WARN_UNIT )
 		{
 			AudioEventRTS unitAttackSound;
-			if( obj->isKindOf(KINDOF_HARVESTER) )
+			if( kind == WARN_HARVESTER )
 			{
-				// display special message
 				TheInGameUI->message( "RADAR:HarvesterUnderAttack" );
-
-				// play special audio event
 				unitAttackSound = TheAudio->getMiscAudio()->m_radarHarvesterUnderAttackSound;
 			}
 			else
 			{
-				// display message
 				TheInGameUI->message( "RADAR:UnitUnderAttack" );
-				
-				// play audio event
 				unitAttackSound = TheAudio->getMiscAudio()->m_radarStructureUnderAttackSound;
 			}
 			unitAttackSound.setPlayerIndex(player->getPlayerIndex());
 			TheAudio->addAudioEvent( &unitAttackSound );
-
-		}  // end if
-		else if( obj->isKindOf( KINDOF_STRUCTURE ) && obj->isKindOf( KINDOF_MP_COUNT_FOR_VICTORY ) )
+		}
+		else if( kind == WARN_BASE )
 		{
 			// play EVA. If its our object, play Base under attack.
-			if (obj->getControllingPlayer()->isLocalPlayer())
+			if (ours)
 				TheEva->setShouldPlay(EVA_BaseUnderAttack);
-			else if (ThePlayerList->getLocalPlayer()->getRelationship(obj->getTeam()) == ALLIES)
+			else if (allied)
 				TheEva->setShouldPlay(EVA_AllyUnderAttack);
 
-			// display message
 			TheInGameUI->message( "RADAR:StructureUnderAttack" );
 
-			// play audio event
 			static AudioEventRTS structureAttackSound = TheAudio->getMiscAudio()->m_radarStructureUnderAttackSound;
 			structureAttackSound.setPlayerIndex(player->getPlayerIndex());
 			TheAudio->addAudioEvent( &structureAttackSound );
-
-		}  // end else if
+		}
 		else
 		{
-
-			// display message
 			TheInGameUI->message( "RADAR:UnderAttack" );
 
-			// play audio event
 			static AudioEventRTS underAttackSound = TheAudio->getMiscAudio()->m_radarStructureUnderAttackSound;
 			underAttackSound.setPlayerIndex(player->getPlayerIndex());
 			TheAudio->addAudioEvent( &underAttackSound );
-
-		}  // end else
-
-	}  // end if
+		}
+	} );
 
 }  // end tryUnderAttackEvent
 
@@ -1280,6 +1359,7 @@ void Radar::tryUnderAttackEvent( const Object *obj )
 // ------------------------------------------------------------------------------------------------
 void Radar::tryInfiltrationEvent( const Object *obj )
 {
+	// the event, the message and the sound below each wait for the end of a tick themselves
 
 	//Sanity!
 	if( !obj )
@@ -1316,6 +1396,15 @@ void Radar::tryInfiltrationEvent( const Object *obj )
 // ------------------------------------------------------------------------------------------------
 Bool Radar::tryEvent( RadarEventType event, const Coord3D *pos )
 {
+	// inside a tick the try waits for its end and the answer is FALSE: a caller that acts on the answer
+	// asks from callAfterTick (StealthDetectorUpdate, tryUnderAttackEvent)
+	if( LogicThread::defersEffects() && pos != NULL )
+	{
+		const Coord3D at = *pos;
+		LogicThread::callAfterTick( [=]() { tryEvent( event, &at ); } );
+		return FALSE;
+	}
+	LOGIC_CENSUS( CENSUS_RADAR );
 
 	// sanity
 	if( event <= RADAR_EVENT_INVALID || event >= RADAR_EVENT_NUM_EVENTS || pos == NULL )
@@ -1397,7 +1486,8 @@ void Radar::queueTerrainRefresh( void )
 	// proximity for us to overwrite something, we're changing the terrain features 
 	// quite often and can't afford the expense of rebuilding the radar visual
 	//
-	m_queueTerrainRefreshFrame = TheGameLogic->getFrame();
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	LogicThread::callAfterTick( [this, frame]() { m_queueTerrainRefreshFrame = frame; } );
 
 }  // end queueTerrainRefresh
 

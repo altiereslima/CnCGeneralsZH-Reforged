@@ -155,6 +155,8 @@ public:
 	virtual void moveCameraTo(const Coord3D *o, Int frames, Int shutter, Bool orient, Real easeIn, Real easeOut) { lookAt( o ); }
 	virtual void moveCameraAlongWaypointPath(Waypoint *way, Int frames, Int shutter, Bool orient, Real easeIn, Real easeOut) { }
 	virtual Bool isCameraMovementFinished( void ) { return TRUE; }
+	virtual Bool isCameraMoving( void ) { return FALSE; }						///< a scripted move, zoom, pitch or rotation under way (LogicThread::ClientBlock)
+	virtual Bool isCameraMotionBlurring( void ) { return FALSE; }		///< an in or out motion blur, which isCameraMovementFinished counts as finished
 	virtual void cameraModFinalZoom(Real finalZoom, Real easeIn, Real easeOut){}; ///< Final zoom for current camera movement.
 	virtual void cameraModRollingAverage(Int framesToAverage){}; ///< Number of frames to average movement for current camera movement.
 	virtual void cameraModFinalTimeMultiplier(Int finalMultiplier){}; ///< Final time multiplier for current camera movement.

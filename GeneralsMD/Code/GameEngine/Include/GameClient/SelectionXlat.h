@@ -49,6 +49,7 @@ private:
 
 	Bool m_leftMouseButtonIsDown;
 	Bool m_dragSelecting;
+	Bool m_leftDragIsLine;							///< latched at the press: this left drag draws an order line, so no box grows (fork)
 	Bool m_dragOrderJustIssued;					///< an attack circle or a left-drawn order line just went out, so eat the click that ends it (fork)
 	UnsignedInt m_lastGroupSelTime;
 	Int m_lastGroupSelGroup;

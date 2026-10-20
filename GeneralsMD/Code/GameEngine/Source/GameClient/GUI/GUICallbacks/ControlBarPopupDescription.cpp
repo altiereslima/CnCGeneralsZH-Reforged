@@ -1244,6 +1244,7 @@ void ControlBar::hideBuildTooltipLayout()
 
 void ControlBar::deleteBuildTooltipLayout( void )
 {
+	LOGIC_CENSUS( CENSUS_CONTROLBAR );
 	m_showBuildToolTipLayout = FALSE;
 	prevWindow= NULL;
 	m_buildToolTipLayout->hide(TRUE);

@@ -191,6 +191,16 @@ public:
 	// Call at the top of a frame.  Arms the two above again.
 	void Begin_Frame();
 
+	// The chain's ambient occlusion multiplied into the scene target as it stands, out of the depth
+	// given, when "ao" is in the chain and the scene is going into this chain's target.  Once a
+	// frame: the chain leaves its own occlusion pass out after it.  The caller binds its target,
+	// depth and viewport again afterwards.  False when it drew nothing.
+	bool Occlude_Scene(ID3D11ShaderResourceView * depth);
+
+	// Call once at the very top of a frame, before any scene of it (a mirror's included) begins.
+	// Arms Occlude_Scene again.
+	void Open_Frame();
+
 	// One line for the shutdown report: the chain, the size of the buffers, and the reason there is
 	// no chain if there is not one.
 	const char * Diagnostic_Line() const { return Diagnostic; }
@@ -226,6 +236,8 @@ private:
 		// The scene came down without a match finishing it (the loading screen, interface and all
 		// drawn into the scene target): the tone curve, but never the lighting style's grade.
 		bool Ungraded;
+		// The pass's colour multiplies what the destination holds instead of replacing it.
+		bool Multiply;
 	};
 
 	bool Create_Shaders();
@@ -248,8 +260,10 @@ private:
 	ID3D11PixelShader * BloomBlurShader;
 	ID3D11PixelShader * BloomCompositeShader;
 	ID3D11PixelShader * WarpShader;
+	ID3D11PixelShader * SceneOcclusionShader;
 	ID3D11SamplerState * Sampler;
 	ID3D11BlendState * BlendState;
+	ID3D11BlendState * MultiplyBlendState;
 	ID3D11DepthStencilState * DepthState;
 	ID3D11RasterizerState * RasterizerState;
 	ID3D11Buffer * ConstantBuffer;
@@ -258,6 +272,8 @@ private:
 	// turn, and they are always eight bit: the frame is back from half float by the time any of the
 	// one pass effects sees it.
 	Target SceneTarget;
+	// The scene as Occlude_Scene found it, in its format, made at that pass's first use.
+	Target SceneCopy;
 	Target ChainTargets[2];
 	Target BloomTargets[2];
 
@@ -274,6 +290,8 @@ private:
 	bool TargetsAreFloat;
 	bool ShadersReady;
 	bool Resolved;
+	// Occlude_Scene ran this frame, so Finish leaves the occlusion pass out.
+	bool Occluded;
 	char Diagnostic[192];
 };
 

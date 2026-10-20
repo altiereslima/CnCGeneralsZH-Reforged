@@ -77,30 +77,8 @@ public:
 	//
 	// water methods
 	//
-	/// enable/disable the water grid
+	/// the water grid was enabled/disabled (TerrainLogic's WaterGrid holds it)
 	virtual void enableWaterGrid( Bool enable );
-	/// set min/max height values allowed in water grid pointed to by waterTable
-	virtual void setWaterGridHeightClamps( const WaterHandle *waterTable, Real minZ, Real maxZ );
-	/// adjust fallof parameters for grid change method
-	virtual void setWaterAttenuationFactors( const WaterHandle *waterTable, 
-																					 Real a, Real b, Real c, Real range );
-	/// set the water table position and orientation in world space
-	virtual void setWaterTransform( const WaterHandle *waterTable, 
-																	Real angle, Real x, Real y, Real z );
-	virtual void setWaterTransform( const Matrix3D *transform );
-	virtual void getWaterTransform( const WaterHandle *waterTable, Matrix3D *transform );
-	/// water grid resolution spacing
-	virtual void setWaterGridResolution( const WaterHandle *waterTable,
-																			 Real gridCellsX, Real gridCellsY, Real cellSize );
-	virtual void getWaterGridResolution( const WaterHandle *waterTable, 
-																			 Real *gridCellsX, Real *gridCellsY, Real *cellSize );
-	/// adjust the water grid in world coords by the delta
-	virtual void changeWaterHeight( Real x, Real y, Real delta );
-	/// adjust the velocity at a water grid point corresponding to the world x,y
-	virtual void addWaterVelocity( Real worldX, Real worldY, 
-																 Real velocity, Real preferredHeight );
-	virtual Bool getWaterGridHeight( Real worldX, Real worldY, Real *height);
-	virtual void updateWaterGrid( UnsignedInt logicFrame );
 
 	virtual void setTerrainTracksDetail(void);
 	virtual void setShoreLineDetail(void);
@@ -190,9 +168,7 @@ protected:
 #ifdef DO_SEISMIC_SIMULATIONS
   WorldHeightMap *m_clientHeightMap; ///< this is a workspace for animating the terrain elevations
 #endif
-  
-	Bool m_isWaterGridRenderingEnabled;
-  
+
   AsciiString	m_currentSkyboxTexNames[NumSkyboxTextures];	///<store current texture names applied to skybox.
 	AsciiString m_initialSkyboxTexNames[NumSkyboxTextures];	///<store starting texture/default skybox textures.
 

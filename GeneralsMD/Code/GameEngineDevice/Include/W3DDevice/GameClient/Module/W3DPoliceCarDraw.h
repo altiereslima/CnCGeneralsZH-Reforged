@@ -55,6 +55,7 @@ public:
 	// virtual destructor prototype provided by memory pool declaration
 
 	virtual void doDrawModule(const Matrix3D* transformMtx);
+	virtual void buildRenderObjects( Bool madeInTick );
 
 protected:
 

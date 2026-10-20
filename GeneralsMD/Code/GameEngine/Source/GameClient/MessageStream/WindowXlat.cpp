@@ -184,7 +184,14 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 			msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK )
 		m_rightClickTaken = FALSE;
 	if( m_rightClickTaken && msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG )
+	{
+		// The windows still see the drag, so a right press that looked on the radar keeps the camera
+		// under the cursor, but the battlefield never does and cannot scroll under it.
+		ICoord2D mousePos = msg->getArgument(0)->pixel;
+		ICoord2D delta = msg->getArgument(1)->pixel;
+		TheWindowManager->winProcessMouseEvent(GWM_RIGHT_DRAG, &mousePos, &delta);
 		return DESTROY_MESSAGE;
+	}
 	if( m_rightClickTaken && msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP )
 	{
 		m_rightClickTaken = FALSE;

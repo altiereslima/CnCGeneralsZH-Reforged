@@ -53,7 +53,7 @@ public:
 	UnsignedInt			m_ignitionDelay;			///< delay in frames from when missile is 'fired', to when it starts moving		15
 	Real						m_initialVel;			
 	Real						m_initialDist;
-	Real						m_diveDistance;				///< parsed and unused: a cruise missile flies one curve to its goal (Locomotor::moveTowardsPositionThrust)
+	Real						m_diveDistance;				///< inside the lock distance, the missile keeps EA's flight over the cruise curve (Locomotor::setDiveDistance)
 	const FXList*		m_ignitionFX;					///< FXList to do when missile 'ignites'
 	Bool						m_useWeaponSpeed;			///< if true, limit speed of projectile to the Weapon's info
 	Bool						m_detonateOnNoFuel;		///< If true, don't just stop thrusting, blow up when out of gas
@@ -121,10 +121,13 @@ private:
 	ObjectID							m_launcherID;							///< ID of object that launched us (INVALID_ID if not yet launched)
 	ObjectID							m_victimID;								///< ID of object that I am rocketing towards (INVALID_ID if not yet launched)
 	UnsignedInt						m_fuelExpirationDate;			///< how long 'til we run out of fuel
-	Real									m_noTurnDistLeft;					///< when zero, ok to start turning
+	Real									m_noTurnDistLeft;					///< when zero, ok to start turning; below zero while the turn eases in
 	Real									m_maxAccel;
 	Coord3D								m_originalTargetPos;			///< When firing uphill, we aim high to clear the brow of the hill.  jba.
 	Coord3D								m_prevPos;
+	Coord3D								m_aimOffset;							///< the shot's point on the victim, in the victim's frame (Weapon::bodyOffsetFromPoint)
+
+	void updateChaseOffset();
 	WeaponBonusConditionFlags		m_extraBonusFlags;
 	const WeaponTemplate*	m_detonationWeaponTmpl;		///< weapon to fire at end (or null)
 	const ParticleSystemTemplate* m_exhaustSysTmpl;

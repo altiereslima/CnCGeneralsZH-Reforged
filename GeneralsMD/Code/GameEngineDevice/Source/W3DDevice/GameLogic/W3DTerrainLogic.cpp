@@ -28,6 +28,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "Common/GameMemory.h"
+#include "Common/LogicThread.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameLogic/W3DTerrainLogic.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
@@ -279,6 +280,7 @@ Bool W3DTerrainLogic::isClearLineOfSight(const Coord3D& pos, const Coord3D& posO
 //-------------------------------------------------------------------------------------------------
 Real W3DTerrainLogic::getGroundHeight( Real x, Real y, Coord3D* normal ) const
 {
+	LOGIC_WINDOW_READ( WINDOW_TERRAIN );
 #define USE_THE_TERRAIN_OBJECT
 #ifdef USE_THE_TERRAIN_OBJECT
 	if (TheTerrainRenderObject) 
@@ -304,6 +306,7 @@ Real W3DTerrainLogic::getGroundHeight( Real x, Real y, Coord3D* normal ) const
 //-------------------------------------------------------------------------------------------------
 Real W3DTerrainLogic::getLayerHeight( Real x, Real y, PathfindLayerEnum layer, Coord3D* normal, Bool clip ) const
 {
+	LOGIC_WINDOW_READ( WINDOW_TERRAIN );
 #ifdef USE_THE_TERRAIN_OBJECT
 
 	if (!TheTerrainRenderObject)

@@ -386,7 +386,9 @@ Bool Win32BIGFileSystem::loadBigFilesFromDirectory(AsciiString dir, AsciiString 
 
 		if (archiveFile != NULL) {
 			DEBUG_LOG(("Win32BIGFileSystem::loadBigFilesFromDirectory - loading %s into the directory tree.\n", (*it).str()));
-			loadIntoDirectoryTree(archiveFile, *it, overwrite);
+			// The fork's art claims over what was mounted before it: ReforgedUI.big sorts after
+			// EnglishZH.big and has to beat its Data\English\Art\Textures interface pages.
+			loadIntoDirectoryTree(archiveFile, *it, overwrite || isReforgedArchive(*it));
 			m_archiveFileMap[(*it)] = archiveFile;
 			DEBUG_LOG(("Win32BIGFileSystem::loadBigFilesFromDirectory - %s inserted into the archive file map.\n", (*it).str()));
 			actuallyAdded = TRUE;

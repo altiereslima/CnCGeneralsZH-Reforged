@@ -40,6 +40,7 @@
 #include "Common/GameState.h"
 #include "GameClient/GameText.h"
 #include "GameClient/MapUtil.h"
+#include "GameLogic/AI.h"
 #include "Common/MultiplayerSettings.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/Xfer.h"
@@ -77,6 +78,7 @@ void GameSlot::reset()
 	m_startPos = -1;
 	m_playerTemplate = -1;
 	m_teamNumber = -1;
+	m_aiPersonality = AIPERSONA_NORMAL;
 	m_NATBehavior = FirewallHelperClass::FIREWALL_TYPE_SIMPLE;
 	m_lastFrameInGame = 0;
 	m_disconnected = FALSE;
@@ -304,6 +306,7 @@ void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 		m_startPos = -1;
 		m_playerTemplate = -1;
 		m_teamNumber = -1;
+		m_aiPersonality = AIPERSONA_NORMAL;
 
 		if (state == SLOT_OPEN && TheGameSpyGame && TheGameSpyGame->getConstSlot(0) == this)
 		{
@@ -407,6 +410,7 @@ void GameInfo::reset( void )
   m_incomeSharing = INCOME_SHARING_OFF;
   m_techRespawn = 0;
   m_supplyPileLimit = 0;
+  m_turbo = FALSE;
 
 	//
 
@@ -1205,6 +1209,9 @@ static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiSt
 		game->getStartingCash().countMoney(), game->oldFactionsOnly() ? 'Y' : 'N', game->getPeaceTime(),
 		game->getUnitLimit() ? 1 : 0, game->getProRules() ? 1 : 0, game->getIncomeSharing(), game->getTechRespawn(),
 		game->getSupplyPileLimit() );
+	// written only when on, so a normal-speed game's string is the one it always was
+	if (game->getTurbo())
+		optionsString.concat("TB=1;");
 
 	//add player info for each slot
 	optionsString.concat(slotListID);
@@ -1229,9 +1236,11 @@ static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiSt
 		}
 		else if (slot && slot->isAI())
 		{
-			str.format("C%c,%d,%d,%d,%d:", SlotStateToOptionsChar(slot->getState()),
+			// an older parser stops at the team and never sees the personality after it
+			str.format("C%c,%d,%d,%d,%d%s:", SlotStateToOptionsChar(slot->getState()),
 				slot->getColor(), slot->getPlayerTemplate(),
-				slot->getStartPos(), slot->getTeamNumber());
+				slot->getStartPos(), slot->getTeamNumber(),
+				AIPersonaSlotField(slot->getAIPersonality()).str());
 		}
 		else if (slot && slot->getState() == SLOT_OPEN)
 		{
@@ -1251,6 +1260,22 @@ static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiSt
 	optionsString.concat(';');
 
 	return optionsString;
+}
+
+AsciiString AIPersonaSlotField( Int persona )
+{
+	AsciiString field;
+	if (persona != AIPERSONA_NORMAL)
+		field.format(",%d", persona);
+	return field;
+}
+
+Int AIPersonaFromSlotField( const char *field )
+{
+	if (field == NULL || *field == 0)
+		return AIPERSONA_NORMAL;
+	const Int persona = atoi(field);
+	return (persona > AIPERSONA_NORMAL && persona < AIPERSONA_COUNT) ? persona : AIPERSONA_NORMAL;
 }
 
 static Int grabHexInt(const char *s)
@@ -1285,6 +1310,7 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
   Int incomeSharing = INCOME_SHARING_OFF; // the same
   Int techRespawn = 0; // the same
   Int supplyPileLimit = 0; // the same
+  Bool turbo = FALSE; // the same
 
 	Bool sawMap, sawMapCRC, sawMapSize, sawSeed, sawSlotlist, sawUseStats, sawSuperweaponRestriction, sawStartingCash, sawOldFactions;
 	sawMap = sawMapCRC = sawMapSize = sawSeed = sawSlotlist = sawUseStats = sawSuperweaponRestriction = sawStartingCash = sawOldFactions = FALSE;
@@ -1410,6 +1436,10 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
     else if (key.compare("PL") == 0 )
     {
       supplyPileLimit = atoi(val.str());
+    }
+    else if (key.compare("TB") == 0 )
+    {
+      turbo = atoi(val.str()) != 0;
     }
 		else if (key.getLength() == 1 && *key.str() == slotListID)
 		{
@@ -1698,6 +1728,9 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 							newSlot[i].setTeamNumber(team);
 							//DEBUG_LOG(("ParseAsciiStringToGameInfo - team number is %d\n", team));
 
+							//Read the optional personality
+							newSlot[i].setAIPersonality(AIPersonaFromSlotField(strtok_r(NULL,",",&slotPos)));
+
 						}//case 'C':
 						break;
 						case 'O':
@@ -1762,6 +1795,7 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
     game->setIncomeSharing( incomeSharing );
     game->setTechRespawn( techRespawn );
     game->setSupplyPileLimit( supplyPileLimit );
+    game->setTurbo( turbo );
 
 		return true;
 	}
@@ -1788,7 +1822,7 @@ void SkirmishGameInfo::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void SkirmishGameInfo::xfer( Xfer *xfer )
 {
-	const XferVersion currentVersion = 10;	// 5 adds m_peaceTime, 6 m_unitLimit, 7 m_proRules, 8 m_incomeSharing, 9 m_techRespawn, 10 m_supplyPileLimit
+	const XferVersion currentVersion = 11;	// 5 adds m_peaceTime, 6 m_unitLimit, 7 m_proRules, 8 m_incomeSharing, 9 m_techRespawn, 10 m_supplyPileLimit, 11 each slot's AI personality
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1843,6 +1877,12 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
  		Int origPlayerTemplate=m_slot[slot]->getOriginalPlayerTemplate();
 		xfer->xferInt(&origPlayerTemplate);
 
+		Int persona = m_slot[slot]->getAIPersonality();
+		if (version >= 11)
+			xfer->xferInt(&persona);
+		else
+			persona = AIPERSONA_NORMAL;
+
 		if( xfer->getXferMode() == XFER_LOAD ) {
 			m_slot[slot]->setState((SlotState)state, name);
 			if (isAccepted) m_slot[slot]->setAccept();
@@ -1856,6 +1896,7 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
 			m_slot[slot]->setColor(color);
 			m_slot[slot]->setStartPos(startPos);
 			m_slot[slot]->setPlayerTemplate(playerTemplate);
+			m_slot[slot]->setAIPersonality(persona);
 		}
 	}
 

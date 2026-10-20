@@ -60,6 +60,7 @@ public:
 
 	/// the draw method
 	virtual void doDrawModule(const Matrix3D* transformMtx);
+	virtual void buildRenderObjects( Bool madeInTick );
 
 	virtual void setShadowsEnabled(Bool enable);
 	virtual void releaseShadows(void) {};	///< we don't care about preserving temporary shadows.	

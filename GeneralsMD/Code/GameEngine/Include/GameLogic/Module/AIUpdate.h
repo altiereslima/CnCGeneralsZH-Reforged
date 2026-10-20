@@ -869,6 +869,7 @@ private:
 
 	// Attack Info --------------------------------------------------------------------------------------------
 	const AttackPriorityInfo*	m_attackInfo;
+	AsciiString								m_attackInfoToLoad;	///< the set a save named: the script engine that holds it loads after the objects
 
 	// "Planning Mode" -----------------------------------------------------------------------------------------
 	enum { MAX_WAYPOINTS = 16 };

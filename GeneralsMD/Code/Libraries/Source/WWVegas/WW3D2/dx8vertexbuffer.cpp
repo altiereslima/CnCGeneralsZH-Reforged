@@ -936,6 +936,16 @@ void DynamicVBAccessClass::Allocate_Sorting_Dynamic_Buffer()
 }
 
 // ----------------------------------------------------------------------------
+
+// While Direct3D 11 presents, Direct3D 9 skips every indexed draw, so the shared dynamic buffer is
+// written into its twin alone and the Direct3D 9 copy is never locked; that lock and unlock were a
+// driver round trip several hundred times a frame for bytes nothing read.  A buffer the twin was
+// refused for keeps its Direct3D 9 lock, which is then the only memory there is to write.
+static bool d3d9_reads_dynamic_buffer(DX8VertexBufferClass* buffer)
+{
+	return !Direct3D11_Present_Is_Enabled() || buffer->Get_DX11_Twin()==NULL;
+}
+
 static int dx8_lock;
 DynamicVBAccessClass::WriteLockClass::WriteLockClass(DynamicVBAccessClass* dynamic_vb_access_)
 	:
@@ -968,20 +978,19 @@ DynamicVBAccessClass::WriteLockClass::WriteLockClass(DynamicVBAccessClass* dynam
 		}
 
 		DX8_Assert();
-		// Lock with discard contents if the buffer offset is zero
-		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()->Lock(
-			DynamicVBAccess->VertexBufferOffset*_DynamicDX8VertexBuffer->FVF_Info().Get_FVF_Size(),
-			DynamicVBAccess->Get_Vertex_Count()*DynamicVBAccess->VertexBuffer->FVF_Info().Get_FVF_Size(),
-			(void**)&Vertices,
-			D3DLOCK_NOSYSLOCK | (!DynamicVBAccess->VertexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE)));
 		{
-			void* mirror=DX11Lock.Begin(
-				static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX11_Twin(),
-				Vertices,
-				DynamicVBAccess->VertexBufferOffset*DynamicVBAccess->VertexBuffer->FVF_Info().Get_FVF_Size(),
-				DynamicVBAccess->Get_Vertex_Count()*DynamicVBAccess->VertexBuffer->FVF_Info().Get_FVF_Size(),
-				!DynamicVBAccess->VertexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE,
-				!Direct3D11_Present_Is_Enabled());
+			DX8VertexBufferClass* buffer=static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer);
+			const bool d3d9_reads=d3d9_reads_dynamic_buffer(buffer);
+			// Lock with discard contents if the buffer offset is zero
+			const unsigned lock_flags=!DynamicVBAccess->VertexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE;
+			const unsigned byte_offset=DynamicVBAccess->VertexBufferOffset*buffer->FVF_Info().Get_FVF_Size();
+			const unsigned byte_count=DynamicVBAccess->Get_Vertex_Count()*buffer->FVF_Info().Get_FVF_Size();
+			Vertices=NULL;
+			if (d3d9_reads) {
+				DX8_ErrorCode(buffer->Get_DX8_Vertex_Buffer()->Lock(byte_offset,byte_count,(void**)&Vertices,
+					D3DLOCK_NOSYSLOCK|lock_flags));
+			}
+			void* mirror=DX11Lock.Begin(buffer->Get_DX11_Twin(),Vertices,byte_offset,byte_count,lock_flags,d3d9_reads);
 			if (mirror) Vertices=(VertexFormatXYZNDUV2*)mirror;
 		}
 		break;
@@ -1012,7 +1021,9 @@ DynamicVBAccessClass::WriteLockClass::~WriteLockClass()
 		if (static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()==NULL) break;
 		DX8_Assert();
 		DX11Lock.End();
-		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()->Unlock());
+		if (d3d9_reads_dynamic_buffer(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer))) {
+			DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()->Unlock());
+		}
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		break;

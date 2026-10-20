@@ -30,6 +30,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Common/LogicThread.h"
 #if !defined(_WIN32)
 #include <unistd.h>		// getpid, for the replay checkpoint folder
 #endif
@@ -120,6 +121,7 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/RankInfo.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GhostObject.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
 #include "GameLogic/TerrainLogic.h"
@@ -229,6 +231,7 @@ struct KindOfSelectionData
 {
 	KindOfMaskType m_mustbeSet;
 	KindOfMaskType m_mustbeClear;
+	Bool m_idleOnly;
 
 	DrawableList newlySelectedDrawables;
 };
@@ -245,7 +248,8 @@ static Bool kindOfUnitSelection( Drawable *test, void *userData )
 		if (!object)
 			return FALSE;
 
-		Bool isKindOfMatch = object->isKindOfMulti(data->m_mustbeSet, data->m_mustbeClear);
+		Bool isKindOfMatch = object->isKindOfMulti(data->m_mustbeSet, data->m_mustbeClear)
+			&& ( !data->m_idleOnly || InGameUI::isIdleCombatUnit( object ) );
 
 		// only select objects if not already selected
 		if( object && isKindOfMatch 
@@ -707,6 +711,8 @@ SuperweaponInfo* InGameUI::findSWInfo(Int playerIndex, const AsciiString& powerN
 // ------------------------------------------------------------------------------------------------
 void InGameUI::addSuperweapon(Int playerIndex, const AsciiString& powerName, ObjectID id, const SpecialPowerTemplate *powerTemplate)
 {
+	LOGIC_AFTER_TICK( [=]() { addSuperweapon( playerIndex, powerName, id, powerTemplate ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	if (powerTemplate == NULL)
 		return;
 
@@ -747,6 +753,13 @@ void InGameUI::addSuperweapon(Int playerIndex, const AsciiString& powerName, Obj
 // ------------------------------------------------------------------------------------------------
 Bool InGameUI::removeSuperweapon(Int playerIndex, const AsciiString& powerName, ObjectID id, const SpecialPowerTemplate *powerTemplate)
 {
+	// logic never reads the answer, which after the tick is not known yet
+	if( LogicThread::defersEffects() )
+	{
+		LogicThread::callAfterTick( [=]() { removeSuperweapon( playerIndex, powerName, id, powerTemplate ); } );
+		return FALSE;
+	}
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	DEBUG_LOG(("Removing superweapon UI timer\n"));
 	SuperweaponMap::iterator mapIt = m_superweapons[playerIndex].find(powerName);
 	if (mapIt != m_superweapons[playerIndex].end())
@@ -775,6 +788,18 @@ Bool InGameUI::removeSuperweapon(Int playerIndex, const AsciiString& powerName, 
 // ------------------------------------------------------------------------------------------------
 void InGameUI::objectChangedTeam(const Object *obj, Int oldPlayerIndex, Int newPlayerIndex)
 {
+	if( LogicThread::defersEffects() )
+	{
+		// by ID: the tick may destroy it before its end, and a dead object's timers went with it
+		const ObjectID id = obj->getID();
+		LogicThread::callAfterTick( [=]() {
+			const Object *live = TheGameLogic->findObjectByID( id );
+			if( live )
+				objectChangedTeam( live, oldPlayerIndex, newPlayerIndex );
+		} );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	// if we already had it listed, remove and re-add it
 	if (obj && oldPlayerIndex >= 0 && newPlayerIndex >= 0)
 	{
@@ -818,27 +843,22 @@ void InGameUI::objectChangedTeam(const Object *obj, Int oldPlayerIndex, Int newP
 // ------------------------------------------------------------------------------------------------
 void InGameUI::hideObjectSuperweaponDisplayByScript(const Object *obj)
 {
-	ObjectID objID = obj->getID();
-	for (Int playerIndex = 0; playerIndex < MAX_PLAYER_COUNT; ++playerIndex)
-	{
-		for (SuperweaponMap::iterator mapIt = m_superweapons[playerIndex].begin(); mapIt != m_superweapons[playerIndex].end(); ++mapIt)
-		{
-			for (SuperweaponList::iterator listIt = mapIt->second.begin(); listIt != mapIt->second.end(); ++listIt)
-			{
-				if ((*listIt)->m_id == objID)
-				{
-					(*listIt)->m_hiddenByScript = TRUE;
-				}
-			}
-		}
-	}
+	setObjectSuperweaponHiddenByScript( obj->getID(), TRUE );
 }
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 void InGameUI::showObjectSuperweaponDisplayByScript(const Object *obj)
 {
-	ObjectID objID = obj->getID();
+	setObjectSuperweaponHiddenByScript( obj->getID(), FALSE );
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+void InGameUI::setObjectSuperweaponHiddenByScript( ObjectID objID, Bool hidden )
+{
+	LOGIC_AFTER_TICK( [=]() { setObjectSuperweaponHiddenByScript( objID, hidden ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	for (Int playerIndex = 0; playerIndex < MAX_PLAYER_COUNT; ++playerIndex)
 	{
 		for (SuperweaponMap::iterator mapIt = m_superweapons[playerIndex].begin(); mapIt != m_superweapons[playerIndex].end(); ++mapIt)
@@ -847,7 +867,7 @@ void InGameUI::showObjectSuperweaponDisplayByScript(const Object *obj)
 			{
 				if ((*listIt)->m_id == objID)
 				{
-					(*listIt)->m_hiddenByScript = FALSE;
+					(*listIt)->m_hiddenByScript = hidden;
 				}
 			}
 		}
@@ -858,6 +878,8 @@ void InGameUI::showObjectSuperweaponDisplayByScript(const Object *obj)
 // ------------------------------------------------------------------------------------------------
 void InGameUI::setSuperweaponDisplayEnabledByScript(Bool enable)
 {
+	LOGIC_AFTER_TICK( [=]() { setSuperweaponDisplayEnabledByScript( enable ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	m_superweaponHiddenByScript = !enable;
 }
 
@@ -874,6 +896,8 @@ Bool InGameUI::getSuperweaponDisplayEnabledByScript(void) const
 // ------------------------------------------------------------------------------------------------
 void InGameUI::addNamedTimer( const AsciiString& timerName, const UnicodeString& text, Bool isCountdown )
 {
+	LOGIC_AFTER_TICK( [=]() { addNamedTimer( timerName, text, isCountdown ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	NamedTimerInfo *info = newInstance( NamedTimerInfo );	
 	info->m_timerName = timerName;
 	info->color = m_namedTimerNormalColor;
@@ -896,6 +920,8 @@ void InGameUI::addNamedTimer( const AsciiString& timerName, const UnicodeString&
 // ------------------------------------------------------------------------------------------------
 void InGameUI::removeNamedTimer( const AsciiString& timerName )
 {
+	LOGIC_AFTER_TICK( [=]() { removeNamedTimer( timerName ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	NamedTimerMapIt mapIt = m_namedTimers.find(timerName);
 	if (mapIt != m_namedTimers.end())
 	{
@@ -910,6 +936,8 @@ void InGameUI::removeNamedTimer( const AsciiString& timerName )
 // ------------------------------------------------------------------------------------------------
 void InGameUI::showNamedTimerDisplay( Bool show )
 {
+	LOGIC_AFTER_TICK( [=]() { showNamedTimerDisplay( show ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	m_showNamedTimers = show;
 }
 
@@ -2180,7 +2208,8 @@ void InGameUI::handleBuildPlacements( void )
 																																&worldStart, &worldEnd,
 																																objectSize,
 																																TheGlobalData->m_maxLineBuildObjects,
-																																builderObject );
+																																builderObject,
+																																BuildAssistant::IGNORE_UNSEEN );
 				positions = tileBuildInfo->positions;
 				iconsUsed = tileBuildInfo->tilesUsed;
 			}
@@ -2793,6 +2822,15 @@ void InGameUI::freeClassicMessages( void )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::addClassicMessage( const UnicodeString &text, const Color *color )
 {
+	// a tick's line (message, playerMessage, chatMessage) is formatted at the call and added after it
+	if( LogicThread::defersEffects() )
+	{
+		const Bool hasColor = color != NULL;
+		const Color colorValue = hasColor ? *color : 0;
+		LogicThread::callAfterTick( [=]() { addClassicMessage( text, hasColor ? &colorValue : NULL ); } );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	const Color color1 = color ? ( *color | GameMakeColor( 0, 0, 0, 255 ) ) : m_messageColor1;
 	const Color color2 = color ? ( *color | GameMakeColor( 0, 0, 0, 255 ) ) : m_messageColor2;
 
@@ -3179,7 +3217,7 @@ void InGameUI::updateFormationHints( void )
 		if( obj->isKindOf( KINDOF_IMMOBILE ) || obj->getAIUpdateInterface() == NULL )
 			continue;
 		// the same riders the logic leaves out of a formation move (GameLogicDispatch)
-		if( obj->isDisabledByType( DISABLED_HELD ) && !isForceAttackArmed() && !isGuardArmed() )
+		if( obj->isDisabledByType( DISABLED_HELD ) && !isForceAttackArmed() && !isForceLineHeld() && !isGuardArmed() )
 			continue;
 		movers.push_back( obj );
 	}
@@ -3194,7 +3232,7 @@ void InGameUI::updateFormationHints( void )
 	{
 		OrderHint hint;
 		hint.kind = isInAttackMoveToMode() ? ORDER_HINT_ATTACK_MOVE
-							: isForceAttackArmed() ? ORDER_HINT_ATTACK
+							: ( isForceAttackArmed() || isForceLineHeld() ) ? ORDER_HINT_ATTACK
 							: isGuardArmed() ? ORDER_HINT_GUARD
 							: ORDER_HINT_MOVE;
 		hint.owner = movers[ i ]->getID();
@@ -4134,15 +4172,16 @@ Bool InGameUI::isAttackListTarget( const Object *obj, const Player *local ) cons
 /** The line drawn with the attack key: every enemy it runs across is shared across the units that
 	* can shoot, in the order both sides stand along the stroke, nearest the start first.  The shots
 	* are dealt the same way as the circle, so the counts differ by one at most, and each unit works
-	* down its own share.  "Across" is the line passing over the object's own footprint, give or take
-	* a few feet for a hand that is not steady.  Returns how many enemies the line crossed.  With
+	* down its own share.  "Across" is the line passing over the object's own footprint or near it,
+	* within LINE_TOLERANCE of its edge.  Returns how many enemies the line crossed.  With
 	* none, the caller fires on the ground along the line instead.  Enemies that nobody selected can
 	* shoot still count, so the ground is not fired in their place. */
 //-------------------------------------------------------------------------------------------------
 Int InGameUI::issueAttackLine( const std::vector<Coord3D>& line )
 {
-	// how far off the line a unit's edge may be and still count as under it
-	const Real LINE_TOLERANCE = 10.0f;
+	// how far off the line a unit's edge may be and still count: the line is drawn near the enemies
+	// it means, not threaded through each one, so a tank's length either side of it counts
+	const Real LINE_TOLERANCE = 40.0f;
 
 	// the range query measures to centres, so it reaches this much further for a building whose
 	// centre is off the line and whose walls are under it
@@ -4967,6 +5006,65 @@ Bool InGameUI::isForceFireOn( void ) const
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Shift on top of the Force Attack hold turns its left drag from the circle into the attack line.
+	* An armed move, attack move or guard key keeps its own line. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::isForceLineHeld( void ) const
+{
+	return m_forceAttackMode && !isLineOrderArmed() && TheKeyboard->isShift();
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::wantsDragLine( void ) const
+{
+	return isLineOrderArmed() || isForceLineHeld() || isMoveLineHeld();
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::wantsDragCircle( void ) const
+{
+	return isForceFireOn() && !isLineOrderArmed() && !isForceLineHeld() && m_selectCount > 0
+		&& getGUICommand() == NULL && m_pendingPlaceType == NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** An armed key's line (move, attack move, guard), the attack key's and Ctrl's circle and Ctrl+Shift's
+	* attack line are drawn with the left button in every mouse, the button their clicks are aimed with;
+	* the right one pans then, and its click puts the key down.  Shift's move line is a plain move and is
+	* drawn with the button a click on the ground moves with: the left in the default Classic mouse, the
+	* right under the Alternate Mouse Setup and the Reforged mouse, where the left drag stays the box. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::isOrderDragButton( Bool rightButton ) const
+{
+	if( isOrderKeyArmed() || m_forceAttackMode )
+		return !rightButton;
+	return rightButton ? TheGlobalData->rightButtonOrders() : TheGlobalData->leftButtonOrders();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Shift with no key armed draws the move line, the one V draws, when something selected of yours
+	* can walk it.  With nothing that walks selected there is no line to draw and shift's drag stays
+	* the box that adds to the selection.  Ctrl and Alt on top keep their own meanings, and a GUI
+	* command or a structure on the cursor (shift drags a row of them) owns the drag. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::isMoveLineHeld( void ) const
+{
+	if( !TheKeyboard->isShift() || TheKeyboard->isCtrl() || TheKeyboard->isAlt() )
+		return FALSE;
+	if( !TheGlobalData->m_formationDrag || isOrderKeyArmed() || m_forceAttackMode
+			|| getGUICommand() != NULL || m_pendingPlaceType != NULL )
+		return FALSE;
+
+	for( DrawableList::const_iterator it = m_selectedDrawables.begin(); it != m_selectedDrawables.end(); ++it )
+	{
+		const Object *obj = (*it)->getObject();
+		if( obj && obj->isLocallyControlled() && !obj->isKindOf( KINDOF_IMMOBILE ) && obj->getAIUpdateInterface() != NULL )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /// Get drawable ID under cursor
 //-------------------------------------------------------------------------------------------------
 DrawableID InGameUI::getMousedOverDrawableID( void ) const
@@ -5648,7 +5746,9 @@ void InGameUI::computePlacementRow( const ThingTemplate *what, Real angle, const
 /** The legality question asked of the spot under the ghost, in one place - the nudge search asks it
 	* of every candidate too.  IGNORE_STEALTHED is deliberate: a structure you cannot put down is a
 	* place a stealthed unit is standing, and the placement cursor is not a detector.  The click
-	* re-asks with FAIL_STEALTHED_WITHOUT_FEEDBACK, which is where that actually gets decided. */
+	* re-asks with FAIL_STEALTHED_WITHOUT_FEEDBACK, which is where that actually gets decided.
+	* IGNORE_UNSEEN is the same for the fog: the ghost, its bib, the nudge and the click know only what
+	* this player has seen, and the logic's own check turns down an order on a building he has not. */
 //-------------------------------------------------------------------------------------------------
 UnsignedInt InGameUI::placementCheckOptions( void )
 {
@@ -5657,7 +5757,8 @@ UnsignedInt InGameUI::placementCheckOptions( void )
 				 BuildAssistant::CLEAR_PATH |
 				 BuildAssistant::NO_OBJECT_OVERLAP |
 				 BuildAssistant::SHROUD_REVEALED |
-				 BuildAssistant::IGNORE_STEALTHED;
+				 BuildAssistant::IGNORE_STEALTHED |
+				 BuildAssistant::IGNORE_UNSEEN;
 
 }  // end placementCheckOptions
 
@@ -5768,12 +5869,32 @@ void InGameUI::snapPlacementToNeighbour( Coord3D *world, const ThingTemplate *wh
 	MemoryPoolObjectHolder holder( iter );
 	for( Object *obj = iter->first(); obj; obj = iter->next() )
 	{
-		if( !obj->isKindOf( KINDOF_STRUCTURE ) || obj->isEffectivelyDead() )
+		// a ghost that jumps flush against bare ground says where an unseen building stands
+		if( !obj->isKindOf( KINDOF_STRUCTURE ) || obj->isEffectivelyDead() ||
+				BuildAssistant_isHiddenFromLocalPlayer( obj ) )
 			continue;
 
 		PlacementBox standing;
 		placementFootprint( obj->getTemplate(), obj->getPosition(), obj->getOrientation(), &standing );
 		neighbours.push_back( standing );
+	}
+
+	// and one that died in his fog, which he still sees standing in its ghost.  The ghost keeps no
+	// template, so its box is the bare geometry, without a factory's bib.
+	enum { MAX_GHOSTS = 16 };
+	const GhostObject *ghosts[ MAX_GHOSTS ];
+	const Int ghostCount = BuildAssistant_findDeadGhostsInFog( world, searchRadius, ghosts, MAX_GHOSTS );
+	for( Int g = 0; g < ghostCount; g++ )
+	{
+		PlacementBox remembered;
+		remembered.x = ghosts[ g ]->getParentPosition()->x;
+		remembered.y = ghosts[ g ]->getParentPosition()->y;
+		remembered.c = (Real)Cos( ghosts[ g ]->getParentAngle() );
+		remembered.s = (Real)Sin( ghosts[ g ]->getParentAngle() );
+		remembered.halfMajor = ghosts[ g ]->getGeometryMajorRadius();
+		remembered.halfMinor = ghosts[ g ]->getGeometryType() == GEOMETRY_BOX ?
+													 ghosts[ g ]->getGeometryMinorRadius() : remembered.halfMajor;
+		neighbours.push_back( remembered );
 	}
 
 	for( size_t i = 0; i < neighbours.size(); i++ )
@@ -5939,6 +6060,11 @@ Bool InGameUI::rotatePendingPlacement( Int steps )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::selectDrawable( Drawable *draw )
 {
+	// a drawable the tick destroys leaves the selection in this queue too, before it is deleted
+	if( LogicThread::defersEffects() )
+		LogicThread::noteSelected( draw->getID(), draw->getObject()->getID(), TRUE );	// what the tick reads back (M7)
+	LOGIC_AFTER_TICK( [=]() { selectDrawable( draw ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 
 	if( draw->isSelected() == FALSE )
 	{
@@ -5965,10 +6091,23 @@ void InGameUI::selectDrawable( Drawable *draw )
 }  // end selectDrawable
 
 //-------------------------------------------------------------------------------------------------
+void InGameUI::setDisplayedMaxWarning( Bool selected )
+{
+	// in order with the selectDrawable the tick queued before it
+	LOGIC_AFTER_TICK( [=]() { setDisplayedMaxWarning( selected ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
+	m_displayedMaxWarning = selected;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Clear "selected" status of Drawable. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::deselectDrawable( Drawable *draw )
 {
+	if( LogicThread::defersEffects() )
+		LogicThread::noteSelected( draw->getID(), INVALID_ID, FALSE );	// what the tick reads back (M7)
+	LOGIC_AFTER_TICK( [=]() { deselectDrawable( draw ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 
 	if( draw->isSelected() )
 	{
@@ -6007,6 +6146,10 @@ void InGameUI::deselectDrawable( Drawable *draw )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::deselectAllDrawables( void )
 {
+	if( LogicThread::defersEffects() )
+		LogicThread::noteSelectionCleared();	// what the tick reads back (M7)
+	LOGIC_AFTER_TICK( [=]() { deselectAllDrawables(); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 	const Bool hadSelectedDrawables = !selected->empty();
 
@@ -6050,6 +6193,7 @@ void InGameUI::deselectAllDrawables( void )
 //-------------------------------------------------------------------------------------------------
 const DrawableList *InGameUI::getAllSelectedDrawables( void ) const
 {
+	LOGIC_CENSUS( CENSUS_CLIENT_READ );
 	return &m_selectedDrawables;
 }
 
@@ -6109,6 +6253,7 @@ const DrawableList *InGameUI::getAllSelectedLocalDrawables( void )
 //-------------------------------------------------------------------------------------------------
 Drawable *InGameUI::getFirstSelectedDrawable( void )
 {
+	LOGIC_CENSUS( CENSUS_CLIENT_READ );
 
 	// sanity
 	if( m_selectedDrawables.empty() )
@@ -6189,6 +6334,8 @@ Bool InGameUI::isAllSelectedKindOf( KindOfType kindOf ) const
 //-------------------------------------------------------------------------------------------------
 void InGameUI::setInputEnabled( Bool enable )
 {
+	LOGIC_AFTER_TICK( [=]() { setInputEnabled( enable ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	if(!enable)
 		setSelecting( FALSE );
 	
@@ -6598,6 +6745,8 @@ void InGameUI::createReplayControl( void )
 // ------------------------------------------------------------------------------------------------
 void InGameUI::playMovie( const AsciiString& movieName )
 {
+	LOGIC_AFTER_TICK( [=]() { playMovie( movieName ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 
 	stopMovie();
 
@@ -6773,6 +6922,8 @@ void InGameUI::displayCantBuildMessage( LegalBuildCode lbc )
 // ------------------------------------------------------------------------------------------------
 void InGameUI::militarySubtitle( const AsciiString& label, Int duration )
 {
+	LOGIC_AFTER_TICK( [=]() { militarySubtitle( label, duration ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	// make sure we don't already have a subtitle up there
 	removeMilitarySubtitle();
 
@@ -7349,7 +7500,7 @@ Bool InGameUI::canSelectedObjectsEffectivelyUseWeapon( const CommandButton *comm
 }
 
 // ------------------------------------------------------------------------------------------------
-Int InGameUI::selectAllUnitsByTypeAcrossRegion( IRegion2D *region, KindOfMaskType mustBeSet, KindOfMaskType mustBeClear )
+Int InGameUI::selectAllUnitsByTypeAcrossRegion( IRegion2D *region, KindOfMaskType mustBeSet, KindOfMaskType mustBeClear, Bool idleOnly )
 {
 	KindOfSelectionData data;
 	Int newSelectionCount = 0;
@@ -7357,6 +7508,7 @@ Int InGameUI::selectAllUnitsByTypeAcrossRegion( IRegion2D *region, KindOfMaskTyp
 
 	data.m_mustbeSet = mustBeSet;
 	data.m_mustbeClear = mustBeClear;
+	data.m_idleOnly = idleOnly;
 
 	if (region)
 	{
@@ -7489,7 +7641,7 @@ Int InGameUI::selectMatchingAcrossRegion( IRegion2D *region )
 }
 
 // ------------------------------------------------------------------------------------------------
-Int InGameUI::selectAllUnitsByTypeAcrossScreen(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear)
+Int InGameUI::selectAllUnitsByTypeAcrossScreen(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear, Bool idleOnly)
 {
 	/// When implementing this, obey TheInGameUI->getMaxSelectCount() if it is > 0
 			
@@ -7503,7 +7655,7 @@ Int InGameUI::selectAllUnitsByTypeAcrossScreen(KindOfMaskType mustBeSet, KindOfM
  
 	buildRegion( &origin, &size, &region );
 
-	Int numSelected = selectAllUnitsByTypeAcrossRegion(&region, mustBeSet, mustBeClear);
+	Int numSelected = selectAllUnitsByTypeAcrossRegion(&region, mustBeSet, mustBeClear, idleOnly);
 	if (numSelected == -1)
 	{
 		UnicodeString message = TheGameText->fetch( "GUI:NothingSelected" );
@@ -7555,10 +7707,10 @@ Int InGameUI::selectMatchingAcrossScreen( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-Int InGameUI::selectAllUnitsByTypeAcrossMap(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear)
+Int InGameUI::selectAllUnitsByTypeAcrossMap(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear, Bool idleOnly)
 {
 	/// When implementing this, obey TheInGameUI->getMaxSelectCount() if it is > 0
-	Int numSelected = selectAllUnitsByTypeAcrossRegion(NULL, mustBeSet, mustBeClear);
+	Int numSelected = selectAllUnitsByTypeAcrossRegion(NULL, mustBeSet, mustBeClear, idleOnly);
 	if (numSelected == -1)
 	{
 		UnicodeString message = TheGameText->fetch( "GUI:NothingSelected" );
@@ -7614,7 +7766,7 @@ Int InGameUI::selectMatchingAcrossMap()
 Int InGameUI::selectAllUnitsByType(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear)
 {
 	/// When implementing this, obey TheInGameUI->getMaxSelectCount() if it is > 0
-	Int numSelected = selectAllUnitsByTypeAcrossScreen(mustBeSet, mustBeClear);
+	Int numSelected = selectAllUnitsByTypeAcrossScreen(mustBeSet, mustBeClear, FALSE);
 	if (numSelected == -1)
 	{
 		return numSelected;
@@ -7622,7 +7774,7 @@ Int InGameUI::selectAllUnitsByType(KindOfMaskType mustBeSet, KindOfMaskType must
 
 	if (numSelected == 0)
 	{
-		Int numSelectedAcrossMap = selectAllUnitsByTypeAcrossMap(mustBeSet, mustBeClear);
+		Int numSelectedAcrossMap = selectAllUnitsByTypeAcrossMap(mustBeSet, mustBeClear, FALSE);
 		return numSelectedAcrossMap;
 	}
 	return numSelected;
@@ -7691,6 +7843,14 @@ void InGameUI::buildRegion( const ICoord2D *anchor, const ICoord2D *dest, IRegio
 //-------------------------------------------------------------------------------------------------
 FloatingTextData *InGameUI::addFloatingText(const UnicodeString& text,const Coord3D *pos, Color color)
 {
+	// nobody in logic keeps the answer
+	if( LogicThread::defersEffects() )
+	{
+		const Coord3D at = *pos;
+		LogicThread::callAfterTick( [=]() { addFloatingText( text, &at, color ); } );
+		return NULL;
+	}
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	if( !TheGameLogic->getDrawIconUI() )
 		return NULL;
 
@@ -7737,6 +7897,8 @@ enum
 //-------------------------------------------------------------------------------------------------
 void InGameUI::addSignalMark( SignalKind kind, const Coord3D &pos, Color color, ParticleSystemID smoke )
 {
+	LOGIC_AFTER_TICK( [=]() { addSignalMark( kind, pos, color, smoke ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	// No decal manager without a renderer (headless, or off Windows until the D track): no mark.
 	// GameLogicDispatch calls this for every signal a player sends, replays included.
 	if( TheProjectedShadowManager == NULL )
@@ -7827,6 +7989,13 @@ inline Bool isClose(const Coord3D& a, const Coord3D& b)
 }
 void InGameUI::DEBUG_addFloatingText(const AsciiString& text, const Coord3D * pos, Color color)
 {
+	if( LogicThread::defersEffects() )
+	{
+		const Coord3D at = *pos;
+		LogicThread::callAfterTick( [=]() { DEBUG_addFloatingText( text, &at, color ); } );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	const Int POINTSIZE = 8;
 	const Int LEADING = 0;
 
@@ -9168,13 +9337,25 @@ void InGameUI::drawHudOverlay( void )
 	WallClockTime wallClock;
 	getLocalWallClock( &wallClock );
 
+	// Turbo mode runs twice the logic frames a second, so its rate reads as the normal rate it is
+	// doubling, with TURBO in front of it.  A replay's 1x is the rate its match was played at; the
+	// speed keys move the engine's limit but not that
+	const Int turboFps = GameEngine_matchFramesPerSecond( TRUE );
+	const Int matchFps = TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK
+		? replayNormalFramesPerSecond() : TheGameEngine->getFramesPerSecondLimit();
+	UnicodeString rateText;
+	if( matchFps == turboFps )
+		rateText.format( u"TURBO %dhz(%dfps)", m_hudLogicHz.shown * GameEngine_matchFramesPerSecond( FALSE ) / turboFps,
+										 m_hudFps.shown );
+	else
+		rateText.format( u"%dhz(%dfps)", m_hudLogicHz.shown, m_hudFps.shown );
+
 	UnicodeString text;
-	text.format( u"%02d:%02d   %02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps) %s",
+	text.format( u"%02d:%02d   %02d:%02d:%02d(%02d:%02d:%02d)   %s %s",
 							 wallClock.wHour, wallClock.wMinute,
 							 gameSecs / 3600, (gameSecs / 60) % 60, gameSecs % 60,
 							 realSecs / 3600, (realSecs / 60) % 60, realSecs % 60,
-							 m_hudLogicHz.shown, m_hudFps.shown,
-							 TheDisplay->getRendererName() );
+							 rateText.str(), TheDisplay->getRendererName() );
 
 	UnicodeString frameText;
 	frameText.format( u"   frame %d", (Int)logicFrame );
@@ -9705,6 +9886,9 @@ void InGameUI::popupMessage( const AsciiString& message, Int x, Int y, Int width
 //-------------------------------------------------------------------------------------------------
 void InGameUI::popupMessage( const AsciiString& identifier, Int x, Int y, Int width, Color textColor, Bool pause, Bool pauseMusic)
 {
+	// the pause it may ask for stops the next tick either way
+	LOGIC_AFTER_TICK( [=]() { popupMessage( identifier, x, y, width, textColor, pause, pauseMusic ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	if(m_popupMessageData)
 		clearPopupMessageData();
 
@@ -9748,6 +9932,8 @@ void InGameUI::popupMessage( const AsciiString& identifier, Int x, Int y, Int wi
 //-------------------------------------------------------------------------------------------------
 void InGameUI::clearPopupMessageData( void )
 {
+	LOGIC_AFTER_TICK( [=]() { clearPopupMessageData(); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	if(!m_popupMessageData)
 		return;
 	if(m_popupMessageData->layout)
@@ -9822,6 +10008,13 @@ void InGameUI::addWorldAnimation( Anim2DTemplate *animTemplate,
 																	Real durationInSeconds,
 																	Real zRisePerSecond )
 {
+	if( LogicThread::defersEffects() && pos != NULL )
+	{
+		const Coord3D at = *pos;
+		LogicThread::callAfterTick( [=]() { addWorldAnimation( animTemplate, &at, options, durationInSeconds, zRisePerSecond ); } );
+		return;
+	}
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 
 	// sanity
 	if( animTemplate == NULL || pos == NULL || durationInSeconds <= 0.0f )
@@ -10009,11 +10202,18 @@ void InGameUI::addIdleWorker( Object *obj )
 {
 	if(!obj)
 		return;
+	addIdleWorkerFor( obj, obj->getControllingPlayer()->getPlayerIndex() );
+}
 
-	if(findIdleWorker(obj))
+/* The list keeps the pointer and never reads through it here, so after a tick it may name an object
+	 that tick destroyed: the destroy queued its removeIdleWorker behind this add. */
+void InGameUI::addIdleWorkerFor( Object *obj, Int index )
+{
+	LOGIC_AFTER_TICK( [=]() { addIdleWorkerFor( obj, index ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
+	if( std::find( m_idleWorkers[index].begin(), m_idleWorkers[index].end(), obj ) != m_idleWorkers[index].end() )
 		return;
 
-	Int index = obj->getControllingPlayer()->getPlayerIndex();
 	m_idleWorkers[index].push_back(obj);
 }
 
@@ -10021,6 +10221,9 @@ void InGameUI::removeIdleWorker( Object *obj, Int playerNumber )
 {
 	if(!obj)
 		return;
+	// compares the pointer only, so the object may be gone by the time this runs
+	LOGIC_AFTER_TICK( [=]() { removeIdleWorker( obj, playerNumber ); } );
+	LOGIC_CENSUS( CENSUS_INGAMEUI );
 	if(playerNumber < 0 || playerNumber >= MAX_PLAYER_COUNT)  // we're leaving the game, so this is all screwed
 		return;
 	
@@ -10042,13 +10245,14 @@ void InGameUI::removeIdleWorker( Object *obj, Int playerNumber )
 	return;
 }
 
-void InGameUI::selectNextIdleWorker( void )
+// The camera stays put; the idle worker buttons look at what this returns, the hotkey does not.
+Object *InGameUI::selectNextIdleWorker( void )
 {
 	Int index = ThePlayerList->getLocalPlayer()->getPlayerIndex();
 	if(m_idleWorkers[index].empty())
 	{
 		DEBUG_ASSERTCRASH(FALSE, ("InGameUI::selectNextIdleWorker We're trying to select a worker when our list is empty for player %s", WideCharAsUtf8( ThePlayerList->getLocalPlayer()->getPlayerDisplayName().str() ).str()));
-		return;
+		return NULL;
 	}
 	Object *selectThisObject = NULL;
 	
@@ -10109,15 +10313,13 @@ void InGameUI::selectNextIdleWorker( void )
 				{
 					TheAudio->addAudioEvent( soundEvent );
 				}*/
-		
-		// center on the unit
-		TheTacticalView->lookAt(selectThisObject->getPosition());
 	}
+	return selectThisObject;
 }
 
 // A unit of the local player's that is standing on the field with no order: not a dozer, a worker
 // or a supply truck (those have the idle-worker key), not a structure, not riding in anything.
-static Bool isIdleCombatUnit( const Object *obj )
+Bool InGameUI::isIdleCombatUnit( const Object *obj )
 {
 	if( !obj->isLocallyControlled() || obj->isEffectivelyDead() || obj->isContained() || !obj->isMobile() )
 		return FALSE;
@@ -10133,7 +10335,7 @@ static Bool isIdleCombatUnit( const Object *obj )
 	return ai && ai->isIdle();
 }
 
-void InGameUI::selectNextIdleUnit( void )
+void InGameUI::selectNextIdleUnit( KindOfMaskType mustBeSet, KindOfMaskType mustBeClear )
 {
 	// Nothing keeps a list of these the way the dozers keep m_idleWorkers, so the key walks the
 	// object list, which is in creation order and stays put between presses.  A lone selected unit
@@ -10145,7 +10347,7 @@ void InGameUI::selectNextIdleUnit( void )
 
 	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
 	{
-		if( isIdleCombatUnit( obj ) )
+		if( isIdleCombatUnit( obj ) && obj->isKindOfMulti( mustBeSet, mustBeClear ) )
 		{
 			if( passedCurrent )
 			{
@@ -10172,10 +10374,8 @@ void InGameUI::selectNextIdleUnit( void )
 	teamMsg->appendBooleanArgument( TRUE );
 	teamMsg->appendObjectIDArgument( selectThisObject->getID() );
 
+	// the camera stays where the player has it
 	selectDrawable( selectThisObject->getDrawable() );
-
-	// center on the unit
-	TheTacticalView->lookAt(selectThisObject->getPosition());
 }
 
 Int InGameUI::getIdleWorkerCount( void )
@@ -10377,7 +10577,9 @@ WindowMsgHandledType IdleWorkerSystem( GameWindow *window, UnsignedInt msg,
 			static NameKeyType buttonSelectID = NAMEKEY( "IdleWorker.wnd:ButtonSelectNextIdleWorker" );
 			if (control && control->winGetWindowId() == buttonSelectID)
 			{
-				TheInGameUI->selectNextIdleWorker( );
+				Object *worker = TheInGameUI->selectNextIdleWorker( );
+				if( worker )	// every worker busy: nothing was selected
+					TheTacticalView->lookAt( worker->getPosition() );
 			}
 			break;
 

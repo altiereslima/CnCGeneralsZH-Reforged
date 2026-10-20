@@ -138,6 +138,7 @@ public:
 	Bool getSelected() {return m_selected;}
 
 	void getCenterPoint(Coord3D* pOutCoord) const;
+	void getCenterXY(Coord3D* pOutCoord) const;
 	Real getRadius(void) const;
 
 public:

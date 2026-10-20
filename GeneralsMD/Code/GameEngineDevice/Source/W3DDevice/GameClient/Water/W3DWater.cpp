@@ -64,6 +64,7 @@
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/PolygonTrigger.h"
 #include "GameLogic/ScriptEngine.h"
+#include "GameLogic/TerrainLogic.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DPoly.h"
@@ -362,11 +363,6 @@ WaterRenderObjClass::~WaterRenderObjClass(void)
 		SAFE_RELEASE( m_pBumpTexture2[i]);
 	}
 
-	if (m_meshData)
-		delete [] m_meshData;
-	m_meshData = NULL;
-	m_meshDataSize = 0;
-
 	//Release strings allocated inside global water settings.
 	for  (i=0; i<TIME_OF_DAY_COUNT; i++)
 	{	WaterSettings[i].m_skyTextureFile.clear();
@@ -390,7 +386,6 @@ WaterRenderObjClass::WaterRenderObjClass(void)
 	m_dy=0;
 	m_indexBuffer=NULL;
 	m_waterTrackSystem = NULL;
-	m_doWaterGrid = FALSE;
 	m_meshVertexMaterialClass=NULL;
 	m_meshLight=NULL;
 	m_vertexMaterialClass=NULL;
@@ -411,19 +406,14 @@ WaterRenderObjClass::WaterRenderObjClass(void)
 
 	m_dwWavePixelShader=NULL;
 	m_dwWaveVertexShader=NULL;
-	m_meshData=NULL;
-	m_meshDataSize = 0;
-	m_meshInMotion = FALSE;
-	m_gridOrigin=Vector2(0,0);
-	m_gridDirectionX=Vector2(1.0f,0.0f);
-	m_gridDirectionY=Vector2(1.0f,0.0f);
+	m_meshGeneration = 0;
+	m_drawnCellsX = 0;
+	m_drawnCellsY = 0;
+	m_drawnCellSize = 0.0f;
+	m_drawnMotionEnabled = FALSE;
+	m_drawnPushed = FALSE;
+	m_drawnTransform.Make_Identity();
 
-	m_gridCellSize=WATER_MESH_SPACING;
-	m_gridCellsX=WATER_MESH_X_VERTICES;
-	m_gridCellsY=WATER_MESH_Y_VERTICES;
-	m_gridWidth = m_gridCellsX * m_gridCellSize;
-	m_gridHeight = m_gridCellsY * m_gridCellSize;
-	
 	Int i=NUM_BUMP_FRAMES;
 	while (i--)
 		m_pBumpTexture[i]=NULL;
@@ -963,13 +953,16 @@ void WaterRenderObjClass::ReAcquireResources(void)
 	m_pDev=DX8Wrapper::_Get_D3D_Device();
 
 	//We're using the same grid for either 3D Water Mesh or Pixel/Vertex shader.  Just
-	//allocate the right size depending on usage
-	if (m_meshData)
+	//allocate the right size depending on usage.  The grid's mesh, once allocated, is never freed
+	//for good, so "buffers built for an allocation" is the old "m_meshData != NULL"; and before the
+	//first one (init's call here, ahead of TerrainLogic) there is no grid to ask.
+	if (m_meshGeneration != 0)
 	{
+		WaterGrid *grid = TheTerrainLogic->getWaterGrid();
 		//Create new grid data
-		if (Render_Failed(generateIndexBuffer(m_gridCellsX+1,m_gridCellsY+1)))
+		if (Render_Failed(generateIndexBuffer(grid->getCellsX()+1,grid->getCellsY()+1)))
 			return;
-		if (Render_Failed(generateVertexBuffer(m_gridCellsX+1,m_gridCellsY+1,sizeof(MaterMeshVertexFormat),false)))
+		if (Render_Failed(generateVertexBuffer(grid->getCellsX()+1,grid->getCellsY()+1,sizeof(MaterMeshVertexFormat),false)))
 			return;
 	}
 	else
@@ -1272,58 +1265,30 @@ void WaterRenderObjClass::updateMapOverrides(void)
 void WaterRenderObjClass::reset( void )
 {
 
-	// for vertex animated water mesh reset the values
-	if( m_meshData)
-	{
-		Int i, j;
-		WaterMeshData *pData;
-		Int	mx = m_gridCellsX + 1;
-		Int my = m_gridCellsY + 1;
-
-		// go through each mesh point and adjust the height according to the velocity
-		for( j = 0, pData = m_meshData; j < (my + 2); j++ )
-		{	
-
-			for( i = 0; i < (mx + 2); i++ )
-			{
-
-				// areset grid values for this cell
-				pData->velocity = 0.0f;
-				pData->height = 0.0f;
-				pData->preferredHeight = 0.0f;
-				pData->status = WaterRenderObjClass::AT_REST;
-
-				// on to the next one
-				pData++;
-
-			}  // end for i
-
-		}  // end for j
-
-		// mesh data is no longer in motion
-		m_meshInMotion = FALSE;
-
-	}  // end if, water type 3
+	// the vertex animated water mesh is zeroed by TerrainLogic::reset, which owns it now
 
 	if (m_waterTrackSystem)
 		m_waterTrackSystem->reset();
-} 
+}
 
+// ------------------------------------------------------------------------------------------------
+/** TerrainLogic::enableWaterGrid has enabled or disabled its WaterGrid, and W3DTerrainVisual::load
+	* calls this with FALSE for a new map.  The grid's flag, mesh and m_disableRiver are the grid's;
+	* what is left is the river flag and the buffers, rebuilt when the grid has a new allocation - the
+	* old "state && m_meshData == NULL", and the reallocation setGridResolution made through here. */
+// ------------------------------------------------------------------------------------------------
 void WaterRenderObjClass::enableWaterGrid(Bool state)
 {
-	m_doWaterGrid = state;
-
 	m_drawingRiver = false;
-	m_disableRiver = false;
 
-	if (state && m_meshData == NULL)
+	WaterGrid *grid = TheTerrainLogic->getWaterGrid();
+	if (grid->getMeshGeneration() != m_meshGeneration)
 	{	//water type has changed, must allocate necessary assets for new water.
-		//contains the current deformed water surface z(height) values.  With 1 vertex invisible border
-		//around surface to speed up normal calculations.
-		m_meshDataSize = (m_gridCellsX+1+2)*(m_gridCellsY+1+2);
-		m_meshData=NEW WaterMeshData[ m_meshDataSize ];
-		memset(m_meshData,0,sizeof(WaterMeshData)*(m_gridCellsX+1+2)*(m_gridCellsY+1+2));
-		reset();
+		m_meshGeneration = grid->getMeshGeneration();
+
+		// the grid was zeroed as it was allocated; reset() did that and this
+		if (m_waterTrackSystem)
+			m_waterTrackSystem->reset();
 
 		//Release existing grid data
 		SAFE_RELEASE(m_vertexBufferD3D);
@@ -1331,10 +1296,41 @@ void WaterRenderObjClass::enableWaterGrid(Bool state)
 		releaseWaterTwins();
 
 		//Create new grid data
-		if (Render_Failed(generateIndexBuffer(m_gridCellsX+1,m_gridCellsY+1)))
+		if (Render_Failed(generateIndexBuffer(grid->getCellsX()+1,grid->getCellsY()+1)))
 			return;
-		if (Render_Failed(generateVertexBuffer(m_gridCellsX+1,m_gridCellsY+1,sizeof(MaterMeshVertexFormat),false)))
+		if (Render_Failed(generateVertexBuffer(grid->getCellsX()+1,grid->getCellsY()+1,sizeof(MaterMeshVertexFormat),false)))
 			return;
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The grid's transform was this object's own: the grid setters called Set_Transform.  They are
+	* TerrainLogic's now, so the drawing takes it from there before it draws. */
+// ------------------------------------------------------------------------------------------------
+void WaterRenderObjClass::syncGridTransform(void)
+{
+	if (memcmp(&m_drawnTransform, &Transform, sizeof(Matrix3D)) != 0)
+		Set_Transform(m_drawnTransform);
+}
+
+// ------------------------------------------------------------------------------------------------
+/** LOGIC-THREAD.md phase 3: the grid as the draw will read it, taken from TerrainLogic at the sync
+	* point (update(), from the client's pass ahead of the draw), so the tick that steps the grid beside
+	* the draw writes nothing the draw reads.  A mesh only while it moves, as only then is it drawn. */
+// ------------------------------------------------------------------------------------------------
+void WaterRenderObjClass::takeGridForDraw(void)
+{
+	WaterGrid *grid = TheTerrainLogic->getWaterGrid();
+	grid->getTransform(&m_drawnTransform);
+	m_drawnMotionEnabled = grid->isMotionEnabled();
+	m_drawnPushed = grid->wasPushed();
+	m_drawnCellsX = grid->getCellsX();
+	m_drawnCellsY = grid->getCellsY();
+	m_drawnCellSize = grid->getCellSize();
+	if (m_drawnMotionEnabled && grid->getMeshData())
+	{
+		const WaterMeshData *mesh = grid->getMeshData();
+		m_drawnMesh.assign(mesh, mesh + (m_drawnCellsX+1+2)*(m_drawnCellsY+1+2));
 	}
 }
 
@@ -1344,6 +1340,9 @@ void WaterRenderObjClass::enableWaterGrid(Bool state)
 // ------------------------------------------------------------------------------------------------
 void WaterRenderObjClass::update( void )
 {
+	// the client's pass, ahead of the draw and with no tick running: the grid the draw will read
+	takeGridForDraw();
+
 	//
 	// The river scroll and the bump flipbook used to advance once per call, which is once per
 	// RENDER frame. That was fine when the loop was capped and wrong now that it is not, and
@@ -1413,20 +1412,10 @@ void WaterRenderObjClass::update( void )
 	}
 
 	/* The mesh motion that was here - the part of the water the simulation reads - is stepped by the
-	   logic now, once per logic frame: updateMeshMotion, from GameLogic::update (T1c, defect 17). */
+	   logic now, once per logic frame: TerrainLogic's WaterGrid::update, from GameLogic::update (T1c,
+	   defect 17; the grid moved to TerrainLogic in M7). */
 
 }  // end update
-
-// ------------------------------------------------------------------------------------------------
-/** The water grid's mesh motion for one logic frame.  GameLogic::update calls this, through
-	* TerrainVisual::updateWaterGrid, at the top of every logic frame: where EA's client pass stepped it,
-	* just ahead of the frame, but once per logic frame however many frames a pass runs.  The step, and
-	* the gate that makes a second call for the same frame do nothing, are WaterGridMotion's. */
-// ------------------------------------------------------------------------------------------------
-void WaterRenderObjClass::updateMeshMotion( UnsignedInt logicFrame )
-{
-	WaterGridMotion::updateForLogicFrame( logicFrame, m_doWaterGrid, m_meshInMotion, m_meshData, m_gridCellsX, m_gridCellsY );
-}
 
 
 //-------------------------------------------------------------------------------------------------
@@ -1572,7 +1561,8 @@ void WaterRenderObjClass::updateRenderTargetTextures(CameraClass *cam)
 			continue;
 
 		Coord3D center;
-		pTrig->getCenterPoint(&center);
+		pTrig->getCenterXY(&center);
+		center.z = TheTerrainRenderObject->getDrawHeight(center.x, center.y);
 		if (cam->Cull_Sphere(SphereClass(Vector3(center.x, center.y, center.z), pTrig->getRadius())))
 			continue;
 
@@ -1731,6 +1721,8 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 	if (TheTerrainRenderObject && !TheTerrainRenderObject->getMap())
 		return;	//no map has been loaded yet.
 
+	syncGridTransform();	// the grid's place in the world, which every water surface below is drawn at
+
 	if (((RTS3DScene *)rinfo.Camera.Get_User_Data())->getCustomPassMode() == SCENE_PASS_ALPHA_MASK ||
 		((SceneClass *)rinfo.Camera.Get_User_Data())->Get_Extra_Pass_Polygon_Mode() == SceneClass::EXTRA_PASS_CLEAR_LINE)
 		return;	//water is not drawn in wireframe or custom scene passes
@@ -1761,7 +1753,7 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 		case WATER_TYPE_3_GRIDMESH:
 			//Draw the water surface as a bunch of alpha blended tiles covering areas where water is visible
 			renderWater();
-			if (!m_drawingRiver || m_disableRiver) {
+			if (!m_drawingRiver || m_drawnPushed) {
 				renderWaterMesh();	//Draw water surface as 3D deforming mesh if it's enabled on this map.
 			}
 			break;
@@ -2107,7 +2099,10 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 			D3DXMatrixTranspose(&matWorldViewProj, &matWorldViewProj);
 			m_pDev->SetVertexShaderConstantF(CV_WORLDVIEWPROJ_0, (const float*)&matWorldViewProj, 4);	//pass transform matrix into shader
 
-			m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,0,m_numVertices,0,m_numIndices);
+			// Nobody sees a Direct3D 9 draw while Direct3D 11 presents; renderWaterMesh skips its own
+			// the same way, and this patch has no Direct3D 11 draw beside it.
+			if (!Direct3D11_Present_Is_Enabled())
+				m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,0,m_numVertices,0,m_numIndices);
 		}
 	}
 //	DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_SOLID);
@@ -2163,7 +2158,8 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 
 				DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD, *(Matrix4x4*)&matTemp);
 
-				m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,0,m_numVertices,0,m_numIndices);
+				if (!Direct3D11_Present_Is_Enabled())
+					m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,0,m_numVertices,0,m_numIndices);
 			}
 		}
 		W3DShaderManager::resetShader(W3DShaderManager::ST_SHROUD_TEXTURE);
@@ -2421,7 +2417,8 @@ void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
 void WaterRenderObjClass::renderWaterMesh(void)
 {
 
-	if (!m_doWaterGrid)
+	// the grid is TerrainLogic's, read here from the copy takeGridForDraw made at the sync point
+	if (!m_drawnMotionEnabled || m_drawnMesh.empty())
 		return;	//the water grid is disabled.
 
  	//According to Nvidia there's a D3D bug that happens if you don't start with a
@@ -2431,12 +2428,13 @@ void WaterRenderObjClass::renderWaterMesh(void)
 	Setting *setting=&m_settings[m_tod];
 
 	WaterMeshData *pData;
-	Int	mx=m_gridCellsX+1;
-	Int my=m_gridCellsY+1;
+	WaterMeshData *meshData=&m_drawnMesh[0];
+	Int	mx=m_drawnCellsX+1;
+	Int my=m_drawnCellsY+1;
 	Int i,j;
-	
-	Real cellSizeX=m_gridCellSize;
-	Real cellSizeY=m_gridCellSize;
+
+	Real cellSizeX=m_drawnCellSize;
+	Real cellSizeY=m_drawnCellSize;
 //	Real	uScale2=5.0f*setting->waterRepeatCount/(128.0f)*cellSizeX/10.0f;
 //	Real	vScale2=5.0f*setting->waterRepeatCount/(128.0f)*cellSizeY/10.0f;
 
@@ -2459,7 +2457,7 @@ void WaterRenderObjClass::renderWaterMesh(void)
 	static Real PhasePerFrameY=0.1f;
 
 	//update the mesh heights for this frame (update buffer is 2 samples wider/taller due to border)
-	for (j=0,pData=m_meshData; j<(my+2); j++)
+	for (j=0,pData=meshData; j<(my+2); j++)
 	{	
 		for (i=0; i<(mx+2); i++)
 		{
@@ -2510,7 +2508,7 @@ void WaterRenderObjClass::renderWaterMesh(void)
 	Real bumpSizeDiv2=0.3f*cellSizeY/BUMP_SIZE;
 
 	//Data has a 1 vertex padding all around it so we don't need to special-case edges.  Improves performance
-	for (j=0,pData=m_meshData+mx+2+1; j<my; j++,pData+=2)	//skip 2 horizontal border samples after each row
+	for (j=0,pData=meshData+mx+2+1; j<my; j++,pData+=2)	//skip 2 horizontal border samples after each row
 	{	
 		Real y=(float)j*cellSizeY;
 		Real v1Offset=m_riverVOrigin+(float)j*vScale + uvCosScale*WWMath::Fast_Sin(sinOffset+y*PI/(8*MAP_XY_FACTOR));
@@ -2657,214 +2655,8 @@ void WaterRenderObjClass::renderWaterMesh(void)
 
 }
 
-inline void WaterRenderObjClass::setGridVertexHeight(Int x, Int y, Real value)
-{
-	DEBUG_ASSERTCRASH( x < (m_gridCellsX+1) && y < (m_gridCellsY+1), ("Invalid Water Mesh Coordinates\n") );
-
-	if (m_meshData)
-	{
-		m_meshData[(y+1)*(m_gridCellsX+1+2)+x+1].height = value;
-	}
-}
-
-void WaterRenderObjClass::setGridHeightClamps(Real minz, Real maxz)
-{
-	m_minGridHeight = minz;
-	m_maxGridHeight = maxz;
-}
-
-void WaterRenderObjClass::addVelocity( Real worldX, Real worldY, 
-																			 Real zVelocity, Real preferredHeight )
-{
-
-	if( m_doWaterGrid)
-	{
-		Real gx,gy;
-		Real minX,maxX,minY,maxY;
-		Int x,y;
-		WaterMeshData *meshPoint;
-		m_disableRiver = true;
-
-		//check if center falls within grid bounds
-		if (worldToGridSpace(worldX, worldY, gx, gy))
-		{	
-		
-			//find extents of influence
-			minX = floorf(gx - m_gridChangeMaxRange);
-			if (minX < 0 )
-				minX = 0;	//clamp extent to fall within box
-			maxX = ceilf(gx + m_gridChangeMaxRange);
-			if (maxX > m_gridCellsX)
-				maxX = m_gridCellsX;	//clamp extent to fall within box
-
-			minY = floorf(gy - m_gridChangeMaxRange);
-			if (minY < 0 )
-				minY = 0;	//clamp extent to fall within box
-			maxY = ceilf(gy + m_gridChangeMaxRange);
-			if (maxY > m_gridCellsY)
-				maxY = m_gridCellsY;	//clamp extent to fall within box
-
-			for (y=minY; y<=maxY; y++)
-			{
-				for (x=minX; x<=maxX; x++)
-				{	
-
-					// get the mesh point that we're concerned with
-					meshPoint = &m_meshData[ (y + 1) * (m_gridCellsX + 1 + 2) + x + 1 ];
-
-					// we now have a new preferred height
-					meshPoint->preferredHeight = preferredHeight;
-
-					//
-					// set the velocity of this point based on the distance from the center of the
-					// "core" point for this call
-					//
-					// The one caller, WaveGuideUpdate, pushes every logic frame, so the push is an
-					// acceleration: per frame squared, a quarter of the 30 Hz amount.  WaterVelocity's
-					// parse (per second to per frame) took one half, this is the other.
-					meshPoint->velocity = meshPoint->velocity + ConvertRetailPerFrameRate( zVelocity );
-
-					// this point is now "in motion"
-					BitSet( meshPoint->status, WaterRenderObjClass::IN_MOTION );
-
-				}
-			}
-
-			//
-			// the mesh data is now dirty, we need to pass through the velocity field
-			// during an update phase to update the positions
-			//
-			m_meshInMotion = TRUE;
-
-		}
-
-	}  // end if, water type is 3
-
-}
-
-void WaterRenderObjClass::changeGridHeight(Real wx, Real wy, Real delta)
-{
-	Real gx,gy;
-	Real *oldData;
-	Real newData;
-	Real distance;
-	Real minX,maxX,minY,maxY;
-	Int x,y;
-	
-	//check if center falls within grid bounds
-	if (worldToGridSpace(wx, wy, gx, gy))
-	{	//find extents of influence
-		minX = floorf(gx - m_gridChangeMaxRange);
-		if (minX < 0 )
-			minX = 0;	//clamp extent to fall within box
-		maxX = ceilf(gx + m_gridChangeMaxRange);
-		if (maxX > m_gridCellsX)
-			maxX = m_gridCellsX;	//clamp extent to fall within box
-
-		minY = floorf(gy - m_gridChangeMaxRange);
-		if (minY < 0 )
-			minY = 0;	//clamp extent to fall within box
-		maxY = ceilf(gy + m_gridChangeMaxRange);
-		if (maxY > m_gridCellsY)
-			maxY = m_gridCellsY;	//clamp extent to fall within box
-
-		for (y=minY; y<=maxY; y++)
-		{
-			for (x=minX; x<=maxX; x++)
-			{	oldData = &m_meshData[(y+1)*(m_gridCellsX+1+2)+x+1].height;
-				distance = (gx - (Real)x)*(gx - (Real)x) + (gy - (Real)y)*(gy - (Real)y);
-				distance = sqrt(distance);
-				newData = *oldData + 1.0f/(m_gridChangeAtt0+m_gridChangeAtt1*distance+distance*distance*m_gridChangeAtt2)*delta;
-				//Clamp to min/max values
-				if (newData < m_minGridHeight)
-					newData = m_minGridHeight;
-				if (newData > m_maxGridHeight)
-					newData = m_maxGridHeight;
-				*oldData = newData;
-			}
-		}
-	}
-}
-
-void WaterRenderObjClass::setGridChangeAttenuationFactors(Real a, Real b, Real c, Real range)
-{
-	m_gridChangeAtt0 = a;
-	m_gridChangeAtt1 = b;
-	m_gridChangeAtt2 = c;
-	m_gridChangeMaxRange = range/m_gridCellSize;	//convert range to grid space
-}
-
-void WaterRenderObjClass::setGridTransform(Real angle, Real x, Real y, Real z)
-{
-	m_gridDirectionX = Vector2(1.0f,0.0f);
-
-	m_gridOrigin.X = x;
-	m_gridOrigin.Y = y;
-
-	Matrix3D xform(1);
-	xform.Rotate_Z(angle);
-
-	m_gridDirectionX.X = xform.Get_X_Vector().X;
-	m_gridDirectionX.Y = xform.Get_X_Vector().Y;
-
-	m_gridDirectionY.X = xform.Get_Y_Vector().X;
-	m_gridDirectionY.Y = xform.Get_Y_Vector().Y;
-
-	xform.Set_Translation(Vector3(x,y,z));
-	Set_Transform(xform);
-}
-
-void WaterRenderObjClass::setGridTransform(const Matrix3D *transform )
-{
-
-	if( transform )
-		Set_Transform( *transform );
-
-}
-
-void WaterRenderObjClass::getGridTransform(Matrix3D *transform )
-{
-
-	if( transform )
-		*transform = Get_Transform();
-
-}
-
-void WaterRenderObjClass::setGridResolution(Real gridCellsX, Real gridCellsY, Real cellSize)
-{
-	m_gridCellSize=cellSize;
-
-	if (m_gridCellsX != gridCellsX || m_gridCellsY != m_gridCellsY)
-	{	//resolutoin has changed
-		m_gridCellsX=gridCellsX;
-		m_gridCellsY=gridCellsY;
-
-		if (m_meshData)
-		{	
-
-			delete [] m_meshData;//free previously allocated grid and allocate new size
-			m_meshData = NULL;	 // must set to NULL so that we properly re-allocate
-			m_meshDataSize = 0;
-
-			Bool enable = m_doWaterGrid;
-			enableWaterGrid(true);	// allocates buffers.
-			m_doWaterGrid = enable;
-
-		}
-	}
-}
-
-void WaterRenderObjClass::getGridResolution( Real *gridCellsX, Real *gridCellsY, Real *cellSize )
-{
-
-	if( gridCellsX )
-		*gridCellsX = m_gridCellsX;
-	if( gridCellsY )
-		*gridCellsY = m_gridCellsY;
-	if( cellSize )
-		*cellSize = m_gridCellSize;
-
-}
+/* The grid's setters, addVelocity and changeGridHeight that stood here are TerrainLogic's WaterGrid's
+	 (GameLogic/WaterGridMotion.h), moved with the members they write (LOGIC-THREAD M7). */
 
 static Real wobble(Real baseV, Real offset, Bool wobble)
 {
@@ -2924,7 +2716,7 @@ void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig)
 	Real bumpFactor = 5;
 	static Bool doWobble = true;
 
-	if (m_disableRiver) return;
+	if (m_drawnPushed) return;
 	m_drawingRiver = true;
 
 	//allocate 2 triangles per side with 3 indices per triangle
@@ -3702,75 +3494,7 @@ void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
 }
 #endif
 
-// ------------------------------------------------------------------------------------------------
-/** CRC */
-// ------------------------------------------------------------------------------------------------
-void WaterRenderObjClass::crc( Xfer *xfer )
-{
-
-}  // end crc
-
-// ------------------------------------------------------------------------------------------------
-/** Xfer
-	* Version Info:
-	* 1: Initial version */
-// ------------------------------------------------------------------------------------------------
-void WaterRenderObjClass::xfer( Xfer *xfer )
-{
-
-	// version
-	XferVersion currentVersion = 1;
-	XferVersion version = currentVersion;
-	xfer->xferVersion( &version, currentVersion );
-
-	// grid cells x
-	Int cellsX = m_gridCellsX;
-	xfer->xferInt( &cellsX );
-	if( cellsX != m_gridCellsX )
-	{
-
-		DEBUG_CRASH(( "WaterRenderObjClass::xfer - cells X mismatch\n" ));
-		throw SC_INVALID_DATA;
-
-	}  // end if
-	
-	// grid cells Y
-	Int cellsY = m_gridCellsY;
-	xfer->xferInt( &cellsY );
-	if( cellsY != m_gridCellsY )
-	{
-	
-		DEBUG_CRASH(( "WaterRenderObjClass::xfer - cells Y mismatch\n" ));
-		throw SC_INVALID_DATA;
-
-	}  // end if
-
-	// xfer each of the mesh data points
-	for( Int i = 0; i < m_meshDataSize; ++i )
-	{
-
-		// height
-		xfer->xferReal( &m_meshData[ i ].height );
-
-		// velocity
-		xfer->xferReal( &m_meshData[ i ].velocity );
-
-		// status
-		xfer->xferUnsignedByte( &m_meshData[ i ].status );
-
-		// preferred height
-		xfer->xferUnsignedByte( &m_meshData[ i ].preferredHeight );
-
-	}  // end for, i
-
-}  // end xfer
-
-// ------------------------------------------------------------------------------------------------
-/** Load post process */
-// ------------------------------------------------------------------------------------------------
-void WaterRenderObjClass::loadPostProcess( void )
-{
-
-}  // end loadPostProcess
+/* The save's grid data (the snapshot that was here) is WaterGrid::xfer's; W3DTerrainVisual::xfer
+	 still writes it in the same place. */
 
 

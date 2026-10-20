@@ -40,6 +40,7 @@
 #include "Common/GameType.h"
 #include "Common/MessageStream.h"		// for GameMessageTranslator
 #include "Common/KindOf.h"
+#include "Common/LogicThread.h"
 #include "Common/SpecialPowerType.h"
 #include "Common/Snapshot.h"
 #include "Common/STLTypedefs.h"
@@ -543,6 +544,7 @@ public:  // ********************************************************************
 
 	virtual void hideObjectSuperweaponDisplayByScript(const Object *obj);
 	virtual void showObjectSuperweaponDisplayByScript(const Object *obj);
+	void setObjectSuperweaponHiddenByScript( ObjectID objID, Bool hidden );	///< both of the above, after the tick when a tick asks
 
 	void addNamedTimer( const AsciiString& timerName, const UnicodeString& text, Bool isCountdown );
 	void removeNamedTimer( const AsciiString& timerName );
@@ -980,9 +982,9 @@ public:  // ********************************************************************
 	virtual void deselectAllDrawables( void );							///< Clear the "select" flag from all drawables
 	void holdSelectionThroughTunnel( Drawable *draw );			///< a selected unit going down a tunnel on its own is selected again when it comes up
 	void restoreSelectionAfterTunnel( Drawable *draw );			///< reselect a unit held by holdSelectionThroughTunnel
-	virtual Int getSelectCount( void ) { return m_selectCount; }		///< Get count of currently selected drawables
+	virtual Int getSelectCount( void ) { LOGIC_CENSUS( CENSUS_CLIENT_READ ); return m_selectCount; }		///< Get count of currently selected drawables
 	virtual Int getMaxSelectCount( void ) { return m_maxSelectCount; }	///< Get the max number of selected drawables
-	virtual UnsignedInt getFrameSelectionChanged( void ) { return m_frameSelectionChanged; }	///< Get the max number of selected drawables
+	virtual UnsignedInt getFrameSelectionChanged( void ) { LOGIC_CENSUS( CENSUS_CLIENT_READ ); return m_frameSelectionChanged; }	///< Get the max number of selected drawables
 	virtual const DrawableList *getAllSelectedDrawables( void ) const;	///< Return the list of all the currently selected Drawable IDs.
 	virtual const DrawableList *getAllSelectedLocalDrawables( void );		///< Return the list of all the currently selected Drawable IDs owned by the current player.
 	virtual Drawable *getFirstSelectedDrawable( void );							///< get the first selected drawable (if any)
@@ -996,12 +998,13 @@ public:  // ********************************************************************
 
 	virtual void setInputEnabled( Bool enable );										///< Set the input enabled or disabled
 	virtual void clearModifierModes( void );												///< forget every mode a held key puts us in (see the definition)
-	virtual Bool getInputEnabled( void ) { return m_inputEnabled; }	///< Get the current input status
+	virtual Bool getInputEnabled( void ) { LOGIC_CENSUS( CENSUS_CLIENT_READ ); return m_inputEnabled; }	///< Get the current input status
 
 	virtual void disregardDrawable( Drawable *draw );				///< Drawable is being destroyed, clean up any UI elements associated with it
 
 	virtual void preDraw( void );														///< Logic which needs to occur before the UI renders
 	virtual void draw( void ) = 0;													///< Render the in-game user interface
+	virtual void recordDraw( void ) { }											///< what draw asks of logic, at the sync point (W3DInGameUI)
 	virtual void postDraw( void );													///< Logic which needs to occur after the UI renders
 	/// -directorrecord's broadcast over the director's picture: a score bar along the top with every
 	/// player's name, side, cash and army and the match clock, the armies' tug of war under it, and a
@@ -1068,14 +1071,14 @@ public:  // ********************************************************************
 	virtual Int selectMatchingAcrossRegion( IRegion2D *region );			// -1 = no locally-owned selection, 0+ = # of units selected
 
 	virtual Int selectAllUnitsByType(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear);                
-	virtual Int selectAllUnitsByTypeAcrossScreen(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear);                         
-	virtual Int selectAllUnitsByTypeAcrossMap(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear);                            
-	virtual Int selectAllUnitsByTypeAcrossRegion( IRegion2D *region, KindOfMaskType mustBeSet, KindOfMaskType mustBeClear );			
+	virtual Int selectAllUnitsByTypeAcrossScreen(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear, Bool idleOnly);
+	virtual Int selectAllUnitsByTypeAcrossMap(KindOfMaskType mustBeSet, KindOfMaskType mustBeClear, Bool idleOnly);
+	virtual Int selectAllUnitsByTypeAcrossRegion( IRegion2D *region, KindOfMaskType mustBeSet, KindOfMaskType mustBeClear, Bool idleOnly );	///< idleOnly: only isIdleCombatUnit
 	
 	virtual void buildRegion( const ICoord2D *anchor, const ICoord2D *dest, IRegion2D *region );  ///< builds a region around the specified coordinates
 
 	virtual Bool getDisplayedMaxWarning( void ) { return m_displayedMaxWarning; }
-	virtual void setDisplayedMaxWarning( Bool selected ) { m_displayedMaxWarning = selected; }
+	virtual void setDisplayedMaxWarning( Bool selected );
 
 	// Floating Test Methods
 	/// the text it added, for a caller that wants to hold it longer; NULL while icons are not drawn
@@ -1141,6 +1144,11 @@ public:  // ********************************************************************
 	void toggleMoveArmed( void )							{ m_moveArmed = !m_moveArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; }
 	Bool isMoveArmed( void ) const						{ return m_moveArmed; }
 	Bool isLineOrderArmed( void ) const				{ return m_attackMoveToMode || m_guardArmed || m_moveArmed; }	///< a left drag draws a move, attack move or guard line; force fire's left drag is the attack circle
+	Bool isForceLineHeld( void ) const;				///< the Force Attack hold with shift: a left drag draws the attack line, not the circle
+	Bool isMoveLineHeld( void ) const;				///< shift alone over a selection that can walk: a left drag draws the move line, not the box
+	Bool wantsDragLine( void ) const;					///< a drag of the order button now draws an order line
+	Bool wantsDragCircle( void ) const;				///< a drag of the order button now draws the attack circle
+	Bool isOrderDragButton( Bool rightButton ) const;	///< which button draws the line or circle wanted now: the left for an armed key or Ctrl, else the one that moves
 	
 	// zeroing the repeat clock makes the first quantized step happen on the very next update, so a
 	// tap of the key is one eighth and a hold is one eighth every CAMERA_SNAP_REPEAT_MS.
@@ -1157,9 +1165,11 @@ public:  // ********************************************************************
 	void resetCamera();
 
 	virtual void addIdleWorker( Object *obj );
+	void addIdleWorkerFor( Object *obj, Int playerIndex );	///< addIdleWorker with the owner read at the call
 	virtual void removeIdleWorker( Object *obj, Int playerNumber );
-	virtual void selectNextIdleWorker( void );
-	void selectNextIdleUnit( void );	///< the same cycle for fighting units standing with no order
+	virtual Object *selectNextIdleWorker( void );	///< what it selected, NULL with no idle worker; never moves the camera
+	void selectNextIdleUnit( KindOfMaskType mustBeSet, KindOfMaskType mustBeClear );	///< the same cycle for fighting units of those kinds standing with no order
+	static Bool isIdleCombatUnit( const Object *obj );	///< the local player's fighting unit standing with no order
 
 	virtual void recreateControlBar( void );
 	virtual void notifyResolutionChange( void );

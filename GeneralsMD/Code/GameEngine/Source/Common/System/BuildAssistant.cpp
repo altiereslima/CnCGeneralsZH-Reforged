@@ -35,6 +35,7 @@
 #include "Common/BuildAssistant.h"
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
+#include "Common/PlayerList.h"
 #include "Common/ThingTemplate.h"
 #include "Common/GameAudio.h"
 #include "Common/ThingFactory.h"
@@ -47,6 +48,7 @@
 #include "GameClient/TerrainVisual.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GhostObject.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/AIPathfind.h"
@@ -737,6 +739,13 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 			}
 		}
 
+		// The ghost and its red bib go by what this player has seen: counting a building standing in
+		// the shroud, or put up in the fog since he last looked, turned the ghost red over it and drew
+		// its footprint.  The order still meets the full check in the logic, which refuses it there.
+		// A stealthed thing the click was told to fail on quietly (above) is left to fail.
+		if( BitTest( options, IGNORE_UNSEEN ) && feedbackWithFailure && BuildAssistant_isHiddenFromLocalPlayer( them ) )
+			continue;
+
 		//Kris: Patch 1.01 - November 5, 2003
 		//Prevent busy units (black lotus hacking from being moved by trying to place a building -- exploit).
 		if( rel == ALLIES )
@@ -890,6 +899,9 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 			}
 		}
 
+		if( BitTest( options, IGNORE_UNSEEN ) && BuildAssistant_isHiddenFromLocalPlayer( them ) )
+			continue;
+
 		// ignore any kind of class of objects that we will "remove" for building
 		if( isRemovableForConstruction( them ) == TRUE )
 			continue;
@@ -953,6 +965,23 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 		}
 
 	}  // end for, them
+
+	// The other half of IGNORE_UNSEEN: a building that fell in his fog still stands for him, drawn
+	// from its ghost until he looks there again, and the ghost going green over it told him it was
+	// gone.  The logic let go of the spot when it died and would take the order, so this is the only
+	// place it is turned down.  No bib: a ghost has no drawable to put one under.
+	if( BitTest( options, IGNORE_UNSEEN ) )
+	{
+		enum { MAX_GHOSTS = 16 };
+		const GhostObject *ghosts[ MAX_GHOSTS ];
+		const Int ghostCount = BuildAssistant_findDeadGhostsInFog( &groundPos, range, ghosts, MAX_GHOSTS );
+		for( Int i = 0; i < ghostCount; ++i )
+		{
+			if( BuildAssistant_ghostOverlaps( ghosts[ i ], &groundPos, myBounds, angle ) )
+				return LBC_OBJECTS_IN_THE_WAY;
+		}
+	}
+
 	return LBC_OK;
 }
 
@@ -964,6 +993,112 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 Bool BuildAssistant_shroudBlocksBuilding( CellShroudStatus status )
 {
 	return status == CELLSHROUD_SHROUDED;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Fogged is a picture: a building he walked past is still drawn there from the ghost, and the
+	* object's own status says FOGGED only for that (see PartitionData::getShroudedStatus).  A unit in
+	* the fog, a building the fog closed over unseen and anything shrouded come back SHROUDED.  A
+	* stealthed thing nobody has detected is not drawn for him either, wherever it stands. */
+//-------------------------------------------------------------------------------------------------
+Bool BuildAssistant_isHiddenFromLocalPlayer( const Object *obj )
+{
+	const Player *me = ThePlayerList->getLocalPlayer();
+	if( obj->getControllingPlayer() == me || me->getRelationship( obj->getTeam() ) == ALLIES )
+		return FALSE;
+
+	if( obj->testStatus( OBJECT_STATUS_STEALTHED ) && !obj->testStatus( OBJECT_STATUS_DETECTED ) &&
+			!obj->testStatus( OBJECT_STATUS_DISGUISED ) )
+		return TRUE;
+
+	const ObjectShroudStatus status = obj->getShroudedStatus( me->getPlayerIndex() );
+	return status != OBJECTSHROUD_CLEAR && status != OBJECTSHROUD_PARTIAL_CLEAR && status != OBJECTSHROUD_FOGGED;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** PartitionManager::unRegisterObject keeps the partition data of a building that dies while some
+	* player remembers it in the fog: no Object any more, only the ghost, still in the cells its
+	* footprint covered.  The ghost holds a snapshot for this player exactly while his fog draws it,
+	* and loses it the moment he sees the spot again. */
+//-------------------------------------------------------------------------------------------------
+Int BuildAssistant_findDeadGhostsInFog( const Coord3D *center, Real radius,
+																				const GhostObject **ghosts, Int maxGhosts )
+{
+	const Int me = ThePlayerList->getLocalPlayer()->getPlayerIndex();
+
+	Int loX, loY, hiX, hiY;
+	ThePartitionManager->worldToCell( center->x - radius, center->y - radius, &loX, &loY );
+	ThePartitionManager->worldToCell( center->x + radius, center->y + radius, &hiX, &hiY );
+
+	Int count = 0;
+	for( Int y = loY; y <= hiY; ++y )
+	{
+		for( Int x = loX; x <= hiX; ++x )
+		{
+			PartitionCell *cell = ThePartitionManager->getCellAt( x, y );
+			if( cell == NULL )	// past the map's edge
+				continue;
+
+			for( CellAndObjectIntersection *coi = cell->getFirstCoiInCell(); coi; coi = coi->getNextCoi() )
+			{
+				const PartitionData *pd = coi->getModule();
+				const GhostObject *ghost = pd->getGhostObject();
+				if( pd->getObject() != NULL || ghost == NULL || !ghost->hasSnapShot( me ) )
+					continue;
+
+				// a footprint spans several cells; a handful of ghosts at most, so a linear search
+				Int i = 0;
+				while( i < count && ghosts[ i ] != ghost )
+					++i;
+				if( i == count && count < maxGhosts )
+					ghosts[ count++ ] = ghost;
+			}
+		}
+	}
+	return count;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool BuildAssistant_ghostOverlaps( const GhostObject *ghost, const Coord3D *pos,
+																	 const GeometryInfo &geom, Real angle )
+{
+	const GeometryInfo remembered( ghost->getGeometryType(), ghost->getGeometrySmall(), 1.0f,
+																 ghost->getGeometryMajorRadius(), ghost->getGeometryMinorRadius() );
+
+	// on the ground, both of them: the test is three dimensional and only the footprint is asked
+	Coord3D at = *ghost->getParentPosition();
+	Coord3D other = *pos;
+	at.z = other.z = 0.0f;
+	return ThePartitionManager->geomCollidesWithGeom( &at, remembered, ghost->getParentAngle(),
+																									 &other, geom, angle );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The cells Pathfinder::internal_classifyObjectFootprint gave the building while it stood, so the
+	* patch looks the same before and after it died.  A round one is the pathfinder's own test, a cell
+	* centre within the radius and four tenths of a cell.  A box is sampled there from its near edge
+	* and stops short of the far one; a pathfinder cell x spans [10x - 0.5, 10x + 9.5), and counting
+	* the ones the box overlaps by more than a sliver on both axes is near enough that sampling. */
+//-------------------------------------------------------------------------------------------------
+Bool BuildAssistant_ghostCoversCell( const GhostObject *ghost, Int cellX, Int cellY )
+{
+	// the collision test squares a circle off (xy_collideTest_Rect_Circle), the pathfinder does not
+	if( ghost->getGeometryType() != GEOMETRY_BOX )
+	{
+		const Real dx = ( (Real)cellX + 0.5f ) * PATHFIND_CELL_SIZE_F - ghost->getParentPosition()->x;
+		const Real dy = ( (Real)cellY + 0.5f ) * PATHFIND_CELL_SIZE_F - ghost->getParentPosition()->y;
+		const Real reach = ghost->getGeometryMajorRadius() + 0.4f * PATHFIND_CELL_SIZE_F;
+		return dx * dx + dy * dy <= reach * reach;
+	}
+
+	const Real CELL_HALF = 0.44f * PATHFIND_CELL_SIZE_F;
+	const GeometryInfo cell( GEOMETRY_BOX, FALSE, 1.0f, CELL_HALF, CELL_HALF );
+
+	Coord3D centre;
+	centre.x = ( (Real)cellX + 0.45f ) * PATHFIND_CELL_SIZE_F;
+	centre.y = ( (Real)cellY + 0.45f ) * PATHFIND_CELL_SIZE_F;
+	centre.z = 0.0f;
+	return BuildAssistant_ghostOverlaps( ghost, &centre, cell, 0.0f );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1192,7 +1327,8 @@ LegalBuildCode BuildAssistant::isLocationLegalToBuild( const Coord3D *worldPos,
 			// The relationship is asked here rather than through PartitionFilterPlayerAffiliation, which
 			// lets a player's own objects through whatever it is asked for - and the first building near
 			// any spot in a base is that base's own command center, so every base refused itself.
-			if( owner->getRelationship( them->getTeam() ) == ENEMIES )
+			if( owner->getRelationship( them->getTeam() ) == ENEMIES &&
+					!( BitTest( options, IGNORE_UNSEEN ) && BuildAssistant_isHiddenFromLocalPlayer( them ) ) )
 				return LBC_TOO_CLOSE_TO_ENEMY;
 		}
 	}
@@ -1260,7 +1396,8 @@ BuildAssistant::TileBuildInfo *BuildAssistant::buildTiledLocations( const ThingT
 																																		const Coord3D *end,
 																																		Real tilingSize, 
 																																		Int maxTiles,
-																																		Object *builderObject )
+																																		Object *builderObject,
+																																		UnsignedInt extraOptions )
 {
 
 	// sanity
@@ -1338,7 +1475,8 @@ BuildAssistant::TileBuildInfo *BuildAssistant::buildTiledLocations( const ThingT
 																BuildAssistant::TERRAIN_RESTRICTIONS |
 																BuildAssistant::CLEAR_PATH |
 																BuildAssistant::NO_OBJECT_OVERLAP |
-																BuildAssistant::SHROUD_REVEALED,
+																BuildAssistant::SHROUD_REVEALED |
+																extraOptions,
 																builderObject,
 																NULL) != LBC_OK )
 			break;
@@ -1391,7 +1529,7 @@ Bool BuildAssistant::isPossibleToMakeUnit( Object *builder, const ThingTemplate 
 		return FALSE;
 
 	// get the command set for the producer object
-	const CommandSet *commandSet = TheControlBar->findCommandSet( builder->getCommandSetString() );
+	const CommandSet *commandSet = TheCommandStore->findCommandSet( builder->getCommandSetString() );
 	
 	// if no command set we cannot build anything
 	if( commandSet == NULL )

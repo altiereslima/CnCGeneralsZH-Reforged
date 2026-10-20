@@ -69,6 +69,7 @@ void NameKeyGenerator::init()
 //------------------------------------------------------------------------------------------------- 
 void NameKeyGenerator::reset()
 {
+	std::lock_guard<std::mutex> lock( m_lock );
 	freeSockets();
 	m_nextID = 1;
 
@@ -114,6 +115,7 @@ inline UnsignedInt calcHashForLowercaseString(const char* p)
 //------------------------------------------------------------------------------------------------- 
 AsciiString NameKeyGenerator::keyToName(NameKeyType key)
 {
+	std::lock_guard<std::mutex> lock( m_lock );
 	// NAMEKEY_INVALID wraps to the largest index and misses with every other unknown key
 	const UnsignedInt index = (UnsignedInt)key - 1;
 	if (index >= m_bucketsByKey.size())
@@ -127,6 +129,7 @@ NameKeyType NameKeyGenerator::nameToKey(const char* nameString)
 	Bucket *b;
 
 	UnsignedInt hash = calcHashForString(nameString) % SOCKET_COUNT;
+	std::lock_guard<std::mutex> lock( m_lock );
 
 	// hmm, do we have it already?
 	for (b = m_sockets[hash]; b; b = b->m_nextInSocket)
@@ -176,6 +179,7 @@ NameKeyType NameKeyGenerator::nameToLowercaseKey(const char* nameString)
 	Bucket *b;
 
 	UnsignedInt hash = calcHashForLowercaseString(nameString) % SOCKET_COUNT;
+	std::lock_guard<std::mutex> lock( m_lock );
 
 	// hmm, do we have it already?
 	for (b = m_sockets[hash]; b; b = b->m_nextInSocket)

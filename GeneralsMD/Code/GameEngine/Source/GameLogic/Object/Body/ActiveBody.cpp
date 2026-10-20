@@ -1174,15 +1174,12 @@ void ActiveBody::createParticleSystems( const AsciiString &boneBaseName,
 void ActiveBody::deleteAllParticleSystems( void )
 {
 	BodyParticleSystem *nextBodySystem;
-	ParticleSystem *particleSystem;
 
 	while( m_particleSystems )
 	{
 
-		// get this particle system
-		particleSystem = TheParticleSystemManager->findParticleSystem( m_particleSystems->m_particleSystemID );
-		if( particleSystem )
-			particleSystem->destroy();
+		// this particle system, after the tick (LOGIC-THREAD.md M5)
+		TheParticleSystemManager->destroyParticleSystemByID( m_particleSystems->m_particleSystemID );
 
 		// get next system in the body
 		nextBodySystem = m_particleSystems->m_next;
@@ -1551,31 +1548,23 @@ void ActiveBody::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLeve
 			TheAudio->addAudioEvent(&veterancyChanged);
 		}
 
-		//Also mark the UI dirty -- incase the object is selected or contained.
-		Object *obj = getObject();
-		Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
-		if( draw )
+		//Also mark the UI dirty -- incase the object is selected or contained.  The selection is the
+		//client's, so the client asks it after the tick (LOGIC-THREAD.md M7), of the object and its
+		//container as they stand now.
+		const Object *obj = getObject();
+		const ObjectID objID = obj->getID();
+		const ObjectID containerID = obj->getContainedBy() ? obj->getContainedBy()->getID() : INVALID_ID;
+		LogicThread::callAfterTick( [objID, containerID]()
 		{
-			Object *checkOwner = draw->getObject();
-			if( checkOwner == obj )
-			{
-				//Our selected object has been promoted!
+			Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
+			if( draw == NULL )
+				return;
+			const ObjectID selectedID = draw->getObject() ? draw->getObject()->getID() : INVALID_ID;
+			//Our selected object has been promoted, or the contained by object is containing me!
+			if( selectedID == objID
+					|| ( containerID != INVALID_ID && TheInGameUI->getSelectCount() == 1 && selectedID == containerID ) )
 				TheControlBar->markUIDirty();
-			}
-			else
-			{
-				const Object *containedBy = obj->getContainedBy();
-				if( containedBy && TheInGameUI->getSelectCount() == 1 )
-				{
-					Object *checkOwner = draw->getObject();
-					if( checkOwner == containedBy )
-					{
-						//But only if the contained by object is containing me!
-						TheControlBar->markUIDirty();
-					}
-				}
-			}
-		}
+		} );
 	}
 
 	Real oldBonus = TheGlobalData->m_healthBonus[oldLevel];

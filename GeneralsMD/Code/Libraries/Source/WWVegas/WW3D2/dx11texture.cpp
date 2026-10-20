@@ -244,6 +244,12 @@ static bool upload_levels(ID3D11DeviceContext * context, ID3D11Texture2D * desti
 static void note_average_colour(IDirect3DTexture9 * texture, const D3DSURFACE_DESC & description,
 	unsigned level_count)
 {
+	// A 64x64 16-bit texture is mirrored again some 150 times a second for as long as a match runs,
+	// and every one used to add a note: 15,000 in a 100 s network match, all of them in the debug log
+	// at shutdown.  The first 64 answer the question.
+	if (Notes.size() >= 64) {
+		return;
+	}
 	D3DLOCKED_RECT locked;
 	if (FAILED(texture->LockRect(0, &locked, NULL, D3DLOCK_READONLY))) {
 		return;

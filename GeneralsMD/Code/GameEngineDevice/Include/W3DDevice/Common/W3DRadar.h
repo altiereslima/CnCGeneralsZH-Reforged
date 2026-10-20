@@ -105,6 +105,8 @@ protected:
 	WW3DFormat m_overlayTextureFormat;						///< format to use for overlay texture
 	Image *m_overlayImage;												///< overlay image abstraction for drawing
 	TextureClass *m_overlayTexture;								///< overlay texture
+	Bool m_overlayDrawn;													///< draw showed the overlay since update last refreshed it
+	Bool m_eventsDrawn;														///< draw showed the events since update last played their sounds
 
 	WW3DFormat m_shroudTextureFormat;							///< format to use for shroud texture
 	Image *m_shroudImage;													///< shroud image abstraction for drawing

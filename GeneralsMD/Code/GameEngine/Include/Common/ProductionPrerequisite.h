@@ -70,6 +70,7 @@ public:
 
 	void resetSciences( void ) { m_prereqSciences.clear(); }
 	void addSciencePrereq( ScienceType science ) { m_prereqSciences.push_back(science); }
+	const ScienceVec &getSciencePrereqs( void ) const { return m_prereqSciences; }
 
 	void resetUnits( void ) { m_prereqUnits.clear(); }
 	void addUnitPrereq( AsciiString units, Bool orUnitWithPrevious );

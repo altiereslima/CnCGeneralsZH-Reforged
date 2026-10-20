@@ -23,6 +23,7 @@ Data/Art/Textures/ReforgedHudHelpbox.dds
 Data/Art/Textures/ReforgedHudObsCommandBar.dds
 Data/Art/Textures/ReforgedHudObsPlayerWindow.dds
 Data/Art/Textures/ReforgedLaserPink.tga
+Data/Art/Textures/ReforgedLobbySpot.tga
 Data/Art/Textures/ReforgedMineGlowBlue.tga
 Data/Art/Textures/ReforgedMineGlowRed.tga
 Data/Art/Textures/ReforgedMineLedBlue.tga
@@ -55,8 +56,16 @@ Data/Cinema/hero_loop_07.txt
 Data/Cinema/hero_loop_08.txt
 Data/Cinema/hero_loop_09.txt
 Data/Cinema/hero_loop_10.txt
+Data/Cinema/hpbar.txt
 Data/Cinema/inf_jam.txt
 Data/Cinema/inf_walk.txt
+Data/Cinema/jetfilm_crash.txt
+Data/Cinema/jetfilm_passclose.txt
+Data/Cinema/jetfilm_passtail.txt
+Data/Cinema/jetfilm_passwide.txt
+Data/Cinema/jetfilm_runway.txt
+Data/Cinema/jetfilm_sturn.txt
+Data/Cinema/jetfilm_turn.txt
 Data/Cinema/looks4.txt
 Data/Cinema/looks4amber.txt
 Data/Cinema/lsv_burst.txt
@@ -159,12 +168,14 @@ Data/INI/MappedImages/HandCreated/ReforgedHudGlaPowers.ini
 Data/INI/MappedImages/HandCreated/ReforgedHudHelpbox.ini
 Data/INI/MappedImages/HandCreated/ReforgedHudObsCommandBar.ini
 Data/INI/MappedImages/HandCreated/ReforgedHudObsPlayerWindow.ini
+Data/INI/MappedImages/HandCreated/ReforgedLobbySpot.ini
 Data/INI/ObjectCreationListReforged.ini
 Data/INI/ParticleSystemReforged.ini
 Data/INI/ScienceReforged.ini
 Data/INI/SpecialPowerReforged.ini
 Data/INI/UpgradeReforged.ini
 Data/INI/WeaponReforged.ini
+Data/INI/WindowTransitionsReforged.ini
 Data/Install_Final.bmp
 Data/Patch.str
 Data/Scenarios/airbelow.txt
@@ -200,6 +211,8 @@ Data/Scenarios/exitmovebuild.txt
 Data/Scenarios/exitorders.txt
 Data/Scenarios/expansionbunker.txt
 Data/Scenarios/explreel.txt
+Data/Scenarios/fogleak.txt
+Data/Scenarios/givemoney.txt
 Data/Scenarios/glowbase.txt
 Data/Scenarios/glowfight.txt
 Data/Scenarios/glowmicrowave.txt
@@ -221,15 +234,22 @@ Data/Scenarios/hero_loop_08.txt
 Data/Scenarios/hero_loop_09.txt
 Data/Scenarios/hero_loop_10.txt
 Data/Scenarios/hitrun.txt
+Data/Scenarios/hpbar.txt
 Data/Scenarios/infantrywalk.txt
 Data/Scenarios/infconvoy.txt
 Data/Scenarios/inferno30.txt
 Data/Scenarios/infheadon.txt
 Data/Scenarios/infroad.txt
+Data/Scenarios/jetcrash.txt
 Data/Scenarios/jetpass.txt
+Data/Scenarios/jetrunway.txt
+Data/Scenarios/jetsturn.txt
+Data/Scenarios/jetturn.txt
 Data/Scenarios/laserglow.txt
+Data/Scenarios/laserlook.txt
 Data/Scenarios/leadinfantry.txt
 Data/Scenarios/leadvehicle.txt
+Data/Scenarios/logicscroll.txt
 Data/Scenarios/looks4.txt
 Data/Scenarios/mappers.txt
 Data/Scenarios/mass420x2.txt
@@ -343,6 +363,7 @@ Data/Turkish/Generals.str
 Data/Window/ControlBar.wnd
 Data/Window/ControlBarPopupDescription.wnd
 Data/Window/ControlBarPro.txt
+Data/Window/Diplomacy.wnd
 Data/Window/GenPowersShortcutBarChina.wnd
 Data/Window/GenPowersShortcutBarGLA.wnd
 Data/Window/GenPowersShortcutBarUS.wnd
@@ -352,11 +373,15 @@ Data/Window/Menus/Defeat.wnd
 Data/Window/Menus/DisconnectScreen.wnd
 Data/Window/Menus/GameSpyGameOptionsMenu.wnd
 Data/Window/Menus/LanGameOptionsMenu.wnd
+Data/Window/Menus/LanMapSelectMenu.wnd
 Data/Window/Menus/LocalDefeat.wnd
+Data/Window/Menus/MainMenu.wnd
 Data/Window/Menus/ObserverQuit.wnd
 Data/Window/Menus/OptionsMenuClassic.wnd
 Data/Window/Menus/SkirmishGameOptionsMenu.wnd
+Data/Window/Menus/SkirmishMapSelectMenu.wnd
 Data/Window/Menus/Victorious.wnd
+Data/Window/Menus/WOLMapSelectMenu.wnd
 Data/Window/ReplayControl.wnd
 Data/Window/Trainer.wnd
 Data/dx11shaders.shipped
@@ -384,6 +409,7 @@ GameEngine/Include/Common/CDManager.h
 GameEngine/Include/Common/CRCDebug.h
 GameEngine/Include/Common/ClientUpdateModule.h
 GameEngine/Include/Common/CommandLine.h
+GameEngine/Include/Common/CommandStore.h
 GameEngine/Include/Common/ControlServer.h
 GameEngine/Include/Common/CopyProtection.h
 GameEngine/Include/Common/CrashHandler.h
@@ -405,6 +431,7 @@ GameEngine/Include/Common/Energy.h
 GameEngine/Include/Common/Errors.h
 GameEngine/Include/Common/ExecutableDirectory.h
 GameEngine/Include/Common/FileSystem.h
+GameEngine/Include/Common/FileWriteQueue.h
 GameEngine/Include/Common/FunctionLexicon.h
 GameEngine/Include/Common/GameAudio.h
 GameEngine/Include/Common/GameCommon.h
@@ -432,8 +459,10 @@ GameEngine/Include/Common/LatchRestore.h
 GameEngine/Include/Common/List.h
 GameEngine/Include/Common/LocalFile.h
 GameEngine/Include/Common/LocalFileSystem.h
+GameEngine/Include/Common/LogicThread.h
 GameEngine/Include/Common/MapObject.h
 GameEngine/Include/Common/MapReaderWriterInfo.h
+GameEngine/Include/Common/MatchHistory.h
 GameEngine/Include/Common/MessageBoxFlags.h
 GameEngine/Include/Common/MessageStream.h
 GameEngine/Include/Common/MiniLog.h
@@ -616,6 +645,7 @@ GameEngine/Include/GameClient/Snow.h
 GameEngine/Include/GameClient/Statistics.h
 GameEngine/Include/GameClient/TerrainRoads.h
 GameEngine/Include/GameClient/TerrainVisual.h
+GameEngine/Include/GameClient/UIStyle.h
 GameEngine/Include/GameClient/UiAnimClock.h
 GameEngine/Include/GameClient/VideoPlayer.h
 GameEngine/Include/GameClient/View.h
@@ -1023,6 +1053,7 @@ GameEngine/Source/Common/RTS/AcademyStats.cpp
 GameEngine/Source/Common/RTS/ActionManager.cpp
 GameEngine/Source/Common/RTS/Energy.cpp
 GameEngine/Source/Common/RTS/Handicap.cpp
+GameEngine/Source/Common/RTS/MatchHistory.cpp
 GameEngine/Source/Common/RTS/MissionStats.cpp
 GameEngine/Source/Common/RTS/Money.cpp
 GameEngine/Source/Common/RTS/Player.cpp
@@ -1046,6 +1077,7 @@ GameEngine/Source/Common/System/ArchiveFileSystem.cpp
 GameEngine/Source/Common/System/AsciiString.cpp
 GameEngine/Source/Common/System/BuildAssistant.cpp
 GameEngine/Source/Common/System/CDManager.cpp
+GameEngine/Source/Common/System/CommandStore.cpp
 GameEngine/Source/Common/System/Compression.cpp
 GameEngine/Source/Common/System/ControlServer.cpp
 GameEngine/Source/Common/System/CopyProtection.cpp
@@ -1058,6 +1090,7 @@ GameEngine/Source/Common/System/DisabledTypes.cpp
 GameEngine/Source/Common/System/ExecutableDirectory.cpp
 GameEngine/Source/Common/System/File.cpp
 GameEngine/Source/Common/System/FileSystem.cpp
+GameEngine/Source/Common/System/FileWriteQueue.cpp
 GameEngine/Source/Common/System/FunctionLexicon.cpp
 GameEngine/Source/Common/System/GameCommon.cpp
 GameEngine/Source/Common/System/GameMemory.cpp
@@ -1068,6 +1101,7 @@ GameEngine/Source/Common/System/KindOf.cpp
 GameEngine/Source/Common/System/List.cpp
 GameEngine/Source/Common/System/LocalFile.cpp
 GameEngine/Source/Common/System/LocalFileSystem.cpp
+GameEngine/Source/Common/System/LogicThread.cpp
 GameEngine/Source/Common/System/MemoryInit.cpp
 GameEngine/Source/Common/System/ObjectStatusTypes.cpp
 GameEngine/Source/Common/System/QuickTrig.cpp
@@ -1169,6 +1203,7 @@ GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/PopupSaveLoad.cpp
 GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp
 GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/ReplayMenu.cpp
 GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/ScoreScreen.cpp
+GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/ScoreScreenGraphs.cpp
 GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/SinglePlayerMenu.cpp
 GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/SkirmishGameOptionsMenu.cpp
 GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/SkirmishMapSelectMenu.cpp
@@ -1212,6 +1247,7 @@ GameEngine/Source/GameClient/GUI/LoadScreen.cpp
 GameEngine/Source/GameClient/GUI/ProcessAnimateWindow.cpp
 GameEngine/Source/GameClient/GUI/Shell/Shell.cpp
 GameEngine/Source/GameClient/GUI/Shell/ShellMenuScheme.cpp
+GameEngine/Source/GameClient/GUI/UIStyle.cpp
 GameEngine/Source/GameClient/GUI/WinInstanceData.cpp
 GameEngine/Source/GameClient/GUI/WindowLayout.cpp
 GameEngine/Source/GameClient/GUI/WindowVideoManager.cpp
@@ -3828,6 +3864,7 @@ Tools/cheat_check.py
 Tools/china_beacon.py
 Tools/control_client.py
 Tools/d3d9posix_check.py
+Tools/diplomacy_layout.py
 Tools/ffmpeg-build-posix.sh
 Tools/ffmpeg-build.bat
 Tools/ffmpeg-build.sh
@@ -3850,10 +3887,12 @@ Tools/linux-packages/PKGBUILD
 Tools/linux-packages/io.github.olcayseygan.ZeroHourReforged.metainfo.xml
 Tools/linux-packages/io.github.olcayseygan.ZeroHourReforged.yml
 Tools/linux-portable.sh
+Tools/lobby_spot.py
 Tools/lobbyroom_layout.py
 Tools/lobbysettings_layout.py
 Tools/lod-first-run-check.sh
 Tools/macos-app-licenses.txt
+Tools/mainmenu_layout.py
 Tools/make-macos-app.sh
 Tools/mangler/Makefile
 Tools/mangler/crc.cpp
@@ -3910,6 +3949,7 @@ Tools/mangler/wnet/tcp.cpp
 Tools/mangler/wnet/tcp.h
 Tools/mangler/wnet/udp.cpp
 Tools/mangler/wnet/udp.h
+Tools/mapselect_layout.py
 Tools/matchbot/debug.cpp
 Tools/matchbot/debug.h
 Tools/matchbot/encrypt.cpp

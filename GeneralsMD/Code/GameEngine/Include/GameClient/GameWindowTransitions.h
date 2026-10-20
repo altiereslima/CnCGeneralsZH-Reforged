@@ -648,6 +648,7 @@ public:
 	void draw( void );
 	
 	void skip ( void );
+	void finish( void );	///< play the remaining frames at once, in the current direction
 	AsciiString getName( void ) { return m_name; }
 	void setName( AsciiString name){ m_name = name;	}
 	void addWindow( TransitionWindow *transWin );
@@ -679,6 +680,7 @@ public:
 	void update( void );
 	void draw( void );
 	Bool isFinished( void );
+	void finish( void );	///< cut the running and the queued group to their end states
 	const FieldParse *getFieldParse() const { return m_gameWindowTransitionsFieldParseTable; }								///< returns the parsing fields
 	static const FieldParse m_gameWindowTransitionsFieldParseTable[];																				///< the parse table
 	static void parseWindow( INI* ini, void *instance, void *store, const void *userData );

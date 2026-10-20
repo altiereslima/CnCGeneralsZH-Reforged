@@ -28,6 +28,7 @@
 // Author: Michael S. Booth, February 2001
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Common/LogicThread.h"
 
 #include "Common/MessageStream.h"
 #include "Common/Player.h"
@@ -307,6 +308,9 @@ AsciiString GameMessage::getCommandTypeAsAsciiString(GameMessage::Type t)
 	CHECK_IF(MSG_META_SELECT_PREV_WORKER)
 	CHECK_IF(MSG_META_SELECT_NEXT_IDLE_WORKER)
 	CHECK_IF(MSG_META_SELECT_NEXT_IDLE_UNIT)
+	CHECK_IF(MSG_META_SELECT_NEXT_IDLE_AIRCRAFT)
+	CHECK_IF(MSG_META_SELECT_NEXT_IDLE_VEHICLE)
+	CHECK_IF(MSG_META_SELECT_NEXT_IDLE_INFANTRY)
 	CHECK_IF(MSG_META_COMMAND_SLOT01)
 	CHECK_IF(MSG_META_COMMAND_SLOT02)
 	CHECK_IF(MSG_META_COMMAND_SLOT03)
@@ -346,6 +350,9 @@ AsciiString GameMessage::getCommandTypeAsAsciiString(GameMessage::Type t)
 	CHECK_IF(MSG_META_SELECT_ALL_BARRACKS)
 	CHECK_IF(MSG_META_SELECT_ALL_WARFACTORIES)
 	CHECK_IF(MSG_META_SELECT_ALL_AIRFIELDS)
+	CHECK_IF(MSG_META_SELECT_ALL_IDLE_UNITS)
+	CHECK_IF(MSG_META_SELECT_ALL_IDLE_AIRCRAFT)
+	CHECK_IF(MSG_META_SELECT_ALL_IDLE_VEHICLES)
 	CHECK_IF(MSG_META_SCATTER)
 	CHECK_IF(MSG_META_STOP)
 	CHECK_IF(MSG_META_DEPLOY)
@@ -667,6 +674,8 @@ AsciiString GameMessage::getCommandTypeAsAsciiString(GameMessage::Type t)
 	CHECK_IF(MSG_SET_STANCE)
 	CHECK_IF(MSG_VOTE_KICK)
 	CHECK_IF(MSG_SET_REPEAT_UNIT)
+	CHECK_IF(MSG_TRANSFER_MONEY)
+	CHECK_IF(MSG_TEAM_REQUEST)
 	CHECK_IF(MSG_DO_GUARD_OBJECT)
 	CHECK_IF(MSG_DO_STOP)
 	CHECK_IF(MSG_DO_SCATTER)
@@ -898,6 +907,17 @@ GameMessage *MessageStream::appendMessage( GameMessage::Type type )
 {
 	GameMessage *msg = newInstance(GameMessage)( type );
 
+	/* LOGIC-THREAD.md phase 2, M6.  A message the tick appends (its CRC, a selection it changes) is
+		 made and handed back at once, so the caller can fill in its arguments, and joins the stream after
+		 the tick, in order with everything else the tick queued; propagateMessages comes later either way,
+		 in the client pass or between network catch-up ticks. */
+	if( LogicThread::defersEffects() )
+	{
+		LogicThread::callAfterTick( [this, msg]() { GameMessageList::appendMessage( msg ); } );
+		return msg;
+	}
+
+	LOGIC_CENSUS( CENSUS_MESSAGESTREAM );
 	// add message to list
 	GameMessageList::appendMessage( msg );
 

@@ -1917,7 +1917,8 @@ void DX8TextureCategoryClass::Render(void)
 		if (!DX8RendererDebugger::Is_Enabled() || !mesh->Is_Disabled_By_Debugger()) {
 
 		// The object's look on the Direct3D 11 frame (RTS3DScene::renderOneObject picks it), for this
-		// mesh's draws only.  A sorted mesh draws later, from the sorting pool, and goes without.
+		// mesh's draws only.  A sorted mesh draws later, from the sorting pool, which keeps the look
+		// with its triangles (SortingRendererClass::Insert_Triangles).
 		const unsigned draw_effect = mesh->Get_Draw_Effect();
 		if (draw_effect != 0) {
 			Direct3D11_Set_Draw_Effect(draw_effect, mesh->Get_Draw_Effect_Parameters());

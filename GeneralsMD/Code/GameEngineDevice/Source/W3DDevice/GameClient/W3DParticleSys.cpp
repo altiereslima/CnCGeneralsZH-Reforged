@@ -49,6 +49,7 @@
 #include "GameLogic/Module/LifetimeUpdate.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameClient/ObserverCamera.h"
+#include <algorithm>
 #include <map>
 
 #ifdef _INTERNAL
@@ -586,6 +587,15 @@ static void addFieldPuddle( FieldChunk &chunk, Real cx, Real cy, Real flatZ, Boo
 	const Real c = WWMath::Cos( angle ) * size;
 	const Real s = WWMath::Sin( angle ) * size;
 	const Real step = 2.0f / steps;
+	// the buffers grow once a puddle and are written in place: a large field is thousands of vertices
+	// and tens of thousands of indices a frame, and a push_back each was most of what it cost
+	const size_t firstVertex = s_fieldPos.size();
+	s_fieldPos.resize( firstVertex + vertices );
+	s_fieldUV.resize( firstVertex + vertices );
+	s_fieldGlow.resize( firstVertex + vertices, glowColor );
+	s_fieldStain.resize( firstVertex + vertices, stainColor );
+	Vector3 *outPos = &s_fieldPos[ firstVertex ];
+	Vector2 *outUV = &s_fieldUV[ firstVertex ];
 	for (Int j = 0; j < side; ++j)
 	{
 		const Real b = -1.0f + j * step;
@@ -595,25 +605,26 @@ static void addFieldPuddle( FieldChunk &chunk, Real cx, Real cy, Real flatZ, Boo
 			const Real x = cx + a * c - b * s;
 			const Real y = cy + a * s + b * c;
 			const Real z = onGround ? TheTerrainRenderObject->getHeightMapHeight( x, y, NULL ) + FIELD_LIFT : flatZ;
-			s_fieldPos.push_back( Vector3( x, y, z ) );
-			s_fieldUV.push_back( Vector2( (1.0f - a) * 0.5f, (1.0f - b) * 0.5f ) );
-			s_fieldGlow.push_back( glowColor );
-			s_fieldStain.push_back( stainColor );
+			(outPos++)->Set( x, y, z );
+			(outUV++)->Set( (1.0f - a) * 0.5f, (1.0f - b) * 0.5f );
 		}
 	}
 
 	const Int base = chunk.vertexCount;
+	const size_t firstIndex = s_fieldIndex.size();
+	s_fieldIndex.resize( firstIndex + steps * steps * 6 );
+	unsigned short *outIndex = &s_fieldIndex[ firstIndex ];
 	for (Int j = 0; j < steps; ++j)
 	{
 		for (Int i = 0; i < steps; ++i)
 		{
 			const unsigned short v = (unsigned short)(base + j * side + i);
-			s_fieldIndex.push_back( v );
-			s_fieldIndex.push_back( (unsigned short)(v + 1) );
-			s_fieldIndex.push_back( (unsigned short)(v + side) );
-			s_fieldIndex.push_back( (unsigned short)(v + 1) );
-			s_fieldIndex.push_back( (unsigned short)(v + side + 1) );
-			s_fieldIndex.push_back( (unsigned short)(v + side) );
+			*outIndex++ = v;
+			*outIndex++ = (unsigned short)(v + 1);
+			*outIndex++ = (unsigned short)(v + side);
+			*outIndex++ = (unsigned short)(v + 1);
+			*outIndex++ = (unsigned short)(v + side + 1);
+			*outIndex++ = (unsigned short)(v + side);
 		}
 	}
 	chunk.vertexCount += vertices;
@@ -684,6 +695,7 @@ struct FieldState
 	ParticleSystemInfo::ParticleShaderType shader;
 	AsciiString texture;
 	Real stealth;				///< ParticleSystem::getStealthFade of the last system seen at it
+	Real lifeFade;			///< fieldFade's answer at the last sync point
 };
 
 static const Int	FIELD_GRACE						= LOGICFRAMES_PER_SECOND;			///< logic frames a field with no object outlives its systems
@@ -717,8 +729,16 @@ struct FieldDraw
 	UnsignedInt seed;		///< the place's hash, for its bubbles
 };
 
+/** Where one field's puddles lie this frame, for the overlap. */
+struct FieldBounds
+{
+	Real minX, maxX, minY, maxY;	///< of the puddles' centres
+	Real maxSize;									///< the largest puddle's half width
+};
+
 static std::vector<FieldPuddle>	s_fieldPuddles;
 static std::vector<FieldDraw>		s_fieldDraws;
+static std::vector<FieldBounds>	s_fieldBounds;	///< one a field draw, in their order
 
 /** The CLEANUP_HAZARD object with a LifetimeUpdate standing on a field's centre, if there is one. */
 static ObjectID findFieldObject( const Coord3D &centre )
@@ -794,23 +814,17 @@ static Real fieldFade( FieldState &state, Int now )
 	return state.shown;
 }
 
-/** Collects this frame's fields from their systems and lays them on the terrain into the field
-	* buffers; drawGroundFields draws them.  Returns the puddles laid. */
-static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &systems, const AABoxClass &view )
+/** This frame's fields from their systems, and each one's fade, at the sync point before the render:
+	* finding a field's object, its life and the fog over it read the logic (LOGIC-THREAD.md phase 3).
+	* `systems` is every isGroundField system in list order, empty ones too. */
+static void updateGroundFields( const std::vector<ParticleSystem *> &systems )
 {
 	const Int now = (Int)TheGameLogic->getFrame();
-	// between the last two logic ticks, as the models are, so a pulse does not step at the logic rate
-	const Real seconds = ((Real)now + (TheSmoothMotionActive ? TheSmoothMotionAlpha : 0.0f)) / LOGICFRAMES_PER_SECOND;
-	s_fieldPuddles.clear();
-	s_fieldDraws.clear();
 
 	// where the fields are this frame, and what each one looks like
-	for (ParticleSystemManager::ParticleSystemListIt it = systems.begin(); it != systems.end(); ++it)
+	for (size_t f = 0; f < systems.size(); ++f)
 	{
-		ParticleSystem *sys = *it;
-		if (!sys || sys->isUsingDrawables() || !isGroundField( sys ))
-			continue;
-
+		ParticleSystem *sys = systems[ f ];
 		Coord3D pos;
 		sys->getPosition( &pos );
 		FieldKey key = { sys->getTemplate(), REAL_TO_INT_FLOOR( pos.x + 0.5f ), REAL_TO_INT_FLOOR( pos.y + 0.5f ) };
@@ -869,25 +883,42 @@ static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &syste
 		st->second.stealth = sys->getStealthFade();
 	}
 
-	Int laid = 0;
 	for (std::map<FieldKey, FieldState>::iterator st = s_fieldStates.begin(); st != s_fieldStates.end(); )
 	{
-		const FieldKey &key = st->first;
 		FieldState &state = st->second;
 
 		// Kept while its systems are, even faded out: the systems outlive the object by a few
 		// seconds, and a field forgotten under them would be found again as a new one.
-		const Real lifeFade = fieldFade( state, now );
+		state.lifeFade = fieldFade( state, now );
 		const Bool stale = now - state.seen > FIELD_GRACE;
-		if ((stale && lifeFade <= 0.0f) || now < state.seen)
+		if ((stale && state.lifeFade <= 0.0f) || now < state.seen)
 		{
 			// out, or a frame count from before a load
 			s_fieldStates.erase( st++ );
 			continue;
 		}
 		++st;
+	}
+}
+
+/** Lays the fields updateGroundFields found on the terrain into the field buffers; drawGroundFields
+	* draws them.  Returns the puddles laid. */
+static Int collectGroundFields( const AABoxClass &view )
+{
+	const Int now = (Int)TheGameLogic->getFrame();
+	// between the last two logic ticks, as the models are, so a pulse does not step at the logic rate
+	const Real seconds = ((Real)now + (TheSmoothMotionActive ? TheSmoothMotionAlpha : 0.0f)) / LOGICFRAMES_PER_SECOND;
+	s_fieldPuddles.clear();
+	s_fieldDraws.clear();
+
+	Int laid = 0;
+	for (std::map<FieldKey, FieldState>::iterator st = s_fieldStates.begin(); st != s_fieldStates.end(); ++st)
+	{
+		const FieldKey &key = st->first;
+		FieldState &state = st->second;
+
 		// a field on a stealthed thing goes with it, as its other particles do
-		const Real fade = lifeFade * state.stealth;
+		const Real fade = state.lifeFade * state.stealth;
 		if (fade <= 0.0f)
 			continue;
 
@@ -991,20 +1022,57 @@ static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &syste
 	// goes over FIELD_STACK, so the whole pool tops out at about that many puddles' worth.  A
 	// neighbour counts at its own fade, so a field coming up or going out dims the others with it
 	// rather than in one frame.
-	// ponytail: every pair, a few hundred puddles on the map at most; a grid when a map holds more
-	const Int puddleCount = (Int)s_fieldPuddles.size();
-	for (Int i = 0; i < puddleCount; ++i)
+	//
+	// A field's puddles lie inside the box of their own centres and reach no further past it than its
+	// largest puddle, so two fields whose boxes stand further apart on an axis than their two largest
+	// puddles together add nothing to each other and their pairs are not tried.  The rest still sum in
+	// puddle order, so every overlap comes out as it did; the margin is wide enough that no pair left
+	// out could have rounded to a t above zero.
+	// ponytail: every pair of near fields, a few hundred puddles on the map at most; a grid when a
+	// map holds more
+	const Int fieldCount = (Int)s_fieldDraws.size();
+	s_fieldBounds.resize( fieldCount );
+	for (Int d = 0; d < fieldCount; ++d)
 	{
-		FieldPuddle &p = s_fieldPuddles[ i ];
-		p.overlap = 1.0f;
-		for (Int j = 0; j < puddleCount; ++j)
+		FieldBounds &b = s_fieldBounds[ d ];
+		const FieldPuddle &first = s_fieldPuddles[ s_fieldDraws[ d ].firstPuddle ];
+		b.minX = b.maxX = first.x;
+		b.minY = b.maxY = first.y;
+		b.maxSize = first.size;
+		for (Int i = s_fieldDraws[ d ].firstPuddle + 1; i < s_fieldDraws[ d ].firstPuddle + s_fieldDraws[ d ].puddleCount; ++i)
 		{
-			const FieldPuddle &q = s_fieldPuddles[ j ];
-			const Real reach = p.size + q.size;
-			const Real dx = p.x - q.x, dy = p.y - q.y;
-			const Real t = 1.0f - (dx * dx + dy * dy) / (reach * reach);
-			if (j != i && t > 0.0f)
-				p.overlap += t * t * q.fade;
+			const FieldPuddle &p = s_fieldPuddles[ i ];
+			b.minX = WWMath::Min( b.minX, p.x );	b.maxX = WWMath::Max( b.maxX, p.x );
+			b.minY = WWMath::Min( b.minY, p.y );	b.maxY = WWMath::Max( b.maxY, p.y );
+			b.maxSize = WWMath::Max( b.maxSize, p.size );
+		}
+	}
+	for (Int a = 0; a < fieldCount; ++a)
+	{
+		const FieldBounds &ba = s_fieldBounds[ a ];
+		const Int aEnd = s_fieldDraws[ a ].firstPuddle + s_fieldDraws[ a ].puddleCount;
+		for (Int i = s_fieldDraws[ a ].firstPuddle; i < aEnd; ++i)
+		{
+			FieldPuddle &p = s_fieldPuddles[ i ];
+			p.overlap = 1.0f;
+			for (Int f = 0; f < fieldCount; ++f)
+			{
+				const FieldBounds &bf = s_fieldBounds[ f ];
+				const Real apart = (ba.maxSize + bf.maxSize) * 1.01f + 0.01f;
+				if (bf.minX - ba.maxX > apart || ba.minX - bf.maxX > apart
+						|| bf.minY - ba.maxY > apart || ba.minY - bf.maxY > apart)
+					continue;
+				const Int fEnd = s_fieldDraws[ f ].firstPuddle + s_fieldDraws[ f ].puddleCount;
+				for (Int j = s_fieldDraws[ f ].firstPuddle; j < fEnd; ++j)
+				{
+					const FieldPuddle &q = s_fieldPuddles[ j ];
+					const Real reach = p.size + q.size;
+					const Real dx = p.x - q.x, dy = p.y - q.y;
+					const Real t = 1.0f - (dx * dx + dy * dy) / (reach * reach);
+					if (j != i && t > 0.0f)
+						p.overlap += t * t * q.fade;
+				}
+			}
 		}
 	}
 
@@ -1137,6 +1205,14 @@ W3DParticleSystemManager::W3DParticleSystemManager()
 
 	m_onScreenParticleCount = 0;
 
+	m_frameViewValid = FALSE;
+	m_sunMapCastersValid = FALSE;
+	m_frameViewLogicFrame = 0;
+	m_frameViewFrame = 0;
+	m_frameViewParticles = 0;
+	m_frameViewSystems = 0;
+	m_frameViewNextID = INVALID_PARTICLE_SYSTEM_ID;
+
 	m_pointGroup = NEW PointGroupClass();
 	//m_streakLine = NULL;
 	m_streakLine = NEW StreakLineClass();
@@ -1170,7 +1246,165 @@ void W3DParticleSystemManager::reset()
 {
 	ParticleSystemManager::reset();
 	s_fireLightsValid = FALSE;
+	m_frameViewValid = FALSE;	// its systems are gone
+	m_frameView.clear();
+	m_fieldSystems.clear();
+	m_sunMapCasters.clear();
 	s_fieldStates.clear();	// the object IDs it holds belong to the game that ended
+}
+
+/** LOGIC-THREAD.md phase 3.  A system's stealth fade asks its object's drawable, and a field asks for
+	* its object, its life and the fog, so the frame view and the fields are taken here, before the
+	* render; the render's own refreshFrameView finds the view still valid. */
+void W3DParticleSystemManager::takeReadsForRender( void )
+{
+	refreshFrameView();
+	updateGroundFields( m_fieldSystems );
+}
+
+/** The systems a pass draws from, walked again only when a particle update or anything else that
+	* adds or takes away a system or a particle has run since the last walk.  A system with no
+	* particles draws nothing and one the local player cannot see is skipped, so neither is kept. */
+void W3DParticleSystemManager::refreshFrameView( void )
+{
+	const UnsignedInt logicFrame = TheGameLogic->getFrame();
+	if (m_frameViewValid && m_frameViewLogicFrame == logicFrame && m_frameViewFrame == m_lastLogicFrameUpdate
+			&& m_frameViewParticles == m_particleCount && m_frameViewSystems == m_particleSystemCount
+			&& m_frameViewNextID == m_uniqueSystemID)
+		return;
+
+	m_frameView.clear();
+	m_fieldSystems.clear();
+	for (ParticleSystemListIt it = m_allParticleSystemList.begin(); it != m_allParticleSystemList.end(); ++it)
+	{
+		ParticleSystem *sys = *it;
+		if (sys == NULL || sys->isUsingDrawables())
+			continue;
+		// a field is kept with no particles too: its system still says where the pool is
+		if (isGroundField( sys ))
+			m_fieldSystems.push_back( sys );
+		if (sys->getParticleCount() == 0)
+			continue;
+		const Real fade = sys->getStealthFade();
+		if (fade <= 0.0f)
+			continue;
+		SystemView view;
+		view.system = sys;
+		view.fade = fade;
+		m_frameView.push_back( view );
+	}
+
+	m_frameViewValid = TRUE;
+	m_sunMapCastersValid = FALSE;
+	m_frameViewLogicFrame = logicFrame;
+	m_frameViewFrame = m_lastLogicFrameUpdate;
+	m_frameViewParticles = m_particleCount;
+	m_frameViewSystems = m_particleSystemCount;
+	m_frameViewNextID = m_uniqueSystemID;
+}
+
+/** One smoke system's share of the walk getSunMapCasters hands the job pool: the room reserved for
+	* its particles in the caster list, and how many of them its job kept. */
+struct SunMapWalk
+{
+	ParticleSystem *	system;
+	Real							fade;				///< its stealth fade: a stealthed thing's smoke shades only as much as it is drawn
+	UnsignedInt				layers;			///< ParticleSystem::getVolumeParticleDepth
+	Int								first;			///< its first slot in the caster list
+	Int								capacity;		///< its particles
+	Int								kept;				///< written by the job
+};
+
+struct SunMapWalkJob
+{
+	SunMapWalk *															walks;
+	W3DParticleSystemManager::SunMapCaster *	casters;
+};
+
+/// systems a pool thread claims at once; most smoke systems are a handful of particles
+static const Int SUN_MAP_WALKS_PER_CLAIM = 8;
+
+static std::vector<SunMapWalk> s_sunMapWalks;	///< kept so the walk does not allocate
+
+/** One system's particles into its own slots of the caster list.  Reads its particles and writes only
+	* those slots and its own walk: no allocation, nothing another job touches. */
+static void walkSunMapCasters( Int index, void *context )
+{
+	SunMapWalkJob *job = (SunMapWalkJob *)context;
+	SunMapWalk &walk = job->walks[ index ];
+	W3DParticleSystemManager::SunMapCaster *out = job->casters + walk.first;
+	Int kept = 0;
+	for (Particle *p = walk.system->getFirstParticle(); p && kept < walk.capacity; p = p->m_systemNext)
+	{
+		const Real opticalDepth = particleSunMapOpticalDepth( p->getAlpha() * walk.fade, walk.layers );
+		if (opticalDepth <= 0.0f)
+			continue;
+		const Real radius = p->getSize() * 0.5f;		// the billboard's size is its full width
+		if (radius <= 0.0f)
+			continue;
+		const Coord3D *pos = p->getPosition();
+		out[ kept ].x = pos->x;
+		out[ kept ].y = pos->y;
+		out[ kept ].z = pos->z;
+		out[ kept ].radius = radius;
+		out[ kept ].opticalDepth = opticalDepth;
+		out[ kept ].system = walk.system;
+		++kept;
+	}
+	walk.kept = kept;
+}
+
+/** See W3DParticleSys.h.  A ground-aligned system is a decal already, fire is additive and casts
+	* nothing, and the heat haze's texture names start with SMUD, as doParticles tests.  The particles
+	* are walked on the job pool, each system into room reserved for it in list order, and the gaps
+	* the faint ones leave are closed in the same order, so the list is the one a serial walk makes. */
+const std::vector<W3DParticleSystemManager::SunMapCaster> &W3DParticleSystemManager::getSunMapCasters( void )
+{
+	refreshFrameView();
+	if (m_sunMapCastersValid)
+		return m_sunMapCasters;
+
+	s_sunMapWalks.clear();
+	Int reserved = 0;
+	for (size_t v = 0; v < m_frameView.size(); ++v)
+	{
+		ParticleSystem *sys = m_frameView[ v ].system;
+		if (sys->getShaderType() != ParticleSystemInfo::ALPHA || !sys->shouldBillboard()
+				|| sys->isUsingStreak() || sys->isUsingSmudge())
+			continue;
+		if (*((UnsignedInt *)sys->getParticleTypeName().str()) == 0x44554D53)
+			continue;
+
+		SunMapWalk walk;
+		walk.system = sys;
+		walk.fade = m_frameView[ v ].fade;
+		walk.layers = sys->getVolumeParticleDepth();
+		walk.first = reserved;
+		walk.capacity = (Int)sys->getParticleCount();
+		walk.kept = 0;
+		reserved += walk.capacity;
+		s_sunMapWalks.push_back( walk );
+	}
+
+	m_sunMapCasters.resize( (size_t)reserved );
+	SunMapWalkJob job;
+	job.walks = s_sunMapWalks.empty() ? NULL : &s_sunMapWalks[ 0 ];
+	job.casters = m_sunMapCasters.empty() ? NULL : &m_sunMapCasters[ 0 ];
+	JobSystem::parallel_for( (Int)s_sunMapWalks.size(), SUN_MAP_WALKS_PER_CLAIM, walkSunMapCasters, &job );
+
+	size_t kept = 0;
+	for (size_t w = 0; w < s_sunMapWalks.size(); ++w)
+	{
+		const SunMapWalk &walk = s_sunMapWalks[ w ];
+		if (kept != (size_t)walk.first)
+			std::copy( m_sunMapCasters.begin() + walk.first, m_sunMapCasters.begin() + walk.first + walk.kept,
+				m_sunMapCasters.begin() + kept );
+		kept += walk.kept;
+	}
+	m_sunMapCasters.resize( kept );
+
+	m_sunMapCastersValid = TRUE;
+	return m_sunMapCasters;
 }
 
 /**
@@ -1240,20 +1474,18 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 	tFillStart = Clock_Ticks();
 #endif
 
-	ParticleSystemManager::ParticleSystemList &particleSysList = TheParticleSystemManager->getAllParticleSystems();
-
 	// Sorted billboards - most smoke, fire and dust - are written on the job pool.  With a hundred
 	// thousand particles, walking them one system after another was a quarter of the frame.  Their
 	// room in the sorting array is reserved here in list order, and the loop below inserts each one
 	// into the sorting pool at its place in the same order, so the pool sees them as it always did.
 	// Smudges, which draw on the client's random stream, streaks, volume particles, ground-aligned and
-	// alpha-tested systems stay in that loop as they were.
+	// alpha-tested systems stay in that loop as they were.  Both loops walk the frame view, which
+	// leaves out what neither would draw: drawable systems, empty ones and ones the player cannot see.
+	refreshFrameView();
 	m_billboardFills.clear();
-	for( ParticleSystemManager::ParticleSystemListIt it = particleSysList.begin(); it != particleSysList.end(); ++it)
+	for (size_t v = 0; v < m_frameView.size(); ++v)
 	{
-		ParticleSystem *sys = (*it);
-		if (!sys || sys->isUsingDrawables())
-			continue;
+		ParticleSystem *sys = m_frameView[ v ].system;
 		if (*((UnsignedInt *)sys->getParticleTypeName().str()) == 0x44554D53)
 			continue;
 
@@ -1264,13 +1496,7 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 			continue;
 
 		const Int particles = (Int)sys->getParticleCount();
-		if (particles == 0)
-			continue;
-
-		fill.fade = sys->getStealthFade();
-		if (fill.fade <= 0.0f)
-			continue;
-
+		fill.fade = m_frameView[ v ].fade;
 		fill.system = sys;
 		fill.capacity = (particles < (Int)MAX_POINTS_PER_GROUP) ? particles : (Int)MAX_POINTS_PER_GROUP;
 		fill.fieldIncrement = ( sys->getPriority() == AREA_EFFECT && sys->m_isGroundAligned != FALSE ) ? 1 : 0;
@@ -1300,18 +1526,10 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 				|| s_fireLightsParticles != m_particleCount || s_fireLightsSystems != m_particleSystemCount)
 		{
 			s_fireLights.clear();
-			for( ParticleSystemManager::ParticleSystemListIt it = particleSysList.begin(); it != particleSysList.end(); ++it)
-			{
-				ParticleSystem *sys = *it;
-				if (sys && !sys->isUsingDrawables() && sys->getShaderType() == ParticleSystemInfo::ADDITIVE
-						&& sys->getParticleCount() > 0)
-				{
-					// a hidden fire lights nothing, an own stealthed one only as much as it shows
-					const Real fade = sys->getStealthFade();
-					if (fade > 0.0f)
-						gatherFireLight( sys, fade );
-				}
-			}
+			// a hidden fire lights nothing, an own stealthed one only as much as it shows
+			for (size_t v = 0; v < m_frameView.size(); ++v)
+				if (m_frameView[ v ].system->getShaderType() == ParticleSystemInfo::ADDITIVE)
+					gatherFireLight( m_frameView[ v ].system, m_frameView[ v ].fade );
 			s_fireLightsValid = TRUE;
 			s_fireLightsFrame = m_lastLogicFrameUpdate;
 			s_fireLightsParticles = m_particleCount;
@@ -1329,7 +1547,7 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 	s_fieldIndex.clear();
 	s_fieldChunks.clear();
 	{
-		const Int puddles = collectGroundFields( particleSysList, bbox );
+		const Int puddles = collectGroundFields( bbox );
 		// counted as field particles on purpose: past MaxFieldParticleCount the field systems keep
 		// one particle each, and that one is all the steady pool needs from them
 		m_fieldParticleCount += puddles;
@@ -1338,21 +1556,24 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 	drawGroundFields();
 
 	size_t nextFill = 0;
-	for( ParticleSystemManager::ParticleSystemListIt it = particleSysList.begin(); it != particleSysList.end(); ++it)
+	for (size_t v = 0; v < m_frameView.size(); ++v)
 	{
-		ParticleSystem *sys = (*it);
-		if (!sys) {
+		ParticleSystem *sys = m_frameView[ v ].system;
+		const Real fade = m_frameView[ v ].fade;
+
+		// first, as a reserved system is never a smudge
+		if (nextFill < m_billboardFills.size() && m_billboardFills[ nextFill ].system == sys)
+		{
+			BillboardFill &fill = m_billboardFills[ nextFill++ ];
+			PointGroupClass::Insert_Sorted_Billboards( &fill.range, fill.drawn, fill.texture, fill.shader, fill.glow != FALSE );
+			fill.texture->Release_Ref();	// the draw state took its own reference
+			m_fieldParticleCount += fill.fieldIncrement * fill.drawn;
+			m_onScreenParticleCount += fill.drawn;
+#ifdef DEBUG_LOGGING
+			TheParticlesPastGroupLimit += fill.pastLimit;
+#endif
 			continue;
 		}
-
-		// only look at particle/point style systems
-		if (sys->isUsingDrawables())
-			continue;
-
-		// the same answer the billboard reservation above had, so a skipped system is skipped here too
-		const Real fade = sys->getStealthFade();
-		if (fade <= 0.0f)
-			continue;
 
 		//temporary hack that checks if texture name starts with "SMUD" - if so, we can assume it's a smudge type
 		if (/*sys->isUsingSmudge()*/ *((UnsignedInt *)sys->getParticleTypeName().str()) == 0x44554D53)
@@ -1387,19 +1608,6 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 					visibleSmudgeCount++;
 				}
 			}
-			continue;
-		}
-
-		if (nextFill < m_billboardFills.size() && m_billboardFills[ nextFill ].system == sys)
-		{
-			BillboardFill &fill = m_billboardFills[ nextFill++ ];
-			PointGroupClass::Insert_Sorted_Billboards( &fill.range, fill.drawn, fill.texture, fill.shader, fill.glow != FALSE );
-			fill.texture->Release_Ref();	// the draw state took its own reference
-			m_fieldParticleCount += fill.fieldIncrement * fill.drawn;
-			m_onScreenParticleCount += fill.drawn;
-#ifdef DEBUG_LOGGING
-			TheParticlesPastGroupLimit += fill.pastLimit;
-#endif
 			continue;
 		}
 

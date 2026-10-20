@@ -264,6 +264,7 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 		else
 		{
 			slot.setState( (SlotState)TheGlobalData->m_autoSkirmishAIState );
+			slot.setAIPersonality( TheGlobalData->autoSkirmishPersona( i ) );
 		}
 		slot.setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
 		slot.setColor( -1 );			// -1 is "random" to populateRandomSideAndColor
@@ -281,6 +282,7 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 	game->setIncomeSharing( TheGlobalData->m_incomeSharing );
 	game->setTechRespawn( TheGlobalData->m_techRespawn );
 	game->setSupplyPileLimit( TheGlobalData->m_supplyPileLimit );
+	game->setTurbo( TheGlobalData->m_turboMatch );
 	game->setIsDirectConnect( FALSE );
 	game->setLastHeard( Clock_Milliseconds() );
 	game->setLocalIP( m_localIP );
@@ -321,6 +323,9 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 
 	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 	msg->appendIntegerArgument( GAME_LAN );
+	msg->appendIntegerArgument( DIFFICULTY_NORMAL );	// not used; there so the speed can go last
+	msg->appendIntegerArgument( 0 );
+	msg->appendIntegerArgument( GameEngine_matchFramesPerSecond( m_currentGame->getTurbo() ) );
 
 	InitRandom( seed );
 
@@ -361,6 +366,7 @@ void LANAPI::OnGameStart( void )
       pref.setInt( "IncomeSharing", m_currentGame->getIncomeSharing() );
       pref.setInt( "TechRespawn", m_currentGame->getTechRespawn() );
       pref.setInt( "SupplyPileLimit", m_currentGame->getSupplyPileLimit() );
+      pref.setInt( "TurboMode", m_currentGame->getTurbo() ? 1 : 0 );
       pref.setStartingCash( m_currentGame->getStartingCash() );
     }
 		pref.write();
@@ -417,6 +423,9 @@ void LANAPI::OnGameStart( void )
 		// send a message to the logic for a new game
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 		msg->appendIntegerArgument(GAME_LAN);
+		msg->appendIntegerArgument(DIFFICULTY_NORMAL);	// not used; there so the speed can go last
+		msg->appendIntegerArgument(0);
+		msg->appendIntegerArgument(GameEngine_matchFramesPerSecond(m_currentGame->getTurbo()));
 
 		TheWritableGlobalData->m_useFpsLimit = false;
 

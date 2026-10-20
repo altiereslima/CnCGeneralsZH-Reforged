@@ -1691,7 +1691,7 @@ WINDOW
           FONT = NAME: "Arial", SIZE: 10, BOLD: 0;
           HEADERTEMPLATE = "LabelRegular";
           TOOLTIPDELAY = -1;
-          TEXTCOLOR = ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, DISABLED: 192 192 192 255, DISABLEDBORDER: 0 0 0 255, HILITE:   192 192 192 255, HILITEBORDER:   0 0 0 255;
+          TEXTCOLOR = ENABLED:  164 170 190 255, ENABLEDBORDER:  0 0 0 255, DISABLED: 164 170 190 255, DISABLEDBORDER: 0 0 0 255, HILITE:   164 170 190 255, HILITEBORDER:   0 0 0 255;
           ENABLEDDRAWDATA = IMAGE: NoImage, COLOR: 0 0 0 0, BORDERCOLOR: 0 0 0 0,
                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
@@ -3234,7 +3234,7 @@ WINDOW
           FONT = NAME: "Arial", SIZE: 10, BOLD: 0;
           HEADERTEMPLATE = "LabelRegular";
           TOOLTIPDELAY = -1;
-          TEXTCOLOR = ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, DISABLED: 192 192 192 255, DISABLEDBORDER: 0 0 0 255, HILITE:   192 192 192 255, HILITEBORDER:   0 0 0 255;
+          TEXTCOLOR = ENABLED:  164 170 190 255, ENABLEDBORDER:  0 0 0 255, DISABLED: 164 170 190 255, DISABLEDBORDER: 0 0 0 255, HILITE:   164 170 190 255, HILITEBORDER:   0 0 0 255;
           ENABLEDDRAWDATA = IMAGE: NoImage, COLOR: 0 0 0 0, BORDERCOLOR: 0 0 0 0,
                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
@@ -9403,8 +9403,100 @@ WINDOW
         CHILD
         WINDOW
           WINDOWTYPE = STATICTEXT;
-          SCREENRECT = UPPERLEFT: 282 150, BOTTOMRIGHT: 506 174, CREATIONRESOLUTION: 800 600;
+          SCREENRECT = UPPERLEFT: 34 330, BOTTOMRIGHT: 258 354, CREATIONRESOLUTION: 800 600;
           NAME = "OptionsMenu.wnd:GroupHeadingInterface2";
+          STATUS = ENABLED;
+          STYLE = STATICTEXT+MOUSETRACK;
+          SYSTEMCALLBACK = "[None]";
+          INPUTCALLBACK = "[None]";
+          TOOLTIPCALLBACK = "[None]";
+          DRAWCALLBACK = "[None]";
+          FONT = NAME: "Generals", SIZE: 15, BOLD: 0;
+          HEADERTEMPLATE = "MainButton";
+          TOOLTIPDELAY = -1;
+          TEXT = "GUI:OptionsGroupSpeed";
+          TEXTCOLOR = ENABLED:  186 255 12 255, ENABLEDBORDER:  0 2 0 255, DISABLED: 186 255 12 255, DISABLEDBORDER: 0 2 0 255, HILITE:   186 255 12 255, HILITEBORDER:   0 2 0 255;
+          ENABLEDDRAWDATA = IMAGE: NoImage, COLOR: 0 0 0 0, BORDERCOLOR: 0 0 0 0,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255;
+          DISABLEDDRAWDATA = IMAGE: NoImage, COLOR: 64 64 64 255, BORDERCOLOR: 192 192 192 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255;
+          HILITEDRAWDATA = IMAGE: NoImage, COLOR: 0 128 0 255, BORDERCOLOR: 128 255 128 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255;
+          STATICTEXTDATA = CENTERED: 0;
+        END
+        CHILD
+        WINDOW
+          WINDOWTYPE = CHECKBOX;
+          SCREENRECT = UPPERLEFT: 40 362, BOTTOMRIGHT: 264 386, CREATIONRESOLUTION: 800 600;
+          NAME = "OptionsMenu.wnd:CheckTurboModeMissions";
+          STATUS = ENABLED+IMAGE+BORDER;
+          STYLE = CHECKBOX+MOUSETRACK;
+          SYSTEMCALLBACK = "[None]";
+          INPUTCALLBACK = "[None]";
+          TOOLTIPCALLBACK = "[None]";
+          DRAWCALLBACK = "[None]";
+          FONT = NAME: "Arial", SIZE: 14, BOLD: 0;
+          HEADERTEMPLATE = "MinorTitle";
+          TOOLTIPTEXT = "TOOLTIP:TurboModeMissions";
+          TOOLTIPDELAY = -1;
+          TEXT = "GUI:TurboModeMissions";
+          TEXTCOLOR = ENABLED:  255 255 255 255, ENABLEDBORDER:  0 0 0 255,
+                      DISABLED: 192 192 192 255, DISABLEDBORDER: 64 64 64 255,
+                      HILITE:   186 255 12 255, HILITEBORDER:   0 0 0 255;
+          ENABLEDDRAWDATA = IMAGE: NoImage, COLOR: 255 0 0 255, BORDERCOLOR: 255 128 128 255,
+                            IMAGE: Active-Unchecked, COLOR: 255 255 255 0, BORDERCOLOR: 128 128 255 255,
+                            IMAGE: Active-Checked, COLOR: 0 0 255 255, BORDERCOLOR: 128 128 255 255,
+                            IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                            IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                            IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                            IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                            IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                            IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0;
+          DISABLEDDRAWDATA = IMAGE: NoImage, COLOR: 128 128 128 255, BORDERCOLOR: 192 192 192 255,
+                             IMAGE: Disabled-Unchecked, COLOR: 255 255 255 0, BORDERCOLOR: 192 192 192 255,
+                             IMAGE: Disabled-Checked, COLOR: 64 64 64 255, BORDERCOLOR: 254 254 254 255,
+                             IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                             IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                             IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                             IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                             IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                             IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0;
+          HILITEDRAWDATA = IMAGE: NoImage, COLOR: 0 255 0 255, BORDERCOLOR: 128 255 128 255,
+                           IMAGE: Active-HiLighted, COLOR: 255 255 255 0, BORDERCOLOR: 128 128 255 255,
+                           IMAGE: Active-Checked, COLOR: 255 255 0 255, BORDERCOLOR: 254 254 254 255,
+                           IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                           IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                           IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                           IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                           IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                           IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0;
+        END
+        CHILD
+        WINDOW
+          WINDOWTYPE = STATICTEXT;
+          SCREENRECT = UPPERLEFT: 282 150, BOTTOMRIGHT: 506 174, CREATIONRESOLUTION: 800 600;
+          NAME = "OptionsMenu.wnd:GroupHeadingInterface3";
           STATUS = ENABLED;
           STYLE = STATICTEXT+MOUSETRACK;
           SYSTEMCALLBACK = "[None]";
@@ -10407,7 +10499,7 @@ WINDOW
         WINDOW
           WINDOWTYPE = STATICTEXT;
           SCREENRECT = UPPERLEFT: 530 150, BOTTOMRIGHT: 754 174, CREATIONRESOLUTION: 800 600;
-          NAME = "OptionsMenu.wnd:GroupHeadingInterface3";
+          NAME = "OptionsMenu.wnd:GroupHeadingInterface4";
           STATUS = ENABLED;
           STYLE = STATICTEXT+MOUSETRACK;
           SYSTEMCALLBACK = "[None]";
@@ -10740,7 +10832,7 @@ WINDOW
         WINDOW
           WINDOWTYPE = STATICTEXT;
           SCREENRECT = UPPERLEFT: 530 254, BOTTOMRIGHT: 754 278, CREATIONRESOLUTION: 800 600;
-          NAME = "OptionsMenu.wnd:GroupHeadingInterface4";
+          NAME = "OptionsMenu.wnd:GroupHeadingInterface5";
           STATUS = ENABLED;
           STYLE = STATICTEXT+MOUSETRACK;
           SYSTEMCALLBACK = "[None]";
@@ -11695,8 +11787,8 @@ WINDOW
           INPUTCALLBACK = "[None]";
           TOOLTIPCALLBACK = "[None]";
           DRAWCALLBACK = "[None]";
-          FONT = NAME: "Arial", SIZE: 10, BOLD: 0;
-          HEADERTEMPLATE = "ButtonSmall";
+          FONT = NAME: "Generals", SIZE: 15, BOLD: 0;
+          HEADERTEMPLATE = "MainButton";
           TOOLTIPTEXT = "TOOLTIP:RefreshNat";
           TOOLTIPDELAY = -1;
           TEXT = "GUI:FirewallRefresh";
@@ -12850,7 +12942,7 @@ WINDOW
           FONT = NAME: "Arial", SIZE: 10, BOLD: 0;
           HEADERTEMPLATE = "LabelRegular";
           TOOLTIPDELAY = -1;
-          TEXTCOLOR = ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, DISABLED: 192 192 192 255, DISABLEDBORDER: 0 0 0 255, HILITE:   192 192 192 255, HILITEBORDER:   0 0 0 255;
+          TEXTCOLOR = ENABLED:  164 170 190 255, ENABLEDBORDER:  0 0 0 255, DISABLED: 164 170 190 255, DISABLEDBORDER: 0 0 0 255, HILITE:   164 170 190 255, HILITEBORDER:   0 0 0 255;
           ENABLEDDRAWDATA = IMAGE: NoImage, COLOR: 0 0 0 0, BORDERCOLOR: 0 0 0 0,
                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
                             IMAGE: NoImage, COLOR: 255 255 255 255, BORDERCOLOR: 255 255 255 255,
@@ -12891,8 +12983,8 @@ WINDOW
           INPUTCALLBACK = "[None]";
           TOOLTIPCALLBACK = "[None]";
           DRAWCALLBACK = "[None]";
-          FONT = NAME: "Arial", SIZE: 10, BOLD: 0;
-          HEADERTEMPLATE = "ButtonSmall";
+          FONT = NAME: "Generals", SIZE: 15, BOLD: 0;
+          HEADERTEMPLATE = "MainButton";
           TOOLTIPTEXT = "TOOLTIP:HotkeyChange";
           TOOLTIPDELAY = -1;
           TEXT = "GUI:HotkeysChange";
@@ -12938,8 +13030,8 @@ WINDOW
           INPUTCALLBACK = "[None]";
           TOOLTIPCALLBACK = "[None]";
           DRAWCALLBACK = "[None]";
-          FONT = NAME: "Arial", SIZE: 10, BOLD: 0;
-          HEADERTEMPLATE = "ButtonSmall";
+          FONT = NAME: "Generals", SIZE: 15, BOLD: 0;
+          HEADERTEMPLATE = "MainButton";
           TOOLTIPTEXT = "TOOLTIP:HotkeyClear";
           TOOLTIPDELAY = -1;
           TEXT = "GUI:HotkeysClear";
@@ -12985,8 +13077,8 @@ WINDOW
           INPUTCALLBACK = "[None]";
           TOOLTIPCALLBACK = "[None]";
           DRAWCALLBACK = "[None]";
-          FONT = NAME: "Arial", SIZE: 10, BOLD: 0;
-          HEADERTEMPLATE = "ButtonSmall";
+          FONT = NAME: "Generals", SIZE: 15, BOLD: 0;
+          HEADERTEMPLATE = "MainButton";
           TOOLTIPTEXT = "TOOLTIP:HotkeyDefault";
           TOOLTIPDELAY = -1;
           TEXT = "GUI:HotkeysDefault";

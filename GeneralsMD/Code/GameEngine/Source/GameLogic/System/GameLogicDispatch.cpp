@@ -37,6 +37,7 @@
 #include "Common/CRCDebug.h"
 #include "Common/DrawnPath.h"
 #include "Common/GameAudio.h"
+#include "Common/LogicThread.h"
 #include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
 #include "Common/NameKeyGenerator.h"
@@ -261,7 +262,7 @@ static void doSetRallyPoint( Object *obj, const Coord3D& pos )
 
 		// mark the UI as dirty so that we re-evaluate the selection and show the rally point
 		Drawable *draw = obj->getDrawable();
-		if( draw && draw->isSelected() )
+		if( draw && LogicThread::isSelectedForTick( draw ) )
 			TheControlBar->markUIDirty();
 
 	}  // end if
@@ -292,7 +293,7 @@ static void doClearRallyPoint( Object *obj )
 
 	// mark the UI as dirty so that we re-evaluate the selection and take the flag down
 	Drawable *draw = obj->getDrawable();
-	if( obj->isLocallyControlled() && draw && draw->isSelected() )
+	if( obj->isLocallyControlled() && draw && LogicThread::isSelectedForTick( draw ) )
 		TheControlBar->markUIDirty();
 
 }
@@ -341,14 +342,15 @@ static Object * getSingleObjectFromSelection(const AIGroup *currentlySelectedGro
 // ------------------------------------------------------------------------------------------------
 void GameLogic::closeWindows( void )
 {
+	// every window here is the client's: a tick's call waits for its end (LOGIC-THREAD.md M6)
+	LOGIC_AFTER_TICK( [this]() { closeWindows(); } );
 	HideDiplomacy();
 	ResetDiplomacy();
 	if( TheGameConsole )
 		TheGameConsole->resetCheatWindow();
 	HideInGameChat();
 	ResetInGameChat();
-	TheControlBar->hidePurchaseScience();
-	TheControlBar->hideSpecialPowerShortcut();
+	ControlBar::callFromLogic( []{ TheControlBar->hidePurchaseScience(); TheControlBar->hideSpecialPowerShortcut(); } );
 	HideQuitMenu();
 	
 	// hide the options menu
@@ -394,6 +396,11 @@ void GameLogic::clearGameData( Bool showScoreScreen )
 		void FixupScoreScreenMovieWindow( void );
 		FixupScoreScreenMovieWindow();
 	}
+
+	// -jumpToFrame names a frame of the match it was given for.  The shell's blank game behind the
+	// score screen counts from frame 0 again and would race undrawn up to it, minutes of nothing.
+	if( !isInShellGame() )
+		TheWritableGlobalData->m_noDraw = 0;
 
 	TheGameEngine->reset();
 	setGameMode(GAME_NONE);
@@ -556,7 +563,11 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 	{
 		if (msg->getType() >= GameMessage::MSG_BEGIN_NETWORK_MESSAGES && msg->getType() <= GameMessage::MSG_END_NETWORK_MESSAGES)
 		{
-			if (msg->getType() != GameMessage::MSG_LOGIC_CRC && msg->getType() != GameMessage::MSG_SET_REPLAY_CAMERA)
+			/* The retaliation switch is no order and needs no selection, and its group took an AIGroup id
+				 on whatever frame the message arrived.  Logic posts it, and in a solo game it waits for the
+				 next client pass, so that frame is the machine's load and the ids after it moved with it. */
+			if (msg->getType() != GameMessage::MSG_LOGIC_CRC && msg->getType() != GameMessage::MSG_SET_REPLAY_CAMERA
+					&& msg->getType() != GameMessage::MSG_ENABLE_RETALIATION_MODE)
 			{
 				currentlySelectedGroup = TheAI->createGroup(); // can't do this outside a game - it'll cause sync errors galore.
 				CRCGEN_LOG(( "Creating AIGroup %d in GameLogic::logicMessageDispatcher()\n", (currentlySelectedGroup)?currentlySelectedGroup->getID():0 ));
@@ -656,8 +667,11 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 				if (maxFPS < 1 || maxFPS > 1000)
 					maxFPS = TheGlobalData->m_framesPerSecondLimit;
 				DEBUG_LOG(("Setting max FPS limit to %d FPS\n", maxFPS));
-				TheGameEngine->setFramesPerSecondLimit(maxFPS);
-				TheWritableGlobalData->m_useFpsLimit = true;
+				// the engine's pacing (LOGIC-THREAD.md hazard 24): after the tick
+				LogicThread::callAfterTick( [maxFPS]() {
+					TheGameEngine->setFramesPerSecondLimit(maxFPS);
+					TheWritableGlobalData->m_useFpsLimit = true;
+				} );
 			}
 
 			/* Seed again from the number the start was seeded with.  Every start seeds when it appends
@@ -769,6 +783,70 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 					|| msg->getArgumentDataType( 1 ) != ARGUMENTDATATYPE_BOOLEAN )
 				break;
 			processKickVote( thisPlayer, msg->getArgument( 0 )->integer, msg->getArgument( 1 )->boolean );
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
+		// A money transfer (fork): (Int player index, Int amount) from the Tab screen.  A player still in
+		// the match may give to an ally still in it, allied both ways, never to an enemy.  The arguments
+		// came over the network, so their shape and the two sides are checked here; withdraw clamps the
+		// amount to what the sender holds, so nobody goes below zero and the receiver gets only what left.
+		case GameMessage::MSG_TRANSFER_MONEY:
+		{
+			if( msg->getArgumentCount() < 2 || msg->getArgumentDataType( 0 ) != ARGUMENTDATATYPE_INTEGER
+					|| msg->getArgumentDataType( 1 ) != ARGUMENTDATATYPE_INTEGER )
+				break;
+			const Int targetIndex = msg->getArgument( 0 )->integer;
+			const Int amount = msg->getArgument( 1 )->integer;
+			if( amount <= 0 || targetIndex < 0 || targetIndex >= ThePlayerList->getPlayerCount() )
+				break;
+			Player *target = ThePlayerList->getNthPlayer( targetIndex );
+			if( target == thisPlayer || !thisPlayer->isPlayableSide() || !thisPlayer->isPlayerActive()
+					|| !target->isPlayableSide() || !target->isPlayerActive() )
+				break;
+			if( thisPlayer->getRelationship( target->getDefaultTeam() ) != ALLIES
+					|| target->getRelationship( thisPlayer->getDefaultTeam() ) != ALLIES )
+			{
+				DEBUG_LOG(( "MONEY TRANSFER: frame %d player %d refused, player %d is not an ally\n", getFrame(),
+										thisPlayer->getPlayerIndex(), targetIndex ));
+				break;
+			}
+
+			const UnsignedInt moved = thisPlayer->getMoney()->withdraw( (UnsignedInt)amount );
+			if( moved == 0 )
+				break;
+			target->getMoney()->deposit( moved );
+
+			DEBUG_LOG(( "MONEY TRANSFER: frame %d player %d gave %u to player %d, now %u and %u\n", getFrame(),
+									thisPlayer->getPlayerIndex(), moved, targetIndex,
+									thisPlayer->getMoney()->countMoney(), target->getMoney()->countMoney() ));
+			if( TheInGameUI )
+			{
+				if( thisPlayer == ThePlayerList->getLocalPlayer() )
+					TheInGameUI->message( "GUI:MoneyTransferSent", (Int)moved, target->getPlayerDisplayName().str() );
+				else if( target == ThePlayerList->getLocalPlayer() )
+					TheInGameUI->message( "GUI:MoneyTransferReceived", thisPlayer->getPlayerDisplayName().str(), (Int)moved );
+			}
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
+		// A chat command to the computer allies (fork): (Int AITeamRequestKind, Location) from help /
+		// attack / money typed in chat.  It goes on the team board (aiPostTeamRequest); only a computer
+		// personality reads it.  The kind came over the network, so it is checked here.
+		case GameMessage::MSG_TEAM_REQUEST:
+		{
+			if( msg->getArgumentCount() < 2 || msg->getArgumentDataType( 0 ) != ARGUMENTDATATYPE_INTEGER
+					|| msg->getArgumentDataType( 1 ) != ARGUMENTDATATYPE_LOCATION )
+				break;
+			const Int kind = msg->getArgument( 0 )->integer;
+			if( kind < 0 || kind >= AIREQ_COUNT || !thisPlayer->isPlayableSide() || !thisPlayer->isPlayerActive() )
+				break;
+			const Coord3D pos = msg->getArgument( 1 )->location;
+			const Int enemy = aiEnemyNear( thisPlayer, &pos );
+			DEBUG_LOG(( "TEAM REQUEST: frame %d player %d asks %d, enemy %d at (%.0f,%.0f)\n", getFrame(),
+									thisPlayer->getPlayerIndex(), kind, enemy, pos.x, pos.y ));
+			aiPostTeamRequest( thisPlayer, (AITeamRequestKind)kind, enemy, &pos );
 			break;
 		}
 
@@ -2252,6 +2330,8 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 				Object *object = TheThingFactory->newObject( thing, thisPlayer->getDefaultTeam() );
 				object->setPosition( &pos );
 				object->setProducer(NULL);
+				// a beacon is an attack request to the computer allies (the team board, fork)
+				aiPostTeamRequest( thisPlayer, AIREQ_ATTACK, aiEnemyNear( thisPlayer, &pos ), &pos );
 
 				if (thisPlayer->getRelationship( ThePlayerList->getLocalPlayer()->getDefaultTeam() ) == ALLIES || ThePlayerList->getLocalPlayer()->isPlayerObserver())
 				{
@@ -2703,7 +2783,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 		currentlySelectedGroup = NULL;
 
 	/**/ /// @todo: multiplayer semantics
-	if (currentlySelectedGroup && orderedGroup == NULL && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer /*&& !TheRecorder->isMultiplayer()*/)
+	if (currentlySelectedGroup && orderedGroup == NULL && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && LogicThread::clientBlock().observerLookAt == thisPlayer /*&& !TheRecorder->isMultiplayer()*/)
 	{
 		const VecObjectID& selectedObjects = currentlySelectedGroup->getAllIDs();
 		TheInGameUI->deselectAllDrawables();

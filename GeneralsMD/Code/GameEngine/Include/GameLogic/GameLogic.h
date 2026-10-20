@@ -36,9 +36,11 @@
 
 #include "Common/GameCommon.h"	// ensure we get DUMP_PERF_STATS, or not
 #include "Common/GameType.h"
+#include "Common/LogicThread.h"
 #include "Common/Snapshot.h"
 #include "Common/STLTypedefs.h"
 #include "Common/ObjectStatusTypes.h"
+#include "Common/RandomValue.h"
 #include "GameNetwork/NetworkDefs.h"
 #include "GameLogic/CRCSnapshotRing.h"
 #include "Common/STLTypedefs.h"
@@ -157,8 +159,15 @@ public:
 	void setHeight( Real height );									///< Sets the height of the world
 	Real getHeight( void );													///< Returns the height of the world
 
-	Bool isInGameLogicUpdate( void ) const { return m_isInUpdate; }
+	/** TRUE on the thread running GameLogic::update, inside it.  Per thread (LOGIC-THREAD.md phase 3): once
+		* the render runs beside the tick, the main thread is not inside it and its client work runs at once. */
+	Bool isInGameLogicUpdate( void ) const { return s_isInUpdate; }
+	Bool isNewGamePending( void ) const { return m_startNewGame; }	///< the next update starts a map (LogicThread keeps that tick on the main thread)
 	UnsignedInt getFrame( void );										///< Returns the current simulation frame number
+	/** LOGIC-THREAD.md phase 3: the frame as the render's sync point found it, which getFrame answers the
+		* main thread with inside the overlap window, where the tick may be advancing m_frame beside it. */
+	void takeFrameForDraw( void ) { m_frameForDraw = m_frame; m_pausedForDraw = m_gamePaused; }
+	UnsignedInt getFrameForClient( void ) const { return m_frameForClient; }	///< the frame the last tick ran, for the client's clock (LogicThread::runTick)
 	UnsignedInt getCRC( Int mode = CRC_CACHED, AsciiString deepCRCFileName = AsciiString::TheEmptyString );		///< Returns the CRC
 
 	void setObjectIDCounter( ObjectID nextObjID ) { m_nextObjID = nextObjID; }
@@ -305,6 +314,11 @@ public:
 			and carried by a save. */
 	Int getSupplyPileLimit( void ) const { return m_supplyPileLimit; }
 
+	/** A save carries the logic random stream as it stood, but the load itself draws from the stream
+			and the engine reset before it reseeded from the clock.  GameState calls this after every
+			block's post-process, the last thing a load does, so play goes on from the saved stream. */
+	void restoreLoadedRandomState( void );
+
 #ifdef DUMP_PERF_STATS
 	void getAIMetricsStatistics( UnsignedInt *numAI, UnsignedInt *numMoving, UnsignedInt *numAttacking, UnsignedInt *numWaitingForPath, UnsignedInt *overallFailedPathfinds );
 	void resetOverallFailedPathfinds() { m_overallFailedPathfinds = 0; }
@@ -357,6 +371,9 @@ private:
 
 	Real m_width, m_height;																	///< Dimensions of the world
 	UnsignedInt m_frame;																		///< Simulation frame number
+	UnsignedInt m_frameForClient;														///< m_frame at the top of the last update that got past the intro movie
+	UnsignedInt m_frameForDraw = 0;													///< see takeFrameForDraw
+	Bool m_pausedForDraw = FALSE;														///< m_gamePaused, taken with m_frameForDraw for the same reason
 	
 	// CRC cache system -----------------------------------------------------------------------------
 	UnsignedInt	m_CRC;																			///< Cache of previous CRC value
@@ -374,7 +391,7 @@ private:
 	Bool m_loadingWithoutScreen;
 	Bool m_clearingGameData;
 
-	Bool m_isInUpdate;
+	static thread_local Bool s_isInUpdate;
 
 	Int m_rankPointsToAddAtGameStart;
 
@@ -447,6 +464,14 @@ private:
 	};
 	std::vector<PendingTechBuilding> m_pendingTechBuildings;	///< in the order they died, which every machine agrees on
 	void techRespawnTick( void );
+
+	/// the logic random stream a save carried, put back once the whole load is done (restoreLoadedRandomState)
+	GameLogicRandomState m_loadedRandomState;
+	Bool m_loadedRandomPending;
+
+	/// the sleepy update heap as a save wrote it, object and behavior module index per entry, for loadPostProcess
+	std::vector< std::pair< ObjectID, Int > > m_loadedSleepyOrder;
+	Bool m_loadedSleepyPending;
 	LoadScreen *getLoadScreen( Bool loadSaveGame );
 	LoadScreen *m_loadScreen;
 	Bool m_gamePaused;
@@ -488,7 +513,7 @@ inline void GameLogic::setWidth( Real width ) { m_width = width; }
 inline Real GameLogic::getWidth( void ) { return m_width; }
 inline void GameLogic::setHeight( Real height ) { m_height = height; }
 inline Real GameLogic::getHeight( void ) { return m_height; }
-inline UnsignedInt GameLogic::getFrame( void ) { return m_frame; }
+inline UnsignedInt GameLogic::getFrame( void ) { return LogicThread::isInsideWindow() ? m_frameForDraw : m_frame; }
 
 inline Bool GameLogic::isInGame( void ) { return !(m_gameMode == GAME_NONE); }
 
@@ -516,6 +541,7 @@ inline UnsignedShort GameLogic::getSuperweaponRestriction() const { return m_sup
 
 inline Object* GameLogic::findObjectByID( ObjectID id )
 {
+	LOGIC_WINDOW_READ( WINDOW_FIND_OBJECT );
 	if( id == INVALID_ID )
 		return NULL;
 

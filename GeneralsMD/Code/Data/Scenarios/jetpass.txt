@@ -12,8 +12,14 @@
 # out, turns and fires all four, and the Overlord has 700 at frame 400. The other three targets end
 # on the same health in both builds. The 42-pass sweep behind the changelog numbers (attack frame
 # 240 to 300, wing offset 0 to 180, parked and driving) is in the commit message of the fix.
+#
+# 2026-10-16: the spawn check now refuses 2200,3300 (a cliff cell), so the Overlord starts at 2250.
+# Banked flight against EA's, health at frame 650 and the frame of the first hit: Overlord 700 at 400
+# against 800 at 490 (the Raptor turns too wide to get all four off in one pass and is still on its
+# second at 650), Battle Master 222 at 290 against 234 at 500, Crusader 80 at 300 against 80 at 330,
+# Scorpion 170 at 330 against 170 at 430. Every jet still hits; the wide turns cost time.
 
-30    spawn      1  ChinaTankOverlord            1   2200 3300
+30    spawn      1  ChinaTankOverlord            1   2250 3300
 30    spawn      0  AmericaJetRaptor             1   1000 3420
 31    move       0  AmericaJetRaptor                 4400 3420
 30    spawn      1  ChinaTankBattleMaster        1   2200 3650
@@ -26,7 +32,7 @@
 30    spawn      0  AmericaJetStealthFighter     1   1000 4470
 31    move       0  AmericaJetStealthFighter         4400 4470
 250   attack     0  AmericaJetRaptor             1  ChinaTankOverlord
-250   move       1  ChinaTankOverlord                2200 3000
+250   move       1  ChinaTankOverlord                2250 3000
 250   attack     0  ChinaJetMIG                  1  ChinaTankBattleMaster
 250   move       1  ChinaTankBattleMaster            2200 3350
 250   attack     0  AmericaJetAurora             1  AmericaTankCrusader

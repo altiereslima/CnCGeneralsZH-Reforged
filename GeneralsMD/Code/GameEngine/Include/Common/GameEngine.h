@@ -53,11 +53,21 @@
 /** The above in logic frames, at a given game speed: 3 at the retail 30fps, 6 at 60. */
 Int GameEngine_logicCatchupMaxFrames( Int logicFps );
 
+/** The logic frames a second a match starts at: FramesPerSecondLimit (normal speed, or what -fps
+	asked for), twice that with turbo mode on.  Every start that sends MSG_NEW_GAME passes this, so a
+	replay plays back at the speed its match had. */
+Int GameEngine_matchFramesPerSecond( Bool turbo );
+
 /** R1, smooth motion: the renderer's blend reads how far into the next logic tick the wall clock is
 	(0 just after a tick, 1 a whole tick later or more; always 1 in fast mode or before the first tick).
 	The logic loop notes each pass's last tick with GameEngine_noteLogicTickDone. */
 void GameEngine_noteLogicTickDone( Int logicFps, Bool fastMode );
 Real GameEngine_logicTickFraction( void );
+
+/** LOGIC-THREAD.md phase 4: a picture presented while the pass's tick still runs beside the render,
+	with another to follow in the same pass.  The frame-time histograms count each picture as a pass of
+	its own, the first with the tick, from the pass's start or the last picture to now. */
+void GameEngine_noteExtraPicture( void );
 
 /** -video and -directorrecord: whether the logic frame is one a range records.  -recordfps draws
 	GameEngine_videoPictures() pictures of each of those, and the logic runs after the last; the coming
@@ -158,7 +168,29 @@ public:
 	virtual Bool isActive(void) {return m_isActive;}	///< returns whether app has OS focus.
 	virtual void setIsActive(Bool isActive) { m_isActive = isActive; };
 
+	/** LOGIC-THREAD.md phase 3, step 3b.  Called by GameClient::update in front of the draw at
+		* -logicthread 1 and 2: in a single-player game it runs this pass's message stream and asks the
+		* pacer here, and answers whether this pass's first tick is due and may run beside the render. */
+	Bool planOverlappedTick( void );
+
+	/** LOGIC-THREAD.md phase 4.  How long until the pacer owes the next tick, asked while this pass's
+		* first tick runs beside the render: the draw shows another picture while it waits only if one fits.
+		* 0 outside a paced single-player pass that planOverlappedTick planned (fast mode, a network game). */
+	Real msUntilNextTickDue( void );
+
+	/** What the pacer decided for one pass, see planLogicPass. */
+	struct LogicPassPlan
+	{
+		Bool fastMode;
+		Bool mayRun;
+		Bool due;
+		Bool mayCatchUp;
+		Bool networkPaced;
+	};
+
 protected:
+
+	void planLogicPass( LogicPassPlan &plan );	///< the pacer: whether logic frames are due this pass, asked once a pass
 
 	virtual FileSystem *createFileSystem( void );								///< Factory for FileSystem classes
 	virtual LocalFileSystem *createLocalFileSystem( void ) = 0;	///< Factory for LocalFileSystem classes

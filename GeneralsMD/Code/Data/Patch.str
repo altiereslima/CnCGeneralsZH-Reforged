@@ -1032,6 +1032,22 @@ TOOLTIP:ProRules
 "The tournament list. No Particle Cannon or SCUD Storm, except the Superweapon General's one cannon. The Nuclear Missile silo goes up but never fires. No Aurora, no Tactical Nuke MiGs, no demo bike, no suicide bombs, Neutron Shells or Stealth Comanche, and no Carpet Bomb before rank 3. A Microwave Tank cannot freeze a building still going up, nobody builds within 300 of an enemy building, and nobody puts more than two Patriots, Gatling Cannons or Stinger Sites round one group of oil derricks."
 END
 
+GUI:TurboMode
+"Turbo Mode"
+END
+
+TOOLTIP:TurboMode
+"The match runs twice as fast: two seconds of play go by in every second, and nothing else about it changes. In a network game the host picks it for everyone."
+END
+
+GUI:TurboModeMissions
+"Turbo Mode in Missions"
+END
+
+TOOLTIP:TurboModeMissions
+"Campaign and Generals' Challenge missions run twice as fast, and a mission already under way speeds up at once. Skirmish and multiplayer games have their own box in the lobby."
+END
+
 // Pro Rules, rule 9: no foundation within reach of an enemy building
 GUI:CantBuildTooCloseToEnemy
 "Can't build this close to an enemy building."
@@ -1175,7 +1191,11 @@ LAN:NoMod
 END
 
 GUI:SaveFromOlderGame
-"This save was made by the original game or by an older version of Reforged, and cannot be loaded."
+"This save was made by the original game or by an older version of Reforged, and cannot be loaded. Its \"Mission Start\" saves still load and carry the campaign on from that mission's beginning, and every campaign mission can be picked from the campaign menu."
+END
+
+GUI:CampaignMission
+"MISSION %d"
 END
 
 GUI:MapCorrupt
@@ -1314,6 +1334,10 @@ GUI:OptionsGroupMenus
 "Menus"
 END
 
+GUI:OptionsGroupSpeed
+"Game Speed"
+END
+
 GUI:OptionsGroupReplays
 "Replays"
 END
@@ -1365,15 +1389,19 @@ GUI:HotkeysCommandBar
 END
 
 GUI:HotkeysChange
-"Change"
+"CHANGE"
 END
 
 GUI:HotkeysClear
-"No key"
+"NO KEY"
 END
 
 GUI:HotkeysDefault
-"Game's key"
+"GAME'S KEY"
+END
+
+GUI:FirewallRefresh
+"REFRESH NAT"
 END
 
 TOOLTIP:HotkeyChange
@@ -1404,8 +1432,12 @@ GUI:HotkeysPressForceAttack
 "Press a key, or Ctrl or Alt alone. Shift cannot be the hold. Esc cancels."
 END
 
+GUI:HotkeysPressHold
+"Press a key, or Ctrl, Alt or Shift alone. Esc cancels."
+END
+
 GUI:HotkeysClash
-"%s: %s share this key. Only one of them gets it in the game, and a fixed order keeps its own."
+"%s: %s share this key. Only one of them gets it in the game: a fixed order keeps its own, and a letter you set beats the game's."
 END
 
 GUI:HotkeysAlsoOn
@@ -1413,7 +1445,7 @@ GUI:HotkeysAlsoOn
 END
 
 GUI:HotkeysFixed
-"A fixed key on every bar: A attack move, S stop, G guard, Y rally point, V evacuate, C combat drop, N sell, H mines, camo netting and the fake switch."
+"The same default on every bar: A attack move, S stop, G guard, Y rally point, V evacuate, C combat drop, N sell, H mines, camo netting and the fake switch. Change moves it."
 END
 
 GUI:HotkeysGameKey
@@ -1557,7 +1589,7 @@ GUI:HotkeysCommandSELECT_ALL
 END
 
 GUI:HotkeysCommandSELECT_ALL_MILITARY
-"Select all fighting units"
+"Select all infantry"
 END
 
 GUI:HotkeysCommandSELECT_ALL_VEHICLES
@@ -1588,6 +1620,30 @@ GUI:HotkeysCommandSELECT_NEXT_IDLE_UNIT
 "Next idle unit"
 END
 
+GUI:HotkeysCommandSELECT_NEXT_IDLE_AIRCRAFT
+"Next idle aircraft"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_VEHICLE
+"Next idle vehicle"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_INFANTRY
+"Next idle infantry"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_UNITS
+"Select all idle units"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_AIRCRAFT
+"Select all idle aircraft"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_VEHICLES
+"Select all idle vehicles"
+END
+
 GUI:HotkeysCommandTOGGLE_PAUSE
 "Pause (single player and replays)"
 END
@@ -1606,4 +1662,518 @@ END
 
 GUI:HotkeysCommandSIGNAL_ATTENTION
 "Signal: look here"
+END
+
+GUI:HotkeysCommandBEGIN_WAYPOINTS
+"Queue orders (hold)"
+END
+
+GUI:HotkeysCommandBEGIN_PREFER_SELECTION
+"Add to selection (hold)"
+END
+
+// The match load screen (LoadScreenBoard in LoadScreen.cpp)
+GUI:LoadModeSkirmish
+"Skirmish"
+END
+
+GUI:LoadModeLAN
+"LAN game"
+END
+
+GUI:LoadModeOnline
+"Online game"
+END
+
+GUI:LoadModeReplay
+"Replay"
+END
+
+GUI:LoadMission
+"Mission %d"
+END
+
+GUI:LoadBriefing
+"BRIEFING"
+END
+
+GUI:LoadFreeForAll
+"Free for all"
+END
+
+GUI:LoadObservers
+"Observers:"
+END
+
+GUI:LoadTeam
+"Team %d"
+END
+
+GUI:LoadWaiting
+"Waiting for the other players"
+END
+
+GUI:LoadTip
+"TIP"
+END
+
+GUI:LoadTip1
+"Hold Shift while you give orders and the group works down the list by itself: move, attack, capture, guard."
+END
+
+GUI:LoadTip2
+"Shift and a number adds your selection to that control group and keeps everyone already in it."
+END
+
+GUI:LoadTip3
+"Ctrl+D selects every unit of the kinds you have selected on the screen. Press it twice for the whole map."
+END
+
+GUI:LoadTip4
+"Hold Shift and drag to draw a line. The selection spreads along it as a firing line."
+END
+
+GUI:LoadTip5
+"On a build button, Shift queues five and Ctrl twenty."
+END
+
+GUI:LoadTip6
+"Hold Ctrl and Alt on a unit's button and the factory builds it on repeat."
+END
+
+GUI:LoadTip7
+"A beacon you place asks your computer allies to attack there."
+END
+
+GUI:LoadTip8
+"Type help, attack or money in chat and your computer allies come to help, attack there or send cash."
+END
+
+GUI:LoadTip9
+"Hold Ctrl while placing a building to flip grid placement for as long as the key is down."
+END
+
+GUI:LoadTip10
+"Double-click a building to select every building of its kind on the screen."
+END
+
+// Computer player personalities, picked per seat in the lobby (AIPersonality)
+GUI:AIPersonaNormal
+"Normal"
+END
+
+GUI:AIPersonaAttacker
+"Attacker"
+END
+
+GUI:AIPersonaTurtle
+"Turtle"
+END
+
+GUI:AIPersonaEconomist
+"Economist"
+END
+
+GUI:AIPersonaAir
+"Air Force"
+END
+
+GUI:AIPersonaRusher
+"Rusher"
+END
+
+GUI:AIPersonaRaider
+"Raider"
+END
+
+GUI:AIPersonaTech
+"Tech"
+END
+
+GUI:AIPersonaInfantry
+"Infantry"
+END
+
+GUI:AIPersonaArmor
+"Armor"
+END
+
+GUI:AIPersonaSneaky
+"Sneaky"
+END
+
+GUI:AIPersonaOpportunist
+"Opportunist"
+END
+
+GUI:AIPersonaSupporter
+"Supporter"
+END
+
+GUI:AIPersonaCounter
+"Counter"
+END
+
+GUI:AIPersonaRandom
+"Random"
+END
+
+GUI:AIPersonaTooltip
+"How this computer player plays, whatever its difficulty"
+END
+
+GUI:AIPersona
+"Personality"
+END
+
+// What a computer player with a personality says in chat: when a wave leaves (two lines), when its
+// base is hit, and when an enemy is wiped out (AIPlayer::personaChat)
+GUI:AIChatAttackerWave1
+"Here we come. Again."
+END
+
+GUI:AIChatAttackerWave2
+"No rest for you today."
+END
+
+GUI:AIChatAttackerHit1
+"Hitting me back? Cute."
+END
+
+GUI:AIChatAttackerWin1
+"Next!"
+END
+
+GUI:AIChatTurtleWave1
+"The walls are done. Now we march."
+END
+
+GUI:AIChatTurtleWave2
+"Slow and steady, coming your way."
+END
+
+GUI:AIChatTurtleHit1
+"Knock all you like. Nobody is home to you."
+END
+
+GUI:AIChatTurtleWin1
+"Patience wins."
+END
+
+GUI:AIChatEconomistWave1
+"Consider this an investment."
+END
+
+GUI:AIChatEconomistWave2
+"Paid for in full. Delivering now."
+END
+
+GUI:AIChatEconomistHit1
+"Do you know what that building cost?"
+END
+
+GUI:AIChatEconomistWin1
+"Bankrupt. Closing the account."
+END
+
+GUI:AIChatAirWave1
+"Look up."
+END
+
+GUI:AIChatAirWave2
+"Wheels up, weapons hot."
+END
+
+GUI:AIChatAirHit1
+"Ground troops. How quaint."
+END
+
+GUI:AIChatAirWin1
+"Air superiority confirmed."
+END
+
+GUI:AIChatRusherWave1
+"Everything I have, right now!"
+END
+
+GUI:AIChatRusherWave2
+"Faster, faster!"
+END
+
+GUI:AIChatRusherHit1
+"You were supposed to be dead by now."
+END
+
+GUI:AIChatRusherWin1
+"Too slow."
+END
+
+GUI:AIChatRaiderWave1
+"Your trucks look lonely."
+END
+
+GUI:AIChatRaiderWave2
+"Hit and gone."
+END
+
+GUI:AIChatRaiderHit1
+"So you found the way to my base too."
+END
+
+GUI:AIChatRaiderWin1
+"No supplies, no army."
+END
+
+GUI:AIChatTechWave1
+"Field test, live targets."
+END
+
+GUI:AIChatTechWave2
+"The prototypes are ready."
+END
+
+GUI:AIChatTechHit1
+"Mind the lab, that equipment is expensive."
+END
+
+GUI:AIChatTechWin1
+"Experiment concluded."
+END
+
+GUI:AIChatInfantryWave1
+"Boots on the ground!"
+END
+
+GUI:AIChatInfantryWave2
+"Every street, every window."
+END
+
+GUI:AIChatInfantryHit1
+"Into the buildings, hold the line!"
+END
+
+GUI:AIChatInfantryWin1
+"The city is ours."
+END
+
+GUI:AIChatArmorWave1
+"Steel is rolling."
+END
+
+GUI:AIChatArmorWave2
+"Hear the tracks? That is us."
+END
+
+GUI:AIChatArmorHit1
+"You scratched the paint."
+END
+
+GUI:AIChatArmorWin1
+"Flattened."
+END
+
+GUI:AIChatSneakyWave1
+"You did not see this coming."
+END
+
+GUI:AIChatSneakyWave2
+"Check behind you."
+END
+
+GUI:AIChatSneakyHit1
+"Found me? Lucky guess."
+END
+
+GUI:AIChatSneakyWin1
+"Gone without a trace."
+END
+
+GUI:AIChatOpportunistWave1
+"You look busy. Good."
+END
+
+GUI:AIChatOpportunistWave2
+"Weak spot found."
+END
+
+GUI:AIChatOpportunistHit1
+"Picking on me? Bad pick."
+END
+
+GUI:AIChatOpportunistWin1
+"Thanks for softening that one up."
+END
+
+GUI:AIChatSupporterWave1
+"Right behind you, partner."
+END
+
+GUI:AIChatSupporterWave2
+"Your target is my target."
+END
+
+GUI:AIChatSupporterHit1
+"Cover me, I am taking fire!"
+END
+
+GUI:AIChatSupporterWin1
+"Good teamwork."
+END
+
+GUI:AIChatCounterWave1
+"I have read your army. This is the answer."
+END
+
+GUI:AIChatCounterWave2
+"Built for you, specially."
+END
+
+GUI:AIChatCounterHit1
+"Predictable."
+END
+
+GUI:AIChatCounterWin1
+"Countered."
+END
+
+// A computer ally answering the team board (AIPlayer::coopChat)
+GUI:AICoopHelp
+"Hold on, I am coming."
+END
+
+GUI:AICoopMoney
+"Here, take some money."
+END
+
+GUI:AICoopJoin
+"I am with you on that attack."
+END
+
+GUI:MoneyTransferTitle
+"Send money"
+END
+
+GUI:MoneyTransferSend
+"Send"
+END
+
+GUI:MoneyTransferAmount
+"$%d"
+END
+
+GUI:MoneyTransferMinus
+"-"
+END
+
+GUI:MoneyTransferPlus
+"+"
+END
+
+GUI:MoneyTransferSent
+"You sent $%d to %ls."
+END
+
+GUI:MoneyTransferReceived
+"%ls sent you $%d."
+END
+
+TOOLTIP:MoneyTransfer
+"Scroll or click - and + to pick the amount: 100 a step, 1,000 with Ctrl, 10,000 with Shift, 100,000 with both. Send hands it over."
+END
+
+GUI:LobbyRecord
+"Record"
+END
+
+GUI:LobbyRecordButton
+"RECORD"
+END
+
+GUI:LobbyRecordClose
+"CLOSE"
+END
+
+// The score screen's summary panel (ScoreScreenGraphs.cpp)
+GUI:SummaryUnits
+"Units"
+END
+
+GUI:SummaryMoney
+"Money"
+END
+
+GUI:SummaryUnitsBuilt
+"Built"
+END
+
+GUI:SummaryBuildingsBuilt
+"Built"
+END
+
+GUI:SummaryLost
+"Lost"
+END
+
+GUI:SummaryDestroyed
+"Destroyed"
+END
+
+GUI:SummaryEarned
+"Earned"
+END
+
+GUI:SummaryWinner
+"Winner"
+END
+
+GUI:BuildOrderEvery
+"Show every build"
+END
+
+GUI:BuildOrderFirsts
+"Show the first of each"
+END
+
+GUI:GraphSummary
+"Summary"
+END
+
+GUI:GraphEarned
+"Money earned"
+END
+
+GUI:GraphArmy
+"Army"
+END
+
+GUI:GraphBuildings
+"Buildings"
+END
+
+GUI:GraphBuildOrder
+"Build order"
+END
+
+GUI:GraphSuperweaponBuilt
+"Superweapon built"
+END
+
+GUI:GraphSuperweaponFired
+"Superweapon fired"
+END
+
+GUI:GraphGeneralPower
+"General's power"
+END
+
+GUI:GraphPromotion
+"Promotion"
+END
+
+GUI:GraphRank
+"Rank %d"
+END
+
+GUI:GraphNoData
+"Nothing was recorded in this match."
 END

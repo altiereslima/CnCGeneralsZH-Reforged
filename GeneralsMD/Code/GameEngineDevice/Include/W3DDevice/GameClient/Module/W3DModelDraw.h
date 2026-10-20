@@ -358,6 +358,7 @@ public:
 
 	/// the draw method
 	virtual void doDrawModule(const Matrix3D* transformMtx);
+	virtual void buildRenderObjects( Bool madeInTick );
 
 	/// the name the render object was made from; under -modfactions it keeps the "M<n>~" its Get_Name drops
 	const AsciiString& getCurrentModelName() const { return m_curState->m_modelName; }

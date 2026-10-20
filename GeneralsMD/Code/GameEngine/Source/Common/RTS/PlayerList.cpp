@@ -102,8 +102,9 @@ PlayerList::~PlayerList()
 }
 
 //-----------------------------------------------------------------------------
-Player *PlayerList::getNthPlayer(Int i) 
-{ 
+Player *PlayerList::getNthPlayer(Int i)
+{
+	LOGIC_WINDOW_READ( WINDOW_PLAYER );
 	if( !isValidPlayerIndex( i ) )
 	{
 //		DEBUG_CRASH( ("Illegal player index\n") );

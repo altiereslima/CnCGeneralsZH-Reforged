@@ -35,6 +35,7 @@
 #include "Common/AudioEventRTS.h"
 #include "Common/DisabledTypes.h"
 #include "Common/GameType.h"
+#include "Common/LogicThread.h"
 #include "Common/ModelState.h"
 #include "Common/ModuleFactory.h"
 #include "Common/Thing.h"
@@ -42,6 +43,8 @@
 #include "GameClient/Color.h"
 #include "WWMath/matrix3d.h"
 #include "GameClient/DrawableInfo.h"
+
+#include <functional>
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class PositionalSound;
@@ -194,6 +197,9 @@ public:
 	Real m_airPitch;						///< hover or wings pitch, roll and yaw from that frame, drawn until the next one
 	Real m_airRoll;
 	Real m_airYaw;
+	Real m_jetHeading;					///< a jet's heading on the retail frame wings last stepped on, for its turn rate
+	Real m_jetBank;							///< a jet's bank into its turn and its nose-up pitch, eased
+	Real m_jetPitch;
 	Real m_groundLeanStages[2][3];	///< a ground vehicle's pitch and roll lean, smoothed through three stages once a retail frame
 	UnsignedInt m_groundFrame;	///< the retail frame (logic frame / LOGICFRAMES_PER_RETAIL_FRAME) those were last stepped on
 	Real m_prevForwardSpeed;		///< a ground vehicle's forward speed on that frame
@@ -362,12 +368,13 @@ public:
 	DrawableID getID( void ) const;																			///< return this drawable's unique ID
 
 	void friend_bindToObject( Object *obj ); ///< bind this drawable to an object ID. for use ONLY by GameLogic!
+	void friend_forgetObject( void ) { m_object = NULL; }	///< GameClient::destroyDrawable, for a deletion that waits for the flush
 	void setIndicatorColor(Color color);
 	void refreshIndicatorColor( void );			///< re-apply the last colour asked for, under whatever scheme is on now
 	
 	void setTintStatus( TintStatus statusBits ) { BitSet( m_tintStatus, statusBits ); };
 	void clearTintStatus( TintStatus statusBits ) { BitClear( m_tintStatus, statusBits ); };
-	Bool testTintStatus( TintStatus statusBits ) const { return BitTest( m_tintStatus, statusBits ); };
+	Bool testTintStatus( TintStatus statusBits ) const { return BitTest( LogicThread::isInsideWindow() ? m_lookForDraw.tintStatus : m_tintStatus, statusBits ); };
 	TintEnvelope *getColorTintEnvelope( void ) { return m_colorTintEnvelope; }
 	void setColorTintEnvelope( TintEnvelope &source ) { if (m_colorTintEnvelope) *m_colorTintEnvelope = source; }
 
@@ -378,8 +385,8 @@ public:
 	void setTerrainDecalSize(Real x, Real y);
 	void setTerrainDecalFadeTarget(Real target, Real rate = ConvertRetailPerFrameRate(0.1f));	///< rate is opacity per logic frame
 
-	inline Object *getObject( void ) { return m_object; }								///< return object ID bound to this drawble
-	inline const Object *getObject( void ) const { return m_object; }		///< return object ID bound to this drawble
+	inline Object *getObject( void ) { LOGIC_WINDOW_READ( WINDOW_DRAWABLE_OBJECT ); return m_object; }								///< return object ID bound to this drawble
+	inline const Object *getObject( void ) const { LOGIC_WINDOW_READ( WINDOW_DRAWABLE_OBJECT ); return m_object; }		///< return object ID bound to this drawble
 
 	inline DrawableInfo *getDrawableInfo(void) {return &m_drawableInfo;}
 
@@ -388,7 +395,7 @@ public:
 	// note that this is not necessarily the 'get' reflection of setDrawableHidden, since drawables
 	// can spontaneously hide via stealth. (srj)
 	//
-	inline Bool isDrawableEffectivelyHidden() const { return m_hidden || m_hiddenByStealth; }
+	inline Bool isDrawableEffectivelyHidden() const { if( LogicThread::isInsideWindow() ) return m_lookForDraw.hidden; return m_hidden || m_hiddenByStealth; }
 
 	void setSelectable( Bool selectable );												///< Changes the drawables selectability	
 	Bool isSelectable( void ) const;
@@ -396,15 +403,17 @@ public:
 
 
 	void setStealthLook(StealthLookType look);
-	StealthLookType getStealthLook() const { return m_stealthLook; }
-	StealthLookType getStealthDrawnLook() const { return m_stealthDrawnLook; }
-	Real getStealthFade() const { return m_stealthFade; }
+	StealthLookType getStealthLook() const { return LogicThread::isInsideWindow() ? m_lookForDraw.stealthLook : m_stealthLook; }
+	StealthLookType getStealthDrawnLook() const { return LogicThread::isInsideWindow() ? m_lookForDraw.stealthDrawnLook : m_stealthDrawnLook; }
+	Real getStealthFade() const { return LogicThread::isInsideWindow() ? m_lookForDraw.stealthFade : m_stealthFade; }
 	// 1 is own paint with no bend, the stealth floor (about a half) is glass.  Cloak-in fade 0
 	// is solid.  The mix goes to that floor so the first frames still have travel while the
 	// pulse has not left 1.0; once faded, the 2003 breath owns it.  Decloak: fade 1 is the
 	// pulse, fade 0 is solid.  The shader keeps coverage: this is the mix, not alpha.
 	Real getStealthSolid() const
 	{
+		if( LogicThread::isInsideWindow() )
+			return m_lookForDraw.stealthSolid;
 		const Real breath = getEffectiveOpacity();
 		const Real fade = getStealthFade();
 		if( getStealthLook() == STEALTHLOOK_NONE )
@@ -436,17 +445,66 @@ public:
 	ClientUpdateModule* findClientUpdateModule( NameKeyType key );
 
 	DrawModule** getDrawModulesNonDirty();
-	DrawModule** getDrawModules();
+	DrawModule** getDrawModules();					///< flushes a model condition change, or inside a logic tick queues it for after the tick
 	DrawModule const** getDrawModules() const;
+	DrawModule** getDrawModulesFlushed();		///< applies what the tick deferred now, for a caller that needs the render object as it stands
+	static void flushPendingClientWork();		///< after each tick, on the main thread: the transforms and model conditions the tick deferred
+	/** LOGIC-THREAD.md phase 2, M4: inside a tick, past the map load, a new drawable is a shell (ID,
+		Thing, condition bits and its modules, everything logic reads) whose render objects are built
+		after the tick, and a destroyed one is deleted after the tick.  Phase 3: both join and leave the
+		client's list and lookup after the tick too (GameClient::linkDrawablesOfTick). */
+	static Bool tickDefersLifetime();
+	void flushPendingTransform( Bool onDemand );	///< tells the draw modules of a transform the tick deferred; GameClient::destroyDrawable
+	void doPendingClientWork( Bool onDemand );	///< everything the tick deferred on this drawable; flushDestroyedDrawables for one the tick also destroyed
+	Bool isRenderPending( void ) const { return m_renderPending; }	///< made in a tick and its render objects not built yet
+	/** Where a doClientWork goes among the model condition states the tick has not applied yet. */
+	enum ClientWorkOrder
+	{
+		WORK_AFTER_FLUSH,				///< on the state the drawable holds at the call, as getDrawModules did
+		WORK_AFTER_APPLIED,			///< on the state last flushed, as getDrawModulesNonDirty did before M1
+		WORK_BEFORE_STATES			///< on the render object as it stands, in front of every state still pending
+	};
+	/** Work on the draw modules, render objects or audio that a call from logic causes.  Inside a
+		tick it waits for flushPendingClientWork and runs there in order with the model condition
+		states; anywhere else it runs now.  movesBones marks work a bone or barrel read needs done
+		first (animation timing, a model rebuild), which an on-demand flush inside the tick runs; the
+		rest an on-demand flush leaves for after the tick. */
+	void doClientWork( const std::function<void()>& work, ClientWorkOrder order, Bool movesBones = FALSE );
 
 	//---------------------------------------------------------------------------
 	void setDrawableStatus( DrawableStatus bit )  { BitSet( m_status, bit ); }
 	void clearDrawableStatus( DrawableStatus bit ) { BitClear( m_status, bit ); }
-	inline Bool testDrawableStatus( DrawableStatus bit ) const { return (m_status & bit) != 0; }
+	inline Bool testDrawableStatus( DrawableStatus bit ) const { LOGIC_WINDOW_READ( WINDOW_DRAWABLE_FIELD ); return (m_status & bit) != 0; }
 
 	void setShroudClearFrame( UnsignedInt frame )  { m_shroudClearFrame = frame; }
 	UnsignedInt getShroudClearFrame( void ) { return m_shroudClearFrame; }
- 
+
+	/** LOGIC-THREAD.md phase 3: what the draw asks of the shroud, taken by GameClient::update's drawable
+		* walk, at the sync point, for the player whose fog is drawn: the object's status, or for a drawable
+		* with no object the status of the object its DrawableInfo names (a prison's inmates).  The draw
+		* calls no getShroudedStatus, which fills the partition's cache and can take a ghost snapshot. */
+	void setShroudForDraw( ObjectShroudStatus status, Bool objectDead ) { m_shroudForDraw = status; m_objectDeadForDraw = objectDead; }
+	ObjectShroudStatus getShroudForDraw( void ) const { return m_shroudForDraw; }
+	Bool isObjectDeadForDraw( void ) const { return m_objectDeadForDraw; }
+
+	/** The rest of what the render asks of the object, taken by the same walk: the scene's look and
+		* occlusion, the translucent silhouette of a building waiting for its builder, a projected shadow
+		* lifted onto a bridge.  The render reads these and calls no getObject. */
+	struct ObjectForDraw
+	{
+		Bool					hasObject;
+		Bool					awaitingBuilder;		///< Object_isAwaitingBuilder, for getEffectiveOpacity
+		Bool					empDisabled;				///< DISABLED_EMP
+		Bool					outage;							///< a structure underpowered, script underpowered or hacked
+		Int						playerIndex;				///< the controlling player's
+		Color					playerColor;				///< clientPlayerColor of the controlling player
+		UnsignedInt		safeOcclusionFrame;
+		PathfindLayerEnum	layer;
+		Real					layerHeight;				///< getLayerHeight at the drawable, off LAYER_GROUND only
+	};
+	void setObjectForDraw( const ObjectForDraw &forDraw ) { m_objectForDraw = forDraw; }
+	const ObjectForDraw &getObjectForDraw( void ) const { return m_objectForDraw; }
+
 	void setShadowsEnabled(Bool enable);
 	Bool getShadowsEnabled() const { return BitTest(m_status, DRAWABLE_STATUS_SHADOWS); }
 
@@ -454,12 +512,37 @@ public:
 	void allocateShadows(void); ///< create shadow resources if not already present. Used by Options screen.
 
 	void setFullyObscuredByShroud(Bool fullyObscured);
-	inline Bool getFullyObscuredByShroud(void) {return m_drawableFullyObscuredByShroud;}
+	inline Bool getFullyObscuredByShroud(void) { return LogicThread::isInsideWindow() ? m_lookForDraw.fullyObscured : m_drawableFullyObscuredByShroud; }
 
   // Put on ice until later... M Lorenzen
   //	inline UnsignedByte getFullyObscuredByShroudWithCheatSpy(void) {return (UnsignedByte)m_drawableFullyObscuredByShroud | 128;}//8 looks like a zero in most fonts
 
-	Bool getDrawsInMirror() const { return BitTest(m_status, DRAWABLE_STATUS_DRAWS_IN_MIRROR) || isKindOf(KINDOF_CAN_CAST_REFLECTIONS); }
+	Bool getDrawsInMirror() const { if( LogicThread::isInsideWindow() ) return m_lookForDraw.drawsInMirror; return BitTest(m_status, DRAWABLE_STATUS_DRAWS_IN_MIRROR) || isKindOf(KINDOF_CAN_CAST_REFLECTIONS); }
+
+	/** LOGIC-THREAD.md phase 3, step 3b.  How the drawable looks, as the render reads it: hidden, stealth,
+		* opacity, tint, the mirror and dynamic light flags.  The tick writes these fields beside the render
+		* (a unit stealthing, a container hiding its passengers, a flash on a hit) and Drawable::draw eases
+		* the fades at the sync point, so takeLookForDraw copies them there, after the views' update and
+		* before the overlap window, and every getter above answers the copy from inside the window. */
+	struct LookForDraw
+	{
+		Bool						hidden;
+		Bool						fullyObscured;
+		Bool						drawsInMirror;
+		Bool						receivesDynamicLights;
+		Bool						hasTintColor;
+		Bool						hasSelectionColor;
+		StealthLookType	stealthLook;
+		StealthLookType	stealthDrawnLook;
+		Real						stealthFade;
+		Real						stealthSolid;
+		Real						secondMaterialPassOpacity;
+		Real						effectiveOpacity;
+		UnsignedInt			tintStatus;
+		Vector3					tintColor;
+		Vector3					selectionColor;
+	};
+	void takeLookForDraw( void );
 
 	void colorFlash( const RGBColor *color, UnsignedInt decayFrames = DEF_DECAY_FRAMES, UnsignedInt attackFrames = 0, UnsignedInt sustainAtPeak = FALSE );  ///< flash a drawable in the color specified for a short time
 	void colorTint( const RGBColor *color );	 ///< tint this drawable the color specified
@@ -467,7 +550,7 @@ public:
 	void flashAsSelected( const RGBColor *color = NULL ); ///< drawable takes care of the details if you spec no color
 	
 	/// Return true if drawable has been marked as "selected"
-	Bool isSelected( void ) const {	return m_selected; }
+	Bool isSelected( void ) const {	LOGIC_CENSUS( CENSUS_CLIENT_READ ); return m_selected; }	///< logic asks LogicThread::isSelectedForTick
 	void onSelected();														///< Work unrelated to selection that must happen at time of selection
 	void onUnselected();													///< Work unrelated to selection that must happen at time of unselection
 
@@ -498,7 +581,7 @@ public:
 	void removeFromList(Drawable **pListHead);
 	void setID( DrawableID id );											///< set this drawable's unique ID
 
-	inline const ModelConditionFlags& getModelConditionFlags( void ) const { return m_conditionState; }
+	inline const ModelConditionFlags& getModelConditionFlags( void ) const { LOGIC_WINDOW_READ( WINDOW_DRAWABLE_FIELD ); return m_conditionState; }
 
 	//
 	// NOTE: avoid repeated calls to the set and clear for the condition state as they 
@@ -514,15 +597,19 @@ public:
 	void clearAndSetModelConditionFlags( const ModelConditionFlags& clr, const ModelConditionFlags& set );
 	void replaceModelConditionFlags( const ModelConditionFlags &flags, Bool forceReplace = FALSE );
 
-	Bool handleWeaponFireFX(
-							WeaponSlotType wslot, 
-							Int specificBarrelToUse, 
-							const FXList* fxl, 
-							Real weaponSpeed, 
-							Real recoilAmount, 
-							Real recoilAngle, 
+	/** A shot's recoil, muzzle flash and FX at the barrel's bone; with no draw module that has one, the FX
+		* at the victim (fxAtVictim, a contact weapon) or at the drawable.  Inside a tick it is the drawable's
+		* deferred work, in its place between the condition states (LOGIC-THREAD.md phase 3). */
+	void handleWeaponFireFX(
+							WeaponSlotType wslot,
+							Int specificBarrelToUse,
+							const FXList* fxl,
+							Real weaponSpeed,
+							Real recoilAmount,
+							Real recoilAngle,
 							const Coord3D* victimPos,
-							Real damageRadius
+							Real damageRadius,
+							Bool fxAtVictim
 							);
 
 	Int getBarrelCount(WeaponSlotType wslot) const;
@@ -610,7 +697,7 @@ public:
 	void setEffectiveOpacity( Real pulseFactor, Real explicitOpacity = -1.0f );
 	
 	// this is for the add'l pass fx which operates completely independently of the stealth opacity effects. Draw() does the fading every frame.
-	inline Real getSecondMaterialPassOpacity() const { return m_secondMaterialPassOpacity; }		///< get alpha/opacity value used to render add'l  rendering pass.
+	inline Real getSecondMaterialPassOpacity() const { return LogicThread::isInsideWindow() ? m_lookForDraw.secondMaterialPassOpacity : m_secondMaterialPassOpacity; }		///< get alpha/opacity value used to render add'l  rendering pass.
 	void setSecondMaterialPassOpacity( Real op ) { m_secondMaterialPassOpacity = op; }; ///< set alpha/opacity value used to render add'l  rendering pass.
 	
 	// both of these assume that you are starting at one extreme 100% or 0% opacity and are trying to go to the other!! -- amit
@@ -641,7 +728,7 @@ public:
 	Bool hasIconInfo() const { return m_iconInfo != NULL; }
 
   
-  Bool getReceivesDynamicLights( void ) { return m_receivesDynamicLights; };
+  Bool getReceivesDynamicLights( void ) { return LogicThread::isInsideWindow() ? m_lookForDraw.receivesDynamicLights : m_receivesDynamicLights; };
   void setReceivesDynamicLights( Bool set ) { m_receivesDynamicLights = set; };
   
   //---------------------------------------------------------------------------------
@@ -765,6 +852,10 @@ private:
 	UnsignedInt		m_timeToFade;						///< how slowly am I fading
 
 	UnsignedInt		m_shroudClearFrame;						///< Last frame the local player saw this drawable "OBJECTSHROUD_CLEAR"
+	ObjectShroudStatus	m_shroudForDraw;				///< see setShroudForDraw
+	Bool					m_objectDeadForDraw;				///< see setShroudForDraw
+	ObjectForDraw	m_objectForDraw;						///< see setObjectForDraw
+	LookForDraw		m_lookForDraw;							///< see takeLookForDraw
 
 	DrawableLocoInfo*	m_locoInfo;	// lazily allocated
 
@@ -818,6 +909,23 @@ private:
 #ifdef DIRTY_CONDITION_FLAGS
 	mutable Bool m_isModelDirty;				///< if true, must call replaceModelConditionState() before drawing or accessing drawmodule info
 #endif
+	mutable Bool m_clientWorkQueued;		///< this drawable's ID is in the list flushPendingClientWork walks
+	Bool m_transformPending;						///< the tick moved it; the draw modules have not been told
+	Bool m_renderPending;								///< made in a tick: the draw modules have not built their render objects
+	struct PendingStep
+	{
+		ModelConditionFlags condition;		///< a state an in-tick flush would have applied, when work is empty
+		std::function<void()> work;				///< else a doClientWork the tick deferred
+		Bool movesBones;										///< an on-demand flush inside the tick runs this work too
+	};
+	mutable std::vector<PendingStep> m_pendingSteps;	///< what the tick deferred, in the order it happened
+
+	void queueClientWork() const;
+	void buildRenderObjects();
+	void recordConditionStep() const;
+	void deferModelConditionFlush() const;
+	void flushModelCondition( Bool onDemand ) const;
+	void markModelDirty();
 
 	//*******************************************
 	//Perhaps we can move this out of Drawable???

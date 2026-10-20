@@ -710,7 +710,8 @@ void Animatable3DObjClass::Capture_Bone(int boneindex)
 void Animatable3DObjClass::Release_Bone(int boneindex)
 { 
 	if (HTree) {
-		HTree->Release_Bone(boneindex); 
+		HTree->Release_Bone(boneindex);
+		Set_Hierarchy_Valid(false);
 	}
 }
 
@@ -1065,11 +1066,13 @@ void Animatable3DObjClass::Single_Anim_Progress (void)
 			// Since ModeAnim.Frame hasn't changed, reset the ModeAnim.PrevFrame.
 			// If you don't do this sounds won't be triggered properly because Frame and PrevFrame will be the same.
 			ModeAnim.PrevFrame = oldprev;
+		} else {
+			// The pose follows the frame. Every render of the object calls this - the sun's shadow
+			// pass, the scene and the occluded flush, three in one frame - and invalidating on each
+			// call evaluated the whole skeleton three times over at the same frame. A new transform,
+			// animation or bone control invalidates on its own.
+			Set_Hierarchy_Valid (false);
 		}
-		//
-		// Force the heirarchy to be recalculated
-		//
-		Set_Hierarchy_Valid (false);
 	}
 }
 
@@ -1139,6 +1142,7 @@ void Animatable3DObjClass::Set_HTree(HTreeClass * new_htree)
 		delete HTree;
 	}
 	HTree = W3DNEW HTreeClass(*new_htree);
+	Set_Hierarchy_Valid(false);
 }
 
 

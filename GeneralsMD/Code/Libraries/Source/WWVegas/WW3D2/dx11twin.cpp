@@ -149,7 +149,11 @@ void * DX11BufferLockClass::Begin(DX11BufferTwinClass * twin, void * d3d9_memory
 	D3D9Memory = d3d9_memory;
 	ByteOffset = byte_offset;
 	ByteCount = byte_count == 0 ? Twin->Byte_Count() - byte_offset : byte_count;
-	Discard = (lock_flags & D3DLOCK_DISCARD) != 0;
+	// A lock with neither flag is a discard on a dynamic buffer, the way DX11Resource_Translate_Lock
+	// reads it.  Mapped NO_OVERWRITE it wrote over vertices a draw from the last pass could still be
+	// reading: the edging and the sea patch write their whole buffer with flags 0, the tank tracks
+	// a run from the start of theirs.
+	Discard = (lock_flags & (D3DLOCK_DISCARD | D3DLOCK_NOOVERWRITE)) != D3DLOCK_NOOVERWRITE;
 	CopyToD3D9 = copy_to_d3d9;
 	Mapped = false;
 

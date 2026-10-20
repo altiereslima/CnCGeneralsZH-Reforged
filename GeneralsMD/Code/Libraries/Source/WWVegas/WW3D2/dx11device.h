@@ -111,6 +111,13 @@ public:
 	// compositor lets a window present faster than the monitor refreshes.
 	bool Can_Tear() const { return Tearing; }
 
+	// Wait, before a frame is built, until the waitable flip chain has room for it in its queue
+	// (MAXIMUM_FRAME_LATENCY in the .cpp).  Once a presented frame and no more, or the count the wait
+	// keeps drifts.  Returns at once on a chain without the wait (the blt model, an older Windows) and
+	// after an occluded present; false only when the limit ran out first.
+	bool Wait_For_Frame(unsigned timeout_milliseconds);
+	bool Has_Frame_Wait() const { return FrameLatencyWaitable != NULL; }
+
 	// What the last Present returned, for the one log line a refused present is worth.
 	HRESULT Last_Present_Result() const { return LastPresentResult; }
 
@@ -144,6 +151,8 @@ private:
 	bool DebugLayerRequested;
 	bool DebugLayerPresent;
 	bool Tearing;
+	UINT ChainFlags;					// what the chain was made with, which ResizeBuffers must repeat
+	HANDLE FrameLatencyWaitable;		// the waitable chain's handle, closed by Release
 	HRESULT LastPresentResult;
 };
 

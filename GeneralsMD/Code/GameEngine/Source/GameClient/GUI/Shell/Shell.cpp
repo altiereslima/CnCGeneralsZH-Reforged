@@ -845,6 +845,27 @@ Bool Shell::isAnimFinished( void )
 		return TRUE;
 }
 
+//-------------------------------------------------------------------------------------------------
+/** The menus ignored a click until the animation it landed in had played out, so a player who knew
+	* where the next button was had to wait for every slide.  Now a click or key cuts the animation:
+	* every transition and slide jumps to its last frame, and a screen that was waiting on its exit
+	* animation to push or pop the next one is let go at once (its own update makes that call), so the
+	* click that cut it lands on the screen it was heading for.  With nothing pressed the animations
+	* play as before. */
+//-------------------------------------------------------------------------------------------------
+void Shell::cutAnimations( void )
+{
+	TheTransitionHandler->finish();
+	m_animateWindowManager->finish();
+
+	if( (m_pendingPush || m_pendingPop) && top() )
+	{
+		top()->runUpdate( NULL );
+		TheTransitionHandler->finish();
+		m_animateWindowManager->finish();
+	}
+}
+
 void Shell::reverseAnimatewindow( void )
 {
 	if(!m_animateWindowManager)

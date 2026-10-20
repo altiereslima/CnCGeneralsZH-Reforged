@@ -26,7 +26,7 @@
 
   This plays AI-against-AI skirmishes with the picture drawn by Direct3D 11, on a Windows machine whose
   d3dcompiler_47 is Microsoft's. It does so at the default post chain and with it off, on a few seeds,
-  plus the shell map. It starts each run from an empty cache: the player's cache is moved aside and put
+  plus the two scenarios that stage the per-object looks, plus the shell map. It starts each run from an empty cache: the player's cache is moved aside and put
   back afterwards, and the farm's shipped file is unlinked. What the runs compiled is then the shipped
   file. The bytecode is exactly what run-time D3DCompile gives on this machine, because it is that output.
   A program the recording never met is compiled on the player's machine, as before.
@@ -97,6 +97,18 @@ foreach ($map in $Maps) {
 	$runs += , @{ Name = "map-$tag"; Args = $named; Minutes = $TimeoutMinutes }
 	$runs += , @{ Name = "map-$tag-nopost"; Args = $named + @("-dx11post", "off"); Minutes = $TimeoutMinutes }
 }
+# The per-object looks (power outage, EMP, cloak and its shadow, revealed), each a program of its own on every
+# mesh it dresses, which an observer's match never draws: an observer sees every stealthed unit as a friend's
+# and none revealed. Scenarios\drawlooks.txt and looks4.txt stage them for a seat 0 that plays, and the
+# cinema of the same name keeps the camera on them and ends the match.
+foreach ($look in @(
+		@{ Name = "drawlooks"; Sides = @("-side", 0, "FactionChina", "-side", 1, "FactionAmerica") },
+		@{ Name = "looks4"; Sides = @("-side", 0, "FactionAmericaSuperWeaponGeneral", "-side", 1, "FactionGLA") })) {
+	$staged = @("-quickstart", "-noshellmap", "-multiInstance", "-noFPSLimit", "-map", "`"Maps\Twilight Flame\Twilight Flame.map`"",
+		"-autoskirmish", 2, "-takeover") + $look.Sides + @("-seed", 7, "-scenario", $look.Name, "-cinema", $look.Name)
+	$runs += , @{ Name = $look.Name; Args = $staged; Minutes = $TimeoutMinutes }
+	$runs += , @{ Name = "$($look.Name)-nopost"; Args = $staged + @("-dx11post", "off"); Minutes = $TimeoutMinutes }
+}
 # The main menu's shell map, the first thing a player sees: the intro movies, then the menu, which runs until
 # it is killed.  The cache is written while the game runs, so the kill loses nothing.
 $runs += , @{ Name = "shellmap"; Args = @("-multiInstance", "-noFPSLimit"); Minutes = 5 }
@@ -108,7 +120,9 @@ try {
 		New-Farm $zh $farm
 		$shipped = Join-Path $farm "dx11shaders.shipped"
 		if (-not $KeepShipped -and (Test-Path -LiteralPath $shipped)) { Remove-Item -LiteralPath $shipped -Force }	# the link, never its target
-		$arguments = $run.Args + $ExtraArgs + @("-maxframes", $Frames, "-hiddenwindow", "-noaudio", "-logPrefix", "rec_$($run.Name)")
+		# -win as well: Windows has no hidden window, and a full screen game minimizes when someone clicks
+		# away from it and then waits, never reaching -maxframes
+		$arguments = $run.Args + $ExtraArgs + @("-maxframes", $Frames, "-win", "-hiddenwindow", "-noaudio", "-logPrefix", "rec_$($run.Name)")
 		Write-Host ("{0}: " -f $run.Name) -NoNewline
 		$sw = [Diagnostics.Stopwatch]::StartNew()
 		$proc = Start-Process -FilePath (Join-Path $farm "generals.exe") -ArgumentList $arguments -WorkingDirectory $farm -PassThru

@@ -308,8 +308,42 @@ AudioEventRTS& AudioEventRTS::operator=( const AudioEventRTS& right )
 }
 
 //-------------------------------------------------------------------------------------------------
+namespace
+{
+	// Plain data so a static AudioEventRTS destroyed at exit finds it intact.  ponytail: a fixed table;
+	// a tick asking for more random sounds than this loses the memory for the rest, as M5 did for all.
+	const Int MAX_HELD_CALLERS = 512;
+	AudioEventRTS *s_heldCallers[ MAX_HELD_CALLERS ];
+	Int s_heldCallerCount = 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int AudioEventRTS::holdCallerForPick( AudioEventRTS *caller )
+{
+	if( s_heldCallerCount == MAX_HELD_CALLERS )
+		return -1;
+	s_heldCallers[ s_heldCallerCount ] = caller;
+	return s_heldCallerCount++;
+}
+
+//-------------------------------------------------------------------------------------------------
+AudioEventRTS *AudioEventRTS::heldCaller( Int slot )
+{
+	return slot < 0 ? NULL : s_heldCallers[ slot ];
+}
+
+//-------------------------------------------------------------------------------------------------
+void AudioEventRTS::forgetHeldCallers( void )
+{
+	s_heldCallerCount = 0;
+}
+
+//-------------------------------------------------------------------------------------------------
 AudioEventRTS::~AudioEventRTS()
 {
+	for( Int i = 0; i < s_heldCallerCount; ++i )
+		if( s_heldCallers[ i ] == this )
+			s_heldCallers[ i ] = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -324,7 +358,7 @@ void AudioEventRTS::setEventName( AsciiString name )
 }
 
 //-------------------------------------------------------------------------------------------------
-void AudioEventRTS::generateFilename( void )
+void AudioEventRTS::generateFilename( Bool forPlaying )
 {
 	// A Logic Random Value is used because we may ask "How long will it take to play this sound?"
 	// In that case, we need the same answer across all pcs.
@@ -379,9 +413,10 @@ void AudioEventRTS::generateFilename( void )
 	m_filenameToLoad.concat(generateFilenameExtension(m_eventInfo->m_soundType));
 	adjustForLocalization(m_filenameToLoad);
 
-	// Note: Also generate Delay when generating a filename, cause 
+	// Note: Also generate Delay when generating a filename, cause
 	// we want delay to apply between every loop of a sound.
-	m_delay = GameAudioRandomValueReal(m_eventInfo->m_delayMin, m_eventInfo->m_delayMax);
+	if (forPlaying)
+		m_delay = GameAudioRandomValueReal(m_eventInfo->m_delayMin, m_eventInfo->m_delayMax);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -391,10 +426,13 @@ AsciiString AudioEventRTS::getFilename( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-void AudioEventRTS::generatePlayInfo( void )
+void AudioEventRTS::generatePlayInfo( Bool forPlaying )
 {
-	m_pitchShift = GameAudioRandomValueReal(m_eventInfo->m_pitchShiftMin, m_eventInfo->m_pitchShiftMax);
-	m_volumeShift = GameAudioRandomValueReal(1.0f + m_eventInfo->m_volumeShift, 1.0f);	// volume shifts are between 0 and 1
+	if (forPlaying)
+	{
+		m_pitchShift = GameAudioRandomValueReal(m_eventInfo->m_pitchShiftMin, m_eventInfo->m_pitchShiftMax);
+		m_volumeShift = GameAudioRandomValueReal(1.0f + m_eventInfo->m_volumeShift, 1.0f);	// volume shifts are between 0 and 1
+	}
 	m_loopCount = m_eventInfo->m_loopCount;
 	
 	m_portionToPlayNext = PP_Attack;

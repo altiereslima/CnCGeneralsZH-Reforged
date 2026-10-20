@@ -36,6 +36,7 @@
 #include "Common/Thing.h"
 #include "Common/ThingTemplate.h"
 #include "Common/INI.h"
+#include "Common/LogicThread.h"
 #include "Common/RandomValue.h"
 #include "Common/Player.h"
 #include "GameLogic/GameLogic.h"
@@ -325,39 +326,46 @@ void EMPUpdate::doDisableAttack( void )
 					Real victimVolume = victimFootprintArea * MIN(victimHeight, 10.0f);
 
 					UnsignedInt emitterCount = MAX(15, REAL_TO_INT_CEIL(data->m_sparksPerCubicFoot * victimVolume));
-			
-					for (Int e = 0 ; e < emitterCount; ++e)
-					{
 
-						ParticleSystem *sys = TheParticleSystemManager->createParticleSystem(tmp);
-						
-						if (sys)
+					// The sparks are made after the tick with the client stream's draws that place them
+					// (LOGIC-THREAD.md M5); nothing logic keeps refers to them.
+					const GeometryInfo geometry = curVictim->getGeometryInfo();
+					const ObjectID victimID = curVictim->getID();
+					const UnsignedInt lifetime = MAX(0, data->m_disabledDuration - LOGICFRAMES_PER_SECOND);
+					LogicThread::callAfterTick( [tmp, geometry, victimID, victimHeight, emitterCount, lifetime]() {
+						for (Int e = 0 ; e < emitterCount; ++e)
 						{
-							Coord3D offs = {0,0,0};
-							// Where a spark sits inside the victim is a thing only this machine ever looks
-							// at, so it comes off the client stream.  Nothing in the simulation reads it.
-							curVictim->getGeometryInfo().makeRandomOffsetWithinFootprint( offs, TRUE );
-							offs.z = GameClientRandomValue(3, victimHeight);
 
-							//This puts all the sparks within a quadrahemicycloid (rectangular dome) volume
-							//The same shape as a four cornered camping dome tent, for those with less Greek
-							if (offs.length() > victimHeight)
+							ParticleSystem *sys = TheParticleSystemManager->createParticleSystem(tmp);
+
+							if (sys)
 							{
-								Real resoreX = offs.x;
-								Real resoreY = offs.y;
-								offs.normalize();
-								offs.z *= victimHeight;
-								offs.x = resoreX;
-								offs.y = resoreY;
-							}
+								Coord3D offs = {0,0,0};
+								// Where a spark sits inside the victim is a thing only this machine ever looks
+								// at, so it comes off the client stream.  Nothing in the simulation reads it.
+								geometry.makeRandomOffsetWithinFootprint( offs, TRUE );
+								offs.z = GameClientRandomValue(3, victimHeight);
 
-							sys->attachToObject(curVictim);
-							sys->setPosition( &offs );
-							sys->setSystemLifetime(MAX(0, data->m_disabledDuration - LOGICFRAMES_PER_SECOND));
-							// Client stream too: this line runs only where the drawable and the particle system exist.
-							sys->setInitialDelay(GameClientRandomValue(1,ConvertRetailFrames(100)));
+								//This puts all the sparks within a quadrahemicycloid (rectangular dome) volume
+								//The same shape as a four cornered camping dome tent, for those with less Greek
+								if (offs.length() > victimHeight)
+								{
+									Real resoreX = offs.x;
+									Real resoreY = offs.y;
+									offs.normalize();
+									offs.z *= victimHeight;
+									offs.x = resoreX;
+									offs.y = resoreY;
+								}
+
+								sys->attachToObjectID(victimID);
+								sys->setPosition( &offs );
+								sys->setSystemLifetime(lifetime);
+								// Client stream too: this line runs only where the drawable and the particle system exist.
+								sys->setInitialDelay(GameClientRandomValue(1,ConvertRetailFrames(100)));
+							}
 						}
-					}
+					} );
 				} 
 			}
 

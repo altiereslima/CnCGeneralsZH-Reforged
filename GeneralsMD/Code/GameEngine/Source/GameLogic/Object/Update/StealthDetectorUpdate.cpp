@@ -33,6 +33,7 @@
 #define DEFINE_STEALTHLEVEL_NAMES
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
+#include "Common/LogicThread.h"
 #include "Common/MiscAudio.h"
 #include "Common/Radar.h"
 #include "Common/ThingTemplate.h"
@@ -240,41 +241,28 @@ UpdateSleepTime StealthDetectorUpdate::update( void )
 				if( ThePlayerList->getLocalPlayer() == self->getControllingPlayer() &&
 						self->getRelationship( them ) != ALLIES )
 				{
-					Bool doFeedback = TRUE;
-
 					//Kris: Aug 18, 2003 -- This whole system is no longer viable with the inclusion of so many
 					//stealth units. It's possible to get spammed hundreds of times in a row in MD_GLA02 because
 					//we're blindly creating radar events for each detection (unless they are mines). The best thing
 					//to do is tryEvent for everything...
-					doFeedback = TheRadar->tryEvent( RADAR_EVENT_STEALTH_DISCOVERED, them->getPosition() );
-					//OLD CODE:
-					/*
-					// do a radar event, for mines we only make events if there weren't other
-					// mine events within close proximity and time to other mines
 					//
-					if( them->isKindOf( KINDOF_MINE ) || them->isKindOf( KINDOF_BOOBY_TRAP ) || them->isKindOf( KINDOF_DEMOTRAP ) )
-						doFeedback = TheRadar->tryEvent( RADAR_EVENT_STEALTH_DISCOVERED, them->getPosition() );
-					else
- 						TheRadar->createEvent( them->getPosition(), RADAR_EVENT_STEALTH_DISCOVERED );
-					*/
-
-					// do audio and UI message if we need to do feedback
-					if( doFeedback )
+					// The try and the feedback it allows are the client's and wait for the end of the tick
+					// (LOGIC-THREAD.md M6); what they need of the objects is read here.
+					const Coord3D at = *them->getPosition();
+					const Int playerIndex = self->getControllingPlayer()->getPlayerIndex();
+					const EvaMessage message = stealth->getEnemyDetectionEvaEvent();
+					LogicThread::callAfterTick( [at, playerIndex, message]()
 					{
- 						// audio msg
- 						static AudioEventRTS discoveredSound = TheAudio->getMiscAudio()->m_stealthDiscoveredSound;
- 						discoveredSound.setPlayerIndex( self->getControllingPlayer()->getPlayerIndex() );
- 						TheAudio->addAudioEvent( &discoveredSound );
- 						// ui msg
- 						TheInGameUI->message( TheGameText->fetch( "MESSAGE:StealthDiscovered" ) );
-
-            // If revealing this unit is suppose to cause an Eva event, do it
-            EvaMessage message = stealth->getEnemyDetectionEvaEvent();
-            if ( message != EVA_Invalid && TheEva != NULL )
-            {
-              TheEva->setShouldPlay( message );
-            }
-					}  // end if				 
+						if( !TheRadar->tryEvent( RADAR_EVENT_STEALTH_DISCOVERED, &at ) )
+							return;
+						static AudioEventRTS discoveredSound = TheAudio->getMiscAudio()->m_stealthDiscoveredSound;
+						discoveredSound.setPlayerIndex( playerIndex );
+						TheAudio->addAudioEvent( &discoveredSound );
+						TheInGameUI->message( TheGameText->fetch( "MESSAGE:StealthDiscovered" ) );
+						// If revealing this unit is suppose to cause an Eva event, do it
+						if ( message != EVA_Invalid && TheEva != NULL )
+							TheEva->setShouldPlay( message );
+					} );
 
 				}  // end if
 
@@ -282,36 +270,32 @@ UpdateSleepTime StealthDetectorUpdate::update( void )
 				if( ThePlayerList->getLocalPlayer() == them->getControllingPlayer() &&
 						self->getRelationship( them ) != ALLIES )
 				{
- 					Bool doFeedback = TRUE;
-
 					//
 					// do a radar event, for mines we only make events if there weren't other
-					// mine events within close proximity and time to other mines
+					// mine events within close proximity and time to other mines; after the tick, as above
 					//
-					if( them->isKindOf( KINDOF_MINE ) || them->isKindOf( KINDOF_BOOBY_TRAP ) || them->isKindOf( KINDOF_DEMOTRAP ) )
-						doFeedback = TheRadar->tryEvent( RADAR_EVENT_STEALTH_NEUTRALIZED, them->getPosition() );
-					else
- 						TheRadar->createEvent( them->getPosition(), RADAR_EVENT_STEALTH_NEUTRALIZED );
-					
-					// do audio and UI message if we need to do feedback
-					if( doFeedback )
+					const Bool trap = them->isKindOf( KINDOF_MINE ) || them->isKindOf( KINDOF_BOOBY_TRAP ) || them->isKindOf( KINDOF_DEMOTRAP );
+					const Coord3D at = *them->getPosition();
+					const Int playerIndex = them->getControllingPlayer()->getPlayerIndex();
+					const EvaMessage message = stealth->getOwnDetectionEvaEvent();
+					LogicThread::callAfterTick( [trap, at, playerIndex, message]()
 					{
+						if( trap )
+						{
+							if( !TheRadar->tryEvent( RADAR_EVENT_STEALTH_NEUTRALIZED, &at ) )
+								return;
+						}
+						else
+							TheRadar->createEvent( &at, RADAR_EVENT_STEALTH_NEUTRALIZED );
+						static AudioEventRTS neutralizedSound = TheAudio->getMiscAudio()->m_stealthNeutralizedSound;
+						neutralizedSound.setPlayerIndex( playerIndex );
+						TheAudio->addAudioEvent( &neutralizedSound );
+						TheInGameUI->message( TheGameText->fetch( "MESSAGE:StealthNeutralized" ) );
+						// If revealing this unit is suppose to cause an Eva event, do it
+						if ( message != EVA_Invalid && TheEva != NULL )
+							TheEva->setShouldPlay( message );
+					} );
 
- 						// audio msg
- 						static AudioEventRTS neutralizedSound = TheAudio->getMiscAudio()->m_stealthNeutralizedSound;
- 						neutralizedSound.setPlayerIndex( them->getControllingPlayer()->getPlayerIndex() );
- 						TheAudio->addAudioEvent( &neutralizedSound );
- 						// ui msg
- 						TheInGameUI->message( TheGameText->fetch( "MESSAGE:StealthNeutralized" ) );
-
-            // If revealing this unit is suppose to cause an Eva event, do it
-            EvaMessage message = stealth->getOwnDetectionEvaEvent();
-            if ( message != EVA_Invalid && TheEva != NULL )
-            {
-              TheEva->setShouldPlay( message );
-            }
-					}  // end if
-				
 				}  // end if
 					 
 			}  // end if, them was not previously detected

@@ -348,46 +348,69 @@ static const char * const SHARPEN_SHADER_BODY =
 //
 // It cannot see behind a surface, so a neighbour nearer by more than the radius is ignored: that is
 // a different object in front, not a corner.
+#define AO_OCCLUSION_FUNCTIONS \
+	"static const int AO_TAPS = 12;\n" \
+	"static const float AO_STRENGTH = 0.45;\n" \
+	"static const float AO_PI2 = 6.2831853;\n" \
+	"\n" \
+	"float linear_depth(float2 at)\n" \
+	"{\n" \
+	"    float raw = Extra.Sample(Sampler, at).r;\n" \
+	"    float near_plane = Tuning.x;\n" \
+	"    float far_plane = Tuning.y;\n" \
+	"    return near_plane * far_plane / max(far_plane - raw * (far_plane - near_plane), 0.0001);\n" \
+	"}\n" \
+	"\n" \
+	"float occlusion_at(VertexOutput input)\n" \
+	"{\n" \
+	"    float centre = linear_depth(input.Texture);\n" \
+	"    float radius = Tuning.z;\n" \
+	"    if (centre >= Tuning.y * 0.99) return 0.0;\n" \
+	"    float turn = frac(sin(dot(input.Position.xy, float2(12.9898, 78.233))) * 43758.5453) * AO_PI2;\n" \
+	"    float spread = TexelSize.x * Tuning.w / max(centre, 1.0);\n" \
+	"    float occlusion = 0.0;\n" \
+	"    for (int tap = 0; tap < AO_TAPS; ++tap)\n" \
+	"    {\n" \
+	"        float angle = turn + AO_PI2 * (float)tap / (float)AO_TAPS;\n" \
+	"        float reach = 0.35 + 0.65 * frac((float)tap * 0.618);\n" \
+	"        float2 at = input.Texture + float2(cos(angle), sin(angle)) * spread * reach;\n" \
+	"        float neighbour = linear_depth(at);\n" \
+	"        float nearer = centre - neighbour;\n" \
+	"        occlusion += (nearer > 0.05 && nearer < radius) ? (1.0 - nearer / radius) : 0.0;\n" \
+	"    }\n" \
+	"    return saturate(occlusion / (float)AO_TAPS);\n" \
+	"}\n" \
+	"\n"
+
+// The pass over the finished frame, for a frame whose scene never reached Occlude_Scene (a screen
+// filter held the target).  Fire, glow and a nuke's cloud are in the frame by now and write no
+// depth, so the depth under them is the ground and the wrecks behind them; darkened by it a white
+// cloud showed every tree and wreck under it as a grey line drawing.  Keyed on the dimmest channel:
+// a white cloud has all three high, sunlit sand and concrete keep a low blue and keep their corners.
+// An orange fireball keeps a low blue too, which is why the occlusion normally runs before the
+// particles are drawn at all.
 static const char * const AO_SHADER_BODY =
-	"static const int AO_TAPS = 12;\n"
-	"static const float AO_STRENGTH = 0.45;\n"
-	"static const float AO_PI2 = 6.2831853;\n"
-	"\n"
-	"float linear_depth(float2 at)\n"
-	"{\n"
-	"    float raw = Extra.Sample(Sampler, at).r;\n"
-	"    float near_plane = Tuning.x;\n"
-	"    float far_plane = Tuning.y;\n"
-	"    return near_plane * far_plane / max(far_plane - raw * (far_plane - near_plane), 0.0001);\n"
-	"}\n"
-	"\n"
+	AO_OCCLUSION_FUNCTIONS
 	"float4 main(VertexOutput input) : SV_TARGET\n"
 	"{\n"
 	"    float3 scene = Source.Sample(Sampler, input.Texture).rgb;\n"
-	"    float centre = linear_depth(input.Texture);\n"
-	"    float radius = Tuning.z;\n"
-	"    if (centre >= Tuning.y * 0.99) return float4(scene, 1.0);\n"
-	"    float turn = frac(sin(dot(input.Position.xy, float2(12.9898, 78.233))) * 43758.5453) * AO_PI2;\n"
-	"    float spread = TexelSize.x * Tuning.w / max(centre, 1.0);\n"
-	"    float occlusion = 0.0;\n"
-	"    for (int tap = 0; tap < AO_TAPS; ++tap)\n"
-	"    {\n"
-	"        float angle = turn + AO_PI2 * (float)tap / (float)AO_TAPS;\n"
-	"        float reach = 0.35 + 0.65 * frac((float)tap * 0.618);\n"
-	"        float2 at = input.Texture + float2(cos(angle), sin(angle)) * spread * reach;\n"
-	"        float neighbour = linear_depth(at);\n"
-	"        float nearer = centre - neighbour;\n"
-	"        occlusion += (nearer > 0.05 && nearer < radius) ? (1.0 - nearer / radius) : 0.0;\n"
-	"    }\n"
-	"    occlusion /= (float)AO_TAPS;\n"
-	"    // Light does not take a corner's shade.  Fire, glow and a nuke's cloud write no depth, so\n"
-	"    // the depth here is the ground and the wrecks behind them, and darkened by it a white cloud\n"
-	"    // showed every tree and wreck under it as a grey line drawing.  Keyed on the dimmest\n"
-	"    // channel: a white cloud has all three high, sunlit sand and concrete keep a low blue and\n"
-	"    // keep their corners.\n"
 	"    float bright = min(scene.r, min(scene.g, scene.b));\n"
-	"    occlusion *= 1.0 - smoothstep(0.7, 0.95, bright);\n"
-	"    return float4(scene * (1.0 - saturate(occlusion) * AO_STRENGTH), 1.0);\n"
+	"    float occlusion = occlusion_at(input) * (1.0 - smoothstep(0.7, 0.95, bright));\n"
+	"    return float4(scene * (1.0 - occlusion * AO_STRENGTH), 1.0);\n"
+	"}\n";
+
+// The same occlusion as a factor the scene target is multiplied by, mid-scene, after the opaque
+// world and before the particles (Occlude_Scene), so no particle takes a corner's shade.  The glow
+// cards, muzzle flashes and fading units drawn before it write no depth either, so the key on the
+// dimmest channel stays, read from a copy of the scene.
+static const char * const AO_SCENE_SHADER_BODY =
+	AO_OCCLUSION_FUNCTIONS
+	"float4 main(VertexOutput input) : SV_TARGET\n"
+	"{\n"
+	"    float3 scene = Source.Sample(Sampler, input.Texture).rgb;\n"
+	"    float bright = min(scene.r, min(scene.g, scene.b));\n"
+	"    float occlusion = occlusion_at(input) * (1.0 - smoothstep(0.7, 0.95, bright));\n"
+	"    return float4((1.0 - occlusion * AO_STRENGTH).xxx, 1.0);\n"
 	"}\n";
 
 // The bright pass, downsampling as it goes: four taps of the full size frame averaged into one
@@ -611,8 +634,10 @@ DX11PostProcessClass::DX11PostProcessClass()
 	, BloomBlurShader(NULL)
 	, BloomCompositeShader(NULL)
 	, WarpShader(NULL)
+	, SceneOcclusionShader(NULL)
 	, Sampler(NULL)
 	, BlendState(NULL)
+	, MultiplyBlendState(NULL)
 	, DepthState(NULL)
 	, RasterizerState(NULL)
 	, ConstantBuffer(NULL)
@@ -624,9 +649,11 @@ DX11PostProcessClass::DX11PostProcessClass()
 	, TargetsAreFloat(false)
 	, ShadersReady(false)
 	, Resolved(false)
+	, Occluded(false)
 {
 	memset(PixelShaders, 0, sizeof(PixelShaders));
 	memset(&SceneTarget, 0, sizeof(SceneTarget));
+	memset(&SceneCopy, 0, sizeof(SceneCopy));
 	memset(ChainTargets, 0, sizeof(ChainTargets));
 	memset(BloomTargets, 0, sizeof(BloomTargets));
 	memset(Chain, 0, sizeof(Chain));
@@ -664,8 +691,10 @@ void DX11PostProcessClass::Shutdown()
 	release_interface(reinterpret_cast<IUnknown **>(&ConstantBuffer));
 	release_interface(reinterpret_cast<IUnknown **>(&RasterizerState));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthState));
+	release_interface(reinterpret_cast<IUnknown **>(&MultiplyBlendState));
 	release_interface(reinterpret_cast<IUnknown **>(&BlendState));
 	release_interface(reinterpret_cast<IUnknown **>(&Sampler));
+	release_interface(reinterpret_cast<IUnknown **>(&SceneOcclusionShader));
 	release_interface(reinterpret_cast<IUnknown **>(&WarpShader));
 	release_interface(reinterpret_cast<IUnknown **>(&BloomCompositeShader));
 	release_interface(reinterpret_cast<IUnknown **>(&BloomBlurShader));
@@ -749,7 +778,8 @@ bool DX11PostProcessClass::Create_Shaders()
 		&& compile_pixel_shader(compiler, device, BLOOM_BLUR_SHADER_BODY, &BloomBlurShader)
 		&& compile_pixel_shader(compiler, device, BLOOM_COMPOSITE_SHADER_BODY,
 			&BloomCompositeShader)
-		&& compile_pixel_shader(compiler, device, WARP_SHADER_BODY, &WarpShader);
+		&& compile_pixel_shader(compiler, device, WARP_SHADER_BODY, &WarpShader)
+		&& compile_pixel_shader(compiler, device, AO_SCENE_SHADER_BODY, &SceneOcclusionShader);
 }
 
 bool DX11PostProcessClass::Create_States()
@@ -775,6 +805,18 @@ bool DX11PostProcessClass::Create_States()
 	ZeroMemory(&blend, sizeof(blend));
 	blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 	if (FAILED(device->CreateBlendState(&blend, &BlendState))) {
+		return false;
+	}
+
+	// The scene's colour times the pass's, its alpha kept.
+	blend.RenderTarget[0].BlendEnable = TRUE;
+	blend.RenderTarget[0].SrcBlend = D3D11_BLEND_ZERO;
+	blend.RenderTarget[0].DestBlend = D3D11_BLEND_SRC_COLOR;
+	blend.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+	blend.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+	blend.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+	blend.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+	if (FAILED(device->CreateBlendState(&blend, &MultiplyBlendState))) {
 		return false;
 	}
 
@@ -874,6 +916,7 @@ void DX11PostProcessClass::Release_Target(Target & target)
 void DX11PostProcessClass::Release_Targets()
 {
 	Release_Target(SceneTarget);
+	Release_Target(SceneCopy);
 	const unsigned chain_target_count = sizeof(ChainTargets) / sizeof(ChainTargets[0]);
 	for (unsigned index = 0; index < chain_target_count; ++index) {
 		Release_Target(ChainTargets[index]);
@@ -927,6 +970,50 @@ ID3D11RenderTargetView * DX11PostProcessClass::Scene_View()
 void DX11PostProcessClass::Begin_Frame()
 {
 	Resolved = false;
+}
+
+void DX11PostProcessClass::Open_Frame()
+{
+	Occluded = false;
+}
+
+bool DX11PostProcessClass::Occlude_Scene(ID3D11ShaderResourceView * depth)
+{
+	if (Occluded || Resolved || !ShadersReady || SceneTarget.View == NULL
+			|| Device->Get_Scene_View() != SceneTarget.View) {
+		return false;
+	}
+	bool wanted = false;
+	for (unsigned index = 0; index < ChainLength; ++index) {
+		wanted = wanted || Chain[index] == DX11_POST_AO;
+	}
+	if (!wanted) {
+		return false;
+	}
+	// The pass keys on the scene's colour and cannot read the target it multiplies, so it reads a
+	// copy, made the first time and kept with the other targets.
+	if (SceneCopy.Texture == NULL
+			&& !Create_Target(SceneCopy, Width, Height, TargetsAreFloat ? FLOAT_FORMAT : EIGHT_BIT_FORMAT)) {
+		Release_Target(SceneCopy);
+		return false;
+	}
+	Device->Get_Context()->CopyResource(SceneCopy.Texture, SceneTarget.Texture);
+
+	PassSetup pass;
+	memset(&pass, 0, sizeof(pass));
+	pass.Shader = SceneOcclusionShader;
+	pass.Source = SceneCopy.Resource;
+	pass.Extra = depth;
+	pass.Occlusion = true;
+	pass.Multiply = true;
+	pass.Destination = SceneTarget.View;
+	pass.DestinationWidth = Width;
+	pass.DestinationHeight = Height;
+	pass.SourceWidth = Width;
+	pass.SourceHeight = Height;
+	Draw_Pass(pass);
+	Occluded = true;
+	return true;
 }
 
 void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
@@ -992,7 +1079,8 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	context->RSSetViewports(1, &viewport);
 
 	const float blend_factor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-	context->OMSetBlendState(BlendState, blend_factor, 0xffffffff);
+	context->OMSetBlendState(pass.Multiply ? MultiplyBlendState : BlendState, blend_factor,
+		0xffffffff);
 	context->OMSetDepthStencilState(DepthState, 0);
 	context->RSSetState(RasterizerState);
 
@@ -1153,7 +1241,22 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 
 bool DX11PostProcessClass::Run_Chain()
 {
-	return Finish(Chain, ChainLength);
+	if (!Occluded) {
+		return Finish(Chain, ChainLength);
+	}
+	// The scene took its occlusion before the particles; a chain of nothing else still has to
+	// bring the scene to the screen.
+	DX11PostEffect effects[DX11_POST_CHAIN_LIMIT];
+	unsigned count = 0;
+	for (unsigned index = 0; index < ChainLength; ++index) {
+		if (Chain[index] != DX11_POST_AO) {
+			effects[count++] = Chain[index];
+		}
+	}
+	if (count == 0) {
+		effects[count++] = DX11_POST_COPY;
+	}
+	return Finish(effects, count);
 }
 
 bool DX11PostProcessClass::Copy_Through()

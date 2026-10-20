@@ -26,11 +26,13 @@
 #include "Common/OptionsCatalog.h"
 #include "Common/AudioAffect.h"
 #include "Common/GameAudio.h"
+#include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
 #include "Common/UserPreferences.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/View.h"
+#include "GameLogic/GameLogic.h"
 
 //-----------------------------------------------------------------------------
 // The accessors.  Each is two lines and exists only because a member pointer cannot span Bool and
@@ -84,6 +86,15 @@ static void set_m_ambientVolume( Int value )
 	TheWritableGlobalData->m_ambientVolume = value;
 	if (TheAudio)
 		TheAudio->setVolume( value / 100.0f, (AudioAffect)(AudioAffect_Ambient | AudioAffect_SystemSetting) );
+}
+// The catalog loads before there is a game; the menu's Accept during a mission changes its speed
+// on the spot, which only the pacing reads.
+static Int get_m_turboMode( void ) { return TheGlobalData->m_turboMode ? 1 : 0; }
+static void set_m_turboMode( Int value )
+{
+	TheWritableGlobalData->m_turboMode = (value != 0);
+	if (TheGameLogic && TheGameLogic->isInSinglePlayerGame())
+		TheGameEngine->setFramesPerSecondLimit( GameEngine_matchFramesPerSecond( value != 0 ) );
 }
 OPTION_BOOL_ACCESSORS( m_formationDrag )
 OPTION_BOOL_ACCESSORS( m_buildWithoutWorker )
@@ -289,6 +300,13 @@ const OptionDef TheOptionCatalog[] =
 	{ "OpenAtMaxZoom",						OPT_WND( "CheckStartAtMaxZoom" ), "GUI:StartAtMaxZoom",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_startAtMaxZoom, set_m_startAtMaxZoom },
+
+	// Turbo mode for the campaign and the generals' challenge: twice the logic frames a second, each
+	// the same as at normal speed.  A skirmish or network lobby has its own box, the host's for the
+	// whole room, so this one never touches a skirmish or a multiplayer match.  On Options > Interface.
+	{ "TurboMode",								OPT_WND( "CheckTurboModeMissions" ), "GUI:TurboModeMissions",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_turboMode, set_m_turboMode },
 
 	// Pixels the pointer may travel with a button held before the press stops being a click and
 	// starts a selection box, a camera drag or a formation line.  Mouse.ini says 25, which is the

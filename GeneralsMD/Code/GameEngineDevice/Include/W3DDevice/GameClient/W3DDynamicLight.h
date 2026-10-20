@@ -79,6 +79,8 @@ public:
 
 	void setEnabled(Bool enabled) { m_enabled = enabled; m_decayRange = false; m_decayFrameCount = 0; m_decayColor = false; m_increaseFrameCount = 0;};
 	Bool isEnabled(void) {return m_enabled;};
+	/// off, and the terrain has taken it back out of its tiles, so nothing reads it until it is handed out again
+	Bool isSpent(void) const {return !m_enabled && !m_priorEnable;};
 
 
 	/// 0 frameIncreaseTime means it starts out full size/intensity, 0 decay time means it lasts forever.

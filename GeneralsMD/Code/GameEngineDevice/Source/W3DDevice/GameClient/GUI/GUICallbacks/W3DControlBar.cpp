@@ -41,11 +41,74 @@
 #include "GameClient/Image.h"
 #include "GameClient/MapUtil.h"
 #include "GameLogic/GameLogic.h"
+#include "Common/LogicThread.h"
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
+
+//-------------------------------------------------------------------------------------------------
+/** LOGIC-THREAD.md phase 3, step 3b.  The window repaint inside the overlap window asks the players
+	* what to paint: the radar, the power bar, the general's rank bar, whether the player is still in.
+	* The tick changes all of it beside the render, so the sync point takes it here and the painters
+	* read this from inside the window. */
+//-------------------------------------------------------------------------------------------------
+namespace
+{
+	struct HudReads
+	{
+		Bool hasRadar;				///< the local player's
+		Bool active;					///< the local player's
+		Int rankProgress;			///< the local player's
+		Int production;				///< the power shown: the observed player's, or the local one's
+		Int consumption;
+	};
+	HudReads s_hudReads;
+
+	Player *powerPlayer( void )
+	{
+		if( TheControlBar->isObserverControlBarOn() )
+			return TheControlBar->getObserverLookAtPlayer();
+		return ThePlayerList->getLocalPlayer();
+	}
+}
+
+void W3DControlBar_takeReadsForRender( void )
+{
+	// no tick runs beside a render outside a match, and before the first one there is no local player
+	if( !TheGameLogic->isInGame() )
+		return;
+	Player *local = ThePlayerList->getLocalPlayer();
+	s_hudReads.hasRadar = local->hasRadar();
+	s_hudReads.active = local->isPlayerActive();
+	s_hudReads.rankProgress = local->getRankProgressPercent();
+	const Player *shown = powerPlayer();
+	s_hudReads.production = shown ? shown->getEnergy()->getProduction() : 0;
+	s_hudReads.consumption = shown ? shown->getEnergy()->getConsumption() : 0;
+}
+
+static Bool hasRadarForDraw( const Player *player )
+{
+	return LogicThread::isInsideWindow() ? s_hudReads.hasRadar : player->hasRadar();
+}
+
+static Bool isActiveForDraw( const Player *player )
+{
+	return LogicThread::isInsideWindow() ? s_hudReads.active : player->isPlayerActive();
+}
+
+static void readPowerForDraw( const Player *player, Int &production, Int &consumption )
+{
+	if( LogicThread::isInsideWindow() )
+	{
+		production = s_hudReads.production;
+		consumption = s_hudReads.consumption;
+		return;
+	}
+	production = player->getEnergy()->getProduction();
+	consumption = player->getEnergy()->getConsumption();
+}
 
 //-------------------------------------------------------------------------------------------------
 void W3DCameoMovieDraw( GameWindow *window, WinInstanceData *instData )
@@ -79,7 +142,7 @@ void W3DLeftHUDDraw( GameWindow *window, WinInstanceData *instData )
 
 		TheDisplay->drawVideoBuffer( video, pos.x, pos.y, pos.x + size.x, pos.y + size.y );
 	}
-	else if( TheRadar->isRadarForced() || ( TheRadar->isRadarHidden() == false && player->hasRadar() ) )
+	else if( TheRadar->isRadarForced() || ( TheRadar->isRadarHidden() == false && hasRadarForDraw( player ) ) )
 	{
 		ICoord2D pos, size;
 		//W3DGameWinDefaultDraw( window, instData );
@@ -144,12 +207,8 @@ void W3DPowerDraw( GameWindow *window, WinInstanceData *instData )
 
 	if(!player || !TheGlobalData)
 		return;
-	Energy *energy = player->getEnergy();
-	if( energy == NULL )
-		return;
-
-	Int consumption = energy->getConsumption();
-	Int production = energy->getProduction();	
+	Int consumption, production;
+	readPowerForDraw( player, production, consumption );
 
 	ICoord2D pos, size;
 	window->winGetScreenPosition( &pos.x, &pos.y );
@@ -158,7 +217,7 @@ void W3DPowerDraw( GameWindow *window, WinInstanceData *instData )
 	static Real pixelsPerInterval = size.x / TheGlobalData->m_powerBarIntervals;
 	Int delta = TheGlobalData->m_powerBarYellowRange;
 	
-	if((consumption > energy->getProduction() - delta) && (consumption <= energy->getProduction()))
+	if((consumption > production - delta) && (consumption <= production))
 	{
 		// 6 and 1 is Green, 6 and 2 is yellow, 6 and 6 is yellow
 		//endBar = endBarYellow;
@@ -311,12 +370,8 @@ void W3DPowerDrawA( GameWindow *window, WinInstanceData *instData )
 
 	if(!player || !TheGlobalData)
 		return;
-	Energy *energy = player->getEnergy();
-	if( energy == NULL )
-		return;
-
-	Int consumption = energy->getConsumption();
-	Int production = energy->getProduction();	
+	Int consumption, production;
+	readPowerForDraw( player, production, consumption );
 
 	ICoord2D pos, size;
 	window->winGetScreenPosition( &pos.x, &pos.y );
@@ -325,7 +380,7 @@ void W3DPowerDrawA( GameWindow *window, WinInstanceData *instData )
 	static Real pixelsPerInterval = size.x / TheGlobalData->m_powerBarIntervals;
 	Int delta = TheGlobalData->m_powerBarYellowRange;
 	
-	if((consumption > energy->getProduction() - delta) && (consumption <= energy->getProduction()))
+	if((consumption > production - delta) && (consumption <= production))
 	{
 		// 6 and 1 is Green, 6 and 2 is yellow, 6 and 6 is yellow
 		endBar = endBarYellow;
@@ -494,12 +549,12 @@ void W3DCommandBarGridDraw( GameWindow *window, WinInstanceData *instData )
 void W3DCommandBarGenExpDraw( GameWindow *window, WinInstanceData *instData )
 {
 	Player *player = ThePlayerList->getLocalPlayer();
-	if(!player->isPlayerActive())
+	if(!isActiveForDraw( player ))
 		return;
 	static const Image *endBar = TheMappedImageCollection->findImageByName("GenExpBarTop1");
 	static const Image *beginBar = TheMappedImageCollection->findImageByName("GenExpBarBottom1");
 	static const Image *centerBar = TheMappedImageCollection->findImageByName("GenExpBar1");
-	const Int progress = player->getRankProgressPercent();
+	const Int progress = LogicThread::isInsideWindow() ? s_hudReads.rankProgress : player->getRankProgressPercent();
 
 	if(progress <= 0)
 		return;
@@ -611,7 +666,7 @@ void W3DCommandBarGenExpDraw( GameWindow *window, WinInstanceData *instData )
 void W3DCommandBarTopDraw( GameWindow *window, WinInstanceData *instData )
 {
 	GameWindow *win = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey("ControlBar.wnd:ButtonGeneral"));
-	if(!win || win->winIsHidden() || !ThePlayerList->getLocalPlayer()->isPlayerActive())
+	if(!win || win->winIsHidden() || !isActiveForDraw( ThePlayerList->getLocalPlayer() ))
 		return;
 	
 //	TheControlBar->drawTransitionHandler();

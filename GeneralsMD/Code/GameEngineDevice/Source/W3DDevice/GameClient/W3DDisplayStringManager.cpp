@@ -34,6 +34,7 @@
 #include "Common/Debug.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/GameText.h"
+#include "GameClient/Display.h"
 #include "GameClient/DisplayString.h"
 #include "GameClient/DrawGroupInfo.h"
 #include "GameClient/GlobalLanguage.h"
@@ -152,7 +153,9 @@ void W3DDisplayStringManager::freeDisplayString( DisplayString *string )
 	// sanity
 	if( string == NULL )
 		return;
-			
+	// a recorded draw of it is still to come (Display::beginRecording)
+	if( TheDisplay && TheDisplay->isRecording() ) { TheDisplay->deferFree( string ); return; }
+
 	// unlink
 	unLink( string );
 

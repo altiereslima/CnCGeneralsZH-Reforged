@@ -39,6 +39,8 @@
 #include "GameClient/Display.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/KeyDefs.h"
+#include "GameClient/Shell.h"
+#include "GameClient/WindowLayout.h"
 #include "GameClient/MetaEvent.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Module/BodyModule.h"
@@ -597,9 +599,14 @@ static void replyStatus( void )
 	std::vector<char> reply;
 	char piece[ 512 ];
 
-	sprintf( piece, "{\"ok\":true,\"frame\":%d,\"inGame\":%s,\"players\":[",
+	// which front-end screen is up, so a script driving the menus can tell where its clicks landed
+	WindowLayout *screen = TheShell ? TheShell->top() : NULL;
+	WindowLayout *options = TheShell ? TheShell->getOptionsLayout( FALSE ) : NULL;
+	sprintf( piece, "{\"ok\":true,\"frame\":%d,\"inGame\":%s,\"screen\":\"%s\",\"options\":%s,\"players\":[",
 					 TheGameLogic ? (Int)TheGameLogic->getFrame() : 0,
-					 inGame ? "true" : "false" );
+					 inGame ? "true" : "false",
+					 screen ? screen->getFilename().str() : "",
+					 options && !options->isHidden() ? "true" : "false" );
 	for( const char *at = piece; *at; ++at )
 		reply.push_back( *at );
 

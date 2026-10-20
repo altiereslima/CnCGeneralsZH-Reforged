@@ -76,6 +76,7 @@
 #include "Platform/RenderTypes.h"
 #include "Lib/Clock.h"		// Clock_Ticks: QueryPerformanceCounter on Windows, a monotonic clock elsewhere
 #include "GameClient/ParticleSys.h"
+#include "W3DDevice/GameClient/W3DParticleSys.h"
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include <algorithm>
 #include <vector>
@@ -3886,15 +3887,22 @@ DECLARE_PERF_TIMER(stencilShadows)
 DECLARE_PERF_TIMER(shadowVolumeUpdate)
 DECLARE_PERF_TIMER(shadowVolumeSubmit)
 
-/** Nothing of this frame's smoke is in the map: every system keeps its blob. */
+/// The systems the last fill marked, by id: a particle update since may have retired any of them.
+static std::vector<ParticleSystemID> s_systemsInSunMap;
+
+/** Nothing of this frame's smoke is in the map: every system keeps its blob.  Only a system the last
+		fill marked can be marked, so only those are looked up, not every system there is. */
 static void forgetSmokeInSunMap( void )
 {
 	if (TheParticleSystemManager == NULL)
 		return;
-	ParticleSystemManager::ParticleSystemList &systems = TheParticleSystemManager->getAllParticleSystems();
-	for (ParticleSystemManager::ParticleSystemListIt it = systems.begin(); it != systems.end(); ++it)
-		if (*it)
-			(*it)->setInSunMap( FALSE );
+	for (size_t i = 0; i < s_systemsInSunMap.size(); ++i)
+	{
+		ParticleSystem *sys = TheParticleSystemManager->findParticleSystem( s_systemsInSunMap[ i ] );
+		if (sys)		// gone since, with its mark
+			sys->setInSunMap( FALSE );
+	}
+	s_systemsInSunMap.clear();
 }
 
 /** One particle on its way into the smoke map, with the system it came from and how far it is from
@@ -3929,53 +3937,34 @@ static void fillSmokeMap( const Matrix3D &sunTransform, const Vector3 &focus, Re
 
 	if (TheGlobalData->m_volumetricSmokeShadows && TheParticleSystemManager != NULL)
 	{
-		ParticleSystemManager::ParticleSystemList &systems = TheParticleSystemManager->getAllParticleSystems();
-		for (ParticleSystemManager::ParticleSystemListIt it = systems.begin(); it != systems.end(); ++it)
+		// The particles are walked once a particle update (getSunMapCasters); a pass drawn in between,
+		// half of them late in a match and most of them early, only culls that list to its own sun.
+		const std::vector<W3DParticleSystemManager::SunMapCaster> &candidates =
+			((W3DParticleSystemManager *)TheParticleSystemManager)->getSunMapCasters();
+		for (size_t i = 0; i < candidates.size(); ++i)
 		{
-			ParticleSystem *sys = *it;
-			if (sys == NULL || sys->getShaderType() != ParticleSystemInfo::ALPHA || !sys->shouldBillboard()
-					|| sys->isUsingDrawables() || sys->isUsingStreak() || sys->isUsingSmudge())
-				continue;
-			// the heat haze's texture names start with SMUD, as W3DParticleSystemManager::doParticles tests
-			if (*((UnsignedInt *)sys->getParticleTypeName().str()) == 0x44554D53)
-				continue;
+			const W3DParticleSystemManager::SunMapCaster &candidate = candidates[ i ];
+			const Real radius = candidate.radius;
 
-			// a stealthed thing's smoke shades the ground only as much as it is drawn
-			const Real fade = sys->getStealthFade();
-			if (fade <= 0.0f)
+			// the box the depth map covers, in the sun's own frame: it looks down its -Z
+			Vector3 inSun;
+			Matrix3D::Inverse_Transform_Vector( sunTransform, Vector3( candidate.x, candidate.y, candidate.z ), &inSun );
+			const Real reach = halfWidth + radius;
+			if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach
+					|| -inSun.Z < SHADOW_MAP_NEAR_CLIP - radius || -inSun.Z > farClip + radius)
 				continue;
 
-			const UnsignedInt layers = sys->getVolumeParticleDepth();
-			for (Particle *p = sys->getFirstParticle(); p; p = p->m_systemNext)
-			{
-				const Real opticalDepth = particleSunMapOpticalDepth( p->getAlpha() * fade, layers );
-				if (opticalDepth <= 0.0f)
-					continue;
-				const Coord3D *pos = p->getPosition();
-				const Real radius = p->getSize() * 0.5f;		// the billboard's size is its full width
-				if (radius <= 0.0f)
-					continue;
-
-				// the box the depth map covers, in the sun's own frame: it looks down its -Z
-				Vector3 inSun;
-				Matrix3D::Inverse_Transform_Vector( sunTransform, Vector3( pos->x, pos->y, pos->z ), &inSun );
-				const Real reach = halfWidth + radius;
-				if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach
-						|| -inSun.Z < SHADOW_MAP_NEAR_CLIP - radius || -inSun.Z > farClip + radius)
-					continue;
-
-				SmokeCaster caster;
-				caster.x = pos->x;
-				caster.y = pos->y;
-				caster.z = pos->z;
-				caster.radius = radius;
-				caster.opticalDepth = opticalDepth;
-				const Real dx = pos->x - focus.X;
-				const Real dy = pos->y - focus.Y;
-				caster.distanceSqr = dx * dx + dy * dy;
-				caster.system = sys;
-				found.push_back( caster );
-			}
+			SmokeCaster caster;
+			caster.x = candidate.x;
+			caster.y = candidate.y;
+			caster.z = candidate.z;
+			caster.radius = radius;
+			caster.opticalDepth = candidate.opticalDepth;
+			const Real dx = candidate.x - focus.X;
+			const Real dy = candidate.y - focus.Y;
+			caster.distanceSqr = dx * dx + dy * dy;
+			caster.system = candidate.system;
+			found.push_back( caster );
 		}
 	}
 
@@ -4007,6 +3996,7 @@ static void fillSmokeMap( const Matrix3D &sunTransform, const Vector3 &focus, Re
 		if (!found[ i ].system->isInSunMap())
 		{
 			found[ i ].system->setInSunMap( TRUE );
+			s_systemsInSunMap.push_back( found[ i ].system->getSystemID() );
 			++systemsHeld;
 		}
 	}
@@ -4276,7 +4266,7 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	{
 		Coord3D look;
 		TheTacticalView->getPosition( &look );
-		focus.Set( look.x, look.y, TheTerrainLogic->getGroundHeight( look.x, look.y ) );
+		focus.Set( look.x, look.y, TheTerrainRenderObject->getDrawHeight( look.x, look.y ) );
 		transform.Look_At( focus + toSun * sunDistance, focus, 0.0f );
 		halfWidth = shadowMapHalfWidth( sceneCamera, transform, lowestReceiver,
 			TheTerrainRenderObject->getMaxHeight() );

@@ -40,7 +40,14 @@ static const DXGI_FORMAT DEPTH_READ_FORMAT = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
 // still run the Direct3D 9 device.
 static const D3D_FEATURE_LEVEL REQUESTED_FEATURE_LEVELS[] = { D3D_FEATURE_LEVEL_11_0 };
 
-static const UINT SWAP_CHAIN_BUFFER_COUNT = 2;
+// Three, so a flip chain always has a buffer to draw into while one is on screen and one waits for
+// its turn there; with two, a frame finished early stalls on the one the compositor still holds.
+static const UINT SWAP_CHAIN_BUFFER_COUNT = 3;
+
+// How many presented frames may be queued ahead of the screen on the waitable flip chain
+// (Wait_For_Frame).  Two keeps the GPU fed across a long CPU frame and adds one frame of latency at
+// most.
+static const UINT MAXIMUM_FRAME_LATENCY = 2;
 
 static void release_interface(IUnknown ** object)
 {
@@ -88,6 +95,8 @@ DX11DeviceClass::DX11DeviceClass()
 	, DebugLayerRequested(false)
 	, DebugLayerPresent(false)
 	, Tearing(false)
+	, ChainFlags(0)
+	, FrameLatencyWaitable(NULL)
 	, LastPresentResult(S_OK)
 {
 }
@@ -135,9 +144,14 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 	DXGI_SWAP_CHAIN_DESC flip_chain = swap_chain;
 	flip_chain.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	flip_chain.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-	const DXGI_SWAP_CHAIN_DESC * chain_choices[] = { &flip_chain, &swap_chain };
-	const unsigned chain_start = (with_swap_chain && tearing_supported()) ? 0u : 1u;
+	// The same flip chain with its queue held by a wait at the top of the frame (Wait_For_Frame)
+	// rather than inside Present.  Windows 8.1 and later; a create that refuses it keeps the flip
+	// chain without the wait, because the blt model would take the tearing with it.
+	DXGI_SWAP_CHAIN_DESC waitable_chain = flip_chain;
+	waitable_chain.Flags |= DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+	const DXGI_SWAP_CHAIN_DESC * chain_choices[] = { &waitable_chain, &flip_chain, &swap_chain };
 	const unsigned chain_choice_count = sizeof(chain_choices)/sizeof(chain_choices[0]);
+	const unsigned chain_start = (with_swap_chain && tearing_supported()) ? 0u : chain_choice_count - 1;
 
 	// Hardware first, WARP second.  WARP draws the same picture on a machine with no D3D11 driver,
 	// which is what makes the device creatable on a build agent as well as on this one.
@@ -166,10 +180,18 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 
 	const unsigned flag_choice_count = sizeof(flag_choices)/sizeof(flag_choices[0]);
 
+	// Every Direct3D 11 call this process makes is on the main thread: the texture loader thread
+	// only fills Direct3D 9 surfaces the main thread locked, the job pool's skin, billboard and
+	// particle work writes plain memory between a lock and an unlock taken outside it, the video
+	// writer thread only writes the pipe, and the hardware cursor thread only touches the Direct3D 9
+	// device.  So the device is spared its own locking.  The Direct3D 9 device is made without
+	// D3DCREATE_MULTITHREADED for the same reason.
+	const UINT thread_flags = D3D11_CREATE_DEVICE_SINGLETHREADED;
+
 	for (unsigned index = 0; index < driver_type_count; ++index) {
 		for (unsigned flag_index = flag_start; flag_index < flag_choice_count; ++flag_index) {
 			for (unsigned chain_index = chain_start; chain_index < chain_choice_count; ++chain_index) {
-				const UINT flags = flag_choices[flag_index];
+				const UINT flags = flag_choices[flag_index] | thread_flags;
 				// The NULL driver has no swap chain to make (ZH_DX11_DRIVER=null, above).
 				const bool null_driver = (driver_types[index] == D3D_DRIVER_TYPE_NULL);
 				const HRESULT result = Create_Device_Guarded(with_swap_chain && !null_driver,
@@ -180,11 +202,23 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 
 				Software = (driver_types[index] == D3D_DRIVER_TYPE_WARP);
 				DebugLayerPresent = (flags & D3D11_CREATE_DEVICE_DEBUG) != 0;
-				Tearing = !null_driver && (chain_choices[chain_index] == &flip_chain);
+				Tearing = !null_driver && (chain_choices[chain_index] != &swap_chain);
+				ChainFlags = chain_choices[chain_index]->Flags;
 				Width = width;
 				Height = height;
 				if (!with_swap_chain) {
 					return true;
+				}
+				// Asked for on the interface the flag belongs to; with the waitable flag the
+				// device's own SetMaximumFrameLatency is not read.  A wrapper dxgi.dll may hand back
+				// a chain without this interface, and then the frame simply does not wait.
+				IDXGISwapChain2 * waitable = NULL;
+				if (SwapChain != NULL && chain_choices[chain_index] == &waitable_chain
+						&& SUCCEEDED(SwapChain->QueryInterface(__uuidof(IDXGISwapChain2),
+							reinterpret_cast<void **>(&waitable)))) {
+					waitable->SetMaximumFrameLatency(MAXIMUM_FRAME_LATENCY);
+					FrameLatencyWaitable = waitable->GetFrameLatencyWaitableObject();
+					waitable->Release();
 				}
 				// DXGI answers Alt+Enter on its own by taking the chain to exclusive fullscreen,
 				// behind the game's back.  A flip chain presenting with tearing is refused there
@@ -325,6 +359,10 @@ void DX11DeviceClass::Release_Views()
 void DX11DeviceClass::Release()
 {
 	Release_Views();
+	if (FrameLatencyWaitable != NULL) {
+		CloseHandle(FrameLatencyWaitable);
+		FrameLatencyWaitable = NULL;
+	}
 	release_interface(reinterpret_cast<IUnknown **>(&SwapChain));
 	release_interface(reinterpret_cast<IUnknown **>(&Context));
 	release_interface(reinterpret_cast<IUnknown **>(&Device));
@@ -332,16 +370,17 @@ void DX11DeviceClass::Release()
 	Height = 0;
 	Software = false;
 	Tearing = false;
+	ChainFlags = 0;
 }
 
 bool DX11DeviceClass::Resize(unsigned width, unsigned height)
 {
 	Release_Views();
 	// With no swap chain (ZH_DX11_DRIVER=null) the views alone are the buffers, made again below.
-	// ResizeBuffers has to be handed the flags the chain was made with, or it refuses.
-	const UINT chain_flags = Tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+	// ResizeBuffers has to be handed the flags the chain was made with, or it refuses: the waitable
+	// flag in particular can be neither added nor taken away here.
 	if (SwapChain != NULL && FAILED(SwapChain->ResizeBuffers(SWAP_CHAIN_BUFFER_COUNT, width, height,
-			BACK_BUFFER_FORMAT, chain_flags))) {
+			BACK_BUFFER_FORMAT, ChainFlags))) {
 		return false;
 	}
 	Width = width;
@@ -392,6 +431,18 @@ bool DX11DeviceClass::Present(unsigned present_interval)
 	}
 	LastPresentResult = result;
 	return SUCCEEDED(result);
+}
+
+bool DX11DeviceClass::Wait_For_Frame(unsigned timeout_milliseconds)
+{
+	// Only a present that returned S_OK queued a frame.  An occluded one (a minimised or hidden
+	// window) or a failed one (a removed device, an invalid call) queued nothing, so nothing will
+	// leave the queue to signal the wait, and every frame would sit out the whole limit.  The first
+	// frame finds the S_OK the device starts with and waits, which keeps waits and presents paired.
+	if (FrameLatencyWaitable == NULL || LastPresentResult != S_OK) {
+		return true;
+	}
+	return WaitForSingleObject(FrameLatencyWaitable, timeout_milliseconds) == WAIT_OBJECT_0;
 }
 
 HRESULT DX11DeviceClass::Device_Removed_Reason() const

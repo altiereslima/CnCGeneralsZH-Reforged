@@ -209,7 +209,9 @@ void TerrainTracksRenderObjClass::addCapEdgeToTrack(Real x, Real y)
 	PathfindLayerEnum objectLayer;
 	Real eHeight;
 
-	if (m_ownerDrawable && (objectLayer=m_ownerDrawable->getObject()->getLayer()) != LAYER_GROUND) 
+	// a tank the tick destroyed caps its track after the tick, its object gone: the cap goes on the ground
+	const Object *owner = m_ownerDrawable ? m_ownerDrawable->getObject() : NULL;
+	if (owner && (objectLayer=owner->getLayer()) != LAYER_GROUND)
 		eHeight=BRIDGE_OFFSET_FACTOR+TheTerrainLogic->getLayerHeight(x,y,objectLayer,&vZTmp);
 	else
 		eHeight=TheTerrainLogic->getGroundHeight(x,y,&vZTmp);
