@@ -4470,8 +4470,296 @@ GUI:AgeFailedTitle
 "IDADE MÍNIMA"
 END
 
+GUI:AIChatAirHit1
+"Tropas terrestres. Que pitoresco."
+END
+
+GUI:AIChatAirWave1
+"Olhe para cima."
+END
+
+GUI:AIChatAirWave2
+"Trem de pouso recolhido, armas prontas."
+END
+
+GUI:AIChatAirWin1
+"Superioridade aérea confirmada."
+END
+
+GUI:AIChatArmorHit1
+"Você arranhou a pintura."
+END
+
+GUI:AIChatArmorWave1
+"O aço está rolando."
+END
+
+GUI:AIChatArmorWave2
+"Ouviu as esteiras? Somos nós."
+END
+
+GUI:AIChatArmorWin1
+"Esmagado."
+END
+
+GUI:AIChatAttackerHit1
+"Revidando? Que fofo."
+END
+
+GUI:AIChatAttackerWave1
+"Lá vamos nós. De novo."
+END
+
+GUI:AIChatAttackerWave2
+"Hoje não tem descanso para você."
+END
+
+GUI:AIChatAttackerWin1
+"Próximo!"
+END
+
+GUI:AIChatCounterHit1
+"Previsível."
+END
+
+GUI:AIChatCounterWave1
+"Estudei o seu exército. Esta é a resposta."
+END
+
+GUI:AIChatCounterWave2
+"Feito especialmente para você."
+END
+
+GUI:AIChatCounterWin1
+"Neutralizado."
+END
+
+GUI:AIChatEconomistHit1
+"Sabe quanto custou aquele edifício?"
+END
+
+GUI:AIChatEconomistWave1
+"Considere isto um investimento."
+END
+
+GUI:AIChatEconomistWave2
+"Pago à vista. Entregando agora."
+END
+
+GUI:AIChatEconomistWin1
+"Falido. Encerrando a conta."
+END
+
+GUI:AIChatInfantryHit1
+"Para dentro dos prédios, segurem a linha!"
+END
+
+GUI:AIChatInfantryWave1
+"Pé no chão, soldados!"
+END
+
+GUI:AIChatInfantryWave2
+"Cada rua, cada janela."
+END
+
+GUI:AIChatInfantryWin1
+"A cidade é nossa."
+END
+
+GUI:AIChatOpportunistHit1
+"Mexendo comigo? Escolha errada."
+END
+
+GUI:AIChatOpportunistWave1
+"Você parece ocupado. Ótimo."
+END
+
+GUI:AIChatOpportunistWave2
+"Ponto fraco encontrado."
+END
+
+GUI:AIChatOpportunistWin1
+"Obrigado por amaciar esse aí."
+END
+
+GUI:AIChatRaiderHit1
+"Então você também achou o caminho até a minha base."
+END
+
+GUI:AIChatRaiderWave1
+"Seus caminhões parecem tão sozinhos."
+END
+
+GUI:AIChatRaiderWave2
+"Bate e some."
+END
+
+GUI:AIChatRaiderWin1
+"Sem suprimentos, sem exército."
+END
+
+GUI:AIChatRusherHit1
+"Era para você já estar morto."
+END
+
+GUI:AIChatRusherWave1
+"Tudo o que eu tenho, agora mesmo!"
+END
+
+GUI:AIChatRusherWave2
+"Mais rápido, mais rápido!"
+END
+
+GUI:AIChatRusherWin1
+"Lento demais."
+END
+
+GUI:AIChatSneakyHit1
+"Me achou? Foi sorte."
+END
+
+GUI:AIChatSneakyWave1
+"Essa você não viu chegando."
+END
+
+GUI:AIChatSneakyWave2
+"Olhe para trás."
+END
+
+GUI:AIChatSneakyWin1
+"Sumiu sem deixar rastro."
+END
+
+GUI:AIChatSupporterHit1
+"Me cubra, estou sob fogo!"
+END
+
+GUI:AIChatSupporterWave1
+"Logo atrás de você, parceiro."
+END
+
+GUI:AIChatSupporterWave2
+"Seu alvo é o meu alvo."
+END
+
+GUI:AIChatSupporterWin1
+"Belo trabalho em equipe."
+END
+
+GUI:AIChatTechHit1
+"Cuidado com o laboratório, aquele equipamento é caro."
+END
+
+GUI:AIChatTechWave1
+"Teste de campo, alvos reais."
+END
+
+GUI:AIChatTechWave2
+"Os protótipos estão prontos."
+END
+
+GUI:AIChatTechWin1
+"Experimento concluído."
+END
+
+GUI:AIChatTurtleHit1
+"Pode bater à vontade. Para você, não tem ninguém em casa."
+END
+
+GUI:AIChatTurtleWave1
+"As muralhas estão prontas. Agora marchamos."
+END
+
+GUI:AIChatTurtleWave2
+"Devagar e sempre, indo na sua direção."
+END
+
+GUI:AIChatTurtleWin1
+"A paciência vence."
+END
+
+GUI:AICoopHelp
+"Aguente firme, estou chegando."
+END
+
+GUI:AICoopJoin
+"Estou com você nesse ataque."
+END
+
+GUI:AICoopMoney
+"Tome, um pouco de dinheiro."
+END
+
 GUI:AIDifficulty
 "Dificuldade do Computador"
+END
+
+GUI:AIPersona
+"Personalidade"
+END
+
+GUI:AIPersonaAir
+"Força Aérea"
+END
+
+GUI:AIPersonaArmor
+"Blindados"
+END
+
+GUI:AIPersonaAttacker
+"Atacante"
+END
+
+GUI:AIPersonaCounter
+"Contra-ataque"
+END
+
+GUI:AIPersonaEconomist
+"Economista"
+END
+
+GUI:AIPersonaInfantry
+"Infantaria"
+END
+
+GUI:AIPersonaNormal
+"Normal"
+END
+
+GUI:AIPersonaOpportunist
+"Oportunista"
+END
+
+GUI:AIPersonaRaider
+"Saqueador"
+END
+
+GUI:AIPersonaRandom
+"Aleatório"
+END
+
+GUI:AIPersonaRusher
+"Apressado"
+END
+
+GUI:AIPersonaSneaky
+"Furtivo"
+END
+
+GUI:AIPersonaSupporter
+"Apoiador"
+END
+
+GUI:AIPersonaTech
+"Tecnologia"
+END
+
+GUI:AIPersonaTooltip
+"Como este jogador do computador joga, seja qual for a dificuldade"
+END
+
+GUI:AIPersonaTurtle
+"Tartaruga"
 END
 
 GUI:AllowableMaps
@@ -5218,6 +5506,14 @@ GUI:BuildingsLostStat
 "Estruturas Perdidas"
 END
 
+GUI:BuildOrderEvery
+"Mostrar cada construção"
+END
+
+GUI:BuildOrderFirsts
+"Mostrar a primeira de cada"
+END
+
 GUI:BuildTooltips
 "Dicas Detalhadas de Construção"
 END
@@ -5232,6 +5528,10 @@ END
 
 GUI:Campaign
 "CAMPANHA"
+END
+
+GUI:CampaignMission
+"MISSÃO %d"
 END
 
 GUI:Cancel
@@ -5987,7 +6287,7 @@ GUI:FireWallPort
 END
 
 GUI:FirewallRefresh
-"Atualizar NAT"
+"ATUALIZAR NAT"
 END
 
 GUI:Follow
@@ -6160,6 +6460,50 @@ END
 
 GUI:GPNoProfile
 "Você não entrou usando um perfil. As informações de amigos não estão disponíveis."
+END
+
+GUI:GraphArmy
+"Exército"
+END
+
+GUI:GraphBuildings
+"Edifícios"
+END
+
+GUI:GraphBuildOrder
+"Ordem de construção"
+END
+
+GUI:GraphEarned
+"Dinheiro ganho"
+END
+
+GUI:GraphGeneralPower
+"Poder do general"
+END
+
+GUI:GraphNoData
+"Nada foi registrado nesta partida."
+END
+
+GUI:GraphPromotion
+"Promoção"
+END
+
+GUI:GraphRank
+"Patente %d"
+END
+
+GUI:GraphSummary
+"Resumo"
+END
+
+GUI:GraphSuperweaponBuilt
+"Superarma construída"
+END
+
+GUI:GraphSuperweaponFired
+"Superarma disparada"
 END
 
 GUI:GridBuild
@@ -6551,15 +6895,15 @@ GUI:HotkeysCategoryTEAM
 END
 
 GUI:HotkeysChange
-"Alterar"
+"ALTERAR"
 END
 
 GUI:HotkeysClash
-"%s: %s usam esta mesma tecla. Só um deles fica com ela no jogo, e uma ordem fixa mantém a sua."
+"%s: %s usam esta mesma tecla. Só um deles fica com ela no jogo: uma ordem fixa mantém a sua, e uma letra que você definiu vence a do jogo."
 END
 
 GUI:HotkeysClear
-"Sem tecla"
+"SEM TECLA"
 END
 
 GUI:HotkeysCommandBar
@@ -6580,6 +6924,14 @@ END
 
 GUI:HotkeysCommandBEGIN_CAMERA_ZOOM_OUT
 "Afastar"
+END
+
+GUI:HotkeysCommandBEGIN_PREFER_SELECTION
+"Adicionar à seleção (segurar)"
+END
+
+GUI:HotkeysCommandBEGIN_WAYPOINTS
+"Enfileirar ordens (segurar)"
 END
 
 GUI:HotkeysCommandCAMERA_RESET
@@ -6626,8 +6978,20 @@ GUI:HotkeysCommandSELECT_ALL_BARRACKS
 "Selecionar todos os quartéis"
 END
 
+GUI:HotkeysCommandSELECT_ALL_IDLE_AIRCRAFT
+"Selecionar todas as aeronaves ociosas"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_UNITS
+"Selecionar todas as unidades ociosas"
+END
+
+GUI:HotkeysCommandSELECT_ALL_IDLE_VEHICLES
+"Selecionar todos os veículos ociosos"
+END
+
 GUI:HotkeysCommandSELECT_ALL_MILITARY
-"Selecionar todas as unidades de combate"
+"Selecionar toda a infantaria"
 END
 
 GUI:HotkeysCommandSELECT_ALL_VEHICLES
@@ -6642,8 +7006,20 @@ GUI:HotkeysCommandSELECT_HERO
 "Selecionar herói"
 END
 
+GUI:HotkeysCommandSELECT_NEXT_IDLE_AIRCRAFT
+"Próxima aeronave ociosa"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_INFANTRY
+"Próxima infantaria ociosa"
+END
+
 GUI:HotkeysCommandSELECT_NEXT_IDLE_UNIT
 "Próxima unidade ociosa"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_VEHICLE
+"Próximo veículo ocioso"
 END
 
 GUI:HotkeysCommandSELECT_NEXT_IDLE_WORKER
@@ -6687,7 +7063,7 @@ GUI:HotkeysCommandTOGGLE_PURCHASE_SCIENCE
 END
 
 GUI:HotkeysDefault
-"Tecla do jogo"
+"PADRÃO"
 END
 
 GUI:HotkeysFamilyAddTeam
@@ -6711,7 +7087,7 @@ GUI:HotkeysFamilyViewView
 END
 
 GUI:HotkeysFixed
-"Uma tecla fixa em toda barra: A mover e atacar, S parar, G proteger, Y ponto de encontro, V evacuar, C invasão de combate, N vender, H minas, rede de camuflagem e a troca da construção falsa."
+"O mesmo padrão em toda barra: A mover e atacar, S parar, G proteger, Y ponto de encontro, V evacuar, C invasão de combate, N vender, H minas, rede de camuflagem e a troca da construção falsa. Alterar muda a tecla."
 END
 
 GUI:HotkeysForceAttack
@@ -6740,6 +7116,10 @@ END
 
 GUI:HotkeysPressForceAttack
 "Pressione uma tecla, ou só Ctrl ou Alt. Shift não pode ser a tecla de segurar. Esc cancela."
+END
+
+GUI:HotkeysPressHold
+"Pressione uma tecla, ou só Ctrl, Alt ou Shift. Esc cancela."
 END
 
 GUI:HotkeysPressKey
@@ -7086,6 +7466,14 @@ GUI:Load
 "CARREGAR"
 END
 
+GUI:LoadBriefing
+"BRIEFING"
+END
+
+GUI:LoadFreeForAll
+"Todos contra todos"
+END
+
 GUI:LoadGame
 "CARREGAR"
 END
@@ -7098,12 +7486,100 @@ GUI:Loading
 "CARREGANDO"
 END
 
+GUI:LoadMission
+"Missão %d"
+END
+
+GUI:LoadModeLAN
+"Jogo em rede local"
+END
+
+GUI:LoadModeOnline
+"Jogo online"
+END
+
+GUI:LoadModeReplay
+"Replay"
+END
+
+GUI:LoadModeSkirmish
+"Combate"
+END
+
+GUI:LoadObservers
+"Observadores:"
+END
+
 GUI:LoadReplay
 "REPLAY"
 END
 
+GUI:LoadTeam
+"Time %d"
+END
+
+GUI:LoadTip
+"DICA"
+END
+
+GUI:LoadTip1
+"Segure Shift enquanto dá ordens e o grupo cumpre a lista sozinho, uma depois da outra: mover, atacar, capturar, proteger."
+END
+
+GUI:LoadTip10
+"Clique duas vezes em um edifício para selecionar na tela todos os edifícios do mesmo tipo."
+END
+
+GUI:LoadTip2
+"Shift e um número adicionam a seleção a esse grupo de controle e mantêm quem já estava nele."
+END
+
+GUI:LoadTip3
+"Ctrl+D seleciona na tela todas as unidades dos tipos que você selecionou. Pressione duas vezes para o mapa inteiro."
+END
+
+GUI:LoadTip4
+"Segure Shift e arraste para desenhar uma linha. A seleção se espalha ao longo dela como uma linha de tiro."
+END
+
+GUI:LoadTip5
+"Em um botão de produção, Shift enfileira cinco e Ctrl, vinte."
+END
+
+GUI:LoadTip6
+"Segure Ctrl e Alt no botão de uma unidade e a fábrica a produz sem parar."
+END
+
+GUI:LoadTip7
+"Um sinalizador que você coloca pede aos aliados do computador que ataquem ali."
+END
+
+GUI:LoadTip8
+"Digite ajuda, atacar ou dinheiro no chat e seus aliados do computador vêm ajudar, atacam ali ou mandam dinheiro."
+END
+
+GUI:LoadTip9
+"Segure Ctrl ao posicionar um edifício para inverter o posicionamento em grade enquanto a tecla estiver pressionada."
+END
+
+GUI:LoadWaiting
+"Esperando os outros jogadores"
+END
+
 GUI:LobbyJoined
 "Você entrou em %ls."
+END
+
+GUI:LobbyRecord
+"Histórico"
+END
+
+GUI:LobbyRecordButton
+"HISTÓRICO"
+END
+
+GUI:LobbyRecordClose
+"FECHAR"
 END
 
 GUI:LobbyTabChat
@@ -7272,6 +7748,34 @@ END
 
 GUI:MoneySymbol
 "$"
+END
+
+GUI:MoneyTransferAmount
+"$%d"
+END
+
+GUI:MoneyTransferMinus
+"-"
+END
+
+GUI:MoneyTransferPlus
+"+"
+END
+
+GUI:MoneyTransferReceived
+"%ls enviou $%d para você."
+END
+
+GUI:MoneyTransferSend
+"Enviar"
+END
+
+GUI:MoneyTransferSent
+"Você enviou $%d para %ls."
+END
+
+GUI:MoneyTransferTitle
+"Enviar dinheiro"
 END
 
 GUI:Monitor
@@ -7576,6 +8080,10 @@ END
 
 GUI:OptionsGroupShadows
 "Sombras"
+END
+
+GUI:OptionsGroupSpeed
+"Velocidade do Jogo"
 END
 
 GUI:OptionsGroupVolume
@@ -8087,7 +8595,7 @@ GUI:SaveDate
 END
 
 GUI:SaveFromOlderGame
-"Este jogo salvo foi feito pelo jogo original ou por uma versão antiga do Reforged e não pode ser carregado."
+"Este jogo salvo foi feito pelo jogo original ou por uma versão antiga do Reforged e não pode ser carregado. Os jogos salvos de \"Início da Missão\" dele ainda carregam e seguem a campanha a partir do começo daquela missão, e qualquer missão da campanha pode ser escolhida no menu da campanha."
 END
 
 GUI:SaveGame
@@ -8590,6 +9098,38 @@ GUI:Struct
 "Estrut."
 END
 
+GUI:SummaryBuildingsBuilt
+"Construídos"
+END
+
+GUI:SummaryDestroyed
+"Destruídos"
+END
+
+GUI:SummaryEarned
+"Ganho"
+END
+
+GUI:SummaryLost
+"Perdidos"
+END
+
+GUI:SummaryMoney
+"Dinheiro"
+END
+
+GUI:SummaryUnits
+"Unidades"
+END
+
+GUI:SummaryUnitsBuilt
+"Produzidas"
+END
+
+GUI:SummaryWinner
+"Vencedor"
+END
+
 GUI:SuperweaponA10ThunderboltMissileStrike
 "Ataque Aéreo A-10"
 END
@@ -8896,6 +9436,14 @@ END
 
 GUI:TryAgain
 "Tentar Novamente"
+END
+
+GUI:TurboMode
+"Modo Turbo"
+END
+
+GUI:TurboModeMissions
+"Modo Turbo nas Missões"
 END
 
 GUI:TypeSelect
@@ -15918,6 +16466,10 @@ TOOLTIP:Mission9_16
 "Campanha Dois"
 END
 
+TOOLTIP:MoneyTransfer
+"Use a roda do mouse ou clique em - e + para escolher o valor: 100 por passo, 1.000 com Ctrl, 10.000 com Shift, 100.000 com os dois. Enviar entrega o dinheiro."
+END
+
 TOOLTIP:Monitor
 "Define o monitor em que o jogo é exibido. A lista de resoluções abaixo mostra os tamanhos que este monitor suporta. Aplicado ao aceitar as alterações."
 END
@@ -16400,6 +16952,14 @@ END
 
 TOOLTIP:TreeSway
 "Árvores e arbustos se inclinam com o vento. Entra em vigor no próximo mapa."
+END
+
+TOOLTIP:TurboMode
+"A partida corre duas vezes mais rápido: a cada segundo passam dois segundos de jogo, e nada mais muda. Em um jogo em rede, o host escolhe para todos."
+END
+
+TOOLTIP:TurboModeMissions
+"As missões da campanha e do Desafio dos Generais correm duas vezes mais rápido, e uma missão em andamento acelera na hora. Partidas de combate e multijogador têm a sua própria opção no lobby."
 END
 
 TOOLTIP:UnitLimit
