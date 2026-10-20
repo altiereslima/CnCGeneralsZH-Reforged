@@ -7,6 +7,7 @@ MARKER = "ReforgedPTBRLanguageInitialized"
 
 # Âncoras do upstream que o passo 12 estende; o validador confere as duas.
 FORK_OWNED_LANGUAGES = '\t\t|| starts("data\\\\turkish\\\\") || starts("data\\\\german\\\\")\n'
+CHAT_REQUESTS = '\t\t{ u"money", AIREQ_MONEY }, { u"para", AIREQ_MONEY } };\n'
 TEST_UNDER_DATA = '\t\tconst char *underData[] = { "INI/", "Scripts/", "Turkish/", "German/" };\n'
 
 def die(msg):
@@ -221,6 +222,16 @@ def main():
         'starts("data\\\\german\\\\") || starts("data\\\\portuguesebrazil\\\\")'))
     p = code / "Tests" / "test_gameengine.cpp"
     replace_once(p, TEST_UNDER_DATA, TEST_UNDER_DATA.replace('"German/" };', '"German/", "PortugueseBrazil/" };'))
+
+    # 13) The chat words that ask the computer allies for help, an attack or money are English and
+    #     Turkish upstream (help, attack, money; yardim, saldir, para); the loading tip names the
+    #     Portuguese ones.
+    p = code / "GameEngine" / "Source" / "GameClient" / "GUI" / "GUICallbacks" / "InGameChat.cpp"
+    replace_once(p, CHAT_REQUESTS,
+        '\t\t{ u"money", AIREQ_MONEY }, { u"para", AIREQ_MONEY },\n'
+        '\t\t// PT-BR edition: the Portuguese words the loading tip (GUI:LoadTip8) names\n'
+        '\t\t{ u"ajuda", AIREQ_HELP }, { u"atacar", AIREQ_ATTACK }, { u"ataque", AIREQ_ATTACK },\n'
+        '\t\t{ u"dinheiro", AIREQ_MONEY } };\n')
 
     # 11) Seed locale file.
     src = pkg / "payload" / "GeneralsMD" / "Code" / "Data" / "PortugueseBrazil" / "Generals.str"

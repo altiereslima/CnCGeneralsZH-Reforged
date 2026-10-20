@@ -12,7 +12,7 @@ import subprocess
 import sys
 import traceback
 
-EXPECTED_UPSTREAM_HEAD = "b37515b18ab42d8f0de2dffd0677139ea521730a"
+EXPECTED_UPSTREAM_HEAD = "153d636c9aa8180d146fa7f3ed377eb0d04eb75c"
 
 PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h",
@@ -34,6 +34,7 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/ControlBar/ControlBarScheme.cpp",
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/ReplayControls.cpp",
     "GeneralsMD/Code/BuildFingerprint.manifest",
+    "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/InGameChat.cpp",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;

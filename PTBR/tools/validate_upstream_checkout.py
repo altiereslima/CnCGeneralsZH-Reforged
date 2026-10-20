@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "b37515b18ab42d8f0de2dffd0677139ea521730a",
+    "head_commit": "153d636c9aa8180d146fa7f3ed377eb0d04eb75c",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "cf0d0f7a8973a1d7ca6a36cf3976fb7d815f796d",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "71d6ee0abdeff73a40d9d441c541cc713c377027",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "00d142966e4dbf4a189dad747797177678daa4e7",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "be736387e5aae9273ec714fb0a878cd4c0f9e5f9",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "65b9ba48b394d50d73e8d5680820025a25eaad42",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "0129b74c930e3538ff47aee72800b2eb27dc0117",
-        "GeneralsMD/Code/Data/Patch.str": "8bc1ecb0f0e53e44a8d07cca5df55b75e01aa932",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "a266a705bb3f8bb3cc67931e28435a4eb8a6db1c",
+        "GeneralsMD/Code/Data/Patch.str": "f918367dd23718c560c169c0832d6d06c5562254",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "1af8f15c265e1204b74b087bab3f9d16d9821224",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
         "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "58f7fc0edbffd43a88b280fb28356fc77af67fe7",
-        "GeneralsMD/Code/CMakeLists.txt": "02ff9ab366d0a4114b298977c0c71265f0714432",
+        "GeneralsMD/Code/CMakeLists.txt": "08184d3e9d9ac7b4de5e7393d7fcaa8735dffb68",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
-        "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "c097a75346d7f14e1288b3d36636c9ada3ded623",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "9a9e1cb21b77dc022d02b05d4dff408db560b49d",
+        "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "f912431471a640658fdd8309ac9b87bf22f15b83",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "ff06cb47ecaa3a75f00d002fb4e7b017bc773e28",
     }
 }
 
@@ -150,7 +150,8 @@ def validate(repo):
     result["checks"]["net_box_anchors"] = "PASS"
 
     # Stage 2, step 12: Data\PortugueseBrazil joins the trees a -mod never replaces.
-    from apply_stage2 import FORK_OWNED_LANGUAGES, TEST_UNDER_DATA
+    from apply_stage2 import FORK_OWNED_LANGUAGES, TEST_UNDER_DATA, CHAT_REQUESTS
+    need((code/"GameEngine/Source/GameClient/GUI/GUICallbacks/InGameChat.cpp").read_text(encoding="utf-8-sig"), CHAT_REQUESTS, "InGameChat.cpp chat requests to the computer allies")
     fs = (code/"GameEngine/Source/Common/System/FileSystem.cpp").read_text(encoding="utf-8-sig")
     need(fs, FORK_OWNED_LANGUAGES, "FileSystem.cpp fork-owned language trees")
     need((code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig"), TEST_UNDER_DATA, "test_gameengine shipped masters under Data")

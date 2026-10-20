@@ -124,6 +124,8 @@ def main():
     need(fs,'starts("data\\\\german\\\\") || starts("data\\\\portuguesebrazil\\\\")',"Data\\PortugueseBrazil is fork-owned")
     test=(code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8")
     need(test,'"Turkish/", "German/", "PortugueseBrazil/" };',"shipped-masters test keeps Data\\ in front of PortugueseBrazil")
+    chat=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/InGameChat.cpp").read_text(encoding="utf-8")
+    need(chat,'{ u"ajuda", AIREQ_HELP }, { u"atacar", AIREQ_ATTACK }',"Portuguese chat words for the computer allies")
     checks["fork_owned_locale"]="PASS"
 
     # the plates' command bar, ControlBar Pro left out
