@@ -212,6 +212,11 @@ def validate(repo):
                 raise RuntimeError(f"ReforgedBar{plate}{piece}.tga: a placa saiu do upstream")
     result["checks"]["plates_bar_anchors"] = "PASS"
 
+    # Stage 20: the Options menu's version label names the game.
+    from apply_stage20 import VERSION_LABEL
+    need(opt, VERSION_LABEL, "OptionsMenu.cpp version label")
+    result["checks"]["version_label_anchor"] = "PASS"
+
     result["status"] = "PASS"
     return result
 

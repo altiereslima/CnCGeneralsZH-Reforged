@@ -15,9 +15,9 @@ O workflow instala automaticamente, em versões/commits fixados:
 
 O que a edição PT-BR muda no jogo, e a chave do `Options.ini` que volta ao comportamento do upstream:
 
-- idioma inicial Português (Brasil), o idioma 3 desde que o upstream pôs o alemão no 2 (um
-  `Options.ini` de antes, em PT-BR, continua em PT-BR); a opção de idioma do menu continua valendo,
-  e `-language portuguese` também escolhe;
+- idioma inicial Português (Brasil), o idioma 6 desde que o upstream 3.4 pôs ucraniano, russo e
+  francês do 3 ao 5 (um `Options.ini` de antes, em PT-BR, continua em PT-BR); a opção de idioma do
+  menu continua valendo, e `-language portuguese` também escolhe;
 - visual clássico: desde a 3.0 o upstream tem uma interface só, sem páginas HTML, com o menu Esc,
   a diplomacia e o piscar de "sob ataque" da EA, e o validador confere que continua assim. A barra
   de comando dele é a do mod ControlBar Pro; o estágio 19 a tira do build e volta às placas
@@ -26,6 +26,8 @@ O que a edição PT-BR muda no jogo, e a chave do `Options.ini` que volta ao com
 - caixa do relógio e FPS escondida: a opção "Caixa de Informações" do menu (`ShowNetBox = yes`)
   mostra;
 - nomes das IAs do lobby traduzidos;
+- o rodapé do menu Opções mostra "Command & Conquer Generals Zero Hour" e o número da versão
+  (estágio 20), no lugar do "Reforged v…" do upstream;
 - abre direto pelo `generals.exe`: desde a 2.4.0 o executável do upstream só abre pelo launcher
   dele, que o build PT-BR não inclui.
 - tela de abertura própria, widescreen (`PTBR/payload/GeneralsMD/Code/Data/Install_Final.bmp`, que

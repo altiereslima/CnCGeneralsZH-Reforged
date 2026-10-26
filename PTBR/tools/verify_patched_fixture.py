@@ -149,6 +149,11 @@ def main():
         raise RuntimeError("missing postcondition: ControlBar Pro still in the build: "+", ".join(left))
     checks["plates_command_bar"]="PASS"
 
+    need(opt,'UnicodeString versionString( u"Command & Conquer Generals Zero Hour " );',"version label names the game")
+    if 'u"Reforged "' in opt:
+        raise RuntimeError("missing postcondition: the version label still says Reforged")
+    checks["version_label"]="PASS"
+
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
     if miss_core:
