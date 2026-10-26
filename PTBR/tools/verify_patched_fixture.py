@@ -26,7 +26,8 @@ def main():
 
     h=(code/"GameEngine/Include/Common/GlobalData.h").read_text(encoding="utf-8")
     need(h,"TEXT_LANGUAGE_PORTUGUESE_BRAZIL","PTBR enum")
-    need(h,"TEXT_LANGUAGE_COUNT\t\t\t\t\t= 4","count 4")
+    need(h,"TEXT_LANGUAGE_PORTUGUESE_BRAZIL\t= 6,","PTBR is language 6")
+    need(h,"TEXT_LANGUAGE_COUNT\t\t= 7,","count 7")
     need(h,"AsciiString GetTextLanguageDirectory( void );","resolver declaration")
     checks["globaldata_h"]="PASS"
 
@@ -42,10 +43,10 @@ def main():
     for src in sorted((code/"GameEngine").rglob("*.cpp")):
         for body in tables.findall(src.read_text(encoding="utf-8",errors="replace")):
             entries=[e for e in (x.strip() for x in re.sub(r"//[^\n]*","",body).split(",")) if e]
-            if len(entries)!=4:
-                raise RuntimeError(f"{src.name}: a TEXT_LANGUAGE_COUNT table has {len(entries)} entries, not 4")
+            if len(entries)!=7:
+                raise RuntimeError(f"{src.name}: a TEXT_LANGUAGE_COUNT table has {len(entries)} entries, not 7")
     command_line=(code/"GameEngine/Source/Common/CommandLine.cpp").read_text(encoding="utf-8")
-    need(command_line,'"german", "portuguese" };',"-language knows portuguese")
+    need(command_line,'"french", "portuguese" };',"-language knows portuguese")
     checks["language_tables"]="PASS"
 
     gt=(code/"GameEngine/Source/GameClient/GameText.cpp").read_text(encoding="utf-8")
@@ -54,12 +55,12 @@ def main():
 
     opt=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp").read_text(encoding="utf-8")
     need(opt,"ReforgedPTBRLanguageInitialized","one-shot migration")
-    need(opt,'(*this)["TextLanguage"] = "3";',"PTBR preference")
-    need(opt,'else if (migrated->second == "1")',"PT-BR 2 from before German carried over to 3")
+    need(opt,'(*this)["TextLanguage"] = "6";',"PTBR preference")
+    need(opt,'else if (migrated->second == "1" || migrated->second == "2")',"PT-BR 2 or 3 from before carried over to 6")
     checks["options_migration"]="PASS"
 
     patch=(code/"Data/Patch.str").read_text(encoding="utf-8")
-    need(patch,'GUI:Language3\n"Português (Brasil)"\nEND',"Portuguese UI choice")
+    need(patch,'GUI:Language6\n"Português (Brasil)"\nEND',"Portuguese UI choice")
     need(patch,"briefings, subtitles and localized videos","updated tooltip")
     checks["patch_str"]="PASS"
 
@@ -123,7 +124,7 @@ def main():
     fs=(code/"GameEngine/Source/Common/System/FileSystem.cpp").read_text(encoding="utf-8")
     need(fs,'starts("data\\\\german\\\\") || starts("data\\\\portuguesebrazil\\\\")',"Data\\PortugueseBrazil is fork-owned")
     test=(code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8")
-    need(test,'"Turkish/", "German/", "PortugueseBrazil/" };',"shipped-masters test keeps Data\\ in front of PortugueseBrazil")
+    need(test,'"French/", "PortugueseBrazil/" };',"shipped-masters test keeps Data\\ in front of PortugueseBrazil")
     chat=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/InGameChat.cpp").read_text(encoding="utf-8")
     need(chat,'{ u"ajuda", AIREQ_HELP }, { u"atacar", AIREQ_ATTACK }',"Portuguese chat words for the computer allies")
     checks["fork_owned_locale"]="PASS"

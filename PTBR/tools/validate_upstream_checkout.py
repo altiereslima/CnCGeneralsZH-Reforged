@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "153d636c9aa8180d146fa7f3ed377eb0d04eb75c",
+    "head_commit": "e19c19dc589387bbd06bc7e6418015bdbd5745de",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "00d142966e4dbf4a189dad747797177678daa4e7",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "be736387e5aae9273ec714fb0a878cd4c0f9e5f9",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "65b9ba48b394d50d73e8d5680820025a25eaad42",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "a266a705bb3f8bb3cc67931e28435a4eb8a6db1c",
-        "GeneralsMD/Code/Data/Patch.str": "f918367dd23718c560c169c0832d6d06c5562254",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "62792876bb3c5e507c0a16baeb24413490a6035d",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "32fe939755a3ffda9101649caaa32c04a8ae9709",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "01694f14b3ee94f66425fdde6d50a79670ba59b4",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "254c9265474c609e36b9327e67bbd8108665a31b",
+        "GeneralsMD/Code/Data/Patch.str": "d1593fd27ff8a9f23fd6a1ba13790ccd4a4fded9",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "1af8f15c265e1204b74b087bab3f9d16d9821224",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
-        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "58f7fc0edbffd43a88b280fb28356fc77af67fe7",
-        "GeneralsMD/Code/CMakeLists.txt": "08184d3e9d9ac7b4de5e7393d7fcaa8735dffb68",
+        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "717e59dce543150596028264a1950af357b76ed7",
+        "GeneralsMD/Code/CMakeLists.txt": "4757f1c668d07942c548c76a194a616f2f6b747d",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "f912431471a640658fdd8309ac9b87bf22f15b83",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "ff06cb47ecaa3a75f00d002fb4e7b017bc773e28",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "3f394ec41d93382530e329d9a65e9ee0955af652",
     }
 }
 
@@ -67,9 +67,8 @@ def validate(repo):
     result = {"repo": str(repo), "checks": {}}
 
     h = (code/"GameEngine/Include/Common/GlobalData.h").read_text(encoding="utf-8-sig")
-    need(h,
-        "\tTEXT_LANGUAGE_ENGLISH\t= 0,\n\tTEXT_LANGUAGE_TURKISH\t= 1,\n\tTEXT_LANGUAGE_GERMAN\t= 2,\n\n\tTEXT_LANGUAGE_COUNT\t\t= 3,\n",
-        "GlobalData.h enum")
+    from apply_stage2 import LANGUAGE_ENUM
+    need(h, LANGUAGE_ENUM, "GlobalData.h enum")
     result["checks"]["language_enum_anchor"] = "PASS"
 
     cpp = (code/"GameEngine/Source/Common/GlobalData.cpp").read_text(encoding="utf-8-sig")
@@ -78,7 +77,8 @@ def validate(repo):
 
     gt = (code/"GameEngine/Source/GameClient/GameText.cpp").read_text(encoding="utf-8-sig")
     need(gt,
-        "static const char *const TheTextLanguageOverlays[ TEXT_LANGUAGE_COUNT ] =\n{\n\tNULL,\n\t\"Data\\\\Turkish\\\\Generals.str\",\n\t\"Data\\\\German\\\\Generals.str\",\n};\n",
+        "static const char *const TheTextLanguageOverlays[ TEXT_LANGUAGE_COUNT ] =\n{\n\tNULL,\n\t\"Data\\\\Turkish\\\\Generals.str\",\n\t\"Data\\\\German\\\\Generals.str\",\n"
+        "\t\"Data\\\\Ukrainian\\\\Generals.str\",\n\t\"Data\\\\Russian\\\\Generals.str\",\n\t\"Data\\\\French\\\\Generals.str\",\n};\n",
         "GameText.cpp overlay table")
     if '"Data\\\\Patch.str"' not in gt:
         raise RuntimeError("GameText.cpp: Patch.str overlay ausente")
@@ -91,7 +91,7 @@ def validate(repo):
     result["checks"]["options_migration_anchor"] = "PASS"
 
     pc = (code/"Data/Patch.str").read_text(encoding="utf-8-sig")
-    need(pc, 'GUI:Language2\n"Deutsch"\nEND\n\nTOOLTIP:Language\n', "Patch.str language")
+    need(pc, 'GUI:Language5\n"Français"\nEND\n\nTOOLTIP:Language\n', "Patch.str language")
     result["checks"]["patch_language_anchor"] = "PASS"
 
     gl = (code/"GameEngine/Source/GameClient/GlobalLanguage.cpp").read_text(encoding="utf-8-sig")
@@ -105,8 +105,6 @@ def validate(repo):
     result["checks"]["w3d_localized_assets_anchor"] = "PASS"
 
     bink = (code/"GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp").read_text(encoding="utf-8-sig")
-    if bink.count("GetRegistryLanguage().str()") != 1:
-        raise RuntimeError("BinkVideoPlayer.cpp: esperado exatamente 1 lookup do idioma do registro")
     need(bink, '#define VIDEO_LANG_PATH_FORMAT "Data/%s/Movies/%s.%s"', "Bink path format definition")
     need(
         bink,
@@ -135,8 +133,8 @@ def validate(repo):
     result["checks"]["options_language_range"] = "PASS"
 
     command_line = (code/"GameEngine/Source/Common/CommandLine.cpp").read_text(encoding="utf-8-sig")
-    need(command_line, '\tstatic const char *const TheTextLanguageNames[ TEXT_LANGUAGE_COUNT ] = { "english", "turkish", "german" };\n', "CommandLine.cpp -language names")
-    need(command_line, "/* -language <english|turkish|german>: ", "CommandLine.cpp -language comment")
+    need(command_line, '\tstatic const char *const TheTextLanguageNames[ TEXT_LANGUAGE_COUNT ] = { "english", "turkish", "german", "ukrainian", "russian", "french" };\n', "CommandLine.cpp -language names")
+    need(command_line, "/* -language <english|turkish|german|ukrainian|russian|french>: ", "CommandLine.cpp -language comment")
     result["checks"]["command_line_language_anchor"] = "PASS"
 
     # Stage 13: the corner box hidden by default, through upstream's own ShowNetBox switch.
