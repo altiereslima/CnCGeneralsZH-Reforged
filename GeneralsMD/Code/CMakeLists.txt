@@ -691,7 +691,7 @@ target_link_libraries(dx11post PUBLIC dx11device d3d11)
 # The renderer itself: the engine's D3D9-shaped calls taken as they are and resolved
 # into a D3D11 pipeline at the moment of the draw.  Ties the five pieces above
 # together, which is why it is the last of them and the one with a drawing test.
-add_library(dx11backend STATIC ${WW}/WW3D2/dx11backend.cpp)
+add_library(dx11backend STATIC ${WW}/WW3D2/dx11backend.cpp ${WW}/WW3D2/dx11water.cpp)
 set_target_properties(dx11backend PROPERTIES CXX_STANDARD 17)
 target_include_directories(dx11backend PUBLIC ${WW}/WW3D2)
 target_link_libraries(dx11backend PUBLIC dx11device dx11state dx11layout dx11resource
@@ -1398,12 +1398,23 @@ if(ZH_PLATFORM_POSIX)
 
   # ---- posixd3d9: the device, in the place d3d9.lib has on Windows -----------------------------------
   file(GLOB_RECURSE POSIXD3D9_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/PosixDevice/Render/*.cpp)
+  # Hazard clouds bridge the scene and SDL device; keep that bridge above the
+  # D3D compatibility library so low-level device tests stay independent.
+  list(FILTER POSIXD3D9_SOURCES EXCLUDE REGEX "/SdlHazardCloud[^/]*\\.cpp$")
   add_library(posixd3d9 STATIC ${POSIXD3D9_SOURCES})
   set_target_properties(posixd3d9 PROPERTIES CXX_STANDARD 17)
   target_include_directories(posixd3d9 PUBLIC ${ZH_POSIX_D3D9_INCLUDE})
   # A3: with a window the device draws through SDL3 GPU, and compiles its own small programs (the gamma
   # pass) the way the generated ones are compiled.
   target_link_libraries(posixd3d9 PRIVATE SDL3::SDL3-static sdl3shadercompile engineshader ffshader ffvertex)
+
+  # Depth-format fallback follows the complete scene-depth capability, without requiring a GPU.
+  add_executable(sdl_gpu_depth_format_selfcheck ${CMAKE_CURRENT_SOURCE_DIR}/Tests/test_sdl_gpu_depth_format.cpp)
+  set_target_properties(sdl_gpu_depth_format_selfcheck PROPERTIES CXX_STANDARD 17)
+  target_include_directories(sdl_gpu_depth_format_selfcheck PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/PosixDevice/Render)
+  target_link_libraries(sdl_gpu_depth_format_selfcheck PRIVATE SDL3::Headers)
+  add_test(NAME sdl_gpu_depth_format_selfcheck COMMAND sdl_gpu_depth_format_selfcheck)
 
   # A3a's frame: a clear read back, and the gamma pass through a picture that shows any flip.  Needs a GPU
   # but no window; exits 77 (skipped, and ctest says so) where SDL has no GPU device to give.
@@ -1452,6 +1463,30 @@ if(ZH_PLATFORM_POSIX)
   add_test(NAME posix_gpu_draw_selfcheck COMMAND posix_gpu_draw_selfcheck)
   set_tests_properties(posix_gpu_draw_selfcheck PROPERTIES SKIP_RETURN_CODE 77)
 
+  if(ZH_PLATFORM_LINUX)
+    add_executable(posix_reset_selfcheck ${CMAKE_CURRENT_SOURCE_DIR}/Tests/test_posix_reset.cpp)
+    set_target_properties(posix_reset_selfcheck PROPERTIES CXX_STANDARD 17)
+    target_include_directories(posix_reset_selfcheck PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/PosixDevice/Render)
+    target_link_libraries(posix_reset_selfcheck PRIVATE posixd3d9 SDL3::SDL3-static)
+    target_link_options(posix_reset_selfcheck PRIVATE
+      "LINKER:--wrap=SDL_AcquireGPUCommandBuffer" "LINKER:--wrap=SDL_CreateGPUTexture")
+    add_test(NAME posix_reset_selfcheck COMMAND posix_reset_selfcheck)
+    set_tests_properties(posix_reset_selfcheck PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+
+  if(ZH_PLATFORM_LINUX)
+    # Dedicated water material editor: the same device, FFT and shader as the game.
+    add_executable(water_preview EXCLUDE_FROM_ALL
+      ${CMAKE_CURRENT_SOURCE_DIR}/Tools/water_preview.cpp)
+    set_target_properties(water_preview PROPERTIES CXX_STANDARD 17)
+    target_include_directories(water_preview PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/PosixDevice/Render
+      ${WW}/WW3D2 ${ZH_POSIX_D3D9_INCLUDE})
+    target_link_libraries(water_preview PRIVATE posixd3d9 SDL3::SDL3-static)
+    # Preserve the original proposal's build-target name for existing local workflows.
+  endif()
+
   # A3b's harness: the device's draws on this machine's GPU against FFReference, scenario by scenario,
   # with two armed controls that must fail (77 without a GPU).
   add_executable(ffref_gpu_selfcheck ${CMAKE_CURRENT_SOURCE_DIR}/Tests/test_ffref_gpu.cpp)
@@ -1499,6 +1534,12 @@ if(ZH_PLATFORM_POSIX)
   # W3DWebBrowser is the embedded browser as a COM object, which only Win32GameEngine makes; GameEngine
   # has its own WebBrowser off Windows (B5).
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/W3DDevice/GameClient/W3DWebBrowser\\.cpp$")
+  # The neutral cloud core is in W3DDevice on every platform. SDL supplies the
+  # POSIX factory below; the no-backend factory is compiled only without it, and
+  # the Direct3D 11 backend only on Windows.
+  list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/(HazardCloudUnsupported|DX11HazardCloud)\\.cpp$")
+  # The GPU particles have only a Direct3D 11 backend; GpuParticlesUnsupported answers for SDL3.
+  list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11GpuParticles\\.cpp$")
 
   # ---- the movies (V1): Windows' Bink player and its Bink API on FFmpeg, the same two files -------------
   # FFmpeg is built from the tarball Tools/vendor.sh keeps, into the build tree, with the Bink demuxer
@@ -1562,6 +1603,12 @@ if(ZH_PLATFORM_POSIX)
   # BinkVideoPlayer.cpp, unchanged: W3DGameClient makes it on every platform, so it lives with w3ddevice
   list(APPEND W3DDEVICE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp)
   add_library(w3ddevice STATIC ${W3DDEVICE_SOURCES})
+  set(ZH_POSIX_RENDER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/PosixDevice/Render)
+  # This entire device branch is ZH_PLATFORM_POSIX: Linux and macOS share
+  # the SDL GPU cloud backend and its runtime capability query.
+  target_sources(w3ddevice PRIVATE
+    ${ZH_POSIX_RENDER_DIR}/SdlHazardCloud.cpp
+    ${ZH_POSIX_RENDER_DIR}/SdlHazardCloudEmbers.cpp)
   set_target_properties(w3ddevice PROPERTIES CXX_STANDARD 17)
   target_include_directories(w3ddevice PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Stubs ${CMAKE_CURRENT_SOURCE_DIR}/Main
@@ -1610,6 +1657,17 @@ if(ZH_PLATFORM_POSIX)
   if(ZH_GAME_DATA)
     set_tests_properties(test_render_hooks PROPERTIES ENVIRONMENT "ZH_DATA_DIR=${ZH_GAME_DATA}")
   endif()
+
+  if(ZH_PLATFORM_LINUX)
+    add_executable(test_sun_shadow_sorting ${CMAKE_CURRENT_SOURCE_DIR}/Tests/test_sun_shadow_sorting.cpp)
+    set_target_properties(test_sun_shadow_sorting PROPERTIES CXX_STANDARD 17)
+    target_include_directories(test_sun_shadow_sorting PRIVATE
+      ${WW}/WWLib ${WW}/WWMath ${WW}/WWDebug ${WW}/WW3D2
+      ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/PosixDevice/Render)
+    target_link_libraries(test_sun_shadow_sorting PRIVATE w3ddevice ww3d2 posixdevice gameengine SDL3::SDL3-static)
+    add_test(NAME test_sun_shadow_sorting COMMAND test_sun_shadow_sorting)
+    set_tests_properties(test_sun_shadow_sorting PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+  endif()
 endif()
 
 # ===========================================================================
@@ -1629,10 +1687,10 @@ endif()
 set(GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(WRITE ${GENERATED}/BuildVersion.h
 "// Generated by CMake, standing in for Tools/buildVersionUpdate.\n"
-"#define VERSION_STRING \"v3.2.0\"\n"
+"#define VERSION_STRING \"v3.4.2\"\n"
 "#define VERSION_MAJOR 3\n"
-"#define VERSION_MINOR 2\n"
-"#define VERSION_BUILDNUM 0\n")
+"#define VERSION_MINOR 4\n"
+"#define VERSION_BUILDNUM 2\n")
 file(WRITE ${GENERATED}/GeneratedVersion.h
 "// Generated by CMake, standing in for Tools/versionUpdate.\n"
 "#define LOCAL_BUILD_STRING \"0\"\n"
@@ -1654,6 +1712,11 @@ list(FILTER GAMEENGINEDEVICE_SOURCES EXCLUDE REGEX "/Source/PosixDevice/")
 # SdlDevice is the same for SDL3 (C2, C3), built below as sdldevice, never on Windows either; the glob
 # above took it in, and W2's first MSVC build found no SDL3 to compile it against.
 list(FILTER GAMEENGINEDEVICE_SOURCES EXCLUDE REGEX "/Source/SdlDevice/")
+# The hazard clouds' backend here is Direct3D 11's (DX11HazardCloud.cpp); the no-backend entry points
+# are for the tests that link no device.
+list(FILTER GAMEENGINEDEVICE_SOURCES EXCLUDE REGEX "/HazardCloudUnsupported\\.cpp$")
+# The same for the GPU particles (DX11GpuParticles.cpp here, GpuParticlesUnsupported.cpp elsewhere).
+list(FILTER GAMEENGINEDEVICE_SOURCES EXCLUDE REGEX "/GpuParticlesUnsupported\\.cpp$")
 # Sound and video are the game's own.  Miles and Bink were binary-only, and the DLLs the retail
 # game ships are 32-bit, so there is nothing for a 64-bit exe to bind to: what it links instead is
 # those two APIs written over XAudio2 and FFmpeg.  FFmpeg decodes binkvideo and binkaudio natively,
@@ -1751,6 +1814,15 @@ add_custom_command(TARGET generals POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/German
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/German
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/Ukrainian
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/Ukrainian
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/Russian
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/Russian
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/French
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/French
   # The startup splash.  WinMain loads it from a loose file next to the exe, so
   # the fork's own artwork is a tracked master here rather than a hand-made file
   # in gitignored Run/.
@@ -1836,6 +1908,21 @@ if(ZH_PLATFORM_POSIX)
   target_link_libraries(sdldevice PUBLIC posixdevice w3ddevice SDL3::SDL3-static milesaudiomanager sdlinput)
   if(APPLE)
     target_link_libraries(sdldevice PRIVATE "-framework CoreGraphics")		# SdlDisplays' panel size
+  endif()
+  # Linux has no icon in the executable: the window sets Generals.ico's pixels on itself (SdlGameEngine).
+  # The Mac app's icon is the bundle's.
+  if(ZH_PLATFORM_LINUX)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(ZH_WINDOW_ICON_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/zh_window_icon.h)
+    add_custom_command(OUTPUT ${ZH_WINDOW_ICON_HEADER}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/generated
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tools/generals-icon.py header
+              ${CMAKE_CURRENT_SOURCE_DIR}/Main/Generals.ico ${ZH_WINDOW_ICON_HEADER}
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Main/Generals.ico ${CMAKE_CURRENT_SOURCE_DIR}/Tools/generals-icon.py
+      COMMENT "Window icon from Main/Generals.ico")
+    target_sources(sdldevice PRIVATE ${ZH_WINDOW_ICON_HEADER})
+    target_include_directories(sdldevice PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    target_compile_definitions(sdldevice PRIVATE ZH_WINDOW_ICON)
   endif()
 
   add_executable(generals ${CMAKE_CURRENT_SOURCE_DIR}/Main/PosixMain.cpp)
@@ -1937,6 +2024,10 @@ if(ZH_PLATFORM_POSIX)
     DEPENDS ${ZH_OVERLAY_INPUTS} ${CMAKE_CURRENT_SOURCE_DIR}/Tools/stage-overlay.sh
     COMMENT "Staging the fork's overlay (P1)" VERBATIM)
   add_custom_target(zh_overlay ALL DEPENDS ${CMAKE_BINARY_DIR}/overlay.staged)
+  if(TARGET water_preview)
+    add_dependencies(water_preview zh_overlay)
+  endif()
+
   add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/overlay-dev.staged
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/Tools/stage-overlay.sh ${CMAKE_CURRENT_SOURCE_DIR}/Data ""
@@ -2118,6 +2209,22 @@ endfunction()
 add_lib_test(test_msvc_float_casts)
 target_include_directories(test_msvc_float_casts PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Include)
 
+# MilesAudioDevice/AudioMixPolicy.h: the battle mix's budget, folding and occlusion arithmetic.
+add_lib_test(test_audio_mix_policy)
+target_include_directories(test_audio_mix_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Include)
+
+add_lib_test(test_hazard_cloud_policy)
+set_target_properties(test_hazard_cloud_policy PROPERTIES CXX_STANDARD 17)
+target_include_directories(test_hazard_cloud_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Include)
+# Exercise the neutral core and no-backend contract without SDL or a graphics
+# device, on every platform (including builds that use the SDL backend in game).
+target_sources(test_hazard_cloud_policy PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloud.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudCore.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudShader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudFlow.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudUnsupported.cpp)
+
 add_lib_test(test_wwmath wwmath wwlib wwsaveload wwdebug)
 target_include_directories(test_wwmath PRIVATE ${WW}/WWLib ${WW}/WWSaveLoad ${WW}/Wwutil)
 # R1, smooth motion: W3DSmoothMotion.h's blend and verdicts, header-only over WWMath.
@@ -2144,6 +2251,15 @@ target_include_directories(test_wwutil PRIVATE ${WW}/Wwutil ${WW}/WWLib ${WW}/WW
 # Lib/Clock.h is header-only and links nothing, so this runs on both platforms from day one -
 # which matters, because the macOS half of that header is the half nobody has ever executed.
 add_lib_test(test_clock)
+if(ZH_PLATFORM_LINUX)
+  add_lib_test(test_water_preview_preset)
+  set_target_properties(test_water_preview_preset PROPERTIES CXX_STANDARD 17)
+  target_include_directories(test_water_preview_preset PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Tools)
+endif()
+add_lib_test(test_modern_water_config)
+set_target_properties(test_modern_water_config PROPERTIES CXX_STANDARD 17)
+target_compile_definitions(test_modern_water_config PRIVATE
+  MODERN_WATER_INI_PATH="${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/ModernWater.ini")
 if(ZH_PLATFORM_WINDOWS)
   target_link_libraries(test_clock PRIVATE winmm)		# Clock.h's Windows half: timeGetTime, timeBeginPeriod (W2)
 endif()
@@ -2188,6 +2304,11 @@ add_lib_test(test_dx11pipeline dx11device dx11state dx11layout ffshader ffvertex
 add_lib_test(test_dx11resource dx11resource dx11device)
 add_lib_test(test_engineshader engineshader)
 add_lib_test(test_dx11backend dx11backend)
+# The hazard clouds' text, which the backend compiles for DX11HazardCloud.cpp.
+target_sources(test_dx11backend PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudShader.cpp)
+target_include_directories(test_dx11backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Include)
+set_target_properties(test_dx11backend PROPERTIES CXX_STANDARD 17)
 add_lib_test(test_dx11post dx11post dx11device user32)
 add_lib_test(test_dx11twin dx11twin dx11device)
 add_lib_test(test_dx11texture dx11texture dx11device user32)
@@ -2286,11 +2407,26 @@ set_target_properties(test_water_grid PROPERTIES CXX_STANDARD 17)
 if(ZH_PLATFORM_POSIX)
   target_link_libraries(test_water_grid PRIVATE posixdevice w3ddevice)
 endif()
+# The rank ladder's arithmetic (RankLadder, GlobalData.cpp): thresholds, pins, the one-grade clip, the
+# stat split.  Linked like test_water_grid.
+add_lib_test(test_rank_ladder gameengine)
+target_sources(test_rank_ladder PRIVATE ${TESTS}/test_gameengine_stubs.cpp)
+set_target_properties(test_rank_ladder PROPERTIES CXX_STANDARD 17)
+if(ZH_PLATFORM_POSIX)
+  target_link_libraries(test_rank_ladder PRIVATE posixdevice w3ddevice)
+endif()
 # Off Windows the device layer's hooks are the game's own: the renderer's from W3DDevice, the CD
 # manager from PosixDevice.  On Windows the test's own stubs stand in for gameenginedevice, which it
 # does not link (B6).
 if(ZH_PLATFORM_POSIX)
   target_link_libraries(test_gameengine PRIVATE posixdevice w3ddevice)
+else()
+  # FunctionLexicon pulls in OptionsMenu, which queries the cloud capability.
+  # These tests omit gameenginedevice, so use its real no-backend entry points.
+  foreach(name test_gameengine test_terrain_golden test_water_grid test_rank_ladder)
+    target_sources(${name} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudUnsupported.cpp)
+  endforeach()
 endif()
 # the well-known Dict keys and a handful of device/exe entry points live in
 # GameEngineDevice, which Phase 4 ports; stand-ins until then.
@@ -2311,10 +2447,10 @@ target_compile_definitions(test_gameengine PRIVATE
   OPTIONS_MENU_WND="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Menus/OptionsMenuClassic.wnd"
   PLATE_TEXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Data/Art/Textures")
 
-# W3: these three link the engine without its device and WinMain, whose Debug-only names it reads
+# W3: these four link the engine without its device and WinMain, whose Debug-only names it reads
 # (Tests/debug_build_stubs.cpp; empty outside _DEBUG).
 if(MSVC)
-  foreach(name test_gameengine test_terrain_golden test_water_grid)
+  foreach(name test_gameengine test_terrain_golden test_water_grid test_rank_ladder)
     target_sources(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Tests/debug_build_stubs.cpp)
     target_compile_definitions(${name} PRIVATE ZH_DEBUG_STUBS_ENGINE)
   endforeach()
@@ -2360,6 +2496,16 @@ target_link_libraries(miles_smoke PRIVATE milesaudio)
 # From Run/, where the FFmpeg DLLs the backend decodes with are.
 add_test(NAME miles_smoke COMMAND miles_smoke
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../Run)
+
+# The air, room and duck of the miniaudio backend, in the offline mix a -wav run records.  The
+# backend is compiled in on its own: milesaudio here carries the XAudio2 half and the FFmpeg DLLs
+# that only Run/ has.  The source keeps its MA_ prefix (the property above is the directory's), so
+# the test calls it by the same names.
+add_executable(test_miles_effects ${TESTS}/test_miles_effects.cpp ${WW}/Miles6/miniaudio/miles_miniaudio.cpp)
+set_source_files_properties(${TESTS}/test_miles_effects.cpp PROPERTIES COMPILE_DEFINITIONS MSS_BACKEND_PREFIX=MA_)
+target_include_directories(test_miles_effects PRIVATE ${WW}/Miles6/include ${WW}/WWLib)
+target_link_libraries(test_miles_effects PRIVATE test_harness miniaudio)
+add_test(NAME test_miles_effects COMMAND test_miles_effects)
 endif()  # ZH_PLATFORM_WINDOWS - device and codec smoke tests
 
 if(ZH_PLATFORM_POSIX)
@@ -2387,6 +2533,11 @@ if(ZH_GAME_DATA)
 else()
   set_tests_properties(test_miles_miniaudio PROPERTIES ENVIRONMENT "ZH_AUDIO_BACKEND=null")
 endif()
+# The same file Windows runs: the air, room and duck in the offline mix.
+add_executable(test_miles_effects ${TESTS}/test_miles_effects.cpp)
+target_include_directories(test_miles_effects PRIVATE ${WW}/Miles6/include)
+target_link_libraries(test_miles_effects PRIVATE test_harness milesaudio)
+add_test(NAME test_miles_effects COMMAND test_miles_effects)
 
 # For human ears, not ctest: plays one sound from a .big archive (or a loose file) on the real
 # device, through the same API, at a chosen volume and pan.
@@ -2537,6 +2688,10 @@ target_link_libraries(fs_oracle PRIVATE wwlib wwdebug)
 # SKIPPED for that step and says how many it did not check.
 find_program(ZH_SPIRV_VAL spirv-val)
 add_lib_test(test_shader_sdl ffvertex engineshader sdl3shadercompile)
+# Reflect the Linux Modern water blocks against their CPU upload structures.
+if(ZH_PLATFORM_LINUX)
+  target_link_libraries(test_shader_sdl PRIVATE spirv-cross-c)
+endif()
 if(ZH_SPIRV_VAL)
   set_tests_properties(test_shader_sdl PROPERTIES ENVIRONMENT "ZH_SPIRV_VAL=${ZH_SPIRV_VAL}")
 endif()
@@ -2680,8 +2835,8 @@ if(Python3_Interpreter_FOUND)
 
   # A translation is a .str of thousands of lines, and one printf directive lost or reordered in any
   # of them reads the wrong argument the moment that line is formatted.  The check parses the tracked
-  # Turkish and German masters the way GameText.cpp does, and against Run/EnglishZH.big when it is
-  # there.
+  # Turkish, German, Ukrainian, Russian and French masters the way GameText.cpp does, and against
+  # Run/EnglishZH.big when it is there.
   add_test(NAME gametext_selfcheck
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/Tools/gametext.py selfcheck)
@@ -2827,7 +2982,7 @@ if(ZH_PLATFORM_POSIX)
     endforeach()
   elseif(ZH_PLATFORM_LINUX)
     foreach(_zh_test sdl_gpu_frame_selfcheck sdl_program_cache_selfcheck sdl_pipeline_state_selfcheck
-                     posix_gpu_draw_selfcheck ffref_gpu_selfcheck ffref_capture_selfcheck)
+                     posix_gpu_draw_selfcheck ffref_gpu_selfcheck ffref_capture_selfcheck test_sun_shadow_sorting)
       if(TEST ${_zh_test})
         set_property(TEST ${_zh_test} APPEND PROPERTY ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen")
       endif()

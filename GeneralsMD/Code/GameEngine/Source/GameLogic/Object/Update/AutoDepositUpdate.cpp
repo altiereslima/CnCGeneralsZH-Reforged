@@ -90,7 +90,7 @@ void parseUpgradePair( INI *ini, void *instance, void *store, const void *userDa
 		throw INI_INVALID_DATA;
 
 
-	token = ini->getNextTokenOrNull( ini->getSepsColon() );
+	token = ini->getNextToken( ini->getSepsColon() );		// as OCLUpdate's: a short line throws, not reads NULL
 	if ( strcasecmp(token, "Boost") == 0 )
 		info.amount = INI::scanInt(ini->getNextToken( ini->getSepsColon() ));
 	else

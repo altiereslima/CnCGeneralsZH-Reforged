@@ -1025,6 +1025,7 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WideChar *text
 	//
 	while (text != NULL) {
 		WideChar ch = *text++;
+		bool wrapped_on_space = false;
 		//
 		//	Determine how much horizontal space this character requires; a hotkey '&' is
 		//	dropped and its letter drawn like the rest, as in Build_Sentence_Centered
@@ -1091,6 +1092,8 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WideChar *text
 						Cursor.X = 0;
 						Cursor.Y += char_height;
 						calcHotKeyX = true;
+						// the space that broke the line is dropped, or the next line starts one space in
+						wrapped_on_space = true;
 					}
 				}
 
@@ -1122,10 +1125,10 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WideChar *text
 			}
 		}
 		
-		if (ch != u'\n' ) {
+		if (ch != u'\n' && !wrapped_on_space) {
 
 			//
-			//	Ensure the surface is locked	
+			//	Ensure the surface is locked
 			//
 			if (!justCalcExtents)
 			{

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -286,6 +287,11 @@ void Animatable3DObjClass::Release( void )
  *   12/8/98    GTH : Created.                                                                 *
  *=============================================================================================*/
 void Animatable3DObjClass::Render(RenderInfoClass & rinfo)
+{
+	Pose_For_Render();
+}
+
+void Animatable3DObjClass::Pose_For_Render(void)
 {
 	if (HTree == NULL) return;
 

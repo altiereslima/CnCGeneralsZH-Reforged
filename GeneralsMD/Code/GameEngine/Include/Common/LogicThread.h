@@ -32,14 +32,15 @@
 
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <vector>
 
 class Drawable;
 class Player;
 
 /**
-	* `-logicthread 0` runs the tick on the main thread, as it always ran.
-	* `-logicthread 1`, the default, hands every tick to a dedicated thread; outside a network game
+	* `-logicthread 0`, the default since v3.3.0's crash reports, runs the tick on the main thread.
+	* `-logicthread 1` hands every tick to a dedicated thread; outside a network game
 	* the render draws beside it (phases 3 and 4), reading only the copies taken at the sync point.
 	* `-logicthread 2` adds jitter to the tick to shake out races.
 	*
@@ -151,6 +152,27 @@ namespace LogicThread
 		Bool closeOrDrawAgain( Real pictureMS );
 	private:
 		Bool m_open;
+	};
+
+	/** Live render objects between the tick and a fork that poses them.  The sun's shadow pass holds it
+		* on the main thread across its pose fork; the tick takes it (TickReachesLiveModels) wherever it
+		* reaches a live model through Drawable::getDrawModulesFlushed, which can set a model's state or
+		* pose its bones.  Neither side waits for the other while holding it, so neither can deadlock, and
+		* a bone read lands at the same pose either side of the fork: posing is a function of the model
+		* and the frame's sync time alone.  Recursive, because those reaches nest. */
+	extern std::recursive_mutex g_liveModelLock;
+
+	/** The tick's half of g_liveModelLock; nothing on any other thread, where the tick is not running
+		* beside a fork. */
+	class TickReachesLiveModels
+	{
+	public:
+		TickReachesLiveModels( void ) : m_locked( t_isLogicThread ) { if( m_locked ) g_liveModelLock.lock(); }
+		~TickReachesLiveModels( void ) { if( m_locked ) g_liveModelLock.unlock(); }
+	private:
+		TickReachesLiveModels( const TickReachesLiveModels & );
+		TickReachesLiveModels &operator=( const TickReachesLiveModels & );
+		Bool m_locked;
 	};
 
 	/** LOGIC-THREAD.md phase 3, step 3b, the overlap.  GameClient::update calls this in front of the

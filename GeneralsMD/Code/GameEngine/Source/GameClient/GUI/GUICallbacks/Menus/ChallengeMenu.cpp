@@ -49,6 +49,7 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameClient/KeyDefs.h"
+#include "GameClient/MapUtil.h"
 #include "GameClient/MessageBox.h"
 #include "GameClient/Shell.h"
 #include "GameClient/WindowLayout.h"
@@ -144,6 +145,44 @@ Int findPositionButton( Int controlID )
 
 
 //-------------------------------------------------------------------------------------------------
+// A general the loaded data cannot field: a mod's ChallengeMode.ini names a player template, a
+// campaign, a map or an opponent its files lack, and the game found out only at the start, in a
+// crash.  The data does not change while the game runs, so each is decided and logged once.
+//-------------------------------------------------------------------------------------------------
+static Bool canPlayGeneral( Int index )
+{
+	static Bool s_checked[NUM_GENERALS];
+	static Bool s_playable[NUM_GENERALS];
+	if (s_checked[index])
+		return s_playable[index];
+	s_checked[index] = TRUE;
+
+	const GeneralPersona &general = TheChallengeGenerals->getChallengeGenerals()[index];
+	const PlayerTemplate *playerTemplate = ThePlayerTemplateStore->getNthPlayerTemplate(ThePlayerTemplateStore->getTemplateNumByName(general.getPlayerTemplateName()));
+	Campaign *campaign = TheCampaignManager->findCampaign(general.getCampaign());
+	AsciiString missing;
+	if (playerTemplate == NULL || playerTemplate->getStartingBuilding().isEmpty())
+		missing.format("player template %s", general.getPlayerTemplateName().str());
+	else if (campaign == NULL || campaign->getNextMission(NULL) == NULL)
+		missing.format("campaign %s", general.getCampaign().str());
+	else
+	{
+		for (Campaign::MissionListIt it = campaign->m_missions.begin(); missing.isEmpty() && it != campaign->m_missions.end(); ++it)
+		{
+			if (!TheFileSystem->doesFileExist((*it)->m_mapName.str()))
+				missing.format("map %s", (*it)->m_mapName.str());
+			else if (TheChallengeGenerals->getGeneralByGeneralName((*it)->m_generalName) == NULL)
+				missing.format("opponent %s", (*it)->m_generalName.str());
+		}
+	}
+	if (missing.isNotEmpty())
+		DEBUG_LOG(("ChallengeMenu: general %d is left out, the data has no %s\n", index, missing.str()));
+
+	s_playable[index] = missing.isEmpty();
+	return s_playable[index];
+}
+
+//-------------------------------------------------------------------------------------------------
 // enable the appropriate buttons, make sure they aren't hidden, and set the correct images
 //-------------------------------------------------------------------------------------------------
 void setEnabledButtons()
@@ -151,8 +190,9 @@ void setEnabledButtons()
 	for (Int i = 0; i < NUM_GENERALS; i++)
 	{
 		const GeneralPersona* generals = TheChallengeGenerals->getChallengeGenerals();
-		buttonGeneralPosition[i]->winEnable(generals[i].isStartingEnabled());
-		buttonGeneralPosition[i]->winHide(! generals[i].isStartingEnabled());
+		const Bool playable = generals[i].isStartingEnabled() && canPlayGeneral(i);
+		buttonGeneralPosition[i]->winEnable(playable);
+		buttonGeneralPosition[i]->winHide(!playable);
 
 		Int templateNum = ThePlayerTemplateStore->getTemplateNumByName(generals[i].getPlayerTemplateName());
 		const PlayerTemplate *playerTemplate = ThePlayerTemplateStore->getNthPlayerTemplate(templateNum);

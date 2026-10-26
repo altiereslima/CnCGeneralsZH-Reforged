@@ -64,6 +64,7 @@
 #include "Common/GameType.h"
 #include "Common/AsciiString.h"
 #include "Common/GlobalData.h"
+#include <vector>
 
 //-----------------------------------------------------------------------------
 //           Forward References
@@ -75,6 +76,7 @@ class W3DTreeDrawModuleData;
 struct BreezeInfo;
 class GeometryInfo;
 class W3DProjectedShadow;
+struct SunShadowCasterCull;
 
 //-----------------------------------------------------------------------------
 //           Type Defines
@@ -130,7 +132,8 @@ typedef struct {
 	Int			swayType;					///< Which sway array entry we are using.
 
 	Int			firstIndex;				///< First index in the vertex buffer for this tree.
-	Int     bufferNdx;				///< Which vertex buffer this is in.
+	Int     bufferNdx;				///< Which vertex buffer this is in, -1 when the last fill left it out.
+	Bool		moved;						///< Its vertices changed since updateVertexBuffer last wrote them.
 
 	// Topple parameters. [7/7/2003]
 	Real					m_angularVelocity;				///< Velocity in degrees per frame (or is it radians per frame?)
@@ -222,8 +225,11 @@ public:
 	/// Empties the tree buffer.
 	void setBounds(const Region2D &bounds) {m_bounds = bounds;}
 	/// Draws the trees.  Uses camera for culling.
-	void drawTrees(CameraClass * camera, RefRenderObjListIterator *pDynamicLightsIterator);
+	void drawTrees(CameraClass * camera, RefRenderObjListIterator *pDynamicLightsIterator,
+		const CameraClass *sunCamera = NULL);
 	void stepTrees(void);	///< the toppling and pushed trees, once a logic frame, at the render's sync point
+	Int drawModelShadowCasters(RenderInfoClass &sunInfo, const SunShadowCasterCull &cull); ///< the object trees drawn into the sun's map
+	Int getSunCasterTrees(void) const {return m_sunCasterTrees;} ///< batched trees the last sun pass drew
 	/// Called when the view changes, and sort key needs to be recalculated.
 	/// Normally sortKey gets calculated when a tree becomes visible.
 	void doFullUpdate(void) {m_updateAllKeys = true;};
@@ -259,6 +265,19 @@ private:
 				MAX_SHADOW_BATCH_VERTEX = 8000};	///< per texture, per frame
 	DX8VertexBufferClass	*m_vertexTree[MAX_BUFFERS];	///<Tree vertex buffer.
 	DX8IndexBufferClass			*m_indexTree[MAX_BUFFERS];	///<indices defining a triangles for the tree drawing.
+	struct ShadowRange { Int first, count; };
+	std::vector<ShadowRange> m_shadowRanges[MAX_BUFFERS];
+	Bool m_lastShadowsForProps = FALSE;
+	Int m_sunCasterTrees = 0;
+	// What the last sun pass culled against: both views' frustum planes, the silhouette stretch and
+	// ShadowsForProps.  The next pass with the same key and no tree changed keeps its visible flags
+	// rather than walking every tree again; any tree change or a screen-only cull drops the key.
+	enum { SUN_CULL_KEY = 2*6*4 + 4 };
+	Real m_sunCullKey[SUN_CULL_KEY];
+	Int m_sunCullTrees = 0;
+	Bool m_sunCullValid = FALSE;
+	Bool m_movedSinceCull = FALSE;	///< a tree moved since the last full cull (a sinking one's sort key moves)
+	std::vector<Int> m_movedTrees;	///< the trees with moved set, in the order stepTrees moved them
 	IDirect3DPixelShader9 *	m_dwTreePixelShader;	///<D3D pixel shader
 	IDirect3DVertexShader9 * m_dwTreeVertexShader;	///<D3D vertex shader
 	IDirect3DVertexDeclaration9 * m_treeVertexDeclaration;	///<what D3D8 carried beside the shader
@@ -312,10 +331,10 @@ protected:
 	void updateSway(const BreezeInfo& info);
 	void loadTreesInVertexAndIndexBuffers(RefRenderObjListIterator *pDynamicLightsIterator); ///< Fills the index and vertex buffers for drawing.
 	void updateVertexBuffer(void); ///< Fills the index and vertex buffers for drawing.
-	void drawTreeBuffers(Bool shadowPass); ///< Draws every filled buffer, as trees or as their shadows.
+	void drawTreeBuffers(Bool shadowPass, Bool sunPass = FALSE); ///< Draws every filled buffer, as trees or as their shadows.
 	void drawModelShadows(CameraClass *camera, Real stretchX, Real stretchY); ///< the object trees' shadows
 	Int  addShadowTexture(TextureClass *tex);	///< index of this texture in the shadow list, adding it if new
-	void cull(const CameraClass * camera);						 ///< Culls the trees.
+	void cull(const CameraClass * camera, const CameraClass *sunCamera = NULL); ///< Culls the trees.
 	UnsignedInt  doLighting(const Vector3 *normal,  
 		const GlobalData::TerrainLighting	*objectLighting, 
 		const Vector3 *emissive, UnsignedInt vertexDiffuse, Real scale) const;

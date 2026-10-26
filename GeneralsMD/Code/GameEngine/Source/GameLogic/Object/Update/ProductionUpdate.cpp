@@ -432,6 +432,12 @@ Bool ProductionUpdate::queueCreateUnit( const ThingTemplate *unitType, Productio
 	// if we can't create the unit do nothing
 	if( TheBuildAssistant->canMakeUnit( getObject(), unitType ) != CANMAKE_OK )
 		return FALSE;
+	// the factory makes its own side's unit: asked by the AI for an AmericaVehicleChinook, a Turkiye
+	// Supply Center makes a TurkiyeVehicleChinook, and an American one never a Turkish reskin.  A
+	// special power's construction (canMakeUnit's first OK) has no build button to read.
+	const ThingTemplate *buttonType = TheBuildAssistant->findBuildButtonTemplate( getObject(), unitType );
+	if( buttonType != NULL )
+		unitType = buttonType;
 
 	ExitDoorType exitDoor = DOOR_NONE_AVAILABLE;
 

@@ -41,6 +41,7 @@
 #include "ffvertex.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -286,6 +287,224 @@ static void check_constants(PosixDevice9 *device)
 	CHECK(pixel.TextureFactor[0] == 1.0f && near_value(pixel.TextureFactor[1], 0x40 / 255.0)
 		&& pixel.TextureFactor[2] == 0.0f && near_value(pixel.TextureFactor[3], 0x80 / 255.0));
 	CHECK(near_value(vertex.GlobalAmbient[0], 0x33 / 255.0) && near_value(vertex.GlobalAmbient[2], 0x99 / 255.0));
+
+	// Water must reconstruct world coordinates from the same projection that drew its geometry.
+	// Check the inverse by composing it with an independently calculated view/projection product.
+	const float water_registers[6][4] = { { 12.5f, 1, 1, 0 }, { -0.8f, -0.6f, 0.9f, 0.7f },
+		{ 0.2f, -0.3f, 0.8f, 0 }, { 0.7f, 0.6f, 0.5f, 0 }, { 160, 5120, 159.375f, 1 },
+		{ 2.7f, 0.75f, 1.0f, 0 } };
+	device->SetPixelShaderConstantF(1, &water_registers[0][0], 6);
+	SdlWaterPixelConstants water;
+	device->Build_Water_Constants(pixel, water);
+	bool inverse = true;
+	for (int r = 0; r < 4; ++r) for (int c = 0; c < 4; ++c) {
+		double identity = 0;
+		for (int k = 0; k < 4; ++k) for (int j = 0; j < 4; ++j)
+			identity += view[r][j] * projection[j][k] * water.WorldFromClip[k * 4 + c];
+		inverse = inverse && fabs(identity - (r == c ? 1.0 : 0.0)) < 0.0001;
+	}
+	CHECK(inverse);
+	CHECK(near_value(water.CameraPosition[0], -20) && near_value(water.CameraPosition[1], 10)
+		&& near_value(water.CameraPosition[2], -30));
+	CHECK(memcmp(&water.Combiner, &pixel, sizeof(pixel)) == 0);
+	CHECK(memcmp(water.WaterParameters, water_registers[0], 16) == 0);
+	CHECK(memcmp(water.ReflectionArea, water_registers[1], 16) == 0);
+	CHECK(memcmp(water.SunDirection, water_registers[2], 16) == 0);
+	CHECK(memcmp(water.SunColour, water_registers[3], 16) == 0);
+	CHECK(memcmp(water.TerrainParameters, water_registers[4], 16) == 0);
+	CHECK(memcmp(water.OpticalParameters, water_registers[5], 16) == 0);
+	// Capability-dependent FFT enablement is supplied only after native preparation succeeds,
+	// never inherited from the engine register bank or an earlier ocean draw.
+	CHECK(water.FftParameters[0]==0 && water.FftParameters[1]==0);
+	// The last vessel's last contour vertex must survive the complete register-to-uniform path.
+	// A shorter legacy pixel bank silently loses this end of the runtime hull field.
+	float hull_registers[81][4] = {};
+	hull_registers[0][0] = 8;
+	for (int r=1;r<81;++r) for (int c=0;c<4;++c) hull_registers[r][c]=float(r*4+c)+0.25f;
+	CHECK(device->SetPixelShaderConstantF(7,&hull_registers[0][0],81)==D3D_OK);
+	float standing_parameters[4]={12.5f,0,1,0};
+	device->SetPixelShaderConstantF(1,standing_parameters,1);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(memcmp(water.HullParameters,hull_registers[0],16)==0);
+	CHECK(memcmp(water.HullData,hull_registers[1],sizeof(water.HullData))==0);
+	// The optional foam contour is a distinct tail, never a replacement for the mean hull used
+	// by displacement. Exercise every register, including the twelfth vertex of hull eight.
+	CHECK(sizeof(water)==186*16 && offsetof(SdlWaterPixelConstants,ContactHullData)==100*16);
+	float contact_registers[80][4]={};
+	for(int r=0;r<80;++r)for(int c=0;c<4;++c)contact_registers[r][c]=-float(r*4+c)-0.75f;
+	CHECK(device->SetPixelShaderConstantF(96,&contact_registers[0][0],80)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(memcmp(water.ContactHullData,contact_registers,sizeof(contact_registers))==0);
+	CHECK(memcmp(water.HullParameters,hull_registers[0],16)==0);
+	CHECK(memcmp(water.HullData,hull_registers[1],sizeof(water.HullData))==0);
+	// Fill lights use the old gap before contact registers. Removing lights must explicitly
+	// clear their colours/main enable so a later map or time-of-day cannot inherit illumination.
+	CHECK(offsetof(SdlWaterPixelConstants,FoamFillLights)==180*16);
+	float fill_registers[4][4]={{.6f,0,.8f,1},{.3f,.2f,.1f,0},{0,.8f,.6f,0},{.1f,.2f,.3f,0}};
+	CHECK(device->SetPixelShaderConstantF(90,&fill_registers[0][0],4)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(memcmp(water.FoamFillLights,fill_registers,sizeof(fill_registers))==0);
+	CHECK(memcmp(water.ContactHullData,contact_registers,sizeof(contact_registers))==0);
+	memset(fill_registers,0,sizeof(fill_registers));fill_registers[0][3]=1;
+	CHECK(device->SetPixelShaderConstantF(90,&fill_registers[0][0],4)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);CHECK(memcmp(water.FoamFillLights,fill_registers,sizeof(fill_registers))==0);
+	// Material state has explicit registers between fill lights and contact geometry.
+	// It must survive packing without borrowing light components, and clear on the next draw.
+	const float material[2][4]={{45/255.0f,58/255.0f,11/255.0f,.67f},{1,.8f,1,0}};
+	CHECK(device->SetPixelShaderConstantF(ModernWaterMaterial::RegisterColor,material[0],2)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(memcmp(water.MaterialColor,material[0],16)==0 && memcmp(water.MaterialParameters,material[1],16)==0);
+	CHECK(memcmp(water.ContactHullData,contact_registers,sizeof(contact_registers))==0);
+	CHECK(memcmp(water.FoamFillLights,fill_registers,sizeof(fill_registers))==0);
+	const float clearMaterial[2][4]={};
+	CHECK(device->SetPixelShaderConstantF(ModernWaterMaterial::RegisterColor,clearMaterial[0],2)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(memcmp(water.MaterialColor,clearMaterial[0],16)==0 && memcmp(water.MaterialParameters,clearMaterial[1],16)==0);
+	fill_registers[0][3]=0;CHECK(device->SetPixelShaderConstantF(90,&fill_registers[0][0],4)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);CHECK(memcmp(water.FoamFillLights,fill_registers,sizeof(fill_registers))==0);
+	CHECK(device->SetPixelShaderConstantF(175,contact_registers[79],1)==D3D_OK);
+	CHECK(device->SetPixelShaderConstantF(WaterHullVisualLayout::PixelRegisterCount,contact_registers[79],1)==D3DERR_INVALIDCALL);
+	// Exact mesh transport extends the emulated bank deliberately, without moving the old
+	// 186-register native vertex prefix or copying the reserved engine-register gap into metadata.
+	using namespace WaterHullVisualLayout;
+	CHECK(PosixDevice9::PIXEL_SHADER_CONSTANT_COUNT==896);
+	CHECK(sizeof(SdlWaterVisualPixelConstants)==194*16 && offsetof(SdlWaterVisualPixelConstants,VisualHullMeta)==186*16);
+	CHECK(VertexCommonRegisters==186 && FragmentCommonRegisters==194);
+	CHECK(BlockOffset(0)==0 && BlockOffset(1)==256 && BlockOffset(2)==512);
+	CHECK(BlockRegisters(0)==256 && BlockRegisters(1)==256 && BlockRegisters(2)==192);
+	float visualMeta[8][4]={};float visualPacket[704][4]={};float reserved[8][4]={};
+	for(unsigned h=0;h<8;++h)for(unsigned c=0;c<4;++c){visualMeta[h][c]=float(h*4+c)+.5f;reserved[h][c]=-99;}
+	for(unsigned r=0;r<704;++r)for(unsigned c=0;c<4;++c)visualPacket[r][c]=float(r*4+c)+.25f;
+	CHECK(device->SetPixelShaderConstantF(176,visualMeta[0],8)==D3D_OK);
+	CHECK(device->SetPixelShaderConstantF(184,reserved[0],8)==D3D_OK);
+	CHECK(device->SetPixelShaderConstantF(192,visualPacket[0],704)==D3D_OK);
+	CHECK(device->SetPixelShaderConstantF(895,visualPacket[703],1)==D3D_OK);
+	CHECK(device->SetPixelShaderConstantF(895,visualPacket[703],2)==D3DERR_INVALIDCALL);
+	CHECK(device->SetPixelShaderConstantF(896,visualPacket[703],1)==D3DERR_INVALIDCALL);
+	SdlWaterVisualPixelConstants visual;
+	device->Build_Water_Visual_Constants(water,visual);
+	CHECK(memcmp(&visual.Water,&water,sizeof(water))==0);
+	CHECK(memcmp(visual.VisualHullMeta,visualMeta,sizeof(visualMeta))==0);
+	// After an ocean, missing/zero metadata must replace every previously populated slot.
+	memset(visualMeta,0,sizeof(visualMeta));CHECK(device->SetPixelShaderConstantF(176,visualMeta[0],8)==D3D_OK);
+	device->Build_Water_Visual_Constants(water,visual);CHECK(memcmp(visual.VisualHullMeta,visualMeta,sizeof(visualMeta))==0);
+	// The river/empty-hull safeguard is independent of the caller remembering to clear metadata.
+	CHECK(device->SetPixelShaderConstantF(176,reserved[0],8)==D3D_OK);
+	SdlWaterPixelConstants emptyWater=water;emptyWater.HullParameters[0]=0;
+	device->Build_Water_Visual_Constants(emptyWater,visual);CHECK(memcmp(visual.VisualHullMeta,visualMeta,sizeof(visualMeta))==0);
+	CHECK(device->SetPixelShaderConstantF(176,visualMeta[0],8)==D3D_OK);
+	// Sparse unsupported layouts cannot read bindings left behind by a different draw.
+	for(unsigned vs=0;vs<5;++vs)for(unsigned ps=0;ps<6;++ps)for(unsigned wv=0;wv<2;++wv)for(unsigned wp=0;wp<2;++wp) {
+		const bool expected=(vs<=1 || (wv && vs==2)) && (ps<=1 || (wp && ps==4));
+		CHECK(Sdl_Draw_Uniform_Buffers_Supported(wv,wp,vs,ps)==expected);
+	}
+
+	// Missing/failed contact geometry is uploaded as a complete zero block. A reused uniform
+	// object must not retain any preceding contour after the engine explicitly disables it.
+	memset(contact_registers,0,sizeof(contact_registers));
+	CHECK(device->SetPixelShaderConstantF(96,&contact_registers[0][0],80)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(memcmp(water.ContactHullData,contact_registers,sizeof(contact_registers))==0);
+	CHECK(memcmp(water.HullData,hull_registers[1],sizeof(water.HullData))==0);
+	// New flat meshes repurpose UV0 only when this per-draw flag reaches the shader. A legacy
+	// grid immediately following them must clear the flag while retaining all other optical data.
+	float correction_optics[4]={2.7f,.75f,1,1};
+	CHECK(device->SetPixelShaderConstantF(6,correction_optics,1)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(memcmp(water.OpticalParameters,correction_optics,sizeof(correction_optics))==0);
+	correction_optics[3]=0;
+	CHECK(device->SetPixelShaderConstantF(6,correction_optics,1)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(water.OpticalParameters[3]==0 && memcmp(water.OpticalParameters,water_registers[5],16)==0);
+	CHECK(device->SetPixelShaderConstantF(PosixDevice9::PIXEL_SHADER_CONSTANT_COUNT-1,
+		&hull_registers[0][0],2)==D3DERR_INVALIDCALL);
+	device->SetPixelShaderConstantF(1,water_registers[0],1);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(water.HullParameters[0]==0); // river following an ocean draw cannot reuse vessel foam
+	CHECK(near_value(water.Viewport[2], 64) && near_value(water.Viewport[3], 32));
+	// Scene depth is the hardware viewport depth, including a nondefault MinZ/MaxZ. Project a known
+	// point independently and reconstruct it, as both surface and submerged-object samples must do.
+	D3DVIEWPORT9 depth_viewport;
+	device->GetViewport(&depth_viewport);
+	depth_viewport.MinZ = 0.2f;
+	depth_viewport.MaxZ = 0.85f;
+	device->SetViewport(&depth_viewport);
+	device->Build_Water_Constants(pixel, water);
+	const double world_point[4] = { 17, -9, 53, 1 };
+	double clip[4] = {};
+	for (unsigned int c = 0; c < 4; ++c)
+		for (unsigned int r = 0; r < 4; ++r)
+			for (unsigned int j = 0; j < 4; ++j) clip[c] += world_point[r] * view[r][j] * projection[j][c];
+	const double device_point[4] = { clip[0] / clip[3], clip[1] / clip[3],
+		depth_viewport.MinZ + clip[2] / clip[3] * (depth_viewport.MaxZ - depth_viewport.MinZ), 1 };
+	double reconstructed[4] = {};
+	for (unsigned int c = 0; c < 4; ++c)
+		for (unsigned int r = 0; r < 4; ++r) reconstructed[c] += device_point[r] * water.WorldFromClip[r * 4 + c];
+	for (unsigned int c = 0; c < 3; ++c) CHECK(near_value(reconstructed[c] / reconstructed[3], world_point[c]));
+	depth_viewport.MinZ = 0;
+	depth_viewport.MaxZ = 1;
+	device->SetViewport(&depth_viewport);
+	memset(&m, 0, sizeof(m));
+	device->SetTransform(D3DTS_PROJECTION, &m);
+	device->Build_Water_Constants(pixel, water);
+	bool fallback = true;
+	for (int i = 0; i < 16; ++i) fallback = fallback && water.WorldFromClip[i] == (i % 5 == 0 ? 1.0f : 0.0f);
+	CHECK(fallback);
+}
+
+static void check_foam_history_constants(PosixDevice9 *device)
+{
+	// The two new registers fit after all eight complete hulls. A stale sampler binding or
+	// missing runtime texture must never activate history on the next material or water level.
+	SdlPixelConstants pixel={};SdlWaterPixelConstants water;
+	float parameters[4]={24.5f,0,1,0};
+	float history[2][4]={{-128,64,1.0f/1024,1.0f/512},{1,7,2,24.25f}};
+	CHECK(device->SetPixelShaderConstantF(1,parameters,1)==D3D_OK);
+	CHECK(device->SetPixelShaderConstantF(88,history[0],2)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);
+	CHECK(water.FoamHistoryParameters[0]==0 && !device->Water_Foam_History_Available());
+	IDirect3DTexture9 *texture=NULL,*attachment=NULL;
+	CHECK(device->CreateTexture(4,4,1,0,D3DFMT_A8R8G8B8,D3DPOOL_MANAGED,&texture,NULL)==D3D_OK);
+	CHECK(device->CreateTexture(4,4,1,D3DUSAGE_RENDERTARGET,D3DFMT_A8R8G8B8,D3DPOOL_DEFAULT,&attachment,NULL)==D3D_OK);
+	CHECK(device->SetTexture(14,texture)==D3D_OK);
+	IDirect3DBaseTexture9 *held=NULL;CHECK(device->GetTexture(14,&held)==D3D_OK && held==texture);if(held)held->Release();
+	device->Build_Water_Constants(pixel,water);
+	CHECK(device->Water_Foam_History_Available());
+	CHECK(memcmp(water.FoamHistoryArea,history[0],16)==0 && memcmp(water.FoamHistoryParameters,history[1],16)==0);
+	CHECK(water.HullData[79][3]==320.0f+3.25f); // the prior test's last vertex survived c88/c89
+	parameters[1]=1;device->SetPixelShaderConstantF(1,parameters,1);device->Build_Water_Constants(pixel,water);
+	CHECK(water.FoamHistoryParameters[0]==0 && water.HullParameters[0]==0);
+	parameters[1]=0;device->SetPixelShaderConstantF(1,parameters,1);
+	for(unsigned row=0;row<2;++row)for(unsigned c=0;c<4;++c) {
+		const float saved=history[row][c];history[row][c]=NAN;
+		device->SetPixelShaderConstantF(88,history[0],2);device->Build_Water_Constants(pixel,water);
+		CHECK(water.FoamHistoryParameters[0]==0);history[row][c]=saved;
+	}
+	for(unsigned field=0;field<3;++field) {
+		float *value=field<2?&history[0][2+field]:&history[1][2];const float saved=*value;*value=0;
+		device->SetPixelShaderConstantF(88,history[0],2);device->Build_Water_Constants(pixel,water);
+		CHECK(water.FoamHistoryParameters[0]==0);*value=saved;
+	}
+	device->SetPixelShaderConstantF(88,history[0],2);CHECK(device->SetTexture(14,attachment)==D3D_OK);
+	device->Build_Water_Constants(pixel,water);CHECK(water.FoamHistoryParameters[0]==0);
+	CHECK(device->SetTexture(14,texture)==D3D_OK);device->Build_Water_Constants(pixel,water);CHECK(water.FoamHistoryParameters[0]==1);
+	for(float flags:{2.f,3.f,5.f,6.f,7.f}) {
+		history[1][0]=flags;device->SetPixelShaderConstantF(88,history[0],2);device->Build_Water_Constants(pixel,water);
+		CHECK(device->Water_Foam_History_Available() && water.FoamHistoryParameters[0]==flags);
+	}
+	for(float flags:{4.f,8.f,5.5f}) {
+		history[1][0]=flags;device->SetPixelShaderConstantF(88,history[0],2);device->Build_Water_Constants(pixel,water);
+		CHECK(!device->Water_Foam_History_Available() && water.FoamHistoryParameters[0]==0);
+	}
+	IDirect3DTexture9 *odd=NULL;
+	CHECK(device->CreateTexture(4,3,1,0,D3DFMT_A8R8G8B8,D3DPOOL_MANAGED,&odd,NULL)==D3D_OK);
+	CHECK(device->SetTexture(14,odd)==D3D_OK);
+	history[1][0]=5;device->SetPixelShaderConstantF(88,history[0],2);CHECK(!device->Water_Foam_History_Available());
+	history[1][0]=1;device->SetPixelShaderConstantF(88,history[0],2);CHECK(device->Water_Foam_History_Available());
+	if(odd)odd->Release();
+	CHECK(device->SetTexture(14,NULL)==D3D_OK);device->Build_Water_Constants(pixel,water);CHECK(water.FoamHistoryParameters[0]==0);
+	if(texture)texture->Release();if(attachment)attachment->Release();
+	printf("posix_draw_resolve_selfcheck: history c88/c89, sampler14, invalid mapping, missing texture, river and attachment fallback checked\n");
 }
 
 int main()
@@ -302,6 +521,7 @@ int main()
 	check_combiner(device);
 	check_lights(device);
 	check_constants(device);
+	check_foam_history_constants(device);
 	device->Release();
 	d3d->Release();
 	if (failures != 0) {

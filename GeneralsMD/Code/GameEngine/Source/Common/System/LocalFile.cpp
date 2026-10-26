@@ -52,6 +52,7 @@
 #include <fcntl.h>
 #if defined(_WIN32)
 #include <io.h>
+#include <string>
 #else
 #include <unistd.h>
 #include "zhio.h"
@@ -135,7 +136,29 @@ enum
 	OPEN_READ_ONLY = _O_RDONLY
 };
 
-static inline int openFile(const Char *filename, int flags) { return _open(filename, flags, _S_IREAD | _S_IWRITE); }
+/* A name that comes out past MAX_PATH once Windows puts the working directory in front of it does not
+	 open through the narrow call.  A player's install 198 characters deep put the fork's
+	 ReforgedHudAmericaCommandBar.ini at 264: the directory scan listed it, the open refused it and the
+	 game stopped at start (crash report 1199).  The wide call takes the absolute name behind "\\?\",
+	 which has no such limit. */
+static int openFile(const Char *filename, int flags)
+{
+	const int handle = _open(filename, flags, _S_IREAD | _S_IWRITE);
+	if (handle != -1)
+		return handle;
+
+	const int wideLength = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
+	std::wstring wide(wideLength, L'\0');
+	MultiByteToWideChar(CP_ACP, 0, filename, -1, &wide[0], wideLength);
+	const DWORD fullLength = GetFullPathNameW(wide.c_str(), 0, NULL, NULL);
+	std::wstring full(fullLength, L'\0');
+	full.resize(GetFullPathNameW(wide.c_str(), fullLength, &full[0], NULL));
+	if (full.size() < MAX_PATH)
+		return handle;		// short enough: the narrow call's answer stands
+
+	const std::wstring prefixed = (full.compare(0, 2, L"\\\\") == 0) ? L"\\\\?\\UNC\\" + full.substr(2) : L"\\\\?\\" + full;
+	return _wopen(prefixed.c_str(), flags, _S_IREAD | _S_IWRITE);
+}
 static inline int readFile(int handle, void *buffer, Int bytes, Bool) { return _read(handle, buffer, bytes); }
 static inline int writeFile(int handle, const void *buffer, Int bytes) { return _write(handle, buffer, bytes); }
 static inline long seekFile(int handle, long offset, int origin) { return _lseek(handle, offset, origin); }

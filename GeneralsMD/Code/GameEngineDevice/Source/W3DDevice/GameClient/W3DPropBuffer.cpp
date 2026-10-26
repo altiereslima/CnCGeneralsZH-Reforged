@@ -110,6 +110,9 @@ void W3DPropBuffer::cull(CameraClass * camera)
 W3DPropBuffer::~W3DPropBuffer(void)
 {
 	Int i;
+	for (i=0; i<m_numProps; i++) {
+		REF_PTR_RELEASE(m_props[i].m_robj);
+	}
 	for (i=0; i<MAX_TYPES; i++) {
 		REF_PTR_RELEASE(m_propTypes[i].m_robj);
 	}
@@ -127,6 +130,7 @@ W3DPropBuffer::W3DPropBuffer(void)
 {
 	memset(this, sizeof(W3DPropBuffer), 0);
 	m_initialized = false;
+	m_numProps = 0;
 	clearAllProps();
 	m_light = NEW_REF( LightClass, (LightClass::DIRECTIONAL) );
 	m_propShroudMaterialPass = NEW_REF(W3DShroudMaterialPassClass,());
@@ -144,8 +148,11 @@ W3DPropBuffer::W3DPropBuffer(void)
 //=============================================================================
 void W3DPropBuffer::clearAllProps(void)
 {
-	m_numProps=0;
 	Int i;
+	for (i=0; i<m_numProps; i++) {
+		REF_PTR_RELEASE(m_props[i].m_robj);
+	}
+	m_numProps=0;
 	for (i=0; i<MAX_TYPES; i++) {
 		REF_PTR_RELEASE(m_propTypes[i].m_robj);
 		m_propTypes[i].m_robjName.clear();

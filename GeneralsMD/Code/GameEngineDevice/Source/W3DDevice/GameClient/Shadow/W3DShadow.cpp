@@ -34,6 +34,7 @@
 //
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
+#include "Platform/SunShadow.h"
 #include "always.h"
 #include "GameClient/View.h"
 #include "WW3D2/camera.h"
@@ -102,6 +103,7 @@ Bool volumeShadowCanReachView( const FrustumClass &view, const SphereClass &body
 DECLARE_PERF_TIMER(shadowsRender)
 void DoShadows(RenderInfoClass & rinfo, Bool stencilPass)
 {
+	SunShadow::ReceiverExclusion sunReceivers(DX8Wrapper::_Get_D3D_Device());
 	USE_PERF_TIMER(shadowsRender)
 	shadowCameraFrustum=&rinfo.Camera.Get_Frustum();
 	Int projectionCount=0;

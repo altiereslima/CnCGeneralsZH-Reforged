@@ -37,6 +37,7 @@ FrameData::FrameData()
 	m_commandList = NULL;
 	m_commandCount = 0;
 	m_frameCommandCount = -1;
+	m_frameInfoID = -1;
 	//Added By Sadullah Nader
 	//Initializations missing and needed
 	m_lastFailedCC = 0;
@@ -68,6 +69,7 @@ void FrameData::init()
 	m_commandList->reset();
 
 	m_frameCommandCount = -1;
+	m_frameInfoID = -1;
 	//DEBUG_LOG(("FrameData::init\n"));
 	m_commandCount = 0;
 	m_lastFailedCC = -2;
@@ -148,6 +150,17 @@ void FrameData::setFrameCommandCount(UnsignedInt frameCommandCount) {
  */
 UnsignedInt FrameData::getFrameCommandCount() {
 	return m_frameCommandCount;
+}
+
+/**
+ * Remember the id the author gave the frame info, so a copy we pass on is the same command.
+ */
+void FrameData::setFrameInfoID(UnsignedShort id) {
+	m_frameInfoID = id;
+}
+
+Int FrameData::getFrameInfoID() {
+	return m_frameInfoID;
 }
 
 /**

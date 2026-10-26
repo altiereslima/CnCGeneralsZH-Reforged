@@ -1,0 +1,16 @@
+# Renderer prototype pairs on Golden Oasis over Scenarios/geproto_oasis.txt. Run with a -video range
+# so this clock is the logic frame over 60. Each cut has two seconds to settle before its shot.
+
+0     hud     off
+3     cut     2750 3230 0.6 -45 0
+18    shot    # the fight, close: team colours of both sides
+18.3  cut     2250 3540 1.0 -45 0
+20    shot    # the base at play distance
+20.3  cut     2250 3540 1.6 -45 0
+22    shot    # the whole base, cliff top left
+22.3  cut     3040 900 1.0 -45 0
+24    shot    # the oasis water, banks and palms
+24.3  cut     2792 1357 0.5 0 -36
+26    shot    # the long bridge from above, water both sides
+26.3  cut     1860 1370 1.0 0 -36
+28    shot    # the cracked-mud approach to the Kandahar bridge

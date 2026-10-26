@@ -411,6 +411,7 @@ public:
 	inline Real getShockWaveTaperOff() const { return m_shockWaveTaperOff; }
 
 	inline Real getRequestAssistRange() const {return m_requestAssistRange;}
+	inline Bool seeksMostValuable() const { return m_seeksMostValuable; }
 	inline AsciiString getName() const { return m_name; }
 	inline AsciiString getProjectileStreamName() const { return m_projectileStreamName; }
 	inline AsciiString getLaserName() const { return m_laserName; }
@@ -419,6 +420,9 @@ public:
 	inline Real getWeaponSpeed() const { return m_weaponSpeed; }
 	inline Real getMinWeaponSpeed() const { return m_minWeaponSpeed; }
 	inline Bool isScaleWeaponSpeed() const { return m_isScaleWeaponSpeed; }
+	inline UnsignedInt getBallisticFlightFrames() const { return m_ballisticFlightFrames; }
+	inline Real getBallisticPeakHeight() const { return m_ballisticPeakHeight; }
+	Real getBallisticLaunchPitch(const Coord3D& from, const Coord3D& to) const;
 	inline Real getWeaponRecoilAmount() const { return m_weaponRecoil; }
 	inline Real getMinTargetPitch() const { return m_minTargetPitch; }
 	inline Real getMaxTargetPitch() const { return m_maxTargetPitch; }
@@ -512,6 +516,8 @@ private:
 	Real m_requestAssistRange;							///< My object will look this far around to get people to join in the attack.
 	Real m_aimDelta;												///< when aiming, consider yourself "aimed" if you are within +/- this much of an angle
 	Real m_scatterRadius;										///< Radius of area actual fire point will be in, default is zero for no deviation
+	Real m_blindScatterRadius;							///< added to the scatter when the firer's player cannot see where the shot is going
+	Bool m_seeksMostValuable;								///< fired at a unit, it goes for the most expensive enemy within its range instead
 	Real m_scatterTargetScalar;							///< Radius of area covered by the coordinates in the scatterTarget table
 	std::vector<Coord2D> m_scatterTargets;	///< instead of pure randomness, this is the list of places I will randomly choose from to attack
 	DamageType m_damageType;								///< damage type enum
@@ -519,6 +525,8 @@ private:
 	Real m_weaponSpeed;											///< speed of damage travel, in dist/frame
 	Real m_minWeaponSpeed;									///< speed of damage travel, in dist/frame
 	Bool m_isScaleWeaponSpeed;							///< Scale from min to normal based on range (for lobbers)
+	UnsignedInt m_ballisticFlightFrames;		///< nonzero: the shell flies a parabola and lands this many frames after launch, at any range
+	Real m_ballisticPeakHeight;							///< how far that parabola rises over the line from muzzle to target, at mid flight
 	Real m_weaponRecoil;										///< amt of recoil caused to firer, in rads
 	Real m_minTargetPitch;									///< min pitch from source->victim allowable in order to target
 	Real m_maxTargetPitch;									///< max pitch from source->victim allowable in order to target
@@ -695,6 +703,7 @@ public:
 
 	inline const WeaponTemplate* getTemplate() const { return m_template; }
 	inline WeaponSlotType getWeaponSlot() const { return m_wslot; }
+	inline Int getCurBarrel() const { return m_curBarrel; }
 	inline AsciiString getName() const { return m_template->getName(); }
 	inline UnsignedInt getLastShotFrame() const { return m_lastFireFrame; }						///< frame a shot was last fired on
 	// If we are "reloading", then m_ammoInClip is a lie.  It will say full.
@@ -929,6 +938,11 @@ extern Real Weapon_elevationRangeBonus( Real range, Real heightAboveTarget );
 
 ///< range as source reaches something standing at targetZ; an aircraft gets no high ground
 extern Real Weapon_elevatedRange( const Object *source, Real range, Real targetZ );
+
+///< source's enemies on the ground within radius of center, the most expensive first and the lower
+///< ObjectID first among equals, at most maxCount of them; the order is the same on every machine
+extern void Weapon_findMostValuableEnemies( const Object *source, const Coord3D *center, Real radius,
+																					 Int maxCount, std::vector<Object*>& found );
 
 #endif // __WEAPON_H_
 

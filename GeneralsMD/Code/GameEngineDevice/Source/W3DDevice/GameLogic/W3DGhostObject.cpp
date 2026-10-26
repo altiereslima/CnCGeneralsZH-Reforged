@@ -368,7 +368,9 @@ void W3DGhostObject::snapShot(int playerIndex)
 	
 	W3DRenderObjectSnapshot *snap=m_parentSnapshots[playerIndex],*prevSnap=NULL;
 
-	//walk through all W3D render objects used by this object
+	//walk through all W3D render objects used by this object; a tick beside the render waits out
+	//the shadow pass's poses first
+	LogicThread::TickReachesLiveModels liveModels;
 	for (DrawModule ** dm = draw->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
@@ -444,6 +446,7 @@ void W3DGhostObject::removeParentObject(void)
 	draw->setFullyObscuredByShroud(true);
 
 	//walk through all W3D render objects used by this object
+	LogicThread::TickReachesLiveModels liveModels;
 	for (DrawModule ** dm = draw->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
@@ -480,6 +483,7 @@ void W3DGhostObject::restoreParentObject(void)
 		return;
 
 	//walk through all W3D render objects used by this object
+	LogicThread::TickReachesLiveModels liveModels;
 	for (DrawModule ** dm = draw->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		const ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();

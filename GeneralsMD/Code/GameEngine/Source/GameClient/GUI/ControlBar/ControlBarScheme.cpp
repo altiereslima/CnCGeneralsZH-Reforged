@@ -1175,6 +1175,7 @@ void ControlBarSchemeManager::setControlBarSchemeByPlayerTemplate( const PlayerT
 	// the squished bar keeps EA's pick: the side's Small scheme, and none ships, so "Default"
 	AsciiString smallSide = side;
 	smallSide.concat("Small");
+	// a side with no bar of its own (the fork's Turkiye) wears America's (findSchemeForFaction)
 	ControlBarScheme *tempScheme = useSmall ? findSchemeForSide( smallSide ) : findSchemeForFaction( side );
 	if(tempScheme)
 	{
@@ -1208,7 +1209,7 @@ void ControlBarSchemeManager::setControlBarSchemeByPlayer(Player *p)
 		side.set("Observer");
 	// picked again every time, even for the side on screen: a new resolution can want a different
 	// scheme for it (findSchemeForSide), and the multiplier below is the screen's
-	// the neutral and civilian players are of no country, and wear America's
+	// the neutral and civilian players are of no country, and wear America's, as does Turkiye
 	m_currentScheme = findSchemeForFaction( side );
 	DEBUG_LOG(("setControlBarSchemeByPlayer gave side %s the scheme of %s\n", side.str(), m_currentScheme->m_side.str()));
 	m_multiplyer.x = TheDisplay->getWidth() / (Real)m_currentScheme->m_ScreenCreationRes.x;

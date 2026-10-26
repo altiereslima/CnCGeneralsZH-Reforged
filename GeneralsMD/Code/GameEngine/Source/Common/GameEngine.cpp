@@ -32,10 +32,12 @@
 #include "zhio.h"
 #include "Common/MessageBoxFlags.h"	// MessageBoxWrapper and its flags
 #include "Platform/SleepMilliseconds.h"
+#include "Platform/ModernWaterBuild.h"
 #if !defined(_WIN32)
 #include <unistd.h>		// getpid, for the model-checksum cache's scratch file
 #endif
 #include "Lib/Clock.h"
+#include <exception>
 
 #include "Lib/WideCharFns.h"
 
@@ -54,6 +56,7 @@
 #include "Common/GameEngine.h"
 #include "Common/INI.h"
 #include "Common/INIException.h"
+#include "Common/MatchHistory.h"
 #include "Common/MessageStream.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
@@ -1044,7 +1047,14 @@ void GameEngine::init( int argc, char *argv[] )
 		// The first place the archives can answer it, and before anything builds a path under
 		// Data\<language>: GlobalLanguage, GameText, the CommandMap, speech and localized art all ask after this.
 		{
-			const AsciiString registryLanguage = GetRegistryLanguage();
+			AsciiString registryLanguage = GetRegistryLanguage();
+			AsciiString named;
+			if (!GetStringFromRegistry( "", "Language", named ))
+			{
+				const AsciiString shipped = TheFileSystem->zeroHourLanguage();
+				if (!shipped.isEmpty())
+					registryLanguage = shipped;
+			}
 			const AsciiString language = TheFileSystem->installedLanguage( registryLanguage );
 			if (language.isEmpty())
 			{
@@ -1054,11 +1064,10 @@ void GameEngine::init( int argc, char *argv[] )
 				_exit(1);
 			}
 			if (language.compareNoCase( registryLanguage ) != 0)
-			{
 				DEBUG_LOG(("GameEngine::init - Language=%s has no Data\\%s\\Language.ini, using %s\n",
 					registryLanguage.str(), registryLanguage.str(), language.str()));
+			if (language.compareNoCase( GetRegistryLanguage() ) != 0)
 				SetRegistryLanguage( language );
-			}
 		}
 
 		initSubsystem(TheWritableGlobalData, "TheWritableGlobalData", MSGNEW("GameEngineSubsystem") GlobalData(), &xferCRC, "Data\\INI\\Default\\GameData.ini", "Data\\INI\\GameData.ini");
@@ -1094,6 +1103,11 @@ void GameEngine::init( int argc, char *argv[] )
 		// read the water settings from INI (must do prior to initing GameClient, apparently)
 		ini.load( AsciiString( "Data\\INI\\Default\\Water.ini" ), INI_LOAD_OVERWRITE, &xferCRC );
 		ini.load( AsciiString( "Data\\INI\\Water.ini" ), INI_LOAD_OVERWRITE, &xferCRC );
+		// Visual material rules have their own parser, shared with the standalone preview.
+		// They do not change gameplay state or the legacy map WaterTransparency values.
+#if ZH_MODERN_WATER
+		loadModernWaterSettings();
+#endif
 		ini.load( AsciiString( "Data\\INI\\Default\\Weather.ini" ), INI_LOAD_OVERWRITE, &xferCRC );
 		ini.load( AsciiString( "Data\\INI\\Weather.ini" ), INI_LOAD_OVERWRITE, &xferCRC );
 
@@ -1144,7 +1158,9 @@ void GameEngine::init( int argc, char *argv[] )
 		if (!TheGlobalData->m_audioOn)
 			DEBUG_LOG(("TheAudio: audio off, no device opened\n"));
 		else
-			DEBUG_LOG(("TheAudio: audio on, device handle %s\n", TheAudio->getDevice() != NULL ? "set" : "none (no device could be opened)"));
+			DEBUG_LOG(("TheAudio: audio on, %s\n", TheAudio->getDevice() == NULL ? "no device (none could be opened), nothing is heard"
+				: TheGlobalData->m_wavEndFrame > 0 ? "no output device: the -wav mix runs offline on the logic clock, into the file only"
+				: "output device open"));
 		//
 		// Missing music used to end the process here, with setQuitting and not one word anywhere: the
 		// game started, the window appeared for a moment and it closed again.  A player who deleted
@@ -1171,6 +1187,8 @@ void GameEngine::init( int argc, char *argv[] )
 		// -modfactions: each mod's own Rank.ini, the table its factions climb (RankInfoStore::getRankInfo)
 		initFactionSubsystem(TheRankInfoStore,"TheRankInfoStore", MSGNEW("GameEngineSubsystem") RankInfoStore(), &xferCRC, NULL, "Data\\INI\\Rank.ini");
 		initFactionSubsystem(ThePlayerTemplateStore,"ThePlayerTemplateStore", MSGNEW("GameEngineSubsystem") PlayerTemplateStore(), &xferCRC, "Data\\INI\\Default\\PlayerTemplate.ini", "Data\\INI\\PlayerTemplate.ini");
+		// The fork's own factions: a new name is added after EA's, an existing one is edited in place
+		ini.load( AsciiString( "Data\\INI\\PlayerTemplateReforged.ini" ), INI_LOAD_MULTIFILE, &xferCRC );
 		initSubsystem(TheParticleSystemManager,"TheParticleSystemManager", createParticleSystemManager(), NULL);
 
 	#ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
@@ -1192,6 +1210,9 @@ void GameEngine::init( int argc, char *argv[] )
 			 one of EA's that nothing fires broke under a mod whose Weapon.ini leaves it out (Contra's Paladin
 			 found no infantry laser and crashed); a new name here exists whatever Weapon.ini loaded. */
 		ini.load( AsciiString( "Data\\INI\\WeaponReforged.ini" ), INI_LOAD_OVERWRITE, &xferCRC );
+		/* Turkiye's own weapons.  OVERWRITE rather than MULTIFILE: a patch file may only edit a weapon
+			 that exists, and every one of these is new. */
+		ini.load( AsciiString( "Data\\INI\\TurkiyeWeaponReforged.ini" ), INI_LOAD_OVERWRITE, &xferCRC );
 		initFactionSubsystem(TheObjectCreationListStore,"TheObjectCreationListStore", MSGNEW("GameEngineSubsystem") ObjectCreationListStore(), &xferCRC, "Data\\INI\\Default\\ObjectCreationList.ini", "Data\\INI\\ObjectCreationList.ini");
 		/* Lists EA left out or got wrong, before any object names one: a list parsed again is cleared
 			 and replaced whole, and a new name is simply added. */
@@ -1224,6 +1245,8 @@ void GameEngine::init( int argc, char *argv[] )
 		/* Mistakes in EA's data for the nine generals, patched the same way: a copy that missed the
 			 original's change, a wrong faction's sound, an icon naming an upgrade that does not exist. */
 		ini.load( AsciiString( "Data\\INI\\FixesReforged.ini" ), INI_LOAD_MULTIFILE, &xferCRC );
+		// Turkiye's objects, reskins of the American ones, so they come after the balance and fixes they copy
+		ini.load( AsciiString( "Data\\INI\\TurkiyeReforged.ini" ), INI_LOAD_MULTIFILE, &xferCRC );
 
 	#ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
 	GetPrecisionTimer(&endTime64);//////////////////////////////////////////////////////////////////
@@ -1257,6 +1280,8 @@ void GameEngine::init( int argc, char *argv[] )
 			 keep their whole AIData there, as retail does, and End of Days' AIData.ini is an empty block. */
 		INI::loadModPasses( "Data\\INI\\Default\\AIData.ini", &xferCRC );
 		INI::loadModPasses( "Data\\INI\\AIData.ini", &xferCRC );
+		// SideInfo and SkirmishBuildList for the fork's factions: a side named again is edited, a new one added
+		ini.load( AsciiString( "Data\\INI\\AIDataReforged.ini" ), INI_LOAD_MULTIFILE, &xferCRC );
 		initSubsystem(TheGameLogic,"TheGameLogic", createGameLogic(), NULL);
 		initSubsystem(TheTeamFactory,"TheTeamFactory", MSGNEW("GameEngineSubsystem") TeamFactory(), NULL);
 		initSubsystem(TheCrateSystem,"TheCrateSystem", MSGNEW("GameEngineSubsystem") CrateSystem(), &xferCRC, "Data\\INI\\Default\\Crate.ini", "Data\\INI\\Crate.ini");
@@ -1278,6 +1303,7 @@ void GameEngine::init( int argc, char *argv[] )
 		AsciiString fname;
 		fname.format("Data\\%s\\CommandMap.ini", GetRegistryLanguage().str());
 		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), NULL);
+		TheMetaMap->keepArrowsForCamera();
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 		ini.load("Data\\INI\\CommandMapDebug.ini", INI_LOAD_MULTIFILE, NULL);
@@ -1490,12 +1516,19 @@ void GameEngine::init( int argc, char *argv[] )
 		why.format("GameEngine::init failed with ErrorCode 0x%08x.", (UnsignedInt)ec);
 		RELEASE_CRASH((why.str()));
 	}
-	catch (INIException e)
+	catch (const INIException &e)
 	{
 		if (e.mFailureMessage)
 			RELEASE_CRASH((e.mFailureMessage));
 		else
 			RELEASE_CRASH(("Uncaught Exception during initialization."));
+	}
+	catch (decltype(INI_INVALID_DATA) code)
+	{
+		// an unnamed enum, so the ErrorCode catch above does not take it
+		AsciiString why;
+		why.format("GameEngine::init failed with INI error 0x%08x: game data (a mod's INI?) names something that is not there or cannot be used.", (UnsignedInt)code);
+		RELEASE_CRASH((why.str()));
 
 	}
 	catch (...)
@@ -2840,6 +2873,36 @@ static void updateHeadlessRun( void )
 			p->logAIPersonaSummary();
 	}
 
+	/* The score screen's graphs as numbers, for whatever reads a match afterwards (the Bot Cup's
+		 overlays): every sample, every player's build order and every event, one line each, the
+		 player being the list index the PLAYER lines use.  The display name runs to the line's end. */
+	static const char *const MATCH_EVENT_WORDS[ MATCH_EVENT_TYPE_COUNT ] = { "built", "fired", "power", "rank" };
+	for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
+	{
+		if (!TheMatchHistory.wasSampled( i ))
+			continue;
+		for( Int sample = 0; sample < TheMatchHistory.getSampleCount(); ++sample )
+			DEBUG_LOG(("HEADLESS HISTORY SAMPLE %d %u %d %d %d %d %d %d\n", i, TheMatchHistory.getSampleFrame( sample ),
+								 TheMatchHistory.getValue( sample, i, MATCH_SERIES_EARNED ), TheMatchHistory.getValue( sample, i, MATCH_SERIES_BANK ),
+								 TheMatchHistory.getValue( sample, i, MATCH_SERIES_ARMY ), TheMatchHistory.getValue( sample, i, MATCH_SERIES_BUILDINGS ),
+								 TheMatchHistory.getValue( sample, i, MATCH_SERIES_POWER ), TheMatchHistory.getValue( sample, i, MATCH_SERIES_LOST )));
+		const std::vector< MatchBuild > &builds = TheMatchHistory.getBuilds( i );
+		for( size_t build = 0; build < builds.size(); ++build )
+		{
+			AsciiString shown;
+			shown.translate( builds[ build ].thing->getDisplayName() );
+			DEBUG_LOG(("HEADLESS HISTORY BUILD %d %u %s %s\n", i, builds[ build ].frame, builds[ build ].thing->getName().str(), shown.str()));
+		}
+	}
+	const std::vector< MatchEvent > &events = TheMatchHistory.getEvents();
+	for( size_t event = 0; event < events.size(); ++event )
+	{
+		const MatchEvent &e = events[ event ];
+		if (TheMatchHistory.wasSampled( e.player ))
+			DEBUG_LOG(("HEADLESS HISTORY EVENT %d %u %s %s %d\n", e.player, e.frame, MATCH_EVENT_WORDS[ e.type ],
+								 e.thing ? e.thing->getName().str() : "-", e.rank));
+	}
+
 	if (scouting)
 		TheObserverCamera.finishScout();
 
@@ -3257,6 +3320,15 @@ void GameEngine::update( void )
 			if( windowMS >= 1000 )
 			{
 				const Real fps = (Real)fpsFrames * 1000.0f / (Real)windowMS;
+				// The sun's depth pass every second of a match, fast or slow, so its cost can be read
+				// on a machine that never drops under the gate below.  Under -shadowmapreport only.
+				if( TheGlobalData->m_shadowMapReport && TheGameLogic && TheGameLogic->isInGame()
+					&& !TheGameLogic->isInShellGame() )
+				{
+					DEBUG_LOG(("SHADOW WINDOW frame %d: cpu %.2f ms, %.0f casters, %.0f draws a picture\n",
+									 TheGameLogic->getFrame(), fpsShadowTotal / fpsFrames,
+									 (Real)fpsCasterTotal / fpsFrames, (Real)fpsShadowDrawTotal / fpsFrames));
+				}
 				if( fps < 50.0f && TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() )
 				{
 					// 'hz' is the rate the simulation actually achieved and 'catchup' how many render
@@ -3376,7 +3448,7 @@ void GameEngine::execute( void )
 					// compute a frame
 					update();
 				}
-				catch (INIException e)
+				catch (const INIException &e)
 				{
 					// Release CRASH doesn't return, so don't worry about executing additional code.
 					if (e.mFailureMessage)
@@ -3395,7 +3467,37 @@ void GameEngine::execute( void )
 					catch (...)
 					{
 					}
-					RELEASE_CRASH(("Uncaught Exception in GameEngine::update"));
+					/* A C++ throw carries no exception record, so the report's "Last error" stayed empty
+						 and named nothing (crash reports 1194 and 1198, both Shockwave Chaos matches).  Say
+						 what was thrown; a fault the SEH translator dumped keeps the old reason. */
+					char why[ 160 ];
+					try
+					{
+						throw;
+					}
+					catch (ErrorCode ec)
+					{
+						snprintf( why, sizeof(why), "Uncaught ErrorCode 0x%08x in GameEngine::update", (UnsignedInt)ec );
+					}
+					// The INI_* codes are an unnamed enum, so the ErrorCode catch does not take them: a
+					// module meeting data it cannot use threw one at a mod's map load (reports 1893-1899).
+					catch (decltype(INI_INVALID_DATA) code)
+					{
+						snprintf( why, sizeof(why), "Uncaught INI error 0x%08x in GameEngine::update: game data (a mod's INI?) names something that is not there or cannot be used", (UnsignedInt)code );
+					}
+					catch (XferStatus status)
+					{
+						snprintf( why, sizeof(why), "Uncaught Xfer error %d in GameEngine::update: an object could not be saved or loaded", (Int)status );
+					}
+					catch (const std::exception &e)
+					{
+						snprintf( why, sizeof(why), "Uncaught std::exception in GameEngine::update: %s", e.what() );
+					}
+					catch (...)
+					{
+						snprintf( why, sizeof(why), "Uncaught Exception in GameEngine::update" );
+					}
+					RELEASE_CRASH((why));
 				}	// catch
 				tFrameEnd = Clock_Ticks();
 				// from the last picture an earlier part of the pass presented, if it presented any

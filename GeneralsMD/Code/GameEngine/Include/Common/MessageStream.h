@@ -490,6 +490,7 @@ public:
 		MSG_META_SIGNAL_ATTACK,											///< smoke for the allies: attack here (fork)
 		MSG_META_SIGNAL_DEFEND,											///< smoke for the allies: defend here (fork)
 		MSG_META_SIGNAL_ATTENTION,									///< smoke for the allies: look here (fork)
+		MSG_META_REQUEST_MONEY,											///< ask the allies for money: the computer's team board and a chat line (fork)
 
 		MSG_END_META_MESSAGES,											///< Marker to delineate "meta" messages
 

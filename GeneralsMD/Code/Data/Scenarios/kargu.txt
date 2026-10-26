@@ -1,0 +1,54 @@
+# Turkiye's Kargu base fired across Twilight Flame into an American base: a War Factory, two power
+# plants and the command centre, eight Crusaders and six Humvees spread around them, and three
+# Patriot batteries and four Avengers for air defense. The swarm is called at frame 60. The hangar
+# doors open, and a second later the sixteen drones roll out of the hangars onto the base's two
+# runways in turn, one every quarter second, climb away to 300, the camera's ceiling, and fly the
+# 1400 to the American base; a SCRAMBLE line says when each one started its roll (the last under
+# five seconds after the call) and a KAMIKAZE line where it began its dive, 250 short of its target
+# and 300 over it. The drones are UNATTACKABLE, so the air defense never fires at them and all
+# sixteen KAMIKAZE lines should come. The tallies of TurkiyeKarguDrone count the jets rolling or in
+# the air, those of TurkiyeKarguDroneDive the drones in their dive. Compare the American tallies at
+# frame 50 and at frame 700, just after the last hit and before the American dozers repair the
+# buildings, and read the SWARM lines for the targets the drones were sent at.
+# SCRAMBLE and KAMIKAZE count logic frames, 60 a second; the frames of this file are 30 a second.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionTurkiye -side 1 FactionAmerica -seed 1 -maxframes 2000 -scenario kargu
+#     -logPrefix kargu_
+
+10    spawn      0  TurkiyeKarguBase                1   start0:0:250
+10    spawn      0  TurkiyePowerPlant               3   start0:-260:40    90
+
+20    spawn      1  AmericaWarFactory               1   start1:0:260
+20    spawn      1  AmericaPowerPlant               2   start1:-240:-200  120
+20    spawn      1  AmericaTankCrusader             8   start1:-300:150   60
+20    spawn      1  AmericaVehicleHumvee            6   start1:300:-150   80
+20    spawn      1  AmericaPatriotBattery           3   start1:250:200    100
+20    spawn      1  AmericaTankAvenger              4   start1:-150:-350  60
+
+50    tally      1  AmericaWarFactory
+50    tally      1  AmericaPowerPlant
+50    tally      1  AmericaCommandCenter
+50    tally      1  AmericaTankCrusader
+50    tally      1  AmericaVehicleHumvee
+50    tally      1  AmericaPatriotBattery
+50    tally      1  AmericaTankAvenger
+50    tally      1  *
+60    power      0  TurkiyeKarguBase                start1
+100   tally      0  TurkiyeKarguDrone
+200   tally      0  TurkiyeKarguDrone
+300   tally      0  TurkiyeKarguDrone
+400   tally      0  TurkiyeKarguDrone
+400   tally      0  TurkiyeKarguDroneDive
+500   tally      0  TurkiyeKarguDrone
+500   tally      0  TurkiyeKarguDroneDive
+700   tally      0  TurkiyeKarguDrone
+700   tally      1  AmericaWarFactory
+700   tally      1  AmericaPowerPlant
+700   tally      1  AmericaCommandCenter
+700   tally      1  AmericaTankCrusader
+700   tally      1  AmericaVehicleHumvee
+700   tally      1  AmericaPatriotBattery
+700   tally      1  AmericaTankAvenger
+700   tally      1  *

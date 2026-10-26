@@ -973,6 +973,14 @@ GUI:Detail
 "Hazır Ayar"
 END
 
+GUI:GraphicsQuality
+"Performans / Kalite"
+END
+
+TOOLTIP:GraphicsQuality
+"Sol en hızlı görüntü, sağ en güzeli. Sürgüyü çekince bu sayfadaki ve Efektler sayfasındaki kutular ayarlanır, ucuz olanlar önce açılır; dört hazır ayar sürgünün üstündeki noktalardır. Sonra bir kutuyu değiştirirseniz hazır ayar Özel olur. Kabul Et'e basınca uygulanır; bazı ayarlar bir sonraki haritayı ya da oyunun bir sonraki açılışını bekler."
+END
+
 GUI:Faction
 "Ordu"
 END
@@ -1099,10 +1107,6 @@ END
 
 TOOLTIP:ProviderType
 "Ses Sağlayıcınızı seçin"
-END
-
-TOOLTIP:SpeakerType
-"Hoparlör Yapılandırmanızı seçin"
 END
 
 TOOLTIP:Resolution
@@ -14701,6 +14705,10 @@ GUI:SignalAttentionPlaced
 "%s: buraya bakın!"
 END
 
+GUI:RequestMoneyChat
+"Paraya ihtiyacım var!"
+END
+
 GUI:GamePaused
 "Oyun duraklatıldı."
 END
@@ -14766,7 +14774,7 @@ GUI:DetailNote3
 END
 
 GUI:DetailNote4
-"Bu sayfadaki ve Efektler sayfasındaki kutuları kendiniz seçtiniz. Kabul Et'e basınca olduğu gibi kaydedilir."
+"Bu sayfadaki ve Efektler sayfasındaki kutuları kendiniz seçtiniz ya da sürgü iki hazır ayarın arasında duruyor. Kabul Et'e basınca olduğu gibi kaydedilir."
 END
 
 GUI:TextureFilter
@@ -15093,6 +15101,82 @@ TOOLTIP:AmbientVolume
 "Kuşlar, rüzgâr, su ve kasabanın uğultusu. Efekt Sesi artık bunları değiştirmez; çatışma yüksek kalırken çevresi sessiz kalabilir."
 END
 
+GUI:MasterVolume
+"Genel Ses"
+END
+
+TOOLTIP:MasterVolume
+"Oyunun tamamını açar ya da kısar: müzik, efektler, konuşmalar, ortam ve videolar. Öteki sürgüler karışımı ayarlar, bu sürgü karışımın ne kadar yüksek çalacağını."
+END
+
+GUI:OptionsGroupMusic
+"Müzik"
+END
+
+GUI:DynamicMusic
+"Müzik Çatışmayı İzlesin"
+END
+
+TOOLTIP:DynamicMusic
+"Çatışma ya da çevrim içi maçta müzik savaşa göre değişir: ortalık sakinken tarafının sakin parçalarından biri, kameranın yakınında ya da birliklerine ateş açılınca daha sert bir parça çalar, çarpışma bittikten birkaç saniye sonra sakin müziğe döner. Kapalıyken müzik özgün oyundaki gibi çalar."
+END
+
+GUI:OptionsGroupOutput
+"Çıkış"
+END
+
+GUI:AudioDevice
+"Çıkış Aygıtı"
+END
+
+TOOLTIP:AudioDevice
+"Oyunun sesinin çıktığı hoparlör ya da kulaklık. Varsayılan Windows'u izler, kulaklık takınca onunla birlikte geçer. Kabul Et'e bastığınızda uygulanır."
+END
+
+GUI:AudioDeviceDefault
+"Varsayılan"
+END
+
+GUI:SpeakerType
+"Hoparlör Düzeni"
+END
+
+TOOLTIP:SpeakerType
+"Savaş alanındaki seslerin çevrenize nasıl yerleştiği. Kulaklıkta her kulak kendi zamanlamasını ve tınısını alır, böylece arkanızdaki ya da yanınızdaki bir ses oradan duyulur. 5.1 ve 7.1 sesleri çevresel hoparlörlere dağıtır; Linux ve macOS'ta stereo çalar. Kabul Et'e bastığınızda uygulanır."
+END
+
+GUI:SpeakerType0
+"Stereo Hoparlör"
+END
+
+GUI:SpeakerType1
+"Kulaklık"
+END
+
+GUI:SpeakerType2
+"5.1 Çevresel"
+END
+
+GUI:SpeakerType3
+"7.1 Çevresel"
+END
+
+GUI:MuteInBackground
+"Arka Planda Sessiz"
+END
+
+TOOLTIP:MuteInBackground
+"Başka bir pencere öndeyken oyunu susturur. Kapalıyken oyun bir tarayıcının arkasında ya da ikinci monitörde de duyulur."
+END
+
+GUI:LegacySound
+"Eski Ses"
+END
+
+TOOLTIP:LegacySound
+"Özgün oyunun sesi: haritada yankı yok, uzaklık, tepe ya da bina boğukluğu yok, uzak ve geçen seslerde gecikme ya da perde kayması yok, büyük patlamalardan sonra kısılma yok, savaş seslerine ve birlik cevaplarına sınır yok, sınırlayıcı yok, harita ambiyansı yok, müzik de çatışmayı izlemez. Ana ses, cihaz ve hoparlörler yine geçerlidir. Hemen etkili olur."
+END
+
 GUI:IsometricCamera
 "İzometrik Kamera"
 END
@@ -15114,7 +15198,7 @@ GUI:SnapCamera45
 END
 
 TOOLTIP:SnapCamera45
-"Döndürülen kamera herhangi bir yerde durmak yerine sekiz 45 derecelik yönden birine oturur."
+"Döndürülen kamera herhangi bir yerde durmak yerine sekiz 45 derecelik yönden birine oturur. Döndürürken Shift'i basılı tutarsan o dönüşte diğer davranış geçerli olur."
 END
 
 GUI:GridBuild
@@ -15478,7 +15562,7 @@ TOOLTIP:StatArmor
 END
 
 TOOLTIP:StatArmorStronger
-"güçlenir"
+"güçlenir, her vuruşun daha azı geçer"
 END
 
 TOOLTIP:StatNewWeapon
@@ -15497,12 +15581,44 @@ TOOLTIP:StatNewWeaponFigures
 "%d hasar, %d menzil"
 END
 
+TOOLTIP:StatHealthHint
+"(zırhtan sonra kaldırabileceği hasar)"
+END
+
+TOOLTIP:StatDamageHint
+"(ana silah, atış başına, zırhtan önce)"
+END
+
+TOOLTIP:StatAttackSpeedHint
+"(saniyedeki atış, şarjör doldurma dahil)"
+END
+
+TOOLTIP:StatDamagePerSecondHint
+"(hasar × atış hızı)"
+END
+
+TOOLTIP:StatRangeHint
+"(10, yerleştirme ızgarasının bir karesi)"
+END
+
+TOOLTIP:StatTimeHint
+"(şu anki enerjiniz ve fabrikalarınızla)"
+END
+
 TOOLTIP:Upgrades
 "GELİŞTİRMELER"
 END
 
 TOOLTIP:UpgradeChanges
 "ETKİLEDİKLERİ"
+END
+
+TOOLTIP:UpgradesHint
+"(onsuz → onunla)"
+END
+
+TOOLTIP:UpgradeChangesHint
+"(yalın birlik → bununla)"
 END
 
 TOOLTIP:UpgradeOwned
@@ -15613,6 +15729,14 @@ GUI:CampaignMission
 "GÖREV %d"
 END
 
+GUI:CampaignZeroHour
+"GENERALS ZERO HOUR"
+END
+
+GUI:CampaignGenerals
+"GENERALS"
+END
+
 GUI:MapCorrupt
 "%ls haritası bozuk, oynanamaz."
 END
@@ -15697,12 +15821,68 @@ TOOLTIP:SmokeFireLighting
 "Ateşin yanındaki duman onun turuncu ışığını alır. Kabul Et'e basınca uygulanır."
 END
 
+GUI:WaterStyle
+"Su Görünümü"
+END
+
+GUI:WaterStyle0
+"Klasik"
+END
+
+GUI:WaterStyle1
+"Modern"
+END
+
+TOOLTIP:WaterStyle
+"Klasik, orijinal suyu, parıltıları, yansımaları ve dümen sularını kullanır. Modern; dalgalar, kıyı ayrıntısı ve gövde köpüğü ekler. Kabul Et'e basınca uygulanır."
+END
+
+GUI:CloudStyle
+"Bulut Görünümü"
+END
+
+GUI:CloudStyle0
+"Klasik"
+END
+
+GUI:CloudStyle1
+"Hacimsel"
+END
+
+TOOLTIP:CloudStyle
+"Klasik, orijinal toksin ve radyasyon efektlerini kullanır. Hacimsel; hareket eden duman, daha koyu nükleer pus ve sıcak hava titremesi ekler. Kabul Et'e basınca, sahadaki bulutlara da uygulanır."
+END
+
 GUI:DebrisTrails
 "Patlama Parça İzleri"
 END
 
 TOOLTIP:DebrisTrails
 "Patlamalar arkasında duman bırakan parçalar savurur, enkazdan yanan şarapnel saçılır. Kapalıyken patlamalar orijinal haliyle kalır. Kabul Et'e basınca uygulanır."
+END
+
+GUI:MapLight
+"Sıcak Işık ve Pus"
+END
+
+TOOLTIP:MapLight
+"Haritayı daha sıcak aydınlatıp daha uzun gölgeler düşüren alçak bir ikindi güneşi ve alçak zeminin üstünde duran, içinden geçen uçakların araladığı hafif bir pus. Yalnızca Direct3D 11. Bir sonraki haritada uygulanır."
+END
+
+GUI:TeamGlow
+"Takım Rengi Parlaması"
+END
+
+TOOLTIP:TeamGlow
+"Birimlerin ve binaların üstündeki parlak takım rengi bölgeleri kendi renginde parlar. Yalnızca Direct3D 11. Bir sonraki haritada uygulanır."
+END
+
+GUI:WaterFoam
+"Su Köpüğü"
+END
+
+TOOLTIP:WaterFoam
+"Nehirlerde ve göllerde köpük benekleri ve kıyı boyunca bir köpük şeridi belirir, güneşin gölgeleri suya düşer. Denizin dalgaları değişmez. Yalnızca Direct3D 11 ve Klasik su ile, Klasik Grafikler açıkken kapalıdır. Kabul Et'e basınca uygulanır."
 END
 
 GUI:FormationDrag
@@ -16057,6 +16237,10 @@ GUI:HotkeysCommandSIGNAL_ATTENTION
 "İşaret: buraya bak"
 END
 
+GUI:HotkeysCommandREQUEST_MONEY
+"Müttefiklerden para iste"
+END
+
 GUI:HotkeysCommandBEGIN_WAYPOINTS
 "Emirleri sıraya koy (basılı tut)"
 END
@@ -16213,6 +16397,67 @@ END
 
 GUI:AIPersonaTooltip
 "Zorluğu ne olursa olsun bu bilgisayar oyuncusunun nasıl oynadığı"
+END
+
+// Her kişiliğin yaptığı, imleç kutunun ya da listesindeki bir satırın üstündeyken gösterilir
+GUI:AIPersonaTooltipNormal
+"Bilgisayarın her zaman oynadığı gibi oynar."
+END
+
+GUI:AIPersonaTooltipAttacker
+"Erken ve sık, küçük dalgalarla saldırır, parasını geldiği anda harcar ve az savunma kurar."
+END
+
+GUI:AIPersonaTooltipTurtle
+"Erkenden bir savunma hattı ve geçitlere toplar kurar, geç ve büyük dalgalarla saldırır, kaybederken daha erken geri çekilir."
+END
+
+GUI:AIPersonaTooltipEconomist
+"Önce gelir ve yükseltmeler, ilk saldırısı daha geç, artan parası en yoksul müttefikine gider."
+END
+
+GUI:AIPersonaTooltipAir
+"Havaalanları kurar, uçaklarını akınlara yollar, uçaksavarın güçlüyse uçaktan vazgeçer."
+END
+
+GUI:AIPersonaTooltipRusher
+"Her şeyini tek bir saldırıya koyar, Zor'da üçüncü, Kolay'da dördüncü buçuk dakikada, neredeyse hiç savunma kurmadan. Sonrasında Saldırgan gibi oynar."
+END
+
+GUI:AIPersonaTooltipRaider
+"En hızlı araçlarından küçük grupları ordunun etrafından dolaştırıp toplayıcılarına ve işçilerine yollar, Zor'da üçüncü, Kolay'da beşinci dakikadan başlayarak."
+END
+
+GUI:AIPersonaTooltipTech
+"Savunmasının arkasında süper silaha koşar, süper silah ayağa kalkınca normal bilgisayar gibi oynar. Müttefikine vurana güçlerini çevirir."
+END
+
+GUI:AIPersonaTooltipInfantry
+"Önce kışlasından yetiştirdiği bir piyade ordusu, dalgalarını nakliye araçlarıyla taşır."
+END
+
+GUI:AIPersonaTooltipArmor
+"Toplanmak için daha uzun bekleyen, daha az ama daha büyük dalgalarla saldıran tank ağırlıklı bir ordu."
+END
+
+GUI:AIPersonaTooltipSneaky
+"Görünmez olabilen birlikleri sever, generallik puanlarını önce gizliliğe harcar, kanatlardan ve arka kapıdan gelir."
+END
+
+GUI:AIPersonaTooltipOpportunist
+"Görüşteki en zayıf düşmanın ve zaten başkasıyla savaşanın peşine düşer."
+END
+
+GUI:AIPersonaTooltipSupporter
+"Müttefiklerinin saldırılarına katılır, boştaki ordusunu müttefikin üssündeki düşmanları temizlemeye yollar."
+END
+
+GUI:AIPersonaTooltipCounter
+"Ordunu daha dikkatli okur ve onu yenecek olanı kurar, Kolay'da bile."
+END
+
+GUI:AIPersonaTooltipRandom
+"Yukarıdaki kişiliklerden biri, maç başlarken çekilir. Normal asla çıkmaz."
 END
 
 GUI:AIPersona
@@ -16466,6 +16711,18 @@ TOOLTIP:MoneyTransfer
 "Miktarı tekerlekle ya da - ve + ile seç: adım 100, Ctrl ile 1.000, Shift ile 10.000, ikisiyle 100.000. Gönder parayı oyuncuya verir."
 END
 
+GUI:DiplomacyPing
+"Ping"
+END
+
+GUI:DiplomacyFps
+"FPS"
+END
+
+TOOLTIP:DiplomacyNet
+"Ping, oyuncunun kurucuya gidip dönüş süresidir (milisaniye; kurucunun kendisi için boş). FPS, makinesinin saniyede yetiştirebildiği oyun karesidir. Sarı sayılar en yavaş oyuncuyu gösterir ve bütün maç onun hızında oynar."
+END
+
 GUI:LobbyRecord
 "Kariyer"
 END
@@ -16560,4 +16817,980 @@ END
 
 GUI:GraphNoData
 "Bu maçta hiçbir şey kaydedilmedi."
+END
+
+RANK:NextRank
+"Sonraki rütbe %d/%d XP"
+END
+
+RANK:PerkSIGHT
+"Görüş +%d%%"
+END
+
+RANK:PerkSTILL_GUARD
+"Dururken %d%% daha az hasar alır"
+END
+
+RANK:PerkMEND
+"Çatışma dışında saniyede %d%% iyileşir"
+END
+
+RANK:PerkSPOTTER
+"Topçuya gözcülük yapar"
+END
+
+RANK:PerkSCATTER
+"Topçu saçılması -%d%%"
+END
+
+RANK:PerkDEATH_RALLY
+"Düştüğünde yakındaki dostlar 10 saniye %d%% daha az hasar alır"
+END
+
+RANK:PerkDETECT
+"%d içindeki gizli birimleri görür"
+END
+
+RANK:PerkAURA_RADIUS
+"Aura menzili +%d%%"
+END
+
+RANK:PerkAURA_RATE_OF_FIRE
+"Aura: atış hızı +%d%%"
+END
+
+RANK:PerkAURA_SIGHT
+"Aura: görüş +%d%%"
+END
+
+RANK:PerkAURA_GUARD
+"Aura: %d%% daha az hasar"
+END
+
+RANK:PerkAURA_RANGE
+"Aura: topçu menzili +%d%%"
+END
+
+RANK:America0
+"E-1 Er"
+END
+
+RANK:America1
+"E-2 Er"
+END
+
+RANK:America2
+"E-3 Birinci Sınıf Er"
+END
+
+RANK:America3
+"E-4 Uzman Er"
+END
+
+RANK:America4
+"E-4 Onbaşı"
+END
+
+RANK:America5
+"E-5 Çavuş"
+END
+
+RANK:America6
+"E-6 Kıdemli Çavuş"
+END
+
+RANK:America7
+"E-7 Birinci Sınıf Çavuş"
+END
+
+RANK:America8
+"E-8 Usta Çavuş"
+END
+
+RANK:America9
+"E-8 Bölük Başçavuşu"
+END
+
+RANK:America10
+"E-9 Başçavuş"
+END
+
+RANK:America11
+"E-9 Komuta Başçavuşu"
+END
+
+RANK:America12
+"E-9 Kara Kuvvetleri Başçavuşu"
+END
+
+RANK:America13
+"W-1 Teknik Subay"
+END
+
+RANK:America14
+"W-2 Kıdemli Teknik Subay"
+END
+
+RANK:America15
+"W-3 Kıdemli Teknik Subay"
+END
+
+RANK:America16
+"W-4 Kıdemli Teknik Subay"
+END
+
+RANK:America17
+"W-5 Kıdemli Teknik Subay"
+END
+
+RANK:America18
+"O-1 Teğmen"
+END
+
+RANK:America19
+"O-2 Üsteğmen"
+END
+
+RANK:America20
+"O-3 Yüzbaşı"
+END
+
+RANK:America21
+"O-4 Binbaşı"
+END
+
+RANK:America22
+"O-5 Yarbay"
+END
+
+RANK:America23
+"O-6 Albay"
+END
+
+RANK:America24
+"O-7 Tuğgeneral"
+END
+
+RANK:America25
+"O-8 Tümgeneral"
+END
+
+RANK:America26
+"O-9 Korgeneral"
+END
+
+RANK:America27
+"O-10 Orgeneral"
+END
+
+RANK:America28
+"Mareşal"
+END
+
+RANK:China0
+"Rütbesiz"
+END
+
+RANK:China1
+"Er"
+END
+
+RANK:China2
+"Birinci Sınıf Er"
+END
+
+RANK:China3
+"Onbaşı"
+END
+
+RANK:China4
+"Çavuş"
+END
+
+RANK:China5
+"İkinci Sınıf Kıdemli Çavuş"
+END
+
+RANK:China6
+"Birinci Sınıf Kıdemli Çavuş"
+END
+
+RANK:China7
+"Üçüncü Sınıf Usta Çavuş"
+END
+
+RANK:China8
+"İkinci Sınıf Usta Çavuş"
+END
+
+RANK:China9
+"Birinci Sınıf Usta Çavuş"
+END
+
+RANK:China10
+"Teğmen"
+END
+
+RANK:China11
+"Üsteğmen"
+END
+
+RANK:China12
+"Yüzbaşı"
+END
+
+RANK:China13
+"Binbaşı"
+END
+
+RANK:China14
+"Yarbay"
+END
+
+RANK:China15
+"Albay"
+END
+
+RANK:China16
+"Kıdemli Albay"
+END
+
+RANK:China17
+"Tümgeneral"
+END
+
+RANK:China18
+"Korgeneral"
+END
+
+RANK:China19
+"Orgeneral"
+END
+
+RANK:GLA0
+"Rütbesiz"
+END
+
+RANK:GLA1
+"Acemi"
+END
+
+RANK:GLA2
+"Düzensiz"
+END
+
+RANK:GLA3
+"Savaşçı"
+END
+
+RANK:GLA4
+"Akıncı"
+END
+
+RANK:GLA5
+"Pişkin Akıncı"
+END
+
+RANK:GLA6
+"Tim Eri"
+END
+
+RANK:GLA7
+"Tim Lideri"
+END
+
+RANK:GLA8
+"Hücre Lideri"
+END
+
+RANK:GLA9
+"Kıdemli Hücre Lideri"
+END
+
+RANK:GLA10
+"Baskın Yüzbaşısı"
+END
+
+RANK:GLA11
+"Kol Yüzbaşısı"
+END
+
+RANK:GLA12
+"Vuruş Komutanı"
+END
+
+RANK:GLA13
+"Saha Komutanı"
+END
+
+RANK:GLA14
+"Sektör Komutanı"
+END
+
+RANK:GLA15
+"Savaş Ağası"
+END
+
+RANK:GLA16
+"Bölgesel Savaş Ağası"
+END
+
+RANK:GLA17
+"Baş Savaş Ağası"
+END
+
+RANK:GLA18
+"General"
+END
+
+RANK:GLA19
+"Büyük General"
+END
+
+RANK:GLA20
+"Yüce Kurtarıcı"
+END
+
+RANK:Turkiye0
+"Rütbesiz"
+END
+
+INI:FactionTurkiye
+"Türkiye (Deneysel)"
+END
+
+SIDE:Turkiye
+"Türkiye (Deneysel)"
+END
+
+TOOLTIP:BioStrategyLong_Turkiye
+"Türkiye uzaktan öldürür ama kendi gözüyle göremez: topçusu 600 atar, 100 görür, hedefi bir gözcü, İHA ya da radar kulesi bulmalıdır"
+END
+
+GUI:BioFeatures_Turkiye
+"Uzun menzilli topçu, kısa görüş \n İstihkam takımı cephede Siper kazar \n Topçuya gözcü, İHA ve radar kulesi nişan aldırır"
+END
+
+OBJECT:TurkiyeInfantryMehmetcik
+"Mehmetçik"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryMehmetcik
+"&Mehmetçik"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryMehmetcik
+"Hat piyadesi. Binaya girer, bina temizler."
+END
+
+OBJECT:TurkiyeInfantryEngineer
+"İstihkam Takımı"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryEngineer
+"İstihkam &Takımı"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryEngineer
+"Yapı kurar ve onarır. Piyadedir: ezilir, taranır."
+END
+
+OBJECT:TurkiyeInfantrySungur
+"Sungur Nişancısı"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantrySungur
+"&Sungur Nişancısı"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantrySungur
+"Tanka ve uçağa karşı füzeli piyade."
+END
+
+OBJECT:TurkiyeInfantrySpotter
+"Gözcü Timi"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantrySpotter
+"&Gözcü Timi"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantrySpotter
+"500 görür, neredeyse hiç savaşmaz. Gizlenemez, menzil dışında tutun. Tepeye çıkınca arkadaki topçunun gözü olur."
+END
+
+OBJECT:TurkiyeInfantryMaroonBeret
+"Bordo Bereli"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryMaroonBeret
+"&Bordo Bereli"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryMaroonBeret
+"Özel kuvvet. Kamufledir, topçu için 350 görür, zamanlı ve uzaktan kumandalı patlayıcı kurar."
+END
+
+OBJECT:TurkiyeVehicleSupplyTruck
+"İkmal Kamyonu"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleSupplyTruck
+"İk&mal Kamyonu"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleSupplyTruck
+"İkmal merkezine para taşır."
+END
+
+OBJECT:TurkiyeVehicleCobra
+"Cobra"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleCobra
+"&Cobra"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleCobra
+"Makineli tüfekli, beş piyade taşıyan hızlı ve kırılgan araç. 250 görür, topçuya uzaktan nişan aldırmaya yetmez."
+END
+
+OBJECT:TurkiyeVehicleKirpi
+"Kirpi"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleKirpi
+"&Kirpi"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleKirpi
+"Beş piyade taşıyan zırhlı araç."
+END
+
+OBJECT:TurkiyeTankAltay
+"Altay"
+END
+
+CONTROLBAR:ConstructTurkiyeTankAltay
+"&Altay"
+END
+
+CONTROLBAR:ToolTipTurkiyeTankAltay
+"Ana muharebe tankı, fabrikada doğrudan ateş eden tek araç."
+END
+
+OBJECT:TurkiyeVehicleKorkut
+"Korkut"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleKorkut
+"K&orkut"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleKorkut
+"Hava savunma: 350 menzilli ikiz top, yalnız uçağa. Yere ateş edemez."
+END
+
+OBJECT:TurkiyeVehicleFirtina
+"Fırtına Obüsü"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleFirtina
+"&Fırtına Obüsü"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleFirtina
+"Geniş etkili ağır mermiyi 600'e atar, 100 görür: nişan için gözcü, İHA ya da radar kulesi ister."
+END
+
+OBJECT:TurkiyeVehicleSakarya
+"Sakarya Çok Namlulu"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleSakarya
+"&Sakarya Çok Namlulu"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleSakarya
+"500 menzile geniş bir alana altılı salvo atar, sonra 12 saniye dolar. Gözcü ister."
+END
+
+OBJECT:TurkiyeTankKoral
+"Koral"
+END
+
+CONTROLBAR:ConstructTurkiyeTankKoral
+"Ko&ral"
+END
+
+CONTROLBAR:ToolTipTurkiyeTankKoral
+"Elektronik harp aracı; ışını düşman binasını 400 menzilden susturur."
+END
+
+OBJECT:TurkiyeVehicleBayraktar
+"Bayraktar İHA"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleBayraktar
+"&Bayraktar İHA"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleBayraktar
+"Gönderildiği yerde durur ve 550 görür, topçunun en iyi gözü. Hafif mühimmat."
+END
+
+OBJECT:TurkiyeVehicleGokbey
+"Gökbey"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleGokbey
+"&Gökbey"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleGokbey
+"Beş piyade taşıyan nakliye helikopteri."
+END
+
+OBJECT:TurkiyeJetAkinci
+"Akıncı"
+END
+
+CONTROLBAR:ConstructTurkiyeJetAkinci
+"&Akıncı"
+END
+
+CONTROLBAR:ToolTipTurkiyeJetAkinci
+"Ağır silahlı İHA. Uçaksavarın altında ölür."
+END
+
+OBJECT:TurkiyeJetKizilelma
+"Kızılelma"
+END
+
+CONTROLBAR:ConstructTurkiyeJetKizilelma
+"&Kızılelma"
+END
+
+CONTROLBAR:ToolTipTurkiyeJetKizilelma
+"Taarruz uçağı: füzeleri havadaki ve yerdeki hedefi aynı vurur."
+END
+
+OBJECT:TurkiyeRadarTower
+"Radar Kulesi"
+END
+
+CONTROLBAR:ConstructTurkiyeRadarTower
+"Ra&dar Kulesi"
+END
+
+CONTROLBAR:ToolTipTurkiyeRadarTower
+"Sabit göz: topçu için 500 görür. Elektrik çeker. Bir hedeftir."
+END
+
+OBJECT:TurkiyeSiper
+"Siper"
+END
+
+CONTROLBAR:ConstructTurkiyeSiper
+"Si&per"
+END
+
+CONTROLBAR:ToolTipTurkiyeSiper
+"Beş piyadelik siper, istihkam takımı nerede durursa orada kazılır. İçindeki Mehmetçik piyadeyi, Sungur nişancısı tankı durdurur."
+END
+
+OBJECT:TurkiyeLandMine
+"Mayın"
+END
+
+CONTROLBAR:ConstructTurkiyeLandMine
+"Ma&yın"
+END
+
+CONTROLBAR:ToolTipTurkiyeLandMine
+"Toprağa gömülü patlayıcı. Mayın seti ister."
+END
+
+UPGRADE:TurkiyeExtendedRange
+"Uzatılmış Menzil"
+END
+
+CONTROLBAR:UpgradeTurkiyeExtendedRange
+"&Uzatılmış Menzil"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeExtendedRange
+"Fırtına ve Sakarya yüzde 15 uzağa atar."
+END
+
+UPGRADE:TurkiyePrecisionGuidance
+"Hassas Güdüm"
+END
+
+CONTROLBAR:UpgradeTurkiyePrecisionGuidance
+"&Hassas Güdüm"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyePrecisionGuidance
+"Kimsenin görmediği yere atışın dağılımı dörtte birine iner."
+END
+
+UPGRADE:TurkiyeArmorPack
+"Takviyeli Gövde"
+END
+
+CONTROLBAR:UpgradeTurkiyeArmorPack
+"Takviyeli &Gövde"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeArmorPack
+"Kirpi ile Altay'ın can puanı yüzde 20 artar."
+END
+
+UPGRADE:TurkiyeMineKit
+"Mayın Seti"
+END
+
+CONTROLBAR:UpgradeTurkiyeMineKit
+"Ma&yın Seti"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeMineKit
+"İstihkam takımı mayın döşeyebilir."
+END
+
+OBJECT:TurkiyeCommandCenter
+"Karargah"
+END
+
+CONTROLBAR:ConstructTurkiyeCommandCenter
+"Ka&rargah"
+END
+
+OBJECT:TurkiyePowerPlant
+"Santral"
+END
+
+CONTROLBAR:ConstructTurkiyePowerPlant
+"&Santral"
+END
+
+OBJECT:TurkiyeBarracks
+"Kışla"
+END
+
+CONTROLBAR:ConstructTurkiyeBarracks
+"&Kışla"
+END
+
+OBJECT:TurkiyeWarFactory
+"Fabrika"
+END
+
+CONTROLBAR:ConstructTurkiyeWarFactory
+"&Fabrika"
+END
+
+OBJECT:TurkiyeAirfield
+"Hava Alanı"
+END
+
+CONTROLBAR:ConstructTurkiyeAirfield
+"&Hava Alanı"
+END
+
+OBJECT:TurkiyeSupplyCenter
+"İkmal Merkezi"
+END
+
+CONTROLBAR:ConstructTurkiyeSupplyCenter
+"İk&mal Merkezi"
+END
+
+OBJECT:TurkiyePatriotBattery
+"Hisar Bataryası"
+END
+
+CONTROLBAR:ConstructTurkiyePatriotBattery
+"Hisar &Bataryası"
+END
+
+SCIENCE:TurkiyeMinefield
+"Mayın Tarlası"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceMinefield
+"Bir kargo uçağı gösterdiğiniz yere mayın döşer. \n \n Çağrıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeMinefield
+"Mayın Ta&rlası"
+END
+
+CONTROLBAR:TooltipTurkiyeMinefield
+"Mayın Tarlası \n Geri Sayım: 4:00"
+END
+
+SCIENCE:TurkiyeFuelResupply
+"Yakıt İkmali"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceFuelResupply
+"Bayraktar her uçuşta bir mühimmat fazla taşır."
+END
+
+SCIENCE:TurkiyeSwarmMunition
+"Gezgin Mühimmat"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceSwarmMunition
+"Bir gezgin mühimmat gösterdiğin yerde döner ve bulduğu en pahalı hedefe dalar. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeSwarmMunition
+"Gezgin &Mühimmat"
+END
+
+CONTROLBAR:TooltipTurkiyeSwarmMunition
+"Gezgin Mühimmat \n Geri Sayım: 3:00"
+END
+
+SCIENCE:TurkiyeElectronicBlinding
+"Elektronik Körleme"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceElectronicBlinding
+"Hedef alanda binası olan her düşmanın radarı 30 saniye kapanır. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeElectronicBlinding
+"Elektronik &Körleme"
+END
+
+CONTROLBAR:TooltipTurkiyeElectronicBlinding
+"Elektronik Körleme \n Geri Sayım: 4:00"
+END
+
+SCIENCE:TurkiyeSwarmStrike
+"Sürü Akını"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceSwarmStrike
+"Bir mühimmat sürüsü geniş bir alandaki en değerli on hedefi tek tek bulur, her birine bir mühimmat. Sıkışık bir üs bunu az hisseder, dağınık bir ordu çok. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeSwarmStrike
+"Sürü Akı&nı"
+END
+
+CONTROLBAR:TooltipTurkiyeSwarmStrike
+"Sürü Akını \n Geri Sayım: 6:00"
+END
+
+UPGRADE:TurkiyeThermal
+"Termal Görüş"
+END
+
+CONTROLBAR:UpgradeTurkiyeThermal
+"Termal Gö&rüş"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeThermal
+"Gözcü timi 650'ye, Cobra 320'ye kadar görür, ikisi de kamufle birimleri fark eder."
+END
+
+UPGRADE:TurkiyeFuelCell
+"Yakıt Hücresi"
+END
+
+CONTROLBAR:UpgradeTurkiyeFuelCell
+"&Yakıt Hücresi"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeFuelCell
+"Bayraktar hedefin üstünde iki kat kalır, iki kat mühimmatla."
+END
+
+UPGRADE:TurkiyeSwarmSoftware
+"Sürü Yazılımı"
+END
+
+CONTROLBAR:UpgradeTurkiyeSwarmSoftware
+"Sürü Ya&zılımı"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeSwarmSoftware
+"Bayraktar'ın mühimmatı hedefini kendi seçer: menzildeki en pahalı düşman."
+END
+
+UPGRADE:TurkiyeFuelResupply
+"Yakıt İkmali"
+END
+
+SCIENCE:TurkiyeRapidDeployment
+"Hızlı İntikal"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceRapidDeployment
+"Bir kargo uçağı gösterdiğin yere altı Mehmetçik ve iki Sungur nişancısı bırakır. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeRapidDeployment
+"&Hızlı İntikal"
+END
+
+CONTROLBAR:TooltipTurkiyeRapidDeployment
+"Hızlı İntikal \n Geri Sayım: 3:00"
+END
+
+SCIENCE:TurkiyeFireMission
+"Atış Desteği"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceFireMission
+"Harita dışından hedefe otuz altı ağır mermi düşer. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeFireMission
+"&Atış Desteği"
+END
+
+CONTROLBAR:TooltipTurkiyeFireMission
+"Atış Desteği \n Geri Sayım: 4:00"
+END
+
+SCIENCE:TurkiyeCommandoRaid
+"Komando Baskını"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceCommandoRaid
+"Bir Bordo Bereli ve iki gözcü timi gösterdiğin yere paraşütle iner: düşman hattının gerisinde göz ve patlayıcı. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeCommandoRaid
+"Komando &Baskını"
+END
+
+CONTROLBAR:TooltipTurkiyeCommandoRaid
+"Komando Baskını \n Geri Sayım: 5:00"
+END
+
+OBJECT:TurkiyeKarguBase
+"Kargu İHA Üssü"
+END
+
+CONTROLBAR:ConstructTurkiyeKarguBase
+"Kar&gu İHA Üssü"
+END
+
+OBJECT:TurkiyeHarekatMerkezi
+"Harekat Merkezi"
+END
+
+CONTROLBAR:ConstructTurkiyeHarekatMerkezi
+"Har&ekat Merkezi"
+END
+
+CONTROLBAR:ToolTipTurkiyeHarekatMerkezi
+"Türkiye'nin teknoloji binası. Bütün ordu aynı anda tek bir savaş planıyla savaşır: Bombardıman, Ara ve Yok Et ya da Hattı Koru. İleri Eğitim ve Kimyasal Koruma Giysileri araştırır; Kargu İHA Üssü'nü, Sakarya'yı, Koral'ı, Akıncı'yı ve Bordo Bereli'yi açar. \n \n Gereken: Fabrika veya Hava Alanı \n Gereken Enerji: 2"
+END
+
+OBJECT:TurkiyeKapalicarsi
+"Kapalıçarşı"
+END
+
+CONTROLBAR:ConstructTurkiyeKapalicarsi
+"K&apalıçarşı"
+END
+
+CONTROLBAR:ToolTipTurkiyeKapalicarsi
+"Türkiye'nin karaborsası. Her 2 saniyede 20 öder; Bayraktar, Akıncı ve Kızılelma için Karşı Tedbirler, istihkam takımı için İşçi Ayakkabıları satar. \n \n Gereken: Fabrika"
+END
+
+CONTROLBAR:ToolTipTurkiyeKarguBase
+"Haritanın herhangi bir yerine on altı kamikaze İHA'dan oluşan bir sürü gönderir. Her biri dairedeki en değerli hedeflerden birini bulur ve üstüne dalar; dağınık ordular en çok zarar görür. Tavana tırmanıp Scud füzesi gibi iner, yolda hiçbir şey onları vuramaz. \n \n Gereken: Harekat Merkezi \n Gereken Enerji: 10 \n Geri Sayım: 5:00"
+END
+
+CONTROLBAR:TurkiyeKarguSwarm
+"&Kargu Sürüsü"
+END
+
+CONTROLBAR:TooltipTurkiyeKarguSwarm
+"Kargu Sürüsü \n Geri Sayım: 5:00"
+END
+
+GUI:SuperweaponTurkiyeKarguSwarm
+"Kargu Sürüsü"
+END
+
+GUI:RandomMapTemplate
+"Harita türü"
+END
+
+GUI:RandomMapAnyTemplate
+"Sürpriz yap"
+END
+
+GUI:RandomMapSize
+"Harita boyutu"
+END
+
+GUI:RandomMapSizeTiny
+"Minik"
+END
+
+GUI:RandomMapSizeSmall
+"Küçük"
+END
+
+GUI:RandomMapSizeMedium
+"Orta"
+END
+
+GUI:RandomMapSizeLarge
+"Büyük"
+END
+
+GUI:RandomMapSizeHuge
+"Çok Büyük"
+END
+
+GUI:FactionPickTitle
+"Ordu Seç"
+END
+
+GUI:FactionPickRandomAll
+"Hepsi Rastgele"
+END
+
+GUI:FactionPickCustom
+"Özel Seçim"
+END
+
+GUI:FactionPickConfirm
+"Onayla: %s"
+END
+
+GUI:FactionPickRandom
+"Rastgele, maç başlarken bu ordulardan birini sizin için seçer."
+END
+
+GUI:FactionPickLeftOut
+"Rastgele şunları hiç seçmez: %s. Eklemek için Özel Seçim'den işaretleyin."
+END
+
+GUI:FactionPickPool
+"Rastgele, solda işaretli %d ordudan birini seçer (toplam %d). Bir orduya tıklayarak onu ekleyin ya da çıkarın."
+END
+
+GUI:FactionPickRandomSide
+"Rastgele %s"
+END
+
+GUI:FactionPickSideHint
+"Bir tarafın kutusu o tarafın tamamını işaretler ya da kaldırır; adına tıklamak çekilişte yalnızca o tarafı bırakır."
+END
+
+GUI:FactionPickSideNameHint
+"Bir tarafın rastgele bir ordusuyla oynamak için o tarafın adına tıklayın."
 END

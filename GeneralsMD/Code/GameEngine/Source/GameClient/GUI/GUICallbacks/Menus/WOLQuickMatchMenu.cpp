@@ -1747,17 +1747,16 @@ WindowMsgHandledType WOLQuickMatchMenuSystem( GameWindow *window, UnsignedInt ms
 					{
 						// If not a forced random ladder, then we need to resolve our pick of random right now anyway, or else
 						// we will get the same pick every darn time.
-						Int randomTries = 0;// Rare to hit Random 10 times in a row, but if it does then random will be converted to a set side by the very bug this tries to fix, so no harm done.
-
-						while( randomTries < 10  &&  index == PLAYERTEMPLATE_RANDOM )
+						// from the listed factions a plain Random may land on, as populateRandomSideAndColor draws
+						std::vector<Int> sides;
+						for( Int entry = 0; entry < GadgetComboBoxGetLength(comboBoxSide); ++entry )
 						{
-							Int numberComboBoxEntries = GadgetComboBoxGetLength(comboBoxSide);
-							Int randomPick = GameClientRandomValue(0, numberComboBoxEntries - 1);
-							index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxSide, randomPick );
-							req.QM.side = index;
-
-							randomTries++;
+							const Int side = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxSide, entry );
+							if( side >= 0 && !ThePlayerTemplateStore->getNthPlayerTemplate(side)->isRandomExcluded() )
+								sides.push_back( side );
 						}
+						if( !sides.empty() )
+							req.QM.side = sides[ GameClientRandomValue(0, (Int)sides.size() - 1) ];
 					}
 
 					index = -1;

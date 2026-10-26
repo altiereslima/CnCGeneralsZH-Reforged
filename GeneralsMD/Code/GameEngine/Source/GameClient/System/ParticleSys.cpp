@@ -33,6 +33,7 @@
 #include "Common/LogicThread.h"
 
 #include <algorithm>
+#include <mutex>
 
 #define DEFINE_PARTICLE_SYSTEM_NAMES
 
@@ -121,6 +122,19 @@ static void parseRetailPerFrameFactorRandom( INI *ini, void *instance, void *sto
 {
 	INI::parseGameClientRandomVariable( ini, instance, store, userData );
 	scaleRandomVariable( store, ConvertRetailPerFrameFactor );
+}
+
+/// "FlipbookGrid": frames a side, kept as its log2 because the point group's frame tables are indexed
+/// that way.  1 is a plain card; anything but a power of two up to 16 stops the load.
+static void parseFlipbookGrid( INI *ini, void * /*instance*/, void *store, const void * /*userData*/ )
+{
+	const UnsignedInt side = INI::scanUnsignedInt( ini->getNextToken() );
+	UnsignedByte log2 = 0;
+	while (log2 < 4 && (1u << log2) < side)
+		++log2;
+	if ((1u << log2) != side)
+		throw INI_INVALID_DATA;
+	*(UnsignedByte *)store = log2;
 }
 
 static void parseRetailPerFrameSquaredReal( INI *ini, void *instance, void *store, const void *userData )
@@ -373,6 +387,13 @@ Particle::Particle( ParticleSystem *system, const ParticleInfo *info )
 	m_createTimestamp = TheGameClient->getFrame();
 	m_personality = 0;
 
+	// Drawn only when the system's template is a flipbook that asks for it, so every other system
+	// leaves the client's random stream as it was.
+	const ParticleSystemTemplate *flipbook = system->getTemplate();
+	m_flipbookStart = 0;
+	if (flipbook->getFlipbookGridLog2() != 0 && flipbook->isFlipbookRandomStart())
+		m_flipbookStart = (UnsignedByte)GameClientRandomValue( 0, ( 1 << ( 2 * flipbook->getFlipbookGridLog2() ) ) - 1 );
+
 	m_size = info->m_size;
 	m_sizeRate = info->m_sizeRate;
 	m_sizeRateDamping = info->m_sizeRateDamping;
@@ -429,6 +450,26 @@ Particle::~Particle()
 	TheParticleSystemManager->removeParticle(this);
 
 	//DEBUG_ASSERTLOG(!(totalParticleCount % 100 == 0), ( "TotalParticleCount = %d\n", m_totalParticleCount ));
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The age is the logic frames the particle has lived, so the frames run on the game's clock and stop
+	* with it.  A particle with no lifetime never ages and keeps its first frame.  Reads only the
+	* particle and its template, so the render's fill jobs may call it. */
+// ------------------------------------------------------------------------------------------------
+UnsignedInt Particle::getFlipbookFrame( void ) const
+{
+	const ParticleSystemTemplate *flipbook = m_system->getTemplate();
+	const UnsignedInt frames = 1u << ( 2 * flipbook->getFlipbookGridLog2() );
+	if (frames == 1 || m_lifetime == 0)
+		return m_flipbookStart;
+
+	const UnsignedInt age = m_lifetime - m_lifetimeLeft;
+	if (flipbook->getFlipbookRate() > 0.0f)
+		return ( m_flipbookStart + (UnsignedInt)( age * flipbook->getFlipbookRate() * SECONDS_PER_LOGICFRAME_REAL ) ) % frames;
+
+	const UnsignedInt frame = m_flipbookStart + (UnsignedInt)( (Real)age / (Real)m_lifetime * (Real)( frames - m_flipbookStart ) );
+	return frame < frames ? frame : frames - 1;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1400,10 +1441,12 @@ void ParticleSystemInfo::loadPostProcess( void )
 // ParticleSystem /////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+UnsignedInt ParticleSystem::s_sunMapStamp = 1;
+
 // ------------------------------------------------------------------------------------------------
 /** Read particle system properties from given file */
 // ------------------------------------------------------------------------------------------------
-ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate, 
+ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 																ParticleSystemID id, 
 																Bool createSlaves )
 {
@@ -1545,7 +1588,11 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	m_personalityStore = 0;
 	m_controlParticle = NULL;
 	m_groundShadow = NULL;
-	m_inSunMap = FALSE;
+	m_inSunMapStamp = 0;
+
+	m_gpuEligible = TheParticleSystemManager->acceptsGpuParticles() && sysTemplate->isGpuEligible();
+	m_gpuSpawnTotal = 0;
+	m_gpuLastDeathFrame = 0;
 
 	// A system logic makes inside a tick is built after it (LOGIC-THREAD.md M5).  The load path's
 	// systems have no id yet and are never made in a tick.
@@ -1643,6 +1690,10 @@ ParticleSystem::~ParticleSystem()
 
 	// give the ground blob back before the particles it was measured from go away
 	releaseGroundShadow();
+
+	// and the device's slot, with every GPU particle still in the air
+	if (m_gpuEligible)
+		TheParticleSystemManager->releaseGpuSystem( this );
 
 	// destroy all particles "in the air"
 	while (m_systemParticlesHead)
@@ -2143,7 +2194,7 @@ Particle *ParticleSystem::createParticle( const ParticleInfo *info,
 
 		if ( getParticleCount() > 0 && priority == AREA_EFFECT && m_isGroundAligned && TheParticleSystemManager->getFieldParticleCount() > (UnsignedInt)TheGlobalData->m_maxFieldParticleCount )
 			return NULL;
-		
+
 		// ALWAYS_RENDER particles are exempt from all count limits, and are always created, regardless of LOD issues.
 		if (priority != ALWAYS_RENDER)
 		{
@@ -2154,6 +2205,13 @@ Particle *ParticleSystem::createParticle( const ParticleInfo *info,
 			int numInExcess = TheParticleSystemManager->getParticleCount() - (UnsignedInt)particleCap;
 			if ( numInExcess > 0)
 			{
+				// At the cap an eligible spawn goes to the GPU pool rather than evicting the oldest, so
+				// below it the picture is the CPU's exactly.  No Particle comes back; the caller tells
+				// this NULL from a refusal by getGpuSpawnTotal.  A player who set no particles at all
+				// gets none there either.
+				if (m_gpuEligible && TheGlobalData->m_maxParticleCount != 0 && spawnOnGpu( info ))
+					return NULL;
+
 				if( TheParticleSystemManager->removeOldestParticles((UnsignedInt) numInExcess, priority) != numInExcess )
 					return NULL;  // could not remove enough particles, don't create new stuff
 			}
@@ -2167,6 +2225,30 @@ Particle *ParticleSystem::createParticle( const ParticleInfo *info,
 	Particle *p = newInstance(Particle)( this, info );
 	return p;
 
+}
+
+// ------------------------------------------------------------------------------------------------
+/** One spawn to the manager's GPU path, kept in the sample ring if it takes it. */
+// ------------------------------------------------------------------------------------------------
+Bool ParticleSystem::spawnOnGpu( const ParticleInfo *info )
+{
+	if (info->m_lifetime == 0 || !TheParticleSystemManager->spawnGpuParticle( this, info ))
+		return FALSE;
+
+	const UnsignedInt birth = ParticleSystemManager::getParticleFrame();
+	if (m_gpuSamples.empty())
+		m_gpuSamples.resize( GPU_SPAWN_SAMPLES );
+	GpuSpawnSample &sample = m_gpuSamples[ m_gpuSpawnTotal % GPU_SPAWN_SAMPLES ];
+	sample.m_info = *info;
+	sample.m_birthFrame = birth;
+	++m_gpuSpawnTotal;
+
+	// a CPU twin is updated in the pass it is born in too, and dies in the update that takes its
+	// lifetime to zero
+	const UnsignedInt death = birth + info->m_lifetime - 1;
+	if (death > m_gpuLastDeathFrame)
+		m_gpuLastDeathFrame = death;
+	return TRUE;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2454,9 +2536,12 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
 						const ParticleInfo *info = generateParticleInfo(i, count);
 						if (!m_isEmitAboveGroundOnly || (info->m_pos.z >= TheTerrainLogic->getGroundHeight(info->m_pos.x, info->m_pos.y)))
 						{
-							// actually create a particle
+							// actually create a particle.  One the GPU took has no Particle but still feeds
+							// the slave and the chain below; its system has no attached system to make
+							// (m_gpuEligible), so p is never NULL there.
+							const UnsignedInt gpuSpawnsBefore = m_gpuSpawnTotal;
 							Particle *p = createParticle( info, priority );
-							if (p == NULL)
+							if (p == NULL && m_gpuSpawnTotal == gpuSpawnsBefore)
 								continue;
 
 							if (m_attachedSystemName.isEmpty() == false)
@@ -2656,9 +2741,16 @@ Bool ParticleSystem::reapAndFinishUpdate( void )
 Bool ParticleSystem::finishUpdate( const ParticleShadowBlob *blob )
 {
 	if (m_pendingCastsGroundShadow)
-		updateGroundShadow( blob );
+	{
+		ParticleShadowBlob footprint = *blob;
+		addGpuSamplesToShadowBlob( &footprint );
+		updateGroundShadow( &footprint );
+	}
 	else
 		releaseGroundShadow();
+
+	// GPU particles still in the air hold the system exactly as CPU ones do
+	const Bool gpuAlive = getGpuLifetimeLeft() != 0;
 
 	//
 	// If we have been "destroyed", wait for all of our particles to die off,
@@ -2667,7 +2759,7 @@ Bool ParticleSystem::finishUpdate( const ParticleShadowBlob *blob )
 	// A finite slave outlives its master by its own lifetime.  Going away first nulls the slave's
 	// master, and a slave with no master emits at the world origin and is cut short, so the master
 	// stays in the list, destroyed and drawing nothing, until the slave is done.
-	if (m_isDestroyed && !m_systemParticlesHead)
+	if (m_isDestroyed && !m_systemParticlesHead && !gpuAlive)
 		return m_slaveSystem != NULL && !m_slaveSystem->isSystemForever();
 
 	// monitor particle system lifetime
@@ -2678,7 +2770,7 @@ Bool ParticleSystem::finishUpdate( const ParticleShadowBlob *blob )
 			m_systemLifetimeLeft--;
 
 		// if there are still particles "in the air", don't destroy yet
-		if (getParticleCount())
+		if (getParticleCount() || gpuAlive)
 			return true;
 
 		// check if time is up
@@ -2699,6 +2791,74 @@ Bool ParticleSystem::finishUpdate( const ParticleShadowBlob *blob )
 	}
 
 	return true;
+}
+
+// ------------------------------------------------------------------------------------------------
+UnsignedInt ParticleSystemManager::getParticleFrame( void )
+{
+	return TheParticleSystemManager->m_particleFrame;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** Counted as a CPU particle's getLifetimeLeft is after this frame's update: zero in the update it
+	* dies in. */
+// ------------------------------------------------------------------------------------------------
+UnsignedInt ParticleSystem::getGpuLifetimeLeft( void ) const
+{
+	const UnsignedInt now = ParticleSystemManager::getParticleFrame();
+	return m_gpuLastDeathFrame > now ? m_gpuLastDeathFrame - now : 0;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** 1 + r + ... + r^(k-1), the sum a damped rate adds up to over k updates. */
+// ------------------------------------------------------------------------------------------------
+static Real particleDampedSum( Real r, UnsignedInt k )
+{
+	if (fabsf( 1.0f - r ) < 1e-4f)
+		return (Real)k;
+	return ( 1.0f - powf( r, (Real)k ) ) / ( 1.0f - r );
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The GPU particles' share of the ground blob.  Each kept spawn is aged over what the blob reads
+	* of Particle::update: the ground plane only, where gravity does not reach, so position is the
+	* damped velocity plus the drift; size the damped rate; alpha the straight line between its keys.
+	* ponytail: GPU_SPAWN_SAMPLES spawns stand in for the whole cloud and alpha skips the key snap
+	* and the fade envelope; ParticleClosedForm.h's evaluator replaces this once it lands. */
+// ------------------------------------------------------------------------------------------------
+void ParticleSystem::addGpuSamplesToShadowBlob( ParticleShadowBlob *blob ) const
+{
+	const UnsignedInt now = ParticleSystemManager::getParticleFrame();
+	const UnsignedInt samples = getGpuSampleCount();
+	for (UnsignedInt i = 0; i < samples; ++i)
+	{
+		const GpuSpawnSample &sample = getGpuSample( i );
+		const ParticleInfo &info = sample.m_info;
+		const UnsignedInt k = now - sample.m_birthFrame + 1;		// updates since birth
+		if (k >= info.m_lifetime)
+			continue;
+
+		const Real travel = info.m_velDamping * particleDampedSum( info.m_velDamping, k );
+		const Real x = info.m_pos.x + k * m_driftVelocity.x + info.m_vel.x * travel;
+		const Real y = info.m_pos.y + k * m_driftVelocity.y + info.m_vel.y * travel;
+		const Real size = info.m_size + info.m_sizeRate * particleDampedSum( info.m_sizeRateDamping, k );
+
+		Real alpha = info.m_alphaKey[ 0 ].value;
+		for (Int j = 1; j < MAX_KEYFRAMES && info.m_alphaKey[ j ].frame; ++j)
+		{
+			const Keyframe &from = info.m_alphaKey[ j - 1 ];
+			const Keyframe &to = info.m_alphaKey[ j ];
+			if (k >= to.frame)
+			{
+				alpha = to.value;
+				continue;
+			}
+			alpha = from.value + ( to.value - from.value ) * (Real)( k - from.frame ) / (Real)( to.frame - from.frame );
+			break;
+		}
+
+		particleShadowBlobAdd( blob, x, y, size, alpha );
+	}
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2737,8 +2897,12 @@ Bool ParticleSystem::shouldCastGroundShadow( void ) const
 	if (m_shaderType != ALPHA && m_shaderType != ALPHA_TEST)
 		return FALSE;
 
+	// a fireball's body gives light and throws no shadow
+	if (m_template->isEmissive())
+		return FALSE;
+
 	// the sun's map holds this cloud already and shades the ground under it through its own density
-	if (m_inSunMap)
+	if (isInSunMap())
 		return FALSE;
 
 	if (m_isGroundAligned)
@@ -3367,6 +3531,11 @@ const FieldParse ParticleSystemTemplate::m_fieldParseTable[] =
 	{ "SlavePosOffset",					INI::parseCoord3D,														NULL,		offsetof( ParticleSystemTemplate, m_slavePosOffset ) },
 	{ "PerParticleAttachedSystem",		INI::parseAsciiString,								NULL,		offsetof( ParticleSystemTemplate, m_attachedSystemName ) },
 	{ "ExplosionDebrisTrail",				INI::parseBool,												NULL,		offsetof( ParticleSystemTemplate, m_explosionDebrisTrail ) },
+	{ "FireLook",										INI::parseBool,												NULL,		offsetof( ParticleSystemTemplate, m_fireLook ) },
+	{ "Emissive",										INI::parseBool,												NULL,		offsetof( ParticleSystemTemplate, m_emissive ) },
+	{ "FlipbookGrid",								parseFlipbookGrid,										NULL,		offsetof( ParticleSystemTemplate, m_flipbookGridLog2 ) },
+	{ "FlipbookRate",								INI::parseReal,												NULL,		offsetof( ParticleSystemTemplate, m_flipbookRate ) },
+	{ "FlipbookRandomStart",				INI::parseBool,												NULL,		offsetof( ParticleSystemTemplate, m_flipbookRandomStart ) },
 
 	{ "Lifetime",								parseRetailFramesRandom,	NULL,		offsetof( ParticleSystemTemplate, m_lifetime ) },
 	{ "SystemLifetime",					INI::parseRetailFramesUnsignedInt,						NULL,		offsetof( ParticleSystemTemplate, m_systemLifetime ) },
@@ -3540,6 +3709,11 @@ ParticleSystemTemplate::ParticleSystemTemplate( const AsciiString &name ) :
 	m_slaveTemplate = NULL;
 	//
 	m_explosionDebrisTrail = FALSE;
+	m_fireLook = FALSE;
+	m_emissive = FALSE;
+	m_flipbookGridLog2 = 0;
+	m_flipbookRate = 0.0f;
+	m_flipbookRandomStart = FALSE;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3600,6 +3774,30 @@ void ParticleSystemTemplate::forceSmokeBoost( const SmokeBoost &boost )
 }
 
 // ------------------------------------------------------------------------------------------------
+/** The GPU path takes only what its closed form evaluates (GPU-PARTICLES.md, split point).  Wind,
+	* the up-towards-emitter turn and a system on every particle need CPU state each frame; a
+	* drawable, a streak, a volume particle, a smudge and the SMUD heat haze are drawn by other code;
+	* the fire look and the flipbook read a particle's age in the CPU renderer; ALPHA_TEST and
+	* MULTIPLY stay in the CPU's sorted pool.  Ground collision does not refuse a system, as the
+	* ParticleBounce option forces it on all of them: the device rests those on the terrain instead
+	* (isGpuGroundClamped).  A lifetime of 0 (forever) is refused per spawn.  Slaves and controlled
+	* children qualify, being on their own after birth.  A system copies every field read here from
+	* its template unchanged, so the template answers for all its systems. */
+// ------------------------------------------------------------------------------------------------
+Bool ParticleSystemTemplate::isGpuEligible( void ) const
+{
+	return m_particleType == PARTICLE
+		&& !m_particleTypeName.startsWith( "SMUD" )
+		&& !m_isGroundAligned
+		&& m_windMotion == WIND_MOTION_NOT_USED
+		&& m_attachedSystemName.isEmpty()
+		&& ( m_shaderType == ALPHA || m_shaderType == ADDITIVE )
+		&& !m_fireLook
+		&& m_flipbookGridLog2 == 0
+		&& !m_isParticleUpTowardsEmitter;
+}
+
+// ------------------------------------------------------------------------------------------------
 /** If returns non-NULL, it is a slave system for use ... the create slaves parameter
  * tells *this* slave system whether or not it should create any slaves itself
  * automatically during its own constructor */
@@ -3633,6 +3831,7 @@ ParticleSystemManager::ParticleSystemManager( void )
 	//Added By Sadullah Nader
 	//Initializations inserted
 	m_lastLogicFrameUpdate = 0;
+	m_particleFrame = 0;
 	m_particleCount = 0;
 	m_fieldParticleCount = 0;
 	m_groundShadowCount = 0;
@@ -3807,6 +4006,8 @@ void ParticleSystemManager::update( void )
 
 	// update the last logic frame.
 	m_lastLogicFrameUpdate = TheGameLogic->getFrame();
+	// before the systems, so a spawn of this pass is born on it and aged once by it, like a Particle
+	++m_particleFrame;
 
 	USE_PERF_TIMER(ParticleSystemManager)
 	ParticleSystem *sys;
@@ -3895,8 +4096,18 @@ ParticleSystem *ParticleSystemManager::createParticleSystem( const ParticleSyste
 	if (sysTemplate == NULL)
 		return NULL;
 
-	m_uniqueSystemID = (ParticleSystemID)((UnsignedInt)m_uniqueSystemID + 1);
-	ParticleSystem *sys = newInstance(ParticleSystem)( sysTemplate, m_uniqueSystemID, createSlaves );
+	// The tick's shells and the render's own systems (a model state's bone systems, a truck's dust)
+	// take ids at the same time while the two overlap.  Particle ids are client handles; no logic CRC
+	// reads them.
+	// ponytail: one global lock on the counter, uncontended outside the overlap; an atomic if it ever shows in a profile
+	static std::mutex s_idLock;
+	ParticleSystemID id;
+	{
+		std::lock_guard<std::mutex> lock( s_idLock );
+		m_uniqueSystemID = (ParticleSystemID)((UnsignedInt)m_uniqueSystemID + 1);
+		id = m_uniqueSystemID;
+	}
+	ParticleSystem *sys = newInstance(ParticleSystem)( sysTemplate, id, createSlaves );
 	return sys;
 }
 
@@ -3922,10 +4133,20 @@ ParticleSystem *ParticleSystemManager::findParticleSystem( ParticleSystemID id )
 	if (id == INVALID_PARTICLE_SYSTEM_ID)
 		return NULL;	// my, that was easy
 
-	// a system this tick made is the tick's own until it is built
-	for (size_t i = 0; i < m_shells.size(); ++i)
-		if (m_shells[ i ]->getSystemID() == id)
-			return m_shells[ i ];
+	// A system this tick made is the tick's own until it is built, and the logic thread fills the list
+	// beside the render: the main thread inside the window looks only at what it made there itself.
+	if (LogicThread::isInsideWindow())
+	{
+		for (size_t i = 0; i < m_windowSystems.size(); ++i)
+			if (m_windowSystems[ i ]->getSystemID() == id)
+				return m_windowSystems[ i ];
+	}
+	else
+	{
+		for (size_t i = 0; i < m_shells.size(); ++i)
+			if (m_shells[ i ]->getSystemID() == id)
+				return m_shells[ i ];
+	}
 
 	LOGIC_CENSUS( CENSUS_PARTICLES );
 	ParticleSystemIDMap::const_iterator it = m_allParticleSystemMap.find( id );
@@ -4133,10 +4354,25 @@ void ParticleSystemManager::removeParticle( Particle *particleToRemove)
 // ------------------------------------------------------------------------------------------------
 void ParticleSystemManager::friend_addParticleSystem( ParticleSystem *particleSystemToAdd )
 {
+	// the tick beside the render reads the list and the lookup; filed once the window closes
+	if (LogicThread::isInsideWindow())
+	{
+		m_windowSystems.push_back(particleSystemToAdd);
+		return;
+	}
 	m_allParticleSystemList.push_back(particleSystemToAdd);
 	particleSystemToAdd->m_managerListIt = --m_allParticleSystemList.end();
 	m_allParticleSystemMap[ particleSystemToAdd->getSystemID() ] = particleSystemToAdd;
 	++m_particleSystemCount;
+}
+
+// ------------------------------------------------------------------------------------------------
+void ParticleSystemManager::friend_fileWindowSystems( void )
+{
+	// outside the window now, so each one files itself as it would have at its build, in the order made
+	for (size_t i = 0; i < m_windowSystems.size(); ++i)
+		friend_addParticleSystem( m_windowSystems[ i ] );
+	m_windowSystems.clear();
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -4146,6 +4382,12 @@ void ParticleSystemManager::friend_removeParticleSystem( ParticleSystem *particl
 {
 	// The constructor filed it and only the destructor calls this, so the iterator is ours and
 	// still good; EA scanned the whole list for it on every single system that died.
+	std::vector<ParticleSystem *>::iterator unfiled = std::find( m_windowSystems.begin(), m_windowSystems.end(), particleSystemToRemove );
+	if (unfiled != m_windowSystems.end())
+	{
+		m_windowSystems.erase( unfiled );
+		return;
+	}
 	m_allParticleSystemList.erase( particleSystemToRemove->m_managerListIt );
 	m_allParticleSystemMap.erase( particleSystemToRemove->getSystemID() );
 	--m_particleSystemCount;

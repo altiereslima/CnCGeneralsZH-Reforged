@@ -73,6 +73,8 @@
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/ScriptEngine.h"
 #include "WWDownload/Registry.h"
+#include "Platform/HazardCloud.h"
+#include "Platform/ModernWaterBuild.h"
 //added by saad
 //used to access a messagebox that does "ok" and "cancel"
 #include "GameClient/MessageBox.h"
@@ -314,7 +316,7 @@ static void showOptionsPage( Int which )
 // shows its column again when it ends.  The main menu's logo and frame stay; they are the screen's
 // mark and its edge.
 //-------------------------------------------------------------------------------------------------
-enum { MAIN_MENU_COLUMN_COUNT = 6 };
+enum { MAIN_MENU_COLUMN_COUNT = 7 };
 
 static const char *TheMainMenuColumnNames[ MAIN_MENU_COLUMN_COUNT ] =
 {
@@ -324,6 +326,7 @@ static const char *TheMainMenuColumnNames[ MAIN_MENU_COLUMN_COUNT ] =
 	"MainMenu.wnd:MapBorder3",
 	"MainMenu.wnd:MapBorder4",
 	"MainMenu.wnd:MapBorder5",
+	"MainMenu.wnd:MapBorder6",
 };
 
 static Bool mainMenuColumnHidden[ MAIN_MENU_COLUMN_COUNT ] = { FALSE };
@@ -1129,6 +1132,28 @@ static void fillCatalogWidgets( void )
 		if( widget == NULL )
 			continue;
 
+		if (strcmp(def.iniKey, "WaterStyle") == 0)
+		{
+			// The Linux renderer and Direct3D 11 draw the Modern water; -d3d9, -headless and macOS do not.
+			const Bool supported = ModernWater::Supported();
+			widget->winHide(!supported);
+			GameWindow *label = TheWindowManager->winGetWindowFromId(
+				NULL, NAMEKEY("OptionsMenu.wnd:LabelWaterStyle"));
+			if (label) label->winHide(!supported);
+			if (!supported) continue;
+		}
+		if (strcmp(def.iniKey, "CloudStyle") == 0)
+		{
+			// The display is initialized before the shell. Query when the menu
+			// opens so a reused layout also reflects the current device.
+			const Bool supported = HazardCloud::Supported();
+			widget->winHide(!supported);
+			GameWindow *label = TheWindowManager->winGetWindowFromId(
+				NULL, NAMEKEY("OptionsMenu.wnd:LabelCloudStyle"));
+			if (label) label->winHide(!supported);
+			if (!supported) continue;
+		}
+
 		const Int value = clampOptionValue( def, def.get() );
 
 		switch( def.kind )
@@ -1172,6 +1197,12 @@ static void readCatalogWidgets( OptionPreferences &out )
 		const OptionDef& def = TheOptionCatalog[ i ];
 		GameWindow *widget = findOptionWidget( def );
 		if( widget == NULL )
+			continue;
+
+		// A hidden, unfilled combo must not overwrite the player's opt-in.
+		if (strcmp(def.iniKey, "CloudStyle") == 0 && !HazardCloud::Supported())
+			continue;
+		if (strcmp(def.iniKey, "WaterStyle") == 0 && !ModernWater::Supported())
 			continue;
 
 		Int value;
@@ -1393,6 +1424,86 @@ static void saveVolumeOptions( OptionPreferences &out )
 	}
 }
 
+//-------------------------------------------------------------------------------------------------
+/** The audio output: the endpoint and the speaker setup.  Neither is a catalog row.  The speaker
+	* setup is EA's SpeakerType string, which MilesAudioManager reads out of Options.ini itself and
+	* hands the backend; the menu offers four of EA's six (GameAudio.cpp's TheSpeakerTypes, numbered as
+	* MSS.h's AIL_3D_*), and a file holding Surround Sound or 4 Speaker shows the stereo entry until the
+	* player picks one.  The endpoint is the backend's own id, "" for the default, and one that has gone
+	* shows Default while the saved id stays for when it comes back. */
+//-------------------------------------------------------------------------------------------------
+static const UnsignedInt TheMenuSpeakerTypes[] = { 0 /* 2 Speakers */, 1 /* Headphones */, 4 /* 5.1 Surround */, 5 /* 7.1 Surround */ };
+enum { MENU_SPEAKER_TYPE_COUNT = sizeof( TheMenuSpeakerTypes ) / sizeof( TheMenuSpeakerTypes[ 0 ] ) };
+enum { MAX_AUDIO_DEVICE_ENTRIES = 32 };
+static AsciiString menuAudioDevices[ MAX_AUDIO_DEVICE_ENTRIES ];	///< entry 0 is "", the default
+static Int menuAudioDeviceCount = 0;
+static Int speakerTypeShown = 0;	///< the entries the menu opened on, so Accept writes only a change
+static Int audioDeviceShown = 0;
+
+static GameWindow *audioOutputWidget( const char *name )
+{
+	return TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( name ) );
+}
+
+static void fillAudioOutputLists( void )
+{
+	GameWindow *speakers = audioOutputWidget( "OptionsMenu.wnd:ComboBoxSpeakerType" );
+	const UnsignedInt speakerType = TheAudio->translateSpeakerTypeToUnsignedInt( pref->getSpeakerType() );
+	GadgetComboBoxReset( speakers );
+	speakerTypeShown = 0;
+	for( Int entry = 0; entry < MENU_SPEAKER_TYPE_COUNT; ++entry )
+	{
+		AsciiString label;
+		label.format( "GUI:SpeakerType%d", entry );
+		GadgetComboBoxAddEntry( speakers, TheGameText->fetch( label ), MENU_ENTRY_COLOR );
+		if( TheMenuSpeakerTypes[ entry ] == speakerType )
+			speakerTypeShown = entry;
+	}
+	GadgetComboBoxSetSelectedPos( speakers, speakerTypeShown );
+
+	GameWindow *devices = audioOutputWidget( "OptionsMenu.wnd:ComboBoxAudioDevice" );
+	OptionPreferences::const_iterator saved = pref->find( "AudioDevice" );
+	const AsciiString savedDevice = saved != pref->end() ? saved->second : AsciiString();
+	GadgetComboBoxReset( devices );
+	GadgetComboBoxAddEntry( devices, TheGameText->fetch( "GUI:AudioDeviceDefault" ), MENU_ENTRY_COLOR );
+	menuAudioDevices[ 0 ].clear();
+	menuAudioDeviceCount = 1;
+	audioDeviceShown = 0;
+	UnicodeString name;
+	while( menuAudioDeviceCount < MAX_AUDIO_DEVICE_ENTRIES
+		&& TheGameEngine->getAudioOutputDevice( menuAudioDeviceCount - 1, menuAudioDevices[ menuAudioDeviceCount ], name ) )
+	{
+		GadgetComboBoxAddEntry( devices, name, MENU_ENTRY_COLOR );
+		if( menuAudioDevices[ menuAudioDeviceCount ] == savedDevice )
+			audioDeviceShown = menuAudioDeviceCount;
+		++menuAudioDeviceCount;
+	}
+	GadgetComboBoxSetSelectedPos( devices, audioDeviceShown );
+}
+
+static void saveAudioOutputOptions( OptionPreferences &out )
+{
+	Int index = -1;
+	GadgetComboBoxGetSelectedPos( audioOutputWidget( "OptionsMenu.wnd:ComboBoxSpeakerType" ), &index );
+	if( index >= 0 && index < MENU_SPEAKER_TYPE_COUNT && index != speakerTypeShown )
+	{
+		const AsciiString speakerType = TheAudio->translateUnsignedIntToSpeakerType( TheMenuSpeakerTypes[ index ] );
+		out[ "SpeakerType" ] = speakerType;
+		TheAudio->setPreferredSpeaker( speakerType );
+		TheAudio->setSpeakerType( TheMenuSpeakerTypes[ index ] );
+		speakerTypeShown = index;
+	}
+
+	index = -1;
+	GadgetComboBoxGetSelectedPos( audioOutputWidget( "OptionsMenu.wnd:ComboBoxAudioDevice" ), &index );
+	if( index >= 0 && index < menuAudioDeviceCount && index != audioDeviceShown )
+	{
+		out[ "AudioDevice" ] = menuAudioDevices[ index ];
+		TheGameEngine->setAudioOutputDevice( menuAudioDevices[ index ] );
+		audioDeviceShown = index;
+	}
+}
+
 static void saveOptions( void )
 {
 	Int index;
@@ -1426,11 +1537,9 @@ static void saveOptions( void )
 //	(*pref)["3DAudioProvider"] = TheAudio->getProviderName(TheAudio->getSelectedProvider());
 //
 	//-------------------------------------------------------------------------------------------------
-//	// speaker type
-	//	isChecked = GadgetCheckBoxIsChecked(checkAudioSurround);
-	//	TheAudio->setSpeakerSurround(isChecked);
-	//	(*pref)["SpeakerType"] = TheAudio->translateUnsignedIntToSpeakerType(TheAudio->getSpeakerType());
-	//
+	// speaker setup and endpoint, in place of EA's surround check box
+	saveAudioOutputOptions( *pref );
+
 	//-------------------------------------------------------------------------------------------------
 	// language filter
 	if( GadgetCheckBoxIsChecked( checkLanguageFilter ) )
@@ -1454,6 +1563,16 @@ static void saveOptions( void )
 	} else {
 		(*pref)["SendDelay"] = AsciiString("no");
 	}
+
+	//-------------------------------------------------------------------------------------------------
+	// Cloud shadows are no preset's (GameLODManager::applyStaticLODLevel leaves them), and a preset
+	// picked here still shows its step's value in the box, so the box is saved whatever the preset.
+	TheWritableGlobalData->m_useCloudMap = GadgetCheckBoxIsChecked( checkCloudShadows );
+	(*pref)["UseCloudMap"] = TheGlobalData->m_useCloudMap ? AsciiString("yes") : AsciiString("no");
+
+	// no preset has an opinion on the behind-buildings marker, so neither does the detail box
+	TheWritableGlobalData->m_enableBehindBuildingMarkers = GadgetCheckBoxIsChecked( checkBuildingOcclusion );
+	(*pref)["BuildingOcclusion"] = TheWritableGlobalData->m_enableBehindBuildingMarkers ? AsciiString("yes") : AsciiString("no");
 
 	//-------------------------------------------------------------------------------------------------
 	// Custom game detail settings.
@@ -1483,9 +1602,6 @@ static void saveOptions( void )
 		TheWritableGlobalData->m_useShadowDecals = GadgetCheckBoxIsChecked( check2DShadows );
 		(*pref)["UseShadowDecals"] = TheWritableGlobalData->m_useShadowDecals ? AsciiString("yes") : AsciiString("no");
 
-		TheWritableGlobalData->m_useCloudMap = GadgetCheckBoxIsChecked( checkCloudShadows );
-		(*pref)["UseCloudMap"] = TheGlobalData->m_useCloudMap ? AsciiString("yes") : AsciiString("no");
-
 		TheWritableGlobalData->m_useLightMap = GadgetCheckBoxIsChecked( checkGroundLighting );
 		(*pref)["UseLightMap"] = TheGlobalData->m_useLightMap ? AsciiString("yes") : AsciiString("no");
 
@@ -1508,9 +1624,6 @@ static void saveOptions( void )
 		// Never write this out
 		//TheWritableGlobalData->m_useFpsLimit = !GadgetCheckBoxIsChecked( checkUnlockFps );
 		//(*pref)["FPSLimit"] = TheGlobalData->m_useFpsLimit ? AsciiString("yes") : AsciiString("no");
-
-		TheWritableGlobalData->m_enableBehindBuildingMarkers = GadgetCheckBoxIsChecked( checkBuildingOcclusion );
-		(*pref)["BuildingOcclusion"] = TheWritableGlobalData->m_enableBehindBuildingMarkers ? AsciiString("yes") : AsciiString("no");
 
 		TheWritableGlobalData->m_useTrees = GadgetCheckBoxIsChecked( checkProps);
 		(*pref)["ShowTrees"] = TheWritableGlobalData->m_useTrees ? AsciiString("yes") : AsciiString("no");
@@ -2062,8 +2175,7 @@ static GameWindow **const TheGraphicsDetailControls[] =
 {
 	&sliderTextureResolution, &sliderParticleCap,
 	&check3DShadows, &check2DShadows, &checkCloudShadows, &checkGroundLighting, &checkSmoothWater,
-	&checkProps, &checkExtraAnimations, &checkTreeSway, &checkHeatEffects, &checkBuildingOcclusion,
-	&checkNoDynamicLod,
+	&checkProps, &checkExtraAnimations, &checkTreeSway, &checkHeatEffects, &checkNoDynamicLod,
 };
 enum { GRAPHICS_DETAIL_CONTROL_COUNT = sizeof( TheGraphicsDetailControls ) / sizeof( TheGraphicsDetailControls[ 0 ] ) };
 
@@ -2077,67 +2189,94 @@ static Bool isGraphicsDetailControl( const GameWindow *control )
 }
 
 //-------------------------------------------------------------------------------------------------
-// The rows of TheOptionCatalog a detail preset sets alongside its GameLOD.ini fields.  GameLOD.ini is
-// older than every one of them, so what each preset puts in them is written here, one column per
-// entry of the detail box: Ultra, High, Medium, Low.  Glow is left out: the artwork was painted
-// without it, and how much of it looks right is taste rather than detail.
+// The Performance / Quality slider.  TheGraphicsQualityTable (OptionsCatalog.cpp) says what every
+// graphics control on the Graphics and Effects pages shows at each of its steps, and the four
+// presets in the detail box are four of those steps.  Moving the slider fills in the controls and
+// puts the detail box on the preset the step is, or on Custom between them; Accept then applies
+// whatever the controls show, as it does for a preset or for boxes ticked by hand.
 //-------------------------------------------------------------------------------------------------
-struct DetailPresetCatalogRow
-{
-	const char	*iniKey;
-	Int					values[ CUSTOMDETAIL ];
-};
+static const char *const TheDetailCaptions[ DETAIL ] = { "GUI:Ultra", "GUI:High", "GUI:Medium", "GUI:Low", "GUI:Custom" };
 
-static const DetailPresetCatalogRow TheDetailPresetCatalogRows[] =
+/** The GameLOD level behind a preset entry of the detail box, which lists them Ultra first. */
+static StaticGameLODLevel detailLevel( Int index )
 {
-	{ "MSAA",											{ 3,	2,	0,	0 } },
-	{ "TextureFilter",						{ 2,	2,	1,	0 } },
-	{ "Anisotropy",								{ 16,	8,	4,	2 } },
-	{ "UseShadowVolumesForSkins",	{ 1,	1,	0,	0 } },
-	{ "ShadowsForProjectiles",		{ 1,	1,	1,	0 } },
-	{ "ShadowsForProps",					{ 1,	1,	1,	0 } },
-	{ "ShadowsForParticles",			{ 1,	1,	0,	0 } },
-	{ "Smoke",										{ 1,	0,	0,	0 } },
-	{ "ParticleBounce",						{ 1,	0,	0,	0 } },
-};
-enum { DETAIL_PRESET_CATALOG_ROW_COUNT = sizeof( TheDetailPresetCatalogRows ) / sizeof( TheDetailPresetCatalogRows[ 0 ] ) };
-
-static GameWindow *detailPresetCatalogWidget( Int row )
-{
-	return findOptionWidget( *findOptionDef( TheDetailPresetCatalogRows[ row ].iniKey ) );
+	return (StaticGameLODLevel)( STATIC_GAME_LOD_ULTRA - index );
 }
 
-static Bool isDetailPresetCatalogControl( const GameWindow *control )
+/** The detail box's entry for a step of the slider: the preset on that step, otherwise Custom. */
+static Int detailIndexAtStep( Int step )
 {
-	for( Int row = 0; row < DETAIL_PRESET_CATALOG_ROW_COUNT; ++row )
-		if( detailPresetCatalogWidget( row ) == control )
+	for( Int index = ULTRADETAIL; index < CUSTOMDETAIL; ++index )
+		if( TheGraphicsQualityAnchors[ detailLevel( index ) ] == step )
+			return index;
+
+	return CUSTOMDETAIL;
+}
+
+static GameWindow *graphicsQualitySlider( void )
+{
+	return findOptionWidget( *findOptionDef( "GraphicsQuality" ) );
+}
+
+static GameWindow *graphicsQualityWidget( const GraphicsQualityRow &row )
+{
+	AsciiString name;
+	name.format( "OptionsMenu.wnd:%s", row.control );
+	return TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( name ) );
+}
+
+static Bool isGraphicsQualityControl( const GameWindow *control )
+{
+	for( Int row = 0; row < TheGraphicsQualityTableCount; ++row )
+		if( graphicsQualityWidget( TheGraphicsQualityTable[ row ] ) == control )
 			return TRUE;
 
 	return FALSE;
 }
 
-/** Put one value in a catalog row's control, the way fillCatalogWidgets does for the loaded one. */
-static void showCatalogValue( const OptionDef &def, Int value )
+/** The row's control when the quality slider sets it, otherwise NULL.  It leaves a control the player
+	* cannot change - greyed in a match or under Direct3D 9, hidden where the device lacks it - and the
+	* two ClassicGraphics forces, whose forced value Accept would otherwise save over the player's own. */
+static GameWindow *graphicsQualityDrivenWidget( const GraphicsQualityRow &row )
 {
-	GameWindow *widget = findOptionWidget( def );
-	// every catalog control is the fork's, so a stock or modded OptionsMenu.wnd has none of them
-	if( widget == NULL )
-		return;
+	GameWindow *control = graphicsQualityWidget( row );
+	if( control->winIsHidden() || !control->winGetEnabled() )
+		return NULL;
 
-	switch( def.kind )
+	if( TheGlobalData->m_classicGraphics
+		&& ( strcmp( row.control, "ComboBoxLightingStyle" ) == 0 || strcmp( row.control, "CheckVolumetricSmoke" ) == 0 ) )
+		return NULL;
+
+	return control;
+}
+
+/** What a row's control shows, in the table's terms: a check box 0 or 1, a combo box its entry, a slider its position. */
+static Int graphicsQualityShownValue( GameWindow *control )
+{
+	if( BitTest( control->winGetStyle(), GWS_CHECK_BOX ) )
+		return GadgetCheckBoxIsChecked( control ) ? 1 : 0;
+
+	if( BitTest( control->winGetStyle(), GWS_COMBO_BOX ) )
 	{
-		case OPTION_BOOL:
-			GadgetCheckBoxSetChecked( widget, value != 0 );
-			break;
-
-		case OPTION_ENUM:
-			GadgetComboBoxSetSelectedPos( widget, clampOptionValue( def, value ) - def.lo );
-			break;
-
-		case OPTION_INT:
-			GadgetSliderSetPosition( widget, clampOptionValue( def, value ) );
-			break;
+		Int entry = -1;
+		GadgetComboBoxGetSelectedPos( control, &entry );
+		return entry;
 	}
+
+	return GadgetSliderGetPosition( control );
+}
+
+/** Whether every control the slider sets shows this step's value. */
+static Bool graphicsQualityStepShown( Int step )
+{
+	for( Int row = 0; row < TheGraphicsQualityTableCount; ++row )
+	{
+		GameWindow *control = graphicsQualityDrivenWidget( TheGraphicsQualityTable[ row ] );
+		if( control && graphicsQualityShownValue( control ) != TheGraphicsQualityTable[ row ].values[ step ] )
+			return FALSE;
+	}
+
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2150,6 +2289,7 @@ enum SliderReadoutKind
 	READOUT_PERCENT,		///< a 0..100 position with a percent sign
 	READOUT_TEXTURE,		///< 0..2, low to high texture resolution
 	READOUT_ANISOTROPY,	///< samples, where 0 is whatever the card offers
+	READOUT_QUALITY,		///< the quality slider: the preset on its step, or how far along it is in percent
 };
 
 struct SliderReadout
@@ -2162,6 +2302,7 @@ struct SliderReadout
 static const SliderReadout TheSliderReadouts[] =
 {
 	{ "OptionsMenu.wnd:SliderGamma",				"OptionsMenu.wnd:ValueGamma",							READOUT_NUMBER },
+	{ "OptionsMenu.wnd:SliderGraphicsQuality",	"OptionsMenu.wnd:ValueGraphicsQuality",	READOUT_QUALITY },
 	{ "OptionsMenu.wnd:LowResSlider",				"OptionsMenu.wnd:ValueTextureResolution",	READOUT_TEXTURE },
 	{ "OptionsMenu.wnd:ParticleCapSlider",	"OptionsMenu.wnd:ValueParticleCap",				READOUT_NUMBER },
 	{ "OptionsMenu.wnd:SliderAnisotropy",		"OptionsMenu.wnd:ValueAnisotropy",				READOUT_ANISOTROPY },
@@ -2169,6 +2310,7 @@ static const SliderReadout TheSliderReadouts[] =
 	{ "OptionsMenu.wnd:SliderSFXVolume",		"OptionsMenu.wnd:ValueSFXVolume",					READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderVoiceVolume",	"OptionsMenu.wnd:ValueVoiceVolume",				READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderAmbientVolume",	"OptionsMenu.wnd:ValueAmbientVolume",		READOUT_PERCENT },
+	{ "OptionsMenu.wnd:SliderMasterVolume",	"OptionsMenu.wnd:ValueMasterVolume",			READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderScrollSpeed",	"OptionsMenu.wnd:ValueScrollSpeed",				READOUT_NUMBER },
 	{ "OptionsMenu.wnd:SliderZoomSpeed",		"OptionsMenu.wnd:ValueZoomSpeed",					READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderDragTolerance",	"OptionsMenu.wnd:ValueDragTolerance",			READOUT_NUMBER },
@@ -2208,6 +2350,18 @@ static void updateSliderReadouts( void )
 					text.format( u"%dx", position );
 				break;
 
+			case READOUT_QUALITY:
+			{
+				// the box's word, not the step's: a box changed by hand leaves the slider on a preset's step
+				Int detailIndex = CUSTOMDETAIL;
+				GadgetComboBoxGetSelectedPos( comboBoxDetail, &detailIndex );
+				if( detailIndex == CUSTOMDETAIL )
+					text.format( u"%d%%", position * 100 / ( GRAPHICS_QUALITY_STEPS - 1 ) );
+				else
+					text = TheGameText->fetch( TheDetailCaptions[ detailIndex ] );
+				break;
+			}
+
 			default:
 				text.format( u"%d", position );
 				break;
@@ -2216,45 +2370,50 @@ static void updateSliderReadouts( void )
 	}
 }
 
-/** Put a preset's values in the Graphics and Effects pages' controls, the catalog rows in
-	* TheDetailPresetCatalogRows included.  Custom leaves them as they are.  Trees and texture
-	* resolution follow the memory test the way applyStaticLODLevel does, so what the pages show is
-	* what Accept will set. */
-static void showDetailPreset( Int index )
+static void updateDetailNote( void );
+
+/** Put one step of the quality slider in every control TheGraphicsQualityTable names, and the detail
+	* box on the preset that step is, or on Custom between two of them.  A control the slider leaves
+	* (graphicsQualityDrivenWidget) keeps what it shows, and so Accept leaves its setting alone. */
+static void showGraphicsQualityStep( Int step )
 {
-	StaticGameLODLevel level;
-	switch( index )
-	{
-		case ULTRADETAIL:		level = STATIC_GAME_LOD_ULTRA;	break;
-		case HIGHDETAIL:		level = STATIC_GAME_LOD_HIGH;		break;
-		case MEDIUMDETAIL:	level = STATIC_GAME_LOD_MEDIUM;	break;
-		case LOWDETAIL:			level = STATIC_GAME_LOD_LOW;		break;
-		default:						return;
-	}
-
-	const StaticGameLODInfo &preset = TheGameLODManager->m_staticGameLODInfo[ level ];
-	const Bool memoryPassed = TheGameLODManager->didMemPass();
-	const Int textureReduction = TheGameLODManager->getLevelTextureReduction( memoryPassed ? level : STATIC_GAME_LOD_LOW );
-
 	ignoreSelected = TRUE;
-	GadgetSliderSetPosition( sliderTextureResolution, TEXTURE_RESOLUTION_STEPS - 1 - textureReduction );
-	GadgetSliderSetPosition( sliderParticleCap, preset.m_maxParticleCount );
-	GadgetCheckBoxSetChecked( check3DShadows, preset.m_useShadowVolumes );
-	GadgetCheckBoxSetChecked( check2DShadows, preset.m_useShadowDecals );
-	GadgetCheckBoxSetChecked( checkCloudShadows, preset.m_useCloudMap );
-	GadgetCheckBoxSetChecked( checkGroundLighting, preset.m_useLightMap );
-	GadgetCheckBoxSetChecked( checkSmoothWater, preset.m_showSoftWaterEdge );
-	GadgetCheckBoxSetChecked( checkProps, memoryPassed );
-	GadgetCheckBoxSetChecked( checkExtraAnimations, preset.m_useBuildupScaffolds );
-	GadgetCheckBoxSetChecked( checkHeatEffects, preset.m_useHeatEffects );
-	GadgetCheckBoxSetChecked( checkNoDynamicLod, !preset.m_enableDynamicLOD );
-	if( checkTreeSway )
-		GadgetCheckBoxSetChecked( checkTreeSway, preset.m_useTreeSway );
-	for( Int row = 0; row < DETAIL_PRESET_CATALOG_ROW_COUNT; ++row )
-		showCatalogValue( *findOptionDef( TheDetailPresetCatalogRows[ row ].iniKey ), TheDetailPresetCatalogRows[ row ].values[ index ] );
+	for( Int row = 0; row < TheGraphicsQualityTableCount; ++row )
+	{
+		GameWindow *control = graphicsQualityDrivenWidget( TheGraphicsQualityTable[ row ] );
+		if( control == NULL )
+			continue;
+
+		const Int value = TheGraphicsQualityTable[ row ].values[ step ];
+		if( BitTest( control->winGetStyle(), GWS_CHECK_BOX ) )
+			GadgetCheckBoxSetChecked( control, value != 0 );
+		else if( BitTest( control->winGetStyle(), GWS_COMBO_BOX ) )
+			GadgetComboBoxSetSelectedPos( control, value );
+		else
+			GadgetSliderSetPosition( control, value );
+	}
+	// trees are no step's: a preset gives them whenever the memory test passed, as applyStaticLODLevel does
+	if( detailIndexAtStep( step ) != CUSTOMDETAIL && checkProps->winGetEnabled() )
+		GadgetCheckBoxSetChecked( checkProps, TheGameLODManager->didMemPass() );
+	GadgetComboBoxSetSelectedPos( comboBoxDetail, detailIndexAtStep( step ) );
 	ignoreSelected = FALSE;
 
 	updateSliderReadouts();
+	updateDetailNote();
+}
+
+/** A preset picked in the detail box: the quality slider moves to its step and the controls show
+	* that step.  Custom leaves both where they are. */
+static void showDetailPreset( Int index )
+{
+	if( index == CUSTOMDETAIL )
+		return;
+
+	const Int step = TheGraphicsQualityAnchors[ detailLevel( index ) ];
+	ignoreSelected = TRUE;
+	GadgetSliderSetPosition( graphicsQualitySlider(), step );
+	ignoreSelected = FALSE;
+	showGraphicsQualityStep( step );
 }
 
 /** The grey line under the detail box: what the picked preset turns on, and that picking one only
@@ -2276,17 +2435,20 @@ static void updateDetailNote( void )
 	GadgetStaticTextSetText( note, TheGameText->fetch( key ) );
 }
 
-/** A detail control was touched, so what the page shows is nobody's preset any more. */
+/** A detail control was touched, so what the page shows is nobody's preset any more.  In a match the
+	* box is greyed and keeps its preset: what can still change there (glow, the live effects) is the
+	* catalog's to save, and Custom would be saved over the preset for it. */
 static void markDetailCustom( void )
 {
 	Int index = CUSTOMDETAIL;
 	GadgetComboBoxGetSelectedPos( comboBoxDetail, &index );
-	if( index == CUSTOMDETAIL )
+	if( index == CUSTOMDETAIL || !comboBoxDetail->winGetEnabled() )
 		return;
 
 	ignoreSelected = TRUE;
 	GadgetComboBoxSetSelectedPos( comboBoxDetail, CUSTOMDETAIL );
 	ignoreSelected = FALSE;
+	updateSliderReadouts();
 	updateDetailNote();
 }
 //-------------------------------------------------------------------------------------------------
@@ -2574,14 +2736,12 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	// the monitor the game is on, and the size it is showing there
 	fillMonitorList();
 	fillResolutionList( selectedMonitor(), TheDisplay->getWidth(), TheDisplay->getHeight() );
+	fillAudioOutputLists();
 
 	// set the display detail
 	GadgetComboBoxReset(comboBoxDetail);
-	GadgetComboBoxAddEntry(comboBoxDetail, TheGameText->fetch("GUI:Ultra"), color);
-	GadgetComboBoxAddEntry(comboBoxDetail, TheGameText->fetch("GUI:High"), color);
-	GadgetComboBoxAddEntry(comboBoxDetail, TheGameText->fetch("GUI:Medium"), color);
-	GadgetComboBoxAddEntry(comboBoxDetail, TheGameText->fetch("GUI:Low"), color);
-	GadgetComboBoxAddEntry(comboBoxDetail, TheGameText->fetch("GUI:Custom"), color);
+	for (Int entry = ULTRADETAIL; entry < DETAIL; ++entry)
+		GadgetComboBoxAddEntry(comboBoxDetail, TheGameText->fetch(TheDetailCaptions[entry]), color);
 
 	//Check if level was never set and default to setting most suitable for system.
 	if (TheGameLODManager->getStaticLODLevel() == STATIC_GAME_LOD_UNKNOWN)
@@ -2744,8 +2904,6 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	}
 
 	fillCatalogWidgets();
-	updateSliderReadouts();
-	updateDetailNote();
 	OptionsHotkeysInit();
 	showOptionsPage( 0 );
 
@@ -2779,6 +2937,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 		if (comboBoxDetail)
 			comboBoxDetail->winEnable(FALSE);
+		graphicsQualitySlider()->winEnable(FALSE);
 
 		// and what the detail box decides with it: a preset is picked outside a match, where the
 		// shadows and textures it changes can be rebuilt
@@ -2798,6 +2957,31 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 //		if (checkAudioHardware)
 //			checkAudioHardware->winEnable(FALSE);
 	}
+
+	// three looks only the Direct3D 11 picture draws; under -d3d9 their boxes keep the saved value, greyed
+	if( !TheGlobalData->m_direct3D11 )
+	{
+		static const char *const direct3D11Only[] = { "MapLight", "TeamGlow", "WaterFoam" };
+		for( Int i = 0; i < (Int)( sizeof( direct3D11Only ) / sizeof( direct3D11Only[ 0 ] ) ); ++i )
+			findOptionWidget( *findOptionDef( direct3D11Only[ i ] ) )->winEnable( FALSE );
+	}
+
+	// A preset is its own step on the quality slider, whatever step Options.ini kept from a Custom mix,
+	// as long as the boxes show that step.  An Options.ini from before the slider can hold a preset
+	// with boxes ticked by hand beside it, and then the page is the Custom mix it really is.  Run after
+	// the greying above, which decides what the slider sets; in a match the box keeps its preset.
+	Int detailIndex = CUSTOMDETAIL;
+	GadgetComboBoxGetSelectedPos( comboBoxDetail, &detailIndex );
+	if( detailIndex != CUSTOMDETAIL )
+	{
+		const Int step = TheGraphicsQualityAnchors[ detailLevel( detailIndex ) ];
+		if( !comboBoxDetail->winGetEnabled() || graphicsQualityStepShown( step ) )
+			GadgetSliderSetPosition( graphicsQualitySlider(), step );
+		else
+			GadgetComboBoxSetSelectedPos( comboBoxDetail, CUSTOMDETAIL );
+	}
+	updateSliderReadouts();
+	updateDetailNote();
 
 
 	// borderless owns the resolution; the list is grey while it is picked
@@ -2971,7 +3155,7 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 															picked ? menuModes[ index ].width : TheDisplay->getWidth(),
 															picked ? menuModes[ index ].height : TheDisplay->getHeight() );
 				}
-				else if( isDetailPresetCatalogControl( control ) )
+				else if( isGraphicsQualityControl( control ) )
 				{
 					markDetailCustom();
 				}
@@ -2999,7 +3183,10 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 				break;
 
 			updateSliderReadouts();
-			if( isGraphicsDetailControl( (GameWindow *)mData1 ) || isDetailPresetCatalogControl( (GameWindow *)mData1 ) )
+			// the quality slider sets the controls rather than being one of them, so it never makes Custom itself
+			if( (GameWindow *)mData1 == graphicsQualitySlider() )
+				showGraphicsQualityStep( GadgetSliderGetPosition( (GameWindow *)mData1 ) );
+			else if( isGraphicsDetailControl( (GameWindow *)mData1 ) || isGraphicsQualityControl( (GameWindow *)mData1 ) )
 				markDetailCustom();
 			break;
 		}
@@ -3088,7 +3275,7 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 				setDefaults();
 				updateSliderReadouts();
 			}
-			else if( isGraphicsDetailControl( control ) || isDetailPresetCatalogControl( control ) )
+			else if( isGraphicsDetailControl( control ) || isGraphicsQualityControl( control ) )
 			{
 				markDetailCustom();
 			}

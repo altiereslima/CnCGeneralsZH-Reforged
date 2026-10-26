@@ -82,7 +82,7 @@ def build(layout, menu):
 
 def read_strings():
     keys = set()
-    with open(PATCH_STR, "r") as fp:
+    with open(PATCH_STR, "r", encoding="utf-8") as fp:
         for line in fp:
             line = line.strip()
             if line and not line.startswith("//") and not line.startswith('"') and line != "END":

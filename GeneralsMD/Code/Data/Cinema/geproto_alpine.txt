@@ -1,0 +1,10 @@
+# Renderer prototype pairs on Alpine Assault over Scenarios/geproto_alpine.txt. Run with a -video
+# range so this clock is the logic frame over 60.
+
+0     hud     off
+3     cut     780 900 1.0 0 0
+18    shot    # the player's view: the field, the outpost, the rail yard
+18.3  cut     780 900 1.4 0 -16
+20    shot    # wider and lower, across the relief
+20.3  cut     760 920 1.0 45 0
+22    shot    # the field from the other side

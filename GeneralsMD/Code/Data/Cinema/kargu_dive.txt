@@ -1,0 +1,24 @@
+# The Kargu swarm of ed68a7bd over Scenarios/kargu.txt on Twilight Flame (seed 1), the take behind
+# kargu_dive_mobile.mp4 (2026-10-25). The drones fly from the Kargu base at 537,3438 to the American
+# base round 1733,4205. The list opens on the runways with the base at the top right, the drones
+# rolling out and climbing away over the top edge, rolls along the line while they cruise above the
+# frame, and holds over the command centre from 10 s: Avengers and a power plant top right,
+# Humvees top left, a Patriot at the bottom left edge, Crusaders at the bottom. The dives begin at
+# logic frame 659 (11 s) and the last lands round 1100.
+#
+# Angle -147 looked along about (0,-1) on this map, not across the flight as the camera code read
+# suggested; -57 looked along the flight, and -114 at zoom 1.15 put a black strip of the map's edge
+# along the top. Keep this one.
+#
+#   PATH must hold ffmpeg.exe, or -video falls back to bitmaps (11 GB for this range at 1080p)
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -fps 120 -noFPSLimit -particlecap 2500
+#     -quickstart -noshellmap -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 2 -takeover -side 0 FactionTurkiye -side 1 FactionAmerica -seed 1
+#     -scenario kargu -cinema kargu_dive -recordfps 120 -video 150 1140 kargu_dive
+#     -wav 150 1140 kargu_dive -maxframes 1150
+
+0.0   cut     700 3560 1.0 -147 14
+6.5   route   5.5 1000 3750 1350 3950 1700 4130
+10.0  zoom    1.2 4
+12.0  orbit   12 7
+12.0  pitch   10 6

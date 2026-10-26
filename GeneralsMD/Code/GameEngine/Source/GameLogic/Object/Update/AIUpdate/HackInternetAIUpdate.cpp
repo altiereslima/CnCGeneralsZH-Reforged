@@ -64,6 +64,7 @@ AIStateMachine* HackInternetAIUpdate::makeStateMachine()
 HackInternetAIUpdate::HackInternetAIUpdate( Thing *thing, const ModuleData* moduleData ) : AIUpdateInterface( thing, moduleData )
 {
 	m_hasPendingCommand = false;
+	m_heldByPlayer = false;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -132,6 +133,15 @@ void HackInternetAIUpdate::aiDoCommand(const AICommandParms* parms)
 {
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
+
+	// A player who stops a hacker or calls it out of a building means it to stand there, so the idle
+	// hacker's automatic hacking waits for his next order. The AI's own orders, the exit's walk out of
+	// the door among them, change nothing.
+	if( parms->m_cmdSource == CMD_FROM_PLAYER &&
+			( parms->m_cmd == AICMD_IDLE || parms->m_cmd == AICMD_EXIT || parms->m_cmd == AICMD_EXIT_INSTANTLY ) )
+		m_heldByPlayer = true;
+	else if( parms->m_cmdSource != CMD_FROM_AI )
+		m_heldByPlayer = false;
 
 	// A hacker already at work, or unpacking to start, ignores a repeat hack order. Without this a
 	// hack order given to a selection with one idle hacker in it packed up every busy one and
@@ -211,18 +221,20 @@ void HackInternetAIUpdate::crc( Xfer *xfer )
 {
 	// extend base class
 	AIUpdateInterface::crc(xfer);
+	xfer->xferBool(&m_heldByPlayer);
 }  // end crc
 
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
 	* 1: Initial version
-	* 2: the pending command keeps its source */
+	* 2: the pending command keeps its source
+	* 3: held by the player */
 // ------------------------------------------------------------------------------------------------
 void HackInternetAIUpdate::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 2;
+  XferVersion currentVersion = 3;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -234,6 +246,8 @@ void HackInternetAIUpdate::xfer( Xfer *xfer )
 		if (version < 2)
 			m_pendingCommand.setCommandSource(CMD_FROM_AI);
 	}
+	if (version >= 3)
+		xfer->xferBool(&m_heldByPlayer);
 }  // end xfer
 
 // ------------------------------------------------------------------------------------------------

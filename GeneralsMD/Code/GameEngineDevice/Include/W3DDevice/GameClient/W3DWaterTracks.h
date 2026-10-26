@@ -62,6 +62,12 @@ public:
 	Int render(DX8VertexBufferClass	*vertexBuffer, Int batchStart);	///<draw this object
 
 protected:
+	void waveForDraw(Vector2 &waveTailOrigin,Vector2 &waveFrontOrigin,Real &waveAlpha,Real &widthFrac);
+#if defined(__linux__)
+	Vector2 m_drawnWaveTail,m_drawnWaveFront;
+	Real m_drawnWaveAlpha=0,m_drawnWaveWidth=0,m_drawnWaterHeight=0;
+	Bool m_drawnHasWater=FALSE,m_drawnWaveReady=FALSE;
+#endif
 	TextureClass *m_stageZeroTexture;	///<primary texture
 	SphereClass	m_boundingSphere;		///<bounding sphere of WaterTracks
 	AABoxClass	m_boundingBox;			///<bounding box of WaterTracks
@@ -69,6 +75,7 @@ protected:
 	waveType	m_type;					///<used for render state sorting (set this to texture pointer for now).
 	Int			m_x;					///<vertex count
 	Int			m_y;					///<vertex count
+	Bool		m_authoredSource;		///< loaded from .wak; explicit optional surf-replacement tag
 	Bool		m_bound;				///<object is bound to owner and accepts new edges
 	Vector2		m_startPos;				///<starting position of wave
 //	Vector2		m_endPos;				///<ending position of wave
@@ -123,6 +130,9 @@ public:
 
 	void flush (RenderInfoClass & rinfo);	///<draw all tracks that were requested for rendering.
 	void update(void);	///<update the state of all edges (fade alpha, remove old, etc.)
+#if defined(__linux__)
+	void takeReadsForRender(void);
+#endif
 
 	void init(void);	///< pre-allocate track objects
 	void shutdown( void );		///< release all pre-allocated track objects, called by destructor

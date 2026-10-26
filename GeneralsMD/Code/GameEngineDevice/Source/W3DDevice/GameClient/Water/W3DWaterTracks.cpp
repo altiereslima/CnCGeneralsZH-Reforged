@@ -65,6 +65,10 @@
 #include "assetmgr.h"
 #include "WW3D2/dx8wrapper.h"
 #include "Platform/RenderTypes.h"
+#if defined(__linux__)
+#include "Platform/WaterShoreOverlay.h"
+#endif
+#include <cstring>
 
 //#pragma optimize("", off)
 
@@ -157,6 +161,7 @@ WaterTracksObj::WaterTracksObj(void)
 {
 	m_stageZeroTexture=NULL;
 	m_bound=false;
+	m_authoredSource=FALSE;
 	m_initTimeOffset=0;
 }
 
@@ -329,60 +334,15 @@ Int WaterTracksObj::update(Int msElapsed)
  */
 //=============================================================================
 
-Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
+void WaterTracksObj::waveForDraw(Vector2 &waveTailOrigin,Vector2 &waveFrontOrigin,Real &waveAlpha,Real &widthFrac)
 {
-	VertexFormatXYZDUV1 *vb;
-	Vector2	waveTailOrigin,waveFrontOrigin;
-	Real	ooWaveDirLen=1.0f/m_waveDir.Length();	//one over length
-	Real	waterHeight;
-	Real	waveAlpha;
-	Real	widthFrac;
-	Real	heightFrac;
-
-	/* This is the one place in the tree that locks the Direct3D 9 buffer itself instead of going
-		 through VertexBufferClass's lock classes, and those classes are where the Direct3D 11 twin
-		 of a buffer is written.  So under the Direct3D 11 backend the waves were sent to the card
-		 out of a twin nothing had ever filled: the draws were made, none were refused, and the surf
-		 was missing from the shell map's beach while Direct3D 9 still drew it.  The lock keeps its
-		 own NOOVERWRITE/DISCARD flags - this is a dynamic buffer written every frame - so the twin
-		 is opened by hand here rather than by swapping in AppendLockClass, which locks with none. */
-	const unsigned vertexSize = vertexBuffer->FVF_Info().Get_FVF_Size();
-	const unsigned byteCount = m_x*m_y*vertexSize;
-	unsigned byteOffset;
-	unsigned lockFlags;
-
-	// the buffer is made right after a device reset, which is when the card can refuse it
-	if (vertexBuffer->Get_DX8_Vertex_Buffer() == NULL)
-		return batchStart;
-
-	if (batchStart < (WATER_VB_PAGES*WATER_STRIP_X*WATER_STRIP_Y-m_x*m_y))
-	{	//we have room in current VB, append new verts
-		byteOffset = batchStart*vertexSize;
-		lockFlags = D3DLOCK_NOOVERWRITE;
-		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(byteOffset,byteCount,(void**)&vb,lockFlags) != D3D_OK)
-			return batchStart;
-	}
-	else
-	{	//ran out of room in last VB, request a substitute VB.
-		byteOffset = 0;
-		lockFlags = D3DLOCK_DISCARD;
-		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(byteOffset,byteCount,(void**)&vb,lockFlags) != D3D_OK)
-			return batchStart;
-		batchStart=0;	//reset start of page to first vertex
-	}
-
-	DX11BufferLockClass dx11Lock;
-	void *mirror = dx11Lock.Begin(vertexBuffer->Get_DX11_Twin(),vb,byteOffset,byteCount,lockFlags);
-	if (mirror)
-		vb = (VertexFormatXYZDUV1 *)mirror;
-
+	const Real ooWaveDirLen=1.0f/m_waveDir.Length();
 	//Adjust wave position in a non-linear way so that it slows down as it hits the target.  Using 1/4 sine wave
 	//seems to work okay since it maxes out at 1.0 at our final position.
 	//Real	timeFrac=(Real)m_elapsedMs/(Real)m_totalMs;//sinf(0.5f*3.14159f*(Real)m_elapsedMs/(Real)m_totalMs);
 
 	//Real displacement=m_elapsedMs*waveInitialV+0.5*waveAcceleration*m_elapsed*m_elapsed;
 
-	heightFrac=1.0f;
 	widthFrac = 1.0f;
 
 	if (m_type == WaveTypeStationary)
@@ -479,9 +439,71 @@ Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 		}
 	}
 
+}
+
+Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
+{
+#if defined(__linux__)
+	if (!m_drawnWaveReady) return batchStart;
+#endif
+	VertexFormatXYZDUV1 *vb;
+	Vector2	waveTailOrigin,waveFrontOrigin;
+	Real	waterHeight;
+	Real	waveAlpha;
+	Real	widthFrac;
+
+	/* This is the one place in the tree that locks the Direct3D 9 buffer itself instead of going
+		 through VertexBufferClass's lock classes, and those classes are where the Direct3D 11 twin
+		 of a buffer is written.  So under the Direct3D 11 backend the waves were sent to the card
+		 out of a twin nothing had ever filled: the draws were made, none were refused, and the surf
+		 was missing from the shell map's beach while Direct3D 9 still drew it.  The lock keeps its
+		 own NOOVERWRITE/DISCARD flags - this is a dynamic buffer written every frame - so the twin
+		 is opened by hand here rather than by swapping in AppendLockClass, which locks with none. */
+	const unsigned vertexSize = vertexBuffer->FVF_Info().Get_FVF_Size();
+	const unsigned byteCount = m_x*m_y*vertexSize;
+	unsigned byteOffset;
+	unsigned lockFlags;
+
+	// the buffer is made right after a device reset, which is when the card can refuse it
+	if (vertexBuffer->Get_DX8_Vertex_Buffer() == NULL)
+		return batchStart;
+
+	if (batchStart < (WATER_VB_PAGES*WATER_STRIP_X*WATER_STRIP_Y-m_x*m_y))
+	{	//we have room in current VB, append new verts
+		byteOffset = batchStart*vertexSize;
+		lockFlags = D3DLOCK_NOOVERWRITE;
+		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(byteOffset,byteCount,(void**)&vb,lockFlags) != D3D_OK)
+			return batchStart;
+	}
+	else
+	{	//ran out of room in last VB, request a substitute VB.
+		byteOffset = 0;
+		lockFlags = D3DLOCK_DISCARD;
+		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(byteOffset,byteCount,(void**)&vb,lockFlags) != D3D_OK)
+			return batchStart;
+		batchStart=0;	//reset start of page to first vertex
+	}
+
+	DX11BufferLockClass dx11Lock;
+	void *mirror = dx11Lock.Begin(vertexBuffer->Get_DX11_Twin(),vb,byteOffset,byteCount,lockFlags);
+	if (mirror)
+		vb = (VertexFormatXYZDUV1 *)mirror;
+
+#if defined(__linux__)
+	waveTailOrigin=m_drawnWaveTail;waveFrontOrigin=m_drawnWaveFront;
+	waveAlpha=m_drawnWaveAlpha;widthFrac=m_drawnWaveWidth;
+	waterHeight=m_drawnWaterHeight;
+#else
+	waveForDraw(waveTailOrigin,waveFrontOrigin,waveAlpha,widthFrac);
+#endif
+
 	//First insert tail of wave:
 	Vector2 testPoint(waveTailOrigin);
+#if defined(__linux__)
+	const Bool hasWaterLevel=m_drawnHasWater;
+#else
 	TheTerrainLogic->isUnderwater(testPoint.X,testPoint.Y,&waterHeight);
+#endif
 	vb->x=	testPoint.X;
 	vb->y=	testPoint.Y;
 	vb->z=waterHeight+1.5f;
@@ -533,7 +555,18 @@ Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 	Int idxCount=(m_y-1)*(m_x*2+2) - 2;	//index count
 
 	DX8Wrapper::Set_Index_Buffer(TheWaterTracksRenderSystem->m_indexBuffer,batchStart);
+	#if defined(__linux__)
+	WaterShoreOverlay::Quad shoreTrack;shoreTrack.level=waterHeight;
+	const Vector2 corners[4]={waveTailOrigin,waveTailOrigin+m_perpDir*m_waveFinalWidth*widthFrac,
+		waveFrontOrigin+m_perpDir*m_waveFinalWidth*widthFrac,waveFrontOrigin};
+	for(Int i=0;i<4;++i){shoreTrack.xy[i*2]=corners[i].X;shoreTrack.xy[i*2+1]=corners[i].Y;}
+	PosixWaterShoreTrack(DX8Wrapper::_Get_D3D_Device(),m_authoredSource && hasWaterLevel &&
+		!TheGlobalData->m_isWorldBuilder && !TheGlobalData->m_usingWaterTrackEditor?&shoreTrack:NULL);
+#endif
 	DX8Wrapper::Draw_Strip(0,idxCount-2,0,m_x*m_y);	//there are always n-2 primitives for n index strip.
+#if defined(__linux__)
+	PosixWaterShoreTrack(DX8Wrapper::_Get_D3D_Device(),NULL);
+#endif
 
 	return batchStart+m_x*m_y;	//return new offset into unused area of vertex buffer
 }
@@ -563,6 +596,7 @@ WaterTracksObj *WaterTracksRenderSystem::bindTrack(waveType type)
 			m_freeModules = mod->m_nextSystem;
 
 		mod->m_type=type;
+		mod->m_authoredSource=FALSE;
 
 		// put module on the used list (sorted next to similar types)
 		nextmod=NULL,prevmod=NULL;
@@ -591,6 +625,9 @@ WaterTracksObj *WaterTracksRenderSystem::bindTrack(waveType type)
 		}
 	
 		mod->m_bound=true;
+#if defined(__linux__)
+		mod->m_drawnWaveReady=FALSE;
+#endif
 	}  // end if
 
 	#ifdef SYNC_WAVES
@@ -929,6 +966,22 @@ void WaterTracksRenderSystem::update()
 static void TestWaterUpdate(void);	// static, as its definition is
 void setFPMode( void );
 
+#if defined(__linux__)
+void WaterTracksRenderSystem::takeReadsForRender(void)
+{
+	if (!TheGlobalData->m_showSoftWaterEdge || TheWaterTransparency->m_transparentWaterDepth==0) return;
+	if (TheGlobalData->m_usingWaterTrackEditor) TestWaterUpdate();
+	update();
+	for (WaterTracksObj *mod=m_usedModules;mod;mod=mod->m_nextSystem) {
+		mod->waveForDraw(mod->m_drawnWaveTail,mod->m_drawnWaveFront,mod->m_drawnWaveAlpha,mod->m_drawnWaveWidth);
+		mod->m_drawnWaterHeight=0.0f;
+		mod->m_drawnHasWater=TheTerrainLogic->getWaterHandle(mod->m_drawnWaveTail.X,mod->m_drawnWaveTail.Y)!=NULL;
+		TheTerrainLogic->isUnderwater(mod->m_drawnWaveTail.X,mod->m_drawnWaveTail.Y,&mod->m_drawnWaterHeight);
+		mod->m_drawnWaveReady=TRUE;
+	}
+}
+#endif
+
 //=============================================================================
 // WaterTracksRenderSystem::flush
 //=============================================================================
@@ -945,10 +998,12 @@ Try improving the fit to vertical surfaces like cliffs.
 	if (!TheGlobalData->m_showSoftWaterEdge || TheWaterTransparency->m_transparentWaterDepth ==0 )
 		return;
 
+#if !defined(__linux__)
 	if (TheGlobalData->m_usingWaterTrackEditor)
 		TestWaterUpdate();
 
 	update();	//update positions of all the tracks
+#endif
 
 	rinfo.Camera.Apply();
 
@@ -1137,6 +1192,7 @@ void WaterTracksRenderSystem::loadTracks(void)
 				flipU ^= 1;	//toggle flip state
 				umod->init(waveTypeInfo[wtype].m_finalHeight,waveTypeInfo[wtype].m_finalWidth,startPos,endPos,waveTypeInfo[wtype].m_textureName,0);
 				umod->m_flipU=flipU;
+				umod->m_authoredSource=TRUE;
 
 				if (waveTypeInfo[wtype].m_secondWaveTimeOffset)	//check if we need a second wave to follow
 				{
@@ -1145,6 +1201,7 @@ void WaterTracksRenderSystem::loadTracks(void)
 					{
 						umod->init(waveTypeInfo[wtype].m_finalHeight,waveTypeInfo[wtype].m_finalWidth,startPos,endPos,waveTypeInfo[wtype].m_textureName,waveTypeInfo[wtype].m_secondWaveTimeOffset);
 						umod->m_flipU = !flipU;
+						umod->m_authoredSource=TRUE;
 					}
 				}
 			}

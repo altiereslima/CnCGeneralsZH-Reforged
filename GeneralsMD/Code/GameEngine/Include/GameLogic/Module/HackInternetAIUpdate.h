@@ -185,6 +185,7 @@ class HackInternetAIInterface
 public:
 	virtual Bool isHacking() const = 0;
 	virtual Bool isHackingPackingOrUnpacking() const = 0;
+	virtual Bool isHeldByPlayer() const = 0;		///< the player's last order was a stop or an exit
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -221,6 +222,7 @@ public:
 
 	virtual Bool isHacking() const;
 	virtual Bool isHackingPackingOrUnpacking() const;
+	virtual Bool isHeldByPlayer() const { return m_heldByPlayer; }
 
 protected:
 
@@ -228,6 +230,7 @@ protected:
 	
 	AICommandParmsStorage		m_pendingCommand;
 	Bool m_hasPendingCommand;
+	Bool m_heldByPlayer;		///< stopped or called out of a building by the player; IdleHackerUpdate leaves it be
 };
 
 #endif

@@ -339,6 +339,17 @@ protected:
 	GapFillerClass *										GapFiller;
 	bool														HasBeenInUse;	// For debugging purposes!
 
+	// A skin's bind pose and bone links in the Direct3D 11 backend's shadow skin source, for the
+	// sun's depth pass to skin on the GPU: the first vertex there, -1 before an upload, and the
+	// generation of the buffer it went into (the backend starts a new one when it fills or is reset).
+	int														ShadowSkinSourceOffset;
+	unsigned													ShadowSkinSourceGeneration;
+	// The depth pass this model's pieces were last worked out in (DX8MeshRendererClass::
+	// Add_Shadow_Caster), and the result: its group of instances in that pass, or -1 less the reason
+	// it goes the old way.  Worked out again every pass, so nothing about the model can go stale.
+	unsigned													ShadowCasterPass;
+	int														ShadowCasterGroup;
+
 	friend class MeshClass;
 	friend class MeshDeformSetClass;
 	friend class MeshDeformClass;

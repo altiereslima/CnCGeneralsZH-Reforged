@@ -98,16 +98,22 @@ if [ "$PLATFORM" = macos ]; then
 else
   need cc c++ git curl unzip tar xz make ninja pkg-config
   [ -n "$CMAKE" ] || need cmake
-  # The X11, Wayland, EGL, DRM and Vulkan headers are SDL3's (the list Tools/linux-check.sh builds with).
+  # GNU ld cannot link the engine's cyclic static libraries; CMakeLists.txt picks LLD, else mold.
+  command -v ld.lld >/dev/null 2>&1 || command -v ld.mold >/dev/null 2>&1 || command -v mold >/dev/null 2>&1 \
+    || missing="$missing lld"
+  # Tools/widechar_check.py reads the engine as POSIX compiles it through unifdef.
+  [ -z "$RUNTESTS" ] || need unifdef
+  # The X11, Wayland, EGL, DRM and Vulkan headers are SDL3's (the list Tools/linux-check.sh builds with);
+  # fontconfig is the glyph rasteriser's.
   if command -v pkg-config >/dev/null 2>&1; then
-    for module in x11 xext xcursor xi xfixes xrandr xscrnsaver xtst wayland-client xkbcommon egl libdrm gbm vulkan; do
+    for module in x11 xext xcursor xi xfixes xrandr xscrnsaver xtst wayland-client xkbcommon egl libdrm gbm vulkan fontconfig; do
       pkg-config --exists "$module" || missing="$missing $module"
     done
   fi
   if [ -n "$missing" ]; then
-    apt="sudo apt-get install cmake ninja-build g++ git curl unzip xz-utils make pkg-config python3 libx11-dev libxext-dev libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev wayland-protocols libegl-dev libdrm-dev libgbm-dev libvulkan-dev"
-    dnf="sudo dnf install cmake ninja-build gcc-c++ git curl unzip xz make pkgconf-pkg-config python3 libX11-devel libXext-devel libXcursor-devel libXi-devel libXfixes-devel libXrandr-devel libXScrnSaver-devel libXtst-devel wayland-devel libxkbcommon-devel wayland-protocols-devel mesa-libEGL-devel libdrm-devel mesa-libgbm-devel vulkan-loader-devel"
-    pacman="sudo pacman -S --needed cmake ninja gcc git curl unzip xz make pkgconf python libx11 libxext libxcursor libxi libxfixes libxrandr libxss libxtst wayland libxkbcommon wayland-protocols mesa libdrm vulkan-icd-loader vulkan-headers"
+    apt="sudo apt-get install cmake ninja-build g++ git curl unzip xz-utils make pkg-config python3 libx11-dev libxext-dev libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev wayland-protocols libegl-dev libdrm-dev libgbm-dev libvulkan-dev libfontconfig-dev lld unifdef"
+    dnf="sudo dnf install cmake ninja-build gcc-c++ git curl unzip xz make pkgconf-pkg-config python3 libX11-devel libXext-devel libXcursor-devel libXi-devel libXfixes-devel libXrandr-devel libXScrnSaver-devel libXtst-devel wayland-devel libxkbcommon-devel wayland-protocols-devel mesa-libEGL-devel libdrm-devel mesa-libgbm-devel vulkan-loader-devel fontconfig-devel lld unifdef"
+    pacman="sudo pacman -S --needed cmake ninja gcc git curl unzip xz make pkgconf python libx11 libxext libxcursor libxi libxfixes libxrandr libxss libxtst wayland libxkbcommon wayland-protocols mesa libdrm vulkan-icd-loader vulkan-headers fontconfig lld unifdef"
     distro=$( (. /etc/os-release 2>/dev/null && echo "${ID:-} ${ID_LIKE:-}") || true)
     case " $distro " in
       *" debian "*|*" ubuntu "*) how="$apt" ;;
@@ -148,7 +154,7 @@ cached_config=
 if [ -e "$BUILD/CMakeCache.txt" ]; then
   cached_config=$(sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=\(.*\)$/\1/p' "$BUILD/CMakeCache.txt" | head -n 1)
 fi
-if [ ! -e "$BUILD/CMakeCache.txt" ] || [ "$cached_config" != "$CONFIG" ]; then
+if [ ! -e "$BUILD/CMakeCache.txt" ] || [ ! -e "$BUILD/build.ninja" ] || [ "$cached_config" != "$CONFIG" ]; then
   echo "[build] configuring $SRC -> $BUILD"
   "$CMAKE" -S "$SRC" -B "$BUILD" -G "$GENERATOR" -DCMAKE_BUILD_TYPE="$CONFIG" || fail "configure failed."
 fi
@@ -181,8 +187,16 @@ else
   package="$BUILD/ZeroHourReforged"
   rm -rf "$package"
   mkdir -p "$package/bin" "$package/share/zero-hour-reforged"
+  # Generals' icon and add-to-menu.sh, which puts the folder in the app menu with it
+  for size in 48 128; do
+    mkdir -p "$package/share/icons/hicolor/${size}x${size}/apps"
+    python3 "$SRC/Tools/generals-icon.py" png "$SRC/Main/Generals.ico" \
+      "$package/share/icons/hicolor/${size}x${size}/apps/zero-hour-reforged.png" $size || fail "cannot make the icon."
+  done
+  cp "$SRC/Tools/linux-menu-entry.sh" "$package/add-to-menu.sh"
   cp "$BUILD/generals" "$package/bin/generals"
-  ln -s ../../../overlay "$package/share/zero-hour-reforged/overlay"
+  # a copy, not a link into the build tree, so the folder runs from wherever it is moved
+  cp -R "$BUILD/overlay" "$package/share/zero-hour-reforged/overlay"
   echo "[build] done: run $package/bin/generals"
 fi
 echo "[build] It finds your Zero Hour in the usual places, or asks for its folder on the first start: the one"

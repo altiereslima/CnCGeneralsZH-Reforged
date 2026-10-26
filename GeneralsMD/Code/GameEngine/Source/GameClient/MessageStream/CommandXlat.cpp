@@ -72,6 +72,7 @@
 #include "GameClient/SelectionInfo.h"
 #include "GameClient/SelectionXlat.h"
 
+#include "GameLogic/AI.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"
@@ -174,6 +175,44 @@ SignalKind Command_signalKindForMeta( GameMessage::Type meta )
 		case GameMessage::MSG_META_SIGNAL_ATTENTION:	return SIGNAL_ATTENTION;
 		default:																			return SIGNAL_KIND_COUNT;
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Attack here is the beacon's request; defend here is the call for help a computer ally makes when
+	* its own base is hit, so an Air personality flies to the spot and an Attacker or Rusher hits the
+	* base of whoever is fighting there.  Look here asks nothing. */
+Int Command_teamRequestForSignal( SignalKind kind )
+{
+	switch( kind )
+	{
+		case SIGNAL_ATTACK:		return AIREQ_ATTACK;
+		case SIGNAL_DEFEND:		return AIREQ_HELP;
+		default:							return -1;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A request read by people as well as by the computer: the line goes to the allies' chat, or, with
+	* no network under a skirmish, to the local feed. */
+static void tellAllies( const UnicodeString &line )
+{
+	Player *localPlayer = ThePlayerList->getLocalPlayer();
+	if( TheNetwork == NULL )
+	{
+		TheInGameUI->playerMessage( localPlayer, line );
+		return;
+	}
+	Int playerMask = 0;
+	for( Int i = 0; i < MAX_SLOTS; ++i )
+	{
+		AsciiString playerName;
+		playerName.format( "player%d", i );
+		const Player *player = ThePlayerList->findPlayerWithNameKey( TheNameKeyGenerator->nameToKey( playerName ) );
+		if( player && ( player == localPlayer || ( player->getRelationship( localPlayer->getDefaultTeam() ) == ALLIES &&
+				localPlayer->getRelationship( player->getDefaultTeam() ) == ALLIES ) ) )
+			playerMask |= ( 1 << i );
+	}
+	TheNetwork->sendChat( line, playerMask );
 }
 
 static Bool isFormationDragArmed( void )
@@ -3477,21 +3516,47 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------------------
 		// Smoke for the allies where the cursor points: on the radar, the map spot it stands for,
-		// otherwise the ground under it.
+		// otherwise the ground under it.  Attack and defend are requests to the computer allies at
+		// the same spot (the team board), so a skirmish against the computer takes them too.
 		case GameMessage::MSG_META_SIGNAL_ATTACK:
 		case GameMessage::MSG_META_SIGNAL_DEFEND:
 		case GameMessage::MSG_META_SIGNAL_ATTENTION:
-			if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame() &&
+			if ((TheGameLogic->isInMultiplayerGame() || TheGameLogic->isInSkirmishGame()) && !TheGameLogic->isInReplayGame() &&
 				ThePlayerList->getLocalPlayer()->isPlayerActive())
 			{
 				const ICoord2D *cursor = &TheMouse->getMouseStatus()->pos;
 				Coord3D world;
 				if( TheRadar->screenPixelToWorld( cursor, &world ) || TheTacticalView->screenToTerrain( cursor, &world ) )
 				{
+					const SignalKind kind = Command_signalKindForMeta( t );
 					GameMessage *signalMsg = TheMessageStream->appendMessage( GameMessage::MSG_PLACE_SIGNAL );
 					signalMsg->appendLocationArgument( world );
-					signalMsg->appendIntegerArgument( Command_signalKindForMeta( t ) );
+					signalMsg->appendIntegerArgument( kind );
+					const Int request = Command_teamRequestForSignal( kind );
+					if( request >= 0 )
+					{
+						GameMessage *requestMsg = TheMessageStream->appendMessage( GameMessage::MSG_TEAM_REQUEST );
+						requestMsg->appendIntegerArgument( request );
+						requestMsg->appendLocationArgument( world );
+					}
 				}
+			}
+			disp = DESTROY_MESSAGE;
+			break;
+
+		//-----------------------------------------------------------------------------------------
+		// Money has no place on the map: the board gets the camera's spot, as the chat word does,
+		// and the ask goes to the allies' chat for the people among them.
+		case GameMessage::MSG_META_REQUEST_MONEY:
+			if ((TheGameLogic->isInMultiplayerGame() || TheGameLogic->isInSkirmishGame()) && !TheGameLogic->isInReplayGame() &&
+				ThePlayerList->getLocalPlayer()->isPlayerActive())
+			{
+				Coord3D where;
+				TheTacticalView->getPosition( &where );
+				GameMessage *requestMsg = TheMessageStream->appendMessage( GameMessage::MSG_TEAM_REQUEST );
+				requestMsg->appendIntegerArgument( AIREQ_MONEY );
+				requestMsg->appendLocationArgument( where );
+				tellAllies( TheGameText->fetch( "GUI:RequestMoneyChat" ) );
 			}
 			disp = DESTROY_MESSAGE;
 			break;

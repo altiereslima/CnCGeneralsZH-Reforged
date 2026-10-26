@@ -1067,6 +1067,9 @@ InGameUI::InGameUI()
 {
 	Int i;
 
+	for( i = 0; i < AURA_RING_MAX; ++i )
+		m_auraRings[ i ].id = INVALID_ID;
+
 	for( i = 0; i < MAX_MOVE_HINTS; i++ )
 	{
 		m_moveHint[ i ].pos.zero();
@@ -1501,6 +1504,88 @@ void InGameUI::setRadiusCursor(RadiusCursorType cursorType, const SpecialPowerTe
 }
 
 //-------------------------------------------------------------------------------------------------
+/** A leader's auras on the ground: one ring for each kind it gives, under a selected or hovered
+	* leader of the player at this machine or an ally, while that player can see it.  Every ring is the
+	* full aura radius; each kind's texture keeps to its own band of that disc (Tools/aura_rings.py),
+	* so any set of them reads as one dial.  Reads the logic's grades and draws; nothing goes back. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::updateAuraRings()
+{
+	struct Wanted { ObjectID id; Int kind; Real radius; Coord3D pos; };
+	Wanted wanted[ AURA_RING_MAX ];
+	Int wantedCount = 0;
+
+	Player *local = ThePlayerList->getLocalPlayer();
+	auto consider = [&]( const Drawable *draw )
+	{
+		const Object *obj = draw ? draw->getObject() : NULL;
+		const RankLadder *ladder = obj ? TheGlobalData->getRankLadder( obj->getTemplate() ) : NULL;
+		if( ladder == NULL || local == NULL || obj->isEffectivelyDead() || obj->getContainedBy()
+				|| ( obj->getControllingPlayer() != local && local->getRelationship( obj->getTeam() ) != ALLIES )
+				|| obj->getShroudedStatus( local->getPlayerIndex() ) != OBJECTSHROUD_CLEAR )
+			return;
+		const Int grade = obj->getRankGrade();
+		for( Int kind = 0; kind < RANK_AURA_COUNT && wantedCount < AURA_RING_MAX; ++kind )
+		{
+			if( ladder->aura( grade, (RankAura)kind ) <= 0.0f || !TheGlobalData->m_rankAuraRing[ kind ].valid() )
+				continue;
+			Bool twice = FALSE;		// the hovered leader may be selected too
+			for( Int i = 0; i < wantedCount; ++i )
+				twice = twice || ( wanted[ i ].id == obj->getID() && wanted[ i ].kind == kind );
+			if( twice )
+				continue;
+			wanted[ wantedCount ].id = obj->getID();
+			wanted[ wantedCount ].kind = kind;
+			wanted[ wantedCount ].radius = ladder->auraRadius( grade );
+			wanted[ wantedCount ].pos = *draw->getPosition();
+			++wantedCount;
+		}
+	};
+	consider( TheGameClient->findDrawableByID( getMousedOverDrawableID() ) );
+	for( DrawableList::const_iterator it = m_selectedDrawables.begin(); it != m_selectedDrawables.end(); ++it )
+		consider( *it );
+
+	// a ring nobody wants goes; one whose radius changed goes too and comes back at the new size
+	for( Int slot = 0; slot < AURA_RING_MAX; ++slot )
+	{
+		AuraRing &ring = m_auraRings[ slot ];
+		if( ring.id == INVALID_ID )
+			continue;
+		Bool keep = FALSE;
+		for( Int i = 0; i < wantedCount && !keep; ++i )
+			keep = wanted[ i ].id == ring.id && wanted[ i ].kind == ring.kind && wanted[ i ].radius == ring.radius;
+		if( !keep )
+		{
+			ring.decal.clear();
+			ring.id = INVALID_ID;
+		}
+	}
+
+	for( Int i = 0; i < wantedCount; ++i )
+	{
+		Int slot = -1, freeSlot = -1;
+		for( Int s = 0; s < AURA_RING_MAX; ++s )
+		{
+			if( m_auraRings[ s ].id == wanted[ i ].id && m_auraRings[ s ].kind == wanted[ i ].kind )
+				slot = s;
+			else if( m_auraRings[ s ].id == INVALID_ID && freeSlot < 0 )
+				freeSlot = s;
+		}
+		if( slot < 0 )
+		{
+			slot = freeSlot;
+			AuraRing &ring = m_auraRings[ slot ];
+			ring.id = wanted[ i ].id;
+			ring.kind = wanted[ i ].kind;
+			ring.radius = wanted[ i ].radius;
+			TheGlobalData->m_rankAuraRing[ ring.kind ].createRadiusDecal( wanted[ i ].pos, ring.radius, local, ring.decal );
+		}
+		m_auraRings[ slot ].decal.setPosition( wanted[ i ].pos );
+		m_auraRings[ slot ].decal.update();
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** handle updating of "radius cursors" that follow the mouse pos */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::handleRadiusCursor()
@@ -1790,6 +1875,8 @@ static const char *const REPLAY_CHECKPOINT_FOLDER = "ReplayRewind";
 	* reason as the seek frame: loading one resets the interface. */
 static std::map< UnsignedInt, ReplayCheckpoint > TheReplayCheckpoints;
 static AsciiString TheReplayCheckpointsOf;
+/// a checkpoint of this replay failed to save, so no more are tried: each try is a whole save
+static Bool TheReplayCheckpointsFailed = FALSE;
 
 /** A seek back is carried out on the next client pass rather than in the click: the load resets the
 	* message stream, and the click is a message the stream is in the middle of handing round. */
@@ -1833,6 +1920,7 @@ static void forgetReplayCheckpoints( void )
 		TheLocalFileSystem->deleteFile( path.str() );
 	}
 	TheReplayCheckpoints.clear();
+	TheReplayCheckpointsFailed = FALSE;
 }
 
 static void collectPostedCRCs( GameMessageList *list, std::vector< std::pair< Int, Bool > > &crcs )
@@ -1857,7 +1945,14 @@ static void takeReplayCheckpoint( UnsignedInt frame )
 	// the command list first: what it holds reaches the logic ahead of what the stream still holds
 	collectPostedCRCs( TheCommandList, checkpoint.postedCRCs );
 	collectPostedCRCs( TheMessageStream, checkpoint.postedCRCs );
-	TheGameState->saveCheckpoint( checkpoint.path );
+	if( !TheGameState->saveCheckpoint( checkpoint.path ) )
+	{
+		// the rewind keeps the checkpoints before this one
+		DEBUG_LOG(( "REPLAY CHECKPOINT frame %u failed, no more checkpoints for this replay\n", frame ));
+		TheReplayCheckpoints.erase( frame );
+		TheReplayCheckpointsFailed = TRUE;
+		return;
+	}
 	DEBUG_LOG(( "REPLAY CHECKPOINT frame %u in %u ms\n", frame, (UnsignedInt)( Clock_Milliseconds() - startMs ) ));
 }
 
@@ -1889,8 +1984,14 @@ static void rewindReplay( UnsignedInt target )
 	const Int followed = TheObserverCamera.getFollowedPlayerIndex();
 	const Bool fog = TheObserverCamera.isFogOn();
 
-	TheGameState->loadCheckpoint( checkpoint.path,
-		[ & ]() { TheRecorder->resumePlayback( replayFile, checkpoint.cursor ); } );
+	// a failed load has cleared the match and said so; nothing is left to seek in or look at
+	if( !TheGameState->loadCheckpoint( checkpoint.path,
+		[ & ]() { TheRecorder->resumePlayback( replayFile, checkpoint.cursor ); } ) )
+	{
+		TheReplaySeekFrame = 0;
+		TheWritableGlobalData->m_TiVOFastMode = FALSE;
+		return;
+	}
 	SetGameLogicRandomState( checkpoint.random );
 
 	TheObserverCamera.setMode( cameraMode );
@@ -1946,7 +2047,7 @@ static void updateReplaySeek( void )
 	}
 
 	const UnsignedInt frame = TheGameLogic->getFrame();
-	if( TheRecorder->hasPlaybackLeft() && frame > 0
+	if( TheRecorder->hasPlaybackLeft() && frame > 0 && !TheReplayCheckpointsFailed
 			&& ( TheReplayCheckpoints.empty() || frame >= TheReplayCheckpoints.rbegin()->first + REPLAY_CHECKPOINT_FRAMES ) )
 		takeReplayCheckpoint( frame );
 
@@ -2302,6 +2403,8 @@ void InGameUI::preDraw( void )
 	// handle radius-cursors, if any
 	handleRadiusCursor();
 
+	updateAuraRings();
+
 	// where the selection is headed, read fresh from the units themselves
 	updateOrderHints();
 
@@ -2599,15 +2702,15 @@ void InGameUI::update( void )
 	// a watcher's camera is driven for him while it is not in his own hands (ObserverCamera.h)
 	if( TheGameLogic->isInGame() && localPlayerWatching() )
 	{
-		// -directorrecord: the director has the camera all match, nothing but the radar is over the
+		// -directorrecord: the director has the camera all match, no interface and no radar is over the
 		// picture, and the glide runs on the logic clock, which is what each recorded picture is
 		UnsignedInt observerNowMs = cameraNowMs;
 		if( TheGlobalData->m_directorRecord && !TheGameLogic->isInShellGame() )
 		{
 			if( TheObserverCamera.getMode() != OBSERVER_CAMERA_DIRECTOR )
 				TheObserverCamera.setMode( OBSERVER_CAMERA_DIRECTOR );
-			if( !CinemaDirector_showsMap() )
-				CinemaDirector_setHudHidden( TRUE, TRUE );
+			if( !CinemaDirector_isHudHidden() )
+				CinemaDirector_setHudHidden( TRUE, FALSE );
 			TheMouse->setVisibility( FALSE );
 			// the picture's own time, a share of a frame before the logic frame for a -recordfps
 			// picture between two of them
@@ -2631,7 +2734,8 @@ void InGameUI::update( void )
 	// interval, which is what the rotate keys do in Stronghold.
 	//
 	const UnsignedInt CAMERA_SNAP_REPEAT_MS = 250;
-	if( TheGlobalData->m_snapCameraRotateTo45 )
+	// Shift flips it while held, the same as on the middle-button drag (LookAtXlat).
+	if( TheGlobalData->m_snapCameraRotateTo45 != TheKeyboard->isShift() )
 	{
 		if( (m_cameraRotatingLeft || m_cameraRotatingRight) && m_cameraRotatingLeft != m_cameraRotatingRight
 				&& cameraNowMs - m_cameraSnapRepeatMs >= CAMERA_SNAP_REPEAT_MS )
@@ -2698,6 +2802,12 @@ void InGameUI::reset( void )
 		m_moveHint[ i ].frame = 0;
 	}
 	m_nextMoveHint = 0;
+
+	for( Int i = 0; i < AURA_RING_MAX; ++i )
+	{
+		m_auraRings[ i ].id = INVALID_ID;
+		m_auraRings[ i ].decal.clear();
+	}
 
 	m_isQuitMenuVisible = FALSE;
 	TheObserverCamera.reset();
@@ -7947,8 +8057,10 @@ void InGameUI::updateSignalMarks( void )
 			continue;
 		}
 
+		// puffs the GPU took have no Particle, and their system says how long the last of them lives
 		const Particle *youngest = smoke->getLastParticle();
-		const UnsignedInt left = smoke->getSystemLifetimeLeft() + ( youngest ? youngest->getLifetimeLeft() : 0 );
+		const UnsignedInt puffLeft = max( youngest ? youngest->getLifetimeLeft() : 0, smoke->getGpuLifetimeLeft() );
+		const UnsignedInt left = smoke->getSystemLifetimeLeft() + puffLeft;
 		const UnsignedInt opacity = min( (UnsignedInt)SIGNAL_MARK_OPACITY, left * SIGNAL_MARK_OPACITY / SIGNAL_MARK_FADE_OUT_FRAMES );
 		mark.decal->setOpacity( shown ? (Int)opacity : 0 );
 		index++;
@@ -9996,6 +10108,8 @@ WorldAnimationData::WorldAnimationData( void )
 	m_expireFrame = 0;
 	m_options = WORLD_ANIM_NO_OPTIONS;
 	m_zRisePerSecond = 0.0f;
+	m_rankOf = NULL;
+	m_rankInsignia = 0;
 
 }  // end WorldAnimationData
 
@@ -10006,12 +10120,14 @@ void InGameUI::addWorldAnimation( Anim2DTemplate *animTemplate,
 																	const Coord3D *pos,
 																	WorldAnimationOptions options,
 																	Real durationInSeconds,
-																	Real zRisePerSecond )
+																	Real zRisePerSecond,
+																	const ThingTemplate *rankOf,
+																	Int rankInsignia )
 {
 	if( LogicThread::defersEffects() && pos != NULL )
 	{
 		const Coord3D at = *pos;
-		LogicThread::callAfterTick( [=]() { addWorldAnimation( animTemplate, &at, options, durationInSeconds, zRisePerSecond ); } );
+		LogicThread::callAfterTick( [=]() { addWorldAnimation( animTemplate, &at, options, durationInSeconds, zRisePerSecond, rankOf, rankInsignia ); } );
 		return;
 	}
 	LOGIC_CENSUS( CENSUS_INGAMEUI );
@@ -10035,6 +10151,8 @@ void InGameUI::addWorldAnimation( Anim2DTemplate *animTemplate,
 	wad->m_options = options;
 	wad->m_worldPos = *pos;
 	wad->m_zRisePerSecond = zRisePerSecond;
+	wad->m_rankOf = rankOf;
+	wad->m_rankInsignia = rankInsignia;
 
 	// add to list
 	m_worldAnimationList.push_front( wad );
@@ -10128,6 +10246,7 @@ void InGameUI::updateAndDrawWorldAnimations( void )
 		}  // end if
 
 		// update translucency value
+		Real alpha = 1.0f;
 		if( BitTest( wad->m_options, WORLD_ANIM_FADE_ON_EXPIRE ) )
 		{
 
@@ -10137,7 +10256,7 @@ void InGameUI::updateAndDrawWorldAnimations( void )
 			{
 				
 				// compute alpha level so that we're totally gone by the expire frame
-				Real alpha = INT_TO_REAL( framesTillExpire ) / INT_TO_REAL( FRAMES_BEFORE_EXPIRE_TO_FADE );
+				alpha = INT_TO_REAL( framesTillExpire ) / INT_TO_REAL( FRAMES_BEFORE_EXPIRE_TO_FADE );
 				wad->m_anim->setAlpha( alpha );
 				
 			}  // end if
@@ -10155,6 +10274,17 @@ void InGameUI::updateAndDrawWorldAnimations( void )
 			// zoom value, which is gone; this number is the size the artwork was drawn against.
 			const Real WORLD_ANIM_ZOOM_REFERENCE = 1.3f;
 			Real zoomScale = WORLD_ANIM_ZOOM_REFERENCE / TheTacticalView->getZoom();
+
+			// a grade gained floats up as its insignia, half again its health bar size, centred where the
+			// chevron would have been
+			const Real RANK_GAIN_SCALE = 1.5f;
+			if( wad->m_rankOf && Drawable::drawRankInsignia( wad->m_rankOf, wad->m_rankInsignia, screen.x, screen.y - REAL_TO_INT( height * zoomScale / 2 ),
+					TRUE, RANK_GAIN_SCALE * zoomScale, GameMakeColor( 255, 255, 255, REAL_TO_INT( 255 * alpha ) ) ) )
+			{
+				++it;
+				continue;
+			}
+
 			width *= zoomScale;
 			height *= zoomScale;
 

@@ -516,6 +516,11 @@ public:
 	static void Set_DX8_Texture_Stage_State(unsigned stage, D3DTEXTURESTAGESTATETYPE state, unsigned value);
 	static void Set_DX8_Texture_Stage_State(unsigned stage, D3DSAMPLERSTATETYPE state, unsigned value);
 	static void Set_DX8_Texture(unsigned int stage, IDirect3DBaseTexture9* texture);
+	// What the wrapper last set, which a deferred Direct3D 9 device (Defer_D3D9_State) may not hold yet.
+	// False while Invalidate_Cached_Render_States has left the state unknown.
+	static bool Get_DX8_Texture_Stage_State(unsigned stage, D3DTEXTURESTAGESTATETYPE state, unsigned & value)
+		{ value = TextureStageStates[stage][state]; return value != 0x12345678; }
+	static IDirect3DBaseTexture9* Get_DX8_Texture(unsigned stage) { return Textures[stage]; }
 	static void Set_Light_Environment(LightEnvironmentClass* light_env);
 	static LightEnvironmentClass* Get_Light_Environment() { return Light_Environment; }
 	static void Set_Fog(bool enable, const Vector3 &color, float start, float end);
@@ -981,6 +986,8 @@ protected:
 
 	static Vector4							Vertex_Shader_Constants[MAX_VERTEX_SHADER_CONSTANTS];
 	static Vector4							Pixel_Shader_Constants[MAX_PIXEL_SHADER_CONSTANTS];
+	static bool Vertex_Shader_Constants_Valid[MAX_VERTEX_SHADER_CONSTANTS];
+	static bool Pixel_Shader_Constants_Valid[MAX_PIXEL_SHADER_CONSTANTS];
 
 	static LightEnvironmentClass*		Light_Environment;
 	static RenderInfoClass*				Render_Info;
@@ -1110,28 +1117,45 @@ WWINLINE void DX8Wrapper::Set_Vertex_Shader_Constant(int reg, const void* data, 
 {
 	int memsize=sizeof(Vector4)*count;
 
-	// Ahead of the comparison below, not behind it.  Invalidate_Cached_Render_States zeroes this
-	// cache without zeroing the device, so a set that writes zeros after one of those is skipped
-	// here while the device really does hold zeros - and the backend, which is not reset by that
-	// call, would keep whatever it was last told.
+	// The mirrored backend owns its own cache and must see every requested update.
 	Direct3D11_Mirror_Vertex_Shader_Constant((unsigned)reg, (const float*)data, (unsigned)count);
 
-	// may be incorrect if shaders are created and destroyed dynamically
+#if defined(__linux__)
+	bool valid = true;
+	for (int i = reg; i < reg + count; ++i)
+		valid = valid && Vertex_Shader_Constants_Valid[i];
+	if (valid && memcmp(data, &Vertex_Shader_Constants[reg],memsize)==0) return;
+#else
 	if (memcmp(data, &Vertex_Shader_Constants[reg],memsize)==0) return;
+#endif
 
 	memcpy(&Vertex_Shader_Constants[reg],data,memsize);
 	DX8CALL(SetVertexShaderConstantF(reg,(const float*)data,count));
+#if defined(__linux__)
+	for (int i = reg; i < reg + count; ++i)
+		Vertex_Shader_Constants_Valid[i] = true;
+#endif
 }
 
 WWINLINE void DX8Wrapper::Set_Pixel_Shader_Constant(int reg, const void* data, int count)
 {
 	int memsize=sizeof(Vector4)*count;
 
-	// may be incorrect if shaders are created and destroyed dynamically
+#if defined(__linux__)
+	bool valid = true;
+	for (int i = reg; i < reg + count; ++i)
+		valid = valid && Pixel_Shader_Constants_Valid[i];
+	if (valid && memcmp(data, &Pixel_Shader_Constants[reg],memsize)==0) return;
+#else
 	if (memcmp(data, &Pixel_Shader_Constants[reg],memsize)==0) return;
+#endif
 
 	memcpy(&Pixel_Shader_Constants[reg],data,memsize);
 	DX8CALL(SetPixelShaderConstantF(reg,(const float*)data,count));
+#if defined(__linux__)
+	for (int i = reg; i < reg + count; ++i)
+		Pixel_Shader_Constants_Valid[i] = true;
+#endif
 }
 // shader system updates KJM ^
 
@@ -1407,6 +1431,7 @@ WWINLINE void DX8Wrapper::Set_DX8_Texture(unsigned int stage, IDirect3DBaseTextu
 {
   	if (stage >= MAX_TEXTURE_STAGES)
   	{	DX8CALL(SetTexture(stage, texture));
+  		Direct3D11_Mirror_Texture(stage, texture);
   		return;
   	}
 

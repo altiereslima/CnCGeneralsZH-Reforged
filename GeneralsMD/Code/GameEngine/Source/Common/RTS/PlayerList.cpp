@@ -237,9 +237,13 @@ void PlayerList::newGame()
 		p->setPlayerRelationship(p, ALLIES);
 		if (p != getNeutralPlayer())
 			p->setPlayerRelationship(getNeutralPlayer(), NEUTRAL);
-
-		p->setDefaultTeam();
 	}
+
+	/* Every player gets its default team, walked by player rather than looked up by side name: a map
+		 with two sides of one name made two players, the lookup above found the first twice, and the
+		 second was left with no default team for the first enemy search to read. */
+	for( i = 0; i < m_playerCount; i++ )
+		m_players[i]->setDefaultTeam();
 
 	/* Now that the players exist and are named, write down which network slot each one came from.
 		 The two numbers are not the same and never were: player 0 is the neutral player, so a human

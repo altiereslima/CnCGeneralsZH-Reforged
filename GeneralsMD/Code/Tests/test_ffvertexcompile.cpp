@@ -274,3 +274,39 @@ TEST(ffvertexcompile_a_soft_billboard_hands_its_half_width_on)
 	CHECK(VertexShader_Generate(soft, VERTEX_SHADER_TARGET_D3D11, hlsl));
 	CHECK(compiles(compile, hlsl, D3D11_PROFILE));
 }
+
+// A fire billboard's age and seed ride the second coordinate set through to TexCoord1, written after
+// the empty stages are zeroed so the zero does not win.  Keyed apart; refused with one set or a
+// second stage.
+TEST(ffvertexcompile_a_fire_billboard_hands_its_age_on)
+{
+	VertexPipelineDescription soft = plain_description();
+	soft.SoftParticle = true;
+	VertexPipelineDescription fire = soft;
+	fire.FireLook = true;
+
+	std::string hlsl;
+	CHECK(VertexShader_Generate(fire, VERTEX_SHADER_TARGET_D3D11, hlsl));
+	const size_t zero = hlsl.find("output.TexCoord1 = float2(0.0, 0.0);");
+	const size_t pass = hlsl.find("output.TexCoord1 = input.TexCoord1;");
+	CHECK(zero != std::string::npos);
+	CHECK(pass != std::string::npos);
+	CHECK(zero < pass);
+	CHECK(VertexShader_Key(fire) == VertexShader_Key(soft) + ":B");
+
+	VertexPipelineDescription one_set = fire;
+	one_set.FVF = D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1|D3DFVF_DIFFUSE;
+	CHECK(!VertexShader_Generate(one_set, VERTEX_SHADER_TARGET_D3D11, hlsl));
+	VertexPipelineDescription two_stages = fire;
+	two_stages.StageCount = 2;
+	two_stages.Stages[1] = two_stages.Stages[0];
+	CHECK(!VertexShader_Generate(two_stages, VERTEX_SHADER_TARGET_D3D11, hlsl));
+
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+		return;
+	}
+	CHECK(VertexShader_Generate(fire, VERTEX_SHADER_TARGET_D3D11, hlsl));
+	CHECK(compiles(compile, hlsl, D3D11_PROFILE));
+}

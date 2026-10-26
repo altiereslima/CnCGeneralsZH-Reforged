@@ -602,7 +602,9 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 				Real angle = FACTOR * (m_currentPos.x - m_anchor.x);
 
-				if (TheGlobalData->m_snapCameraRotateTo45)
+				// Shift held turns the other way to the option for as long as it is held: free turning
+				// gets the eighths, snapped turning gets the free heading.
+				if (TheGlobalData->m_snapCameraRotateTo45 != TheKeyboard->isShift())
 				{
 					// discrete heading: the drag turns an angle we keep to ourselves and the camera
 					// jumps to the eighth it is nearest, as the mouse crosses each halfway point.
@@ -611,7 +613,8 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				}
 				else
 				{
-					TheTacticalView->setAngle( TheTacticalView->getAngle() + angle );
+					m_freeRotateAngle = TheTacticalView->getAngle() + angle;
+					TheTacticalView->setAngle( m_freeRotateAngle );
 				}
 				m_anchor = msg->getArgument( 0 )->pixel;
 			}

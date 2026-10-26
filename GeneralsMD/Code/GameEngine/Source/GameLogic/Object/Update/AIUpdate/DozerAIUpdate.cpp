@@ -263,8 +263,7 @@ StateReturnType DozerActionPickActionPosState::update( void )
 	//
 	const Real walkX = goalPos.x - dozer->getPosition()->x;
 	const Real walkY = goalPos.y - dozer->getPosition()->y;
-	const TunnelTracker *tunnels = dozer->getControllingPlayer()->getTunnelSystem();
-	Object *entrance = tunnels->findTunnelShortcut( dozer, dozer->getPosition(), &goalPos,
+	Object *entrance = TunnelTracker::findTunnelShortcut( dozer, dozer->getPosition(), &goalPos,
 		(Real)sqrt( walkX * walkX + walkY * walkY ) );
 
 	if( entrance != NULL && ai->takeTunnelTrip( entrance, &goalPos, TUNNEL_TRIP_MOVE, CMD_FROM_AI ) )
@@ -369,7 +368,10 @@ StateReturnType DozerActionMoveToActionPosState::update( void )
 	// First will register, and idle for a frame, second will see first as not active and say yes
 	// Next frame, first will start the build task, without reasking validity
 	// Infinite number of workers can be told to build something with just two in progress buildings
-	if( (m_task == DOZER_TASK_BUILD) && goalObject && (goalObject->getBuilderID() != dozer->getID()) )
+	// A cooperative builder (Turkiye's engineers) is meant to double up: each one on the site adds its
+	// own share of progress every frame, so two of them finish it in half the time.
+	if( (m_task == DOZER_TASK_BUILD) && goalObject && (goalObject->getBuilderID() != dozer->getID()) &&
+			!dozer->getTemplate()->isCooperativeBuilder() )
 	{
 		// Geebus.  Returning failure is ignored, so you have to explicitly make the ai stop trying to restart the machine
 		if ( ai )	
@@ -538,6 +540,16 @@ StateReturnType DozerActionDoActionState::update( void )
 			if (dozer->getControllingPlayer() != goalObject->getControllingPlayer())//Yipes, SOmehow I have changed sides in mid build!
 				return STATE_FAILURE;
 
+			// a cooperative builder can find the site finished by the other one on it; finishing it
+			// again would add progress to CONSTRUCTION_COMPLETE and never stop
+			if( dozer->getTemplate()->isCooperativeBuilder() &&
+					!goalObject->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+			{
+				dozerAI->finishBuildingSound();
+				complete = TRUE;
+				break;
+			}
+
 			// if we need to select the dock location and move there do so
 			if( dozerAI->getBuildSubTask() == DOZER_SELECT_BUILD_DOCK_LOCATION )
 			{
@@ -583,12 +595,12 @@ StateReturnType DozerActionDoActionState::update( void )
 
 				// the builder is now actively constructing something
 				dozer->setModelConditionState( MODELCONDITION_ACTIVELY_CONSTRUCTING );
-				
+
 
 				// increase the construction percent of the goal object
 				Int framesToBuild = goalObject->getTemplate()->calcTimeToBuild( dozer->getControllingPlayer() );
 				Real percentProgressThisFrame = 100.0f / framesToBuild;
-				goalObject->setConstructionPercent( goalObject->getConstructionPercent() + 
+				goalObject->setConstructionPercent( goalObject->getConstructionPercent() +
 																						percentProgressThisFrame );
 
 				//

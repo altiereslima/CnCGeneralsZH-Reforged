@@ -7,6 +7,7 @@
 #include "Common/DamageFX.h"
 #include "GameLogic/Weapon.h"
 #include "GameClient/Snow.h"
+#include "GameClient/TerrainVisual.h"
 
 // GameLogic::loadMapINI's load: unknown fields skipped, any throw stops the file there
 static Bool loadMapIni( const char *name )
@@ -295,4 +296,188 @@ TEST(map_ini_refuses_extreme_snow)
 	WeatherSetting *ws = (WeatherSetting *)TheWeatherSetting.getNonOverloadedPointer();
 	TheWeatherSetting = (WeatherSetting *)ws->deleteOverrides();
 	remove( TEST_INI );
+}
+
+namespace {
+// WaterTransparency's real INI parser notifies the terrain renderer even when
+// only water colors change. These tests load no terrain or graphics device.
+class WaterRuleTestTerrain : public TerrainVisual
+{
+public:
+	void getTerrainColorAt(Real, Real, RGBColor *) override {}
+	TerrainType *getTerrainTile(Real, Real) override { return NULL; }
+	void enableWaterGrid(Bool) override {}
+	void setTerrainTracksDetail() override {}
+	void setShoreLineDetail() override {}
+	void addFactionBib(Object *, Bool, Real) override {}
+	void removeFactionBib(Object *) override {}
+	void addFactionBibDrawable(Drawable *, Bool, Real) override {}
+	void removeFactionBibDrawable(Drawable *) override {}
+	void removeAllBibs() override {}
+	void removeBibHighlighting() override {}
+	void removeTreesAndPropsForConstruction(const Coord3D *, const GeometryInfo &, Real) override {}
+	void addProp(const ThingTemplate *, const Coord3D *, Real) override {}
+	void setRawMapHeight(const ICoord2D *, Int) override {}
+	Int getRawMapHeight(const ICoord2D *) override { return 0; }
+#ifdef DO_SEISMIC_SIMULATIONS
+	void updateSeismicSimulations() override {}
+	void addSeismicSimulation(const SeismicSimulationNode &) override {}
+#endif
+	void replaceSkyboxTextures(const AsciiString *[NumSkyboxTextures], const AsciiString *[NumSkyboxTextures]) override {}
+};
+
+const char *const WATER_RULE_TEST_INI = "test_gameengine_water_rule_tmp.ini";
+class WaterRuleTestFiles : public TestLocalFileSystem
+{
+public:
+	Bool present = FALSE;
+	File *openFile(const Char *filename, Int access = 0) override
+	{
+		if (strcmp(filename, "Data\\INI\\ModernWater.ini") == 0)
+			return present ? TestLocalFileSystem::openFile(WATER_RULE_TEST_INI, access) : NULL;
+		return TestLocalFileSystem::openFile(filename, access);
+	}
+};
+
+// The real VFS, INI loader, override chain and material cache are exercised.
+// Only the graphics callback and ModernWater.ini's backing file are replaced.
+struct WaterRuleFixture
+{
+	LocalFileSystem *savedFiles = TheLocalFileSystem;
+	ArchiveFileSystem *savedArchives = TheArchiveFileSystem;
+	GlobalData *savedGlobals = TheWritableGlobalData;
+	TerrainVisual *savedTerrain = TheTerrainVisual;
+	const WaterTransparencySetting *savedWater = TheWaterTransparency.getNonOverloadedPointer();
+	WaterRuleTestFiles files;
+	WaterRuleTestTerrain terrain;
+	WaterTransparencySetting *base = newInstance(WaterTransparencySetting);
+
+	WaterRuleFixture()
+	{
+		TheLocalFileSystem = &files;
+		TheArchiveFileSystem = NULL;
+		TheWritableGlobalData = NULL;
+		TheTerrainVisual = &terrain;
+		TheWaterTransparency = base;
+		loadModernWaterSettings(); // absent through this fixture: deterministic built-in defaults
+	}
+	~WaterRuleFixture()
+	{
+		files.present = FALSE;
+		loadModernWaterSettings();
+		base->deleteInstance(); // also frees this test's map overrides
+		TheWaterTransparency = savedWater;
+		TheTerrainVisual = savedTerrain;
+		TheWritableGlobalData = savedGlobals;
+		TheArchiveFileSystem = savedArchives;
+		TheLocalFileSystem = savedFiles;
+		remove(TEST_INI);
+		remove(WATER_RULE_TEST_INI);
+	}
+	void resetMap()
+	{
+		TheWaterTransparency = static_cast<WaterTransparencySetting *>(base->deleteOverrides());
+	}
+	void loadRules(const char *text)
+	{
+		writeFile(WATER_RULE_TEST_INI, text);
+		files.present = TRUE;
+		loadModernWaterSettings();
+	}
+};
+
+void checkWaterMaterial(Real r, Real g, Real b, Real brightness, Real tint, Real pollution, Real bubbles)
+{
+	Real color[4], parameters[4];
+	getModernWaterMaterial(color, parameters);
+	CHECK_NEAR(color[0], r / 255.0f, .00001f);
+	CHECK_NEAR(color[1], g / 255.0f, .00001f);
+	CHECK_NEAR(color[2], b / 255.0f, .00001f);
+	CHECK_NEAR(color[3], brightness, .00001f);
+	CHECK_NEAR(parameters[0], tint, .00001f);
+	CHECK_NEAR(parameters[1], pollution, .00001f);
+	CHECK_NEAR(parameters[2], bubbles, .00001f);
+	CHECK_EQ(parameters[3], 0.0f);
+}
+}
+
+TEST(map_ini_modern_water_resolves_effective_override_without_changing_classic)
+{
+	CHECK(bootOnce());
+	WaterRuleFixture fixture;
+	checkWaterMaterial(255, 255, 255, 1, 0, 0, 0);
+	writeFile(TEST_INI,
+		"WaterTransparency\n"
+		" StandingWaterColor = R:50 G:75 B:50\n"
+		" StandingWaterTexture = TSWater03.tga\n"
+		" TransparentWaterDepth = 2.0\n"
+		" TransparentWaterMinOpacity = 0.8\n"
+		"End\n");
+	CHECK(loadMapIni(TEST_INI));
+	checkWaterMaterial(45, 58, 11, .67f, 1, .80f, 1);
+	// Resolve repeatedly through the cache; Classic still sees authored values.
+	checkWaterMaterial(45, 58, 11, .67f, 1, .80f, 1);
+	CHECK_NEAR(TheWaterTransparency->m_standingWaterColor.red, 50 / 255.0f, .00001f);
+	CHECK_NEAR(TheWaterTransparency->m_standingWaterColor.green, 75 / 255.0f, .00001f);
+	CHECK_NEAR(TheWaterTransparency->m_standingWaterColor.blue, 50 / 255.0f, .00001f);
+	CHECK_STR(TheWaterTransparency->m_standingWaterTexture.str(), "TSWater03.tga");
+	CHECK_NEAR(TheWaterTransparency->m_transparentWaterDepth, 2, .00001f);
+	CHECK_NEAR(TheWaterTransparency->m_minWaterOpacity, .8f, .00001f);
+	CHECK(TheWaterTransparency.getNonOverloadedPointer() == fixture.base);
+	CHECK_NEAR(fixture.base->m_standingWaterColor.red, 1, .00001f);
+
+	// The next map can have the same color and a different texture; the cache
+	// must notice that change even if it never rendered the reset state.
+	fixture.resetMap();
+	writeFile(TEST_INI,
+		"WaterTransparency\n"
+		" StandingWaterColor = R:50 G:75 B:50\n"
+		" StandingWaterTexture = OtherWater.tga\n"
+		"End\n");
+	CHECK(loadMapIni(TEST_INI));
+	checkWaterMaterial(50, 75, 50, 1, 1, 0, 0);
+	fixture.resetMap();
+	checkWaterMaterial(255, 255, 255, 1, 0, 0, 0);
+	writeFile(TEST_INI,
+		"WaterTransparency\n"
+		" StandingWaterColor = R:255 G:0 B:0\n"
+		" StandingWaterTexture = TSWater03.tga\n"
+		"End\n");
+	CHECK(loadMapIni(TEST_INI));
+	checkWaterMaterial(255, 0, 0, 1, 1, 0, 0);
+	fixture.resetMap();
+	checkWaterMaterial(255, 255, 255, 1, 0, 0, 0);
+}
+
+TEST(map_ini_modern_water_config_reload_replaces_cache_and_falls_back_atomically)
+{
+	CHECK(bootOnce());
+	WaterRuleFixture fixture;
+	writeFile(TEST_INI,
+		"WaterTransparency\n"
+		" StandingWaterColor = R:50 G:75 B:50\n"
+		" StandingWaterTexture = TSWater03.tga\n"
+		"End\n");
+	CHECK(loadMapIni(TEST_INI));
+	checkWaterMaterial(45, 58, 11, .67f, 1, .80f, 1);
+	const char *const custom =
+		"ModernWaterRule Custom\n"
+		" MatchColors\n Color = R:50 G:75 B:50\n End\n"
+		" MatchTextures\n Texture = TSWater03.tga\n End\n"
+		" ReplacementColor = R:120 G:10 B:20\n"
+		" Brightness = 0.5\n Pollution = 0.25\n Bubbles = No\nEnd\n";
+	fixture.loadRules(custom);
+	checkWaterMaterial(120, 10, 20, .5f, 1, .25f, 0);
+	fixture.loadRules("; intentionally disabled\n");
+	checkWaterMaterial(50, 75, 50, 1, 1, 0, 0);
+
+	// A valid first rule followed by a malformed rule cannot install a partial edit.
+	const std::string malformed = std::string(custom) + "ModernWaterRule Broken\nUnknown = 1\nEnd\n";
+	fixture.loadRules(malformed.c_str());
+	checkWaterMaterial(45, 58, 11, .67f, 1, .80f, 1);
+	fixture.loadRules(custom);
+	checkWaterMaterial(120, 10, 20, .5f, 1, .25f, 0);
+	fixture.files.present = FALSE;
+	loadModernWaterSettings();
+	checkWaterMaterial(45, 58, 11, .67f, 1, .80f, 1);
 }

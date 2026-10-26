@@ -1,0 +1,22 @@
+# particles1m with smoke in it, the mix a match draws: a million additive flakes on the GPU and
+# smoke on both paths.
+#
+# The 3350 Snow copies of particles1m, and 100 copies of BurningBridgeBeam (particles1m_smoke's
+# puffs) in a 10 by 10 block, 60 apart, over the middle of the snow. At the CPU cap a freed CPU
+# slot goes to whichever system spawns next, so a few hundred puffs stay on the CPU and the rest
+# go to the GPU ring. Those CPU puffs are what the smoke's fire light is gathered for: every Snow
+# copy is an additive system, so each one's GPU samples are aged in closed form once a particle
+# update to light them. particles1m alone draws no CPU smoke and skips that gather.
+#
+#   generals.exe -win -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -msaa 0 -noDynamicLOD -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2
+#     -takeover -seed 1 -maxframes 2400 -gpuparticles
+#     -scenario particles1m_mixed -camera 760 850 -logPrefix p1mx_
+#
+# Grep the log for HEADLESS FRAMETIME, PARTICLECOST and GPUPARTICLES; the live count holds at
+# about 1,012,000 from frame 700.
+#
+#   <frame> particles <slot> <particle system> <count> <x> <y> [spacing]
+
+30    particles  0  Snow  3350  760 850  15
+30    particles  0  BurningBridgeBeam  100  760 850  60

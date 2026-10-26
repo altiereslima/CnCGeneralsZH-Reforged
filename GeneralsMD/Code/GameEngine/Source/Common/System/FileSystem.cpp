@@ -241,7 +241,10 @@ FileSystem::~FileSystem()
 
 void		FileSystem::init( void )
 {
-	m_fileExist.clear();		// see reset(): the cache outlives whatever it was an answer about
+	{
+		std::lock_guard<std::mutex> lock( m_fileExistLock );
+		m_fileExist.clear();		// see reset(): the cache outlives whatever it was an answer about
+	}
 	TheLocalFileSystem->init();
 	TheArchiveFileSystem->init();
 }
@@ -270,7 +273,10 @@ void		FileSystem::reset( void )
 	// mounted, or before Win32BIGFileSystem::init re-loaded the Patch*.big over the plain pass, made
 	// that file invisible for the rest of the run - and the cache is keyed by name, so nothing else
 	// would ever ask again.
-	m_fileExist.clear();
+	{
+		std::lock_guard<std::mutex> lock( m_fileExistLock );
+		m_fileExist.clear();
+	}
 
 	TheLocalFileSystem->reset();
 	TheArchiveFileSystem->reset();
@@ -350,7 +356,9 @@ File*		FileSystem::openFile( const Char *filename, Int access )
 		 map's (upstream #991). */
 	if ( file != NULL && (access & File::CREATE) )
 	{
-		m_fileExist[ TheNameKeyGenerator->nameToLowercaseKey( filename ) ] = true;
+		const unsigned key = TheNameKeyGenerator->nameToLowercaseKey( filename );
+		std::lock_guard<std::mutex> lock( m_fileExistLock );
+		m_fileExist[ key ] = true;
 	}
 
 	if ( (TheArchiveFileSystem != NULL) && (file == NULL) )
@@ -383,23 +391,21 @@ Bool FileSystem::doesFileExist(const Char *filename) const
 		return focusedLooseFile( AsciiString( filename ) ).isNotEmpty() || TheArchiveFileSystem->doesFileExist( filename );
 
   unsigned key=TheNameKeyGenerator->nameToLowercaseKey(filename);
-  std::map<unsigned,bool>::iterator i=m_fileExist.find(key);
-  if (i!=m_fileExist.end())
-    return i->second;
-
-	if (TheLocalFileSystem->doesFileExist(filename) || modLooseFile(AsciiString(filename)).isNotEmpty())
-  {
-    m_fileExist[key]=true;
-		return TRUE;
-	}
-	if (TheArchiveFileSystem != NULL && TheArchiveFileSystem->doesFileExist(filename))
-  {
-    m_fileExist[key]=true;
-		return TRUE;
+	{
+		std::lock_guard<std::mutex> lock( m_fileExistLock );
+		std::map<unsigned,bool>::iterator i=m_fileExist.find(key);
+		if (i!=m_fileExist.end())
+			return i->second;
 	}
 
-  m_fileExist[key]=false;
-	return FALSE;
+	// asked unlocked, so a slow disk does not hold the other thread up; two threads asking the same
+	// name both find the same answer and store it twice
+	const Bool exists = TheLocalFileSystem->doesFileExist(filename) || modLooseFile(AsciiString(filename)).isNotEmpty()
+		|| (TheArchiveFileSystem != NULL && TheArchiveFileSystem->doesFileExist(filename));
+
+	std::lock_guard<std::mutex> lock( m_fileExistLock );
+	m_fileExist[key]=exists != FALSE;
+	return exists;
 }
 
 //============================================================================
@@ -551,8 +557,11 @@ Bool FileSystem::isForkOwnedPath(const AsciiString& filename)
 		return TRUE;
 	if (starts("data\\ini\\mappedimages\\handcreated\\reforged") && ends(".ini"))
 		return TRUE;
+	if (p == "data\\ini\\modernwater.ini")
+		return TRUE;
 	return p == "data\\patch.str"
 		|| starts("data\\turkish\\") || starts("data\\german\\")
+		|| starts("data\\ukrainian\\") || starts("data\\russian\\") || starts("data\\french\\")
 		|| starts("art\\textures\\reforged")
 		|| starts("window\\")
 		|| p == "install_final.bmp";
@@ -680,20 +689,38 @@ Bool FileSystem::createDirectory(AsciiString directory)
 	 then threw on Data\german\Language.ini before the first frame (player report #39). A German-only
 	 install has no english to fall back to either (issue #63), so every retail language is tried.
 	 Empty when no Language.ini is found at all. */
+static const char *const RetailLanguages[] = { "english", "german", "french", "spanish", "italian",
+	"korean", "chinese", "brazilian", "polish", "russian" };
+
 AsciiString FileSystem::installedLanguage(const AsciiString &language) const
 {
-	static const char *const fallbacks[] = { "english", "german", "french", "spanish", "italian",
-		"korean", "chinese", "brazilian", "polish", "russian" };
 	AsciiString probe;
 	if (!language.isEmpty()) {
 		probe.format("Data\\%s\\Language.ini", language.str());
 		if (doesFileExist(probe.str()))
 			return language;
 	}
-	for (Int i = 0; i < (Int)(sizeof(fallbacks) / sizeof(fallbacks[0])); ++i) {
-		probe.format("Data\\%s\\Language.ini", fallbacks[i]);
+	for (Int i = 0; i < (Int)ARRAY_SIZE(RetailLanguages); ++i) {
+		probe.format("Data\\%s\\Language.ini", RetailLanguages[i]);
 		if (doesFileExist(probe.str()))
-			return AsciiString(fallbacks[i]);
+			return AsciiString(RetailLanguages[i]);
+	}
+	return AsciiString::TheEmptyString;
+}
+
+//============================================================================
+// FileSystem::zeroHourLanguage
+//============================================================================
+/* With no Language in the registry (a Linux or Mac install never ran EA's installer, which writes it)
+	 the default english finds the base game's English.big in ZH_Generals, so a German Zero Hour showed
+	 Generals' text with Zero Hour's strings missing.  Zero Hour's own language archive says which it is. */
+AsciiString FileSystem::zeroHourLanguage() const
+{
+	AsciiString probe;
+	for (Int i = 0; i < (Int)ARRAY_SIZE(RetailLanguages); ++i) {
+		probe.format("%sZH.big", RetailLanguages[i]);
+		if (TheLocalFileSystem->doesFileExist(probe.str()))
+			return AsciiString(RetailLanguages[i]);
 	}
 	return AsciiString::TheEmptyString;
 }

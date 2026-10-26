@@ -649,8 +649,20 @@ Int SidesList::skirmishSideFit(const AsciiString& candidateSide, Int candidateMo
 
 SidesInfo *SidesList::findSkirmishSideFor(const PlayerTemplate *pt, TeamsInfoRec **teams)
 {
-	const AsciiString side = pt->getSide();
-	const Int mod = pt->getModIndex();
+	SidesInfo *found = findSkirmishSideNamed(pt->getSide(), pt->getModIndex(), teams);
+	/* A faction the map's skirmish scripts were never written for (the fork's own, Turkiye) takes the
+		 scripts of the original faction it is built on. */
+	if (found == NULL)
+	{
+		const AsciiString oldSide = ThePlayerTemplateStore->getOldFactionSide(pt->getBaseSide());
+		if (!oldSide.isEmpty() && oldSide != pt->getSide())
+			found = findSkirmishSideNamed(oldSide, pt->getModIndex(), teams);
+	}
+	return found;
+}
+
+SidesInfo *SidesList::findSkirmishSideNamed(const AsciiString& side, Int mod, TeamsInfoRec **teams)
+{
 	SidesInfo *best = NULL;
 	Int bestFit = 0;
 	for (size_t i = 0; i < m_modSkirmishSides.size() && bestFit < 2; ++i)
@@ -756,7 +768,7 @@ void SidesList::prepareForMP_or_Skirmish(void)
 							 takeover click handed it to whoever clicked it.  The file's own player for that side
 							 stands in, kept beside the map's, which nearly fill m_skirmishSides. */
 						const PlayerTemplate *pt = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(static_readPlayerDicts[i].getAsciiString(TheKey_playerFaction)));
-						if (scripts[i] && pt && pt->isPlayableSide() && findSkirmishSideFor(pt, NULL) == NULL) {
+						if (scripts[i] && pt && pt->isPlayableSide() && findSkirmishSideNamed(pt->getSide(), pt->getModIndex(), NULL) == NULL) {
 							DEBUG_LOG(("Skirmish map has no player for %s, using %s from the standard scripts\n", pt->getSide().str(), static_readPlayerNames[i].str()));
 							m_modSkirmishSides.push_back(SidesInfo());
 							m_modSkirmishSides.back().init(&static_readPlayerDicts[i]);

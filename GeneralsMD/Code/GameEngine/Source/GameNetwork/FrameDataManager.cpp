@@ -147,10 +147,20 @@ UnsignedInt FrameDataManager::getCommandCount(UnsignedInt frame) {
 /**
  * Set the frame command count for the given frame.
  */
-void FrameDataManager::setFrameCommandCount(UnsignedInt frame, UnsignedInt commandCount) {
+void FrameDataManager::setFrameCommandCount(UnsignedInt frame, UnsignedInt commandCount, UnsignedShort frameInfoID) {
 	UnsignedInt frameindex = frame % FRAME_DATA_LENGTH;
 
 	m_frameData[frameindex].setFrameCommandCount(commandCount);
+	m_frameData[frameindex].setFrameInfoID(frameInfoID);
+}
+
+/**
+ * The id of the frame info that announced the given frame, -1 if none has.
+ */
+Int FrameDataManager::getFrameInfoID(UnsignedInt frame) {
+	UnsignedInt frameindex = frame % FRAME_DATA_LENGTH;
+
+	return m_frameData[frameindex].getFrameInfoID();
 }
 
 /**

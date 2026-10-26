@@ -139,6 +139,9 @@ void INI::parseDialogDefinition( INI* ini )
 static void parseDelay( INI* ini, void *instance, void *store, const void* /*userData*/ );
 static void parsePitchShift( INI* ini, void *instance, void *store, const void* /*userData*/ );
 
+// MusicMood: one more than MusicManager::Mood, so a zeroed info is untagged
+static const char *TheMusicMoodNames[] = { "NONE", "CALM", "TENSE", "BATTLE", NULL };
+
 //-------------------------------------------------------------------------------------------------
 const FieldParse AudioEventInfo::m_audioEventInfo[] = 
 {
@@ -162,6 +165,8 @@ const FieldParse AudioEventInfo::m_audioEventInfo[] =
 	{ "MinRange",							INI::parseReal,						NULL,								offsetof( AudioEventInfo, m_minDistance) },
 	{ "MaxRange",							INI::parseReal,						NULL,								offsetof( AudioEventInfo, m_maxDistance) },
 	{ "LowPassCutoff",				INI::parsePercentToReal,	NULL,								offsetof( AudioEventInfo, m_lowPassFreq) },
+	{ "MusicMood",						INI::parseIndexList,			TheMusicMoodNames,	offsetof( AudioEventInfo, m_musicMood) },
+	{ "MusicSide",						INI::parseAsciiString,		NULL,								offsetof( AudioEventInfo, m_musicSide) },
 	{ NULL, NULL, NULL, 0 }
 };
 

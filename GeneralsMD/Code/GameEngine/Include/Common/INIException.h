@@ -43,10 +43,13 @@ public:
 		}
 	}
 
+	// The compiler's copy shared the buffer, and a catch by value deleted it twice
+	INIException(const INIException& other) : INIException(other.mFailureMessage) {}
+
+	INIException& operator=(const INIException&) = delete;
+
 	~INIException()
 	{
-		if (mFailureMessage) {
-			delete [] mFailureMessage;
-		}
+		delete [] mFailureMessage;
 	}
 };

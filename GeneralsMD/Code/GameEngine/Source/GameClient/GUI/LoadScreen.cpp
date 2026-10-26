@@ -264,7 +264,7 @@ public:
 
 private:
 	static void drawWindow( GameWindow *window, WinInstanceData *instData );
-	void prepare( const UnicodeString &title, const UnicodeString &subtitle );
+	void prepare( const UnicodeString &titleInCapitals, const UnicodeString &subtitle );
 	GameWindow *makeWindow( GameWindow *parent );
 	void draw( void );
 	void drawMatch( void );
@@ -548,7 +548,7 @@ GameWindow *LoadScreenBoard::create( GameInfo *game, const char *modeLabel, Bool
 	cash.format( u"$%u", game->getStartingCash().countMoney() );
 	subtitle.concat( BOARD_SEPARATOR );
 	subtitle.concat( cash );
-	prepare( mapName, subtitle );
+	prepare( UIStyle::nameCapitals( mapName ), subtitle );
 
 	// the cards: two columns with the map between, as tall as four cards a side allow
 	m_unknown = text( UnicodeString( u"?" ), centerFont );
@@ -675,11 +675,11 @@ GameWindow *LoadScreenBoard::create( GameInfo *game, const char *modeLabel, Bool
 }
 
 /** The header's and the foot's words, the same on every board. */
-void LoadScreenBoard::prepare( const UnicodeString &title, const UnicodeString &subtitle )
+void LoadScreenBoard::prepare( const UnicodeString &titleInCapitals, const UnicodeString &subtitle )
 {
 	GameFont *wordmarkFont = UIStyle::font( UIStyle::TEXT_STRONG, TRUE );
 	GameFont *tipFont = UIStyle::font( UIStyle::TEXT_BODY );
-	m_title = text( UIStyle::capitals( title ), UIStyle::titleFont( UIStyle::TEXT_TITLE ) );
+	m_title = text( titleInCapitals, UIStyle::titleFont( UIStyle::TEXT_TITLE ) );
 	m_subtitle = text( subtitle, tipFont );
 	m_wordmark[ 0 ] = text( UnicodeString( u"Zero Hour" ), wordmarkFont );
 	m_wordmark[ 1 ] = text( UnicodeString( u" Reforged" ), wordmarkFont );
@@ -710,7 +710,7 @@ GameWindow *LoadScreenBoard::createMission( GameWindow *parent, const UnicodeStr
 	const UnicodeString *briefing, Int briefingLines )
 {
 	m_mission = TRUE;
-	prepare( title, subtitle );
+	prepare( UIStyle::capitals( title ), subtitle );
 
 	const Int pad = scaled( 28 );
 	const Int width = scaled( BOARD_COLUMN_WIDTH );
@@ -1323,6 +1323,29 @@ void SinglePlayerLoadScreen::init( GameInfo *game )
 
 */
 	m_ambientLoop.setEventName("LoadScreenAmbient");
+
+	// format the progress bar: USA to blue, GLA to green, China to red
+	// and set the background image.  Before the movie, which may not open: the original Generals
+	// campaigns' movies come from a Generals install, and without one the side's picture was lost too.
+	AsciiString campaignName = TheCampaignManager->getCurrentCampaign()->getSide();
+	GameWindow *backgroundWin = TheWindowManager->winGetWindowFromId( m_loadScreen,TheNameKeyGenerator->nameToKey( AsciiString( "SinglePlayerLoadScreen.wnd:ParentSinglePlayerLoadScreen" ) ));
+	if (campaignName.compareNoCase("USA") == 0)
+	{
+		backgroundWin->winSetEnabledImage( 0, TheMappedImageCollection->findImageByName("MissionLoad_USA") );
+		m_progressBar->winSetEnabledImage( 6, TheMappedImageCollection->findImageByName("LoadingBar_ProgressCenter2") );
+	}
+	else if (campaignName.compareNoCase("GLA") == 0)
+	{
+		backgroundWin->winSetEnabledImage( 0, TheMappedImageCollection->findImageByName("MissionLoad_GLA") );
+		m_progressBar->winSetEnabledImage( 6, TheMappedImageCollection->findImageByName("LoadingBar_ProgressCenter3") );
+	}
+	else if (campaignName.compareNoCase("China") == 0)
+	{
+		backgroundWin->winSetEnabledImage( 0, TheMappedImageCollection->findImageByName("MissionLoad_China") );
+		m_progressBar->winSetEnabledImage( 6, TheMappedImageCollection->findImageByName("LoadingBar_ProgressCenter1") );
+	}
+	// else leave the default background screen
+
 	// create the new stream
 	m_videoStream = TheVideoPlayer->open( TheCampaignManager->getCurrentMission()->m_movieLabel );
 	if ( m_videoStream == NULL )
@@ -1347,27 +1370,6 @@ void SinglePlayerLoadScreen::init( GameInfo *game )
 
 		return;
 	}
-
-	// format the progress bar: USA to blue, GLA to green, China to red
-	// and set the background image
-	AsciiString campaignName = TheCampaignManager->getCurrentCampaign()->m_name;
-	GameWindow *backgroundWin = TheWindowManager->winGetWindowFromId( m_loadScreen,TheNameKeyGenerator->nameToKey( AsciiString( "SinglePlayerLoadScreen.wnd:ParentSinglePlayerLoadScreen" ) ));
-	if (campaignName.compareNoCase("USA") == 0)
-	{
-		backgroundWin->winSetEnabledImage( 0, TheMappedImageCollection->findImageByName("MissionLoad_USA") );
-		m_progressBar->winSetEnabledImage( 6, TheMappedImageCollection->findImageByName("LoadingBar_ProgressCenter2") );
-	}
-	else if (campaignName.compareNoCase("GLA") == 0)
-	{
-		backgroundWin->winSetEnabledImage( 0, TheMappedImageCollection->findImageByName("MissionLoad_GLA") );
-		m_progressBar->winSetEnabledImage( 6, TheMappedImageCollection->findImageByName("LoadingBar_ProgressCenter3") );
-	}
-	else if (campaignName.compareNoCase("China") == 0)
-	{
-		backgroundWin->winSetEnabledImage( 0, TheMappedImageCollection->findImageByName("MissionLoad_China") );
-		m_progressBar->winSetEnabledImage( 6, TheMappedImageCollection->findImageByName("LoadingBar_ProgressCenter1") );
-	} 
-	// else leave the default background screen
 
 
 	if(TheGameLODManager && TheGameLODManager->didMemPass())

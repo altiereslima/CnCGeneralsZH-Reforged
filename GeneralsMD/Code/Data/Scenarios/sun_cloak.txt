@@ -1,0 +1,4 @@
+# Friendly cloak shadow coverage, Flash Effect, local America (no observer).
+# Wait for Burton's ordinary stealth update; a ranger provides an opaque reference.
+30 spawn 0 AmericaInfantryColonelBurton 2 1640 1560 80
+30 spawn 0 AmericaInfantryRanger 1 1780 1640

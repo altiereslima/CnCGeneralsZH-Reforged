@@ -103,6 +103,22 @@ double frameDueSeconds(Movie *movie, unsigned int frameNumber)
 	return (double)(frameNumber - 1) * divisor / (double)movie->pub.FrameRate;
 }
 
+#if defined(_WIN32)
+// A voice nothing has played.  BinkGoto takes a new one rather than flushing this one and feeding it
+// on: xaudio2_9.dll's resampler can carry its place in the flushed audio over as frame -1 of the next
+// buffer and read it as an unsigned index, gigabytes past the buffer (miles_xaudio2.cpp's freshVoice).
+bool openVoice(Movie *movie)
+{
+	if (FAILED(movie->xaudio->CreateSourceVoice(&movie->voice, &movie->audioFormat))) {
+		movie->voice = NULL;
+		return false;
+	}
+	movie->voice->SetVolume(movie->volume);
+	movie->voice->Start(0);
+	return true;
+}
+#endif
+
 void openAudio(Movie *movie)
 {
 	if (!soundEnabled || movie->audioStream < 0 || movie->audioDecoder == NULL) {
@@ -146,11 +162,7 @@ void openAudio(Movie *movie)
 	movie->audioFormat.nBlockAlign = (WORD)(channels * 2);
 	movie->audioFormat.nAvgBytesPerSec = movie->audioFormat.nSamplesPerSec * movie->audioFormat.nBlockAlign;
 
-	if (SUCCEEDED(movie->xaudio->CreateSourceVoice(&movie->voice, &movie->audioFormat))) {
-		movie->voice->SetVolume(movie->volume);
-		movie->voice->Start(0);
-		movie->audioEnabled = true;
-	}
+	movie->audioEnabled = openVoice(movie);
 #endif
 }
 
@@ -497,8 +509,12 @@ int __stdcall BinkGoto(HBINK handle, unsigned int frame, int)
 	}
 #if defined(_WIN32)
 	if (movie->voice != NULL) {
-		movie->voice->FlushSourceBuffers();
+		// DestroyVoice waits out the mixer's pass, so nothing reads the queued chunks after it
+		// returns.  The game's thread holds no audio lock here, and a skip is once a movie.
+		movie->voice->Stop(0);
+		movie->voice->DestroyVoice();
 		movie->audioQueued.clear();
+		movie->audioEnabled = openVoice(movie);
 	}
 #else
 	AIL_ex_flush_pcm(movie->pcm);

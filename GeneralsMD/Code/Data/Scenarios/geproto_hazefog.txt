@@ -1,0 +1,18 @@
+# The Warm Light haze under the fog of war on Golden Oasis, seen from seat 0 (no -observer, so
+# the shroud is drawn). A Humvee crosses the oasis bank and leaves, so its track is fogged
+# (explored, not seen); a Crusader shuttles on the east bank and keeps that patch in sight; the
+# rest of the frame has never been seen. Frames here count 30 a second.
+#
+#   generals.exe -win -borderless -quickstart -noshellmap -multiInstance -fps 120 -noFPSLimit
+#     -particlecap 2500 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario geproto_hazefog
+#     -camera 3040 900 -screenshot 600 -video 300 660 hazefog -maxframes 700
+#   with MapLight = yes in the Options.ini of a ZH_USER_DATA_DIR folder for the haze
+
+30    spawn      0  AmericaVehicleHumvee      1  3040 950
+45    move       0  AmericaVehicleHumvee         2400 600
+
+30    spawn      0  AmericaTankCrusader       1  3250 1050
+45    move       0  AmericaTankCrusader          3350 800
+200   move       0  AmericaTankCrusader          3250 1050
+340   move       0  AmericaTankCrusader          3350 800

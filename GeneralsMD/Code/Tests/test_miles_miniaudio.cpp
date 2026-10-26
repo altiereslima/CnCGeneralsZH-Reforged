@@ -313,7 +313,7 @@ TEST(playback_rate_is_pitch)
 
 // ---------------------------------------------------------------------------------------------
 // 3D: miles_xaudio2's min / distance falloff between the two distances (a straight line with
-// AIL_ex_set_3D_linear_falloff), occlusion as a scale, and a pan along up x face.
+// AIL_ex_set_3D_linear_falloff), occlusion as a low-pass, and a pan along up x face.
 // ---------------------------------------------------------------------------------------------
 
 static Heard play3D(float x, float occlusion)
@@ -379,11 +379,13 @@ TEST(linear_falloff_is_a_straight_line_between_the_distances)
 	CHECK(heard.left < SILENT_RMS);
 }
 
-TEST(occlusion_scales_and_inside_the_minimum_is_full)
+TEST(occlusion_is_a_low_pass_and_inside_the_minimum_is_full)
 {
+	// Occlusion was a cut in volume and is a filter now (MSS.h's AIL_ex_3D_cutoff): half occluded is a
+	// one-pole at 5 kHz, which leaves the 440 Hz tone at 0.993 of itself.
 	Heard heard = play3D(-5.0f, 0.5f);
 	if (!audio()) return;
-	CHECK(near(heard.right, 0.5 * TONE_RMS));
+	CHECK(near(heard.right, TONE_RMS));
 	CHECK(heard.left < SILENT_RMS);
 }
 

@@ -150,7 +150,7 @@ protected:
 
 	virtual void getUpgradeActivationMasks(UpgradeMaskType& activation, UpgradeMaskType& conflicting) const
 	{
-		getAutoHealBehaviorModuleData()->m_upgradeMuxData.getUpgradeActivationMasks(activation, conflicting);
+		getAutoHealBehaviorModuleData()->m_upgradeMuxData.getUpgradeActivationMasks(activation, conflicting, this);
 	}
 
 	virtual void performUpgradeFX()
@@ -161,7 +161,7 @@ protected:
 	virtual void processUpgradeRemoval()
 	{
 		// I can't take it any more.  Let the record show that I think the UpgradeMux multiple inheritence is CRAP.
-		getAutoHealBehaviorModuleData()->m_upgradeMuxData.muxDataProcessUpgradeRemoval(getObject());
+		getAutoHealBehaviorModuleData()->m_upgradeMuxData.muxDataProcessUpgradeRemoval(this);
 	}
 
 	virtual Bool requiresAllActivationUpgrades() const

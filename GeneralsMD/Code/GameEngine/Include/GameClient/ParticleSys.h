@@ -207,6 +207,10 @@ public:
 	UnsignedInt getPersonality(void) { return m_personality; };
 	void setPersonality(UnsignedInt p) { m_personality = p; };
 
+	/// The cell of its template's flipbook this particle shows now (ParticleSystemTemplate's Flipbook
+	/// fields), counted row by row from the top left; 0 for a card that is not a flipbook.
+	UnsignedInt getFlipbookFrame( void ) const;
+
 protected:
 
 	// snapshot methods
@@ -244,6 +248,7 @@ protected:
 
 
 	Bool							m_diesThisUpdate;											///< set on the job pool, read when the dead are removed; never saved
+	UnsignedByte			m_flipbookStart;											///< the flipbook cell it starts on; drawing only, never saved
 public:
 	Bool							m_inSystemList;
 	Bool							m_inOverallList;
@@ -619,6 +624,31 @@ public:
 	Bool isExplosionDebrisTrail( void ) const { return m_explosionDebrisTrail; }
 	void setExplosionDebrisTrail( Bool on ) { m_explosionDebrisTrail = on; }
 
+	/** "FireLook = Yes": a flame or explosion system, whose billboards the Direct3D 11 frame draws
+		* with a temperature ramp over their life, edges that burn away and a flicker
+		* (W3DParticleSys.cpp, FIRE_LOOK_SAMPLING in ffshader.h).  Drawing only. */
+	Bool isFireLook( void ) const { return m_fireLook; }
+
+	/** "FlipbookGrid = 8": the card is a square atlas of 8 by 8 frames (2, 4, 8 or 16 a side), row by
+		* row from the top left, and each particle shows one at a time.  "FlipbookRate" is frames a
+		* second, looping; 0 (the default) plays the frames once over the particle's life.
+		* "FlipbookRandomStart = Yes" starts each particle on a frame from the client's random stream,
+		* and a particle playing once then runs from there to the last.  Drawing only, and only for
+		* billboards and the point group: a streak or a ground field still draws the whole atlas. */
+	/** "Emissive = Yes": an alpha blended system that gives light rather than takes it, a fireball's
+		* body: no glow from nearby fires and lights, and nothing cast into the sun's smoke map, so it
+		* neither shades itself nor darkens the ground under it.  Drawing only. */
+	Bool isEmissive( void ) const { return m_emissive; }
+
+	UnsignedInt getFlipbookGridLog2( void ) const { return m_flipbookGridLog2; }
+	Real getFlipbookRate( void ) const { return m_flipbookRate; }
+
+	/// Whether the GPU path's closed form can draw this template's particles (ParticleSys.cpp says why
+	/// each test is there); the manager still has to accept GPU particles at all.
+	Bool isGpuEligible( void ) const;
+	const AsciiString &getParticleTypeName( void ) const { return m_particleTypeName; }
+	Bool isFlipbookRandomStart( void ) const { return m_flipbookRandomStart; }
+
 	// This function was made const because of update modules' module data being all const.
 	ParticleSystem *createSlaveSystem( Bool createSlaves = TRUE ) const ;					///< if returns non-NULL, it is a slave system for use
 
@@ -643,6 +673,11 @@ protected:
 protected:
 	AsciiString								m_name;													///< the name of this template
 	Bool											m_explosionDebrisTrail;						///< switched off with the DebrisTrails option (client only)
+	Bool											m_fireLook;												///< drawn with the Direct3D 11 fire look (client only)
+	Bool											m_emissive;												///< alpha blended but takes no light and casts no smoke shadow (client only)
+	UnsignedByte							m_flipbookGridLog2;								///< log2 of the flipbook's frames a side, 0 for a plain card (client only)
+	Real											m_flipbookRate;										///< flipbook frames a second, looping; 0 plays once over the life (client only)
+	Bool											m_flipbookRandomStart;						///< each particle starts on a random flipbook frame (client only)
 
 	// This has to be mutable because of the delayed initialization thing in createSlaveSystem
 	mutable const ParticleSystemTemplate *m_slaveTemplate;		///< if non-NULL, use this to create a slave system
@@ -727,6 +762,7 @@ public:
 	void trigger (void) { m_burstDelayLeft = 0; m_delayLeft = 0;}
 
 	void setInitialDelay( UnsignedInt delay ) { m_delayLeft = delay; m_initialDelaySet = TRUE; }
+	UnsignedInt getInitialDelayLeft() const { return m_delayLeft; }
 
 	/// the name of the particles; a reference, as the renderer asks it of every system several times
 	/// a frame and a copy is an atomic increment and decrement each
@@ -750,8 +786,11 @@ public:
 	/// The renderer put at least one of this system's particles into the sun's smoke map on its
 	/// last frame, so the cloud shades the ground already and its blob would shade it twice.
 	/// Written by the shadow pass every frame it runs, read by shouldCastGroundShadow.
-	void setInSunMap( Bool inSunMap ) { m_inSunMap = inSunMap; }
-	Bool isInSunMap( void ) const { return m_inSunMap; }
+	/// A mark is the stamp of the fill that set it, so the next fill drops every mark at once with
+	/// forgetAllInSunMap rather than finding each system the last one marked.
+	void setInSunMap( Bool inSunMap ) { m_inSunMapStamp = inSunMap ? s_sunMapStamp : 0; }
+	Bool isInSunMap( void ) const { return m_inSunMapStamp == s_sunMapStamp; }
+	static void forgetAllInSunMap( void ) { if( ++s_sunMapStamp == 0 ) s_sunMapStamp = 1; }
 
 	Bool shouldBillboard( void ) { return !m_isGroundAligned; }
 
@@ -814,6 +853,29 @@ public:
 	/// How much of this system the local player sees, for the stealth of what it is attached to.
 	Real getStealthFade( void ) const;
 
+	/** The GPU particle path (docs/plans/GPU-PARTICLES.md).  An eligible system hands each spawn to
+		* the manager's spawnGpuParticle, which keeps it as a spawn record the vertex shader ages in
+		* closed form; no Particle is made and nothing on the CPU touches it again.  The system keeps
+		* the last few spawns so the client can still estimate what the cloud does (ground blob, fire
+		* light) without reading the device's ring back. */
+	struct GpuSpawnSample
+	{
+		ParticleInfo	m_info;					///< the spawn exactly as spawnGpuParticle was handed it
+		UnsignedInt		m_birthFrame;		///< ParticleSystemManager::getParticleFrame() at the spawn
+	};
+	enum { GPU_SPAWN_SAMPLES = 16 };
+
+	Bool isGpuEligible( void ) const { return m_gpuEligible; }								///< decided once, in the constructor
+	UnsignedInt getGpuSpawnTotal( void ) const { return m_gpuSpawnTotal; }				///< spawns the GPU took, ever; 0 for a CPU-only system
+	UnsignedInt getGpuLastDeathFrame( void ) const { return m_gpuLastDeathFrame; }	///< the update its last GPU particle to go dies in, as a CPU twin would
+	UnsignedInt getGpuLifetimeLeft( void ) const;									///< frames until the last GPU particle dies, as Particle::getLifetimeLeft counts; 0 when none is alive
+	UnsignedInt getGpuSampleCount( void ) const { return m_gpuSpawnTotal < (UnsignedInt)GPU_SPAWN_SAMPLES ? m_gpuSpawnTotal : (UnsignedInt)GPU_SPAWN_SAMPLES; }
+	/// 0 is the newest spawn, getGpuSampleCount() - 1 the oldest kept
+	const GpuSpawnSample &getGpuSample( UnsignedInt newestFirst ) const { return m_gpuSamples[ ( m_gpuSpawnTotal - 1 - newestFirst ) % GPU_SPAWN_SAMPLES ]; }
+	/// The template asked for terrain collision (its INI, or -particlebounce and the ParticleBounce
+	/// option forcing it): the device rests GPU particles on the terrain, without the bounce.
+	Bool isGpuGroundClamped( void ) const { return m_template->m_groundCollision; }
+
 protected:
 
 	// snapshot methods
@@ -838,11 +900,14 @@ protected:
 
 	void makeUpdateContext( ParticleUpdateContext *context ) const;
 	Bool finishUpdate( const ParticleShadowBlob *blob );	///< the ground blob and the lifetime, after the particles
+	void addGpuSamplesToShadowBlob( ParticleShadowBlob *blob ) const;	///< the GPU particles' share of the ground blob, from the samples
+	Bool spawnOnGpu( const ParticleInfo *info );	///< hand one spawn to the manager's GPU path; TRUE if it took it
 
 	ParticleShadowBlob	m_pendingShadowBlob;				///< the survivors' footprint, gathered by updateParticlesMark
 	Bool								m_pendingCastsGroundShadow;	///< decided by updateEmission, where update() always decided it
 	UnsignedInt					m_pendingDeaths;						///< particles updateParticlesMark marked; the reap stops once it has removed them
-	Bool								m_inSunMap;									///< setInSunMap: client-only, never xfered
+	UnsignedInt					m_inSunMapStamp;						///< setInSunMap: client-only, never xfered; 0 is never a fill's stamp
+	static UnsignedInt	s_sunMapStamp;							///< the current fill's, from 1
 
 protected:
 	Particle *				m_systemParticlesHead;
@@ -899,6 +964,11 @@ protected:
   Bool              m_skipParentXfrm;                     ///< true if this system is already in world space.
 	Bool							m_isShell;														///< made inside a tick and not yet built (buildClientPart)
 	Bool							m_initialDelaySet;										///< setInitialDelay was called, so the build keeps it over the template's
+
+	Bool							m_gpuEligible;												///< spawns go to the manager's GPU path; client-only, never xfered
+	UnsignedInt				m_gpuSpawnTotal;											///< spawns the GPU took; indexes m_gpuSamples
+	UnsignedInt				m_gpuLastDeathFrame;									///< the latest frame a GPU spawn of this system dies in
+	std::vector<GpuSpawnSample>	m_gpuSamples;								///< ring of the last GPU_SPAWN_SAMPLES spawns, sized on the first
 
 
 	// the actual particle system data is inherited from ParticleSystemInfo
@@ -984,7 +1054,21 @@ public:
 	
 	virtual void doParticles(RenderInfoClass &rinfo) = 0;
 	virtual void queueParticleRender() = 0;
-	
+
+	/** The GPU particle path (docs/plans/GPU-PARTICLES.md); a device that has one overrides all three.
+		* acceptsGpuParticles is asked once per system, in its constructor.  spawnGpuParticle takes one
+		* spawn of an eligible system whole or answers FALSE, and the system then makes a CPU Particle.
+		* releaseGpuSystem is called from every eligible system's destructor; one destroyed by the
+		* manager's own destructor reaches this base no-op, the device's part being gone already. */
+	virtual Bool acceptsGpuParticles( void ) const { return FALSE; }
+	virtual Bool spawnGpuParticle( ParticleSystem *system, const ParticleInfo *info ) { return FALSE; }
+	virtual void releaseGpuSystem( ParticleSystem *system ) {}
+
+	/// The GPU particles' clock: one tick for each update() that runs the systems, which is exactly
+	/// how often a CPU Particle ages, where the logic frame runs two or three ahead in a catch-up
+	/// pass.  Spawn records stamp their birthFrame from it and age against it.
+	static UnsignedInt getParticleFrame( void );
+
 	virtual void preloadAssets( TimeOfDay timeOfDay );
 
 	// these are only for use by partcle systems to link and unlink themselves
@@ -995,6 +1079,9 @@ public:
 	void friend_renumberParticleSystem( ParticleSystem *particleSystem, ParticleSystemID oldID );
 	/// a system a tick made waits here for its build after the tick (ParticleSystem::buildClientPart)
 	void friend_addShell( ParticleSystem *shell, Bool createSlaves );
+	/// LogicThread::OverlapWindow::close, once the tick beside the render is done: what the render
+	/// made inside the window joins the list and the lookup
+	void friend_fileWindowSystems( void );
 
 protected:
 
@@ -1017,9 +1104,11 @@ protected:
 	UnsignedInt m_particleSystemCount;
 	Int m_onScreenParticleCount;                ///< number of particles displayed on screen per frame
 	UnsignedInt m_lastLogicFrameUpdate;
+	UnsignedInt m_particleFrame;		///< getParticleFrame; client-only, never xfered
 	Int m_localPlayerIndex;	///<used to tell particle systems which particles can be skipped due to player shroud status
 	std::vector<ParticleSystem *> m_independentUpdates;	///< this update's systems whose particles go to the job pool; kept so it does not reallocate
 	std::vector<ParticleSystem *> m_shells;							///< made inside this tick, built after it; reset() deletes any a cleared game left
+	std::vector<ParticleSystem *> m_windowSystems;			///< built by the main thread inside the overlap window, filed when it closes; the tick reads the list and the lookup beside the render
 
 private:
 	TemplateMap m_templateMap;		///< a hash map of all particle system templates

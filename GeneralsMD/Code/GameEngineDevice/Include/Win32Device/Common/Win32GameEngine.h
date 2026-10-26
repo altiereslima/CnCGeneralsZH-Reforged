@@ -73,6 +73,8 @@ public:
 	virtual void reset( void );															///< reset engine
 	virtual void update( void );														///< update the game engine
 	virtual void serviceWindowsOS( void );									///< allow windows maintenance in background
+	virtual Bool getAudioOutputDevice( Int index, AsciiString &id, UnicodeString &name );	///< MMDevice render endpoints
+	virtual void setAudioOutputDevice( const AsciiString &id );
 
 protected:
 

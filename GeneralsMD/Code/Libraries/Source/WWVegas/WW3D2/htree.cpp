@@ -815,13 +815,16 @@ void HTreeClass::Combo_Update
 			int anim_num;
 			for ( anim_num = 0; anim_num < anim->Get_Num_Anims(); anim_num++ ) {
 
-				HAnimClass *motion = anim->Get_Motion( anim_num );
+				// Peeked, not got: the motion and the map are shared by every object playing them, and
+				// their reference counts are plain ints the sun's shadow pass would race on while it
+				// poses casters on several threads.
+				HAnimClass *motion = anim->Peek_Motion( anim_num );
 
 				if ( motion != NULL ) {
 
 					float frame_num = anim->Get_Frame( anim_num );
 
-					PivotMapClass * pivot_map = anim->Get_Pivot_Weight_Map( anim_num );
+					PivotMapClass * pivot_map = anim->Peek_Pivot_Weight_Map( anim_num );
 
 					//float	*pivot_map = anim->Get_Pivot_Weight_Map( anim_num );
 
@@ -829,9 +832,6 @@ void HTreeClass::Combo_Update
 
 					if ( pivot_map != NULL ) {
 						weight *= (*pivot_map)[piv_idx];
-						// GREG - Pivot maps are ref counted so shouldn't we
-						// release the rivot map here?
-						pivot_map->Release_Ref();
 					}
 
 					if ( weight != 0.0 ) {
@@ -855,8 +855,6 @@ void HTreeClass::Combo_Update
 						last_weight = weight;
 #endif
 					}
-
-					motion->Release_Ref();
 
 				}
 			}
@@ -892,13 +890,11 @@ void HTreeClass::Combo_Update
 			pivot->IsVisible = false;
 
 			for ( anim_num = 0; (anim_num < anim->Get_Num_Anims()) && (!pivot->IsVisible); anim_num++ ) {
-				HAnimClass *motion = anim->Get_Motion( anim_num );
+				HAnimClass *motion = anim->Peek_Motion( anim_num );
 				if ( motion != NULL ) {
 					float frame_num = anim->Get_Frame( anim_num );
 
 					pivot->IsVisible |= motion->Get_Visibility(piv_idx,frame_num);
-
-					motion->Release_Ref();
 				}
 			}
 		}

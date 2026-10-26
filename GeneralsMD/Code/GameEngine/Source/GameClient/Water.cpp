@@ -32,10 +32,82 @@
 
 #include "GameClient/Water.h"
 #include "Common/INI.h"
+#include "Common/FileSystem.h"
+#include "Common/file.h"
+#include "Platform/ModernWaterConfig.h"
+
 
 // GLOBALS ////////////////////////////////////////////////////////////////////////////////////////
 WaterSetting WaterSettings[ TIME_OF_DAY_COUNT ];
 OVERRIDE<WaterTransparencySetting> TheWaterTransparency = NULL;
+
+namespace {
+struct ModernWaterSettings {
+	ModernWaterConfig::Rules rules = ModernWaterConfig::Defaults();
+	ModernWaterConfig::Material material;
+	ModernWaterConfig::Color mapColor;
+	std::string mapTexture;
+	bool resolved = false;
+};
+
+ModernWaterSettings &modernWaterSettings()
+{
+	static ModernWaterSettings settings;
+	return settings;
+}
+}
+
+void loadModernWaterSettings()
+{
+	ModernWaterSettings &settings = modernWaterSettings();
+	settings.rules = ModernWaterConfig::Defaults();
+	settings.resolved = false;
+	const char *path = "Data\\INI\\ModernWater.ini";
+	File *file = TheFileSystem->openFile(path, File::READ | File::BINARY);
+	if (!file) {
+		return;
+	}
+	const Int size = file->size();
+	if (size < 0 || size > 1024 * 1024) {
+		file->close();
+		return;
+	}
+	std::string contents(size, '\0');
+	const bool complete = size == 0 || file->read(&contents[0], size) == size;
+	file->close();
+	std::string error;
+	if (!complete || !ModernWaterConfig::Parse(contents, settings.rules, error)) {
+		return;
+	}
+}
+
+void getModernWaterMaterial(Real color[4], Real parameters[4])
+{
+	ModernWaterSettings &settings = modernWaterSettings();
+	const RGBColor &authored = TheWaterTransparency->m_standingWaterColor;
+	const ModernWaterConfig::Color mapColor = ModernWaterConfig::ByteColor(authored.red, authored.green, authored.blue);
+	const std::string mapTexture = TheWaterTransparency->m_standingWaterTexture.str();
+	// Compare the effective values, not the override object's address: save restoration and
+	// match reset can reuse an allocation. A new map must never inherit a prior material.
+	if (!settings.resolved || settings.mapColor.r != mapColor.r || settings.mapColor.g != mapColor.g ||
+		settings.mapColor.b != mapColor.b || settings.mapTexture != mapTexture) {
+		settings.mapColor = mapColor;
+		settings.mapTexture = mapTexture;
+		settings.material = ModernWaterConfig::Resolve(settings.rules, mapColor, mapTexture);
+		settings.resolved = true;
+		DEBUG_LOG(("ModernWater: map color %d,%d,%d texture %s -> %s\n", mapColor.r, mapColor.g,
+			mapColor.b, mapTexture.c_str(), settings.material.ruleName.empty() ? "authored tint" : settings.material.ruleName.c_str()));
+	}
+	const ModernWaterConfig::Material &material = settings.material;
+	color[0] = material.color.r / 255.0f;
+	color[1] = material.color.g / 255.0f;
+	color[2] = material.color.b / 255.0f;
+	color[3] = material.brightness;
+	parameters[0] = material.tintAmount;
+	parameters[1] = material.pollution;
+	parameters[2] = material.bubbles ? 1.0f : 0.0f;
+	parameters[3] = 0.0f;
+}
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 const FieldParse WaterSetting::m_waterSettingFieldParseTable[] = 

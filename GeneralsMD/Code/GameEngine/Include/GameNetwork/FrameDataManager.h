@@ -47,8 +47,9 @@ public:
 	FrameDataReturnType allCommandsReady(UnsignedInt frame, Bool debugSpewage);
 	NetCommandList * getFrameCommandList(UnsignedInt frame);
 	UnsignedInt getCommandCount(UnsignedInt frame);
-	void setFrameCommandCount(UnsignedInt frame, UnsignedInt commandCount);
+	void setFrameCommandCount(UnsignedInt frame, UnsignedInt commandCount, UnsignedShort frameInfoID);
 	UnsignedInt getFrameCommandCount(UnsignedInt frame);
+	Int getFrameInfoID(UnsignedInt frame);
 	void zeroFrames(UnsignedInt startingFrame, UnsignedInt numFrames);
 	void destroyGameMessages();
 	void resetFrame(UnsignedInt frame, Bool isAdvancing = TRUE);

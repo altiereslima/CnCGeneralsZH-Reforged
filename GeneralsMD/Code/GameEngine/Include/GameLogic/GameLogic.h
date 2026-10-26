@@ -377,10 +377,10 @@ private:
 	
 	// CRC cache system -----------------------------------------------------------------------------
 	UnsignedInt	m_CRC;																			///< Cache of previous CRC value
-	std::map<Int, UnsignedInt> m_cachedCRCs;								///< CRCs we've seen this frame
+	std::map<UnsignedInt, std::map<Int, UnsignedInt> > m_cachedCRCs;	///< CRCs executed this frame, by the frame they were computed on, then by player
 	Bool m_shouldValidateCRCs;															///< Should we validate CRCs this frame?
 	CRCSnapshotRing m_crcSnapshots;													///< per object CRCs for the last few CRC frames, for mismatch diagnosis
-	void writeMismatchDump( Int numPlayers );								///< write down what the world looked like on the mismatching frame
+	void writeMismatchDump( Int numPlayers, UnsignedInt crcFrame );	///< write down what the world looked like on the mismatching frame
 	//-----------------------------------------------------------------------------------------------
 
 	//Added By Sadullah Nader

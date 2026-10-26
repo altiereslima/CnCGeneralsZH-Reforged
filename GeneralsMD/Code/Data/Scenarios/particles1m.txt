@@ -1,0 +1,29 @@
+# A million small additive particles on one screen, the load the GPU particle path is measured on.
+#
+# 3350 copies of the shipped Snow system in a 58 by 58 block. Snow is a billboard ADDITIVE system
+# with no wind, no attached system and no flipbook, so it is GPU eligible. Each copy emits 2 to 4
+# flakes every second retail frame and a flake lives 300 retail frames (10 s); measured, a copy
+# settles at about 315 rather than the 450 that suggests, so the block holds about 1,055,000.
+# Snow emits above the ground only, so a slope under a copy loses a few. The flakes fade in from
+# black over the first 4 s and the additive invisibility test does not retire them early. Gravity
+# pulls them under the emitter after about 4 s, so half of each flake's life is behind the terrain
+# (with ParticleBounce on, the GPU rests them on it instead): vertex and sort cost, little fill.
+# particles1m_smoke is the fill-bound half.
+#
+# The count climbs for 600 logic frames after the spawn and holds from about frame 660.
+#
+#   generals.exe -win -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -msaa 0 -noDynamicLOD -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2
+#     -takeover -seed 1 -maxframes 2400 -gpuparticles
+#     -scenario particles1m -camera 760 850 -logPrefix p1m_
+#
+# With -gpuparticles the CPU keeps its usual cap and every eligible spawn past it goes to the GPU
+# ring, so the CPU draws the first few thousand and the GPU the rest. The CPU baseline drops
+# -gpuparticles and adds -particlecap 1100000 to hold the same count. Grep the log for HEADLESS
+# FRAMETIME, PARTICLECOST and GPUPARTICLES. -noDynamicLOD keeps the LOD manager from dropping
+# WEAPON_EXPLOSION priority particles as the frame rate falls, which would make the two runs draw
+# different scenes.
+#
+#   <frame> particles <slot> <particle system> <count> <x> <y> [spacing]
+
+30    particles  0  Snow  3350  760 850  15

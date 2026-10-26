@@ -124,6 +124,7 @@ static void NullifyControls()
 	{
 		buttonMapStartPosition[i] = NULL;
 	}
+	RandomMapTabShutdown();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -188,6 +189,7 @@ void LanMapSelectMenuInit( WindowLayout *layout, void *userData )
 			TheMapCache->updateCache();
 		populateMapListbox( mapList, usesSystemMapDir, TRUE, TheLAN->GetMyGame()->getMap() );
 	}
+	RandomMapTabInit( "LanMapSelectMenu.wnd", parent, winMapPreview, buttonMapStartPosition, TheLAN->GetMyGame(), TRUE );
 }  // end LanMapSelectMenuInit
 
 //-------------------------------------------------------------------------------------------------
@@ -272,6 +274,9 @@ WindowMsgHandledType LanMapSelectMenuInput( GameWindow *window, UnsignedInt msg,
 WindowMsgHandledType LanMapSelectMenuSystem( GameWindow *window, UnsignedInt msg, 
 																				  WindowMsgData mData1, WindowMsgData mData2 )
 {
+	if( RandomMapTabHandle( msg, mData1, mData2 ) )
+		return MSG_HANDLED;
+
 	GameWindow *mapWindow = NULL;
 	if (listboxMap != NULL)
 	{
@@ -370,25 +375,30 @@ WindowMsgHandledType LanMapSelectMenuSystem( GameWindow *window, UnsignedInt msg
 				Int selected = -1;
 				UnicodeString map;
 
-				// get the selected index
-				if (mapWindow != NULL)
+				// the Random tab's map, already staged and in the cache, or else the list's row
+				AsciiString asciiMap = RandomMapTabMap();
+				if( !asciiMap.isEmpty() )
+					selected = 0;
+				else if (mapWindow != NULL)
 				{
 					GadgetListBoxGetSelected( mapWindow, &selected );
 				}
 
 				if( selected != -1 )
 				{
-					// get text of the map to load
-					map = GadgetListBoxGetText( mapWindow, selected, 0 );
+					if( asciiMap.isEmpty() )
+					{
+						// get text of the map to load
+						map = GadgetListBoxGetText( mapWindow, selected, 0 );
 
-					// set the map name in the global data map name
-					AsciiString asciiMap;
-					const char *mapFname = (const char *)GadgetListBoxGetItemData( mapWindow, selected );
-					DEBUG_ASSERTCRASH(mapFname, ("No map item data"));
-					if (mapFname)
-						asciiMap = mapFname;
-					else
-						asciiMap.translate( map );
+						// set the map name in the global data map name
+						const char *mapFname = (const char *)GadgetListBoxGetItemData( mapWindow, selected );
+						DEBUG_ASSERTCRASH(mapFname, ("No map item data"));
+						if (mapFname)
+							asciiMap = mapFname;
+						else
+							asciiMap.translate( map );
+					}
 					TheLAN->GetMyGame()->setMap( asciiMap );
 					asciiMap.toLower();
 					std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->find(asciiMap);

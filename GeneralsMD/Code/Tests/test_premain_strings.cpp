@@ -95,6 +95,7 @@ void getExecutableDirectory( char *buf, size_t size, Bool ) { if (size > 0) buf[
 #ifdef ALLOW_DEBUG_UTILS
 DEBUG_EXTERN_C void DebugInit( int ) {}		// the pre-main start opens the debug log; this test has none
 #endif
+DEBUG_EXTERN_C void ReleaseCrash( const char *reason ) { fprintf( stderr, "ReleaseCrash: %s\n", reason ); abort(); }	// a corrupt block header
 #ifdef DEBUG_LOGGING
 #include <stdarg.h>
 DEBUG_EXTERN_C void DebugLog( const char *format, ... )

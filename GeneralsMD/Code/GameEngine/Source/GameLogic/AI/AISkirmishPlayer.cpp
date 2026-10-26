@@ -190,9 +190,13 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				}	else {
 					if (bldg->getControllingPlayer() == m_player) {
 						// Check for built or dozer missing.
-						if( bldg->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) ) 
+						if( bldg->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 						{
-							if (bldg->isKindOf(KINDOF_FS_POWER) && !bldg->isKindOf(KINDOF_CASH_GENERATOR)) 
+							// a site its dozers cannot reach, or die on the way to, is cancelled for the money
+							if (watchSite(info, bldg)) {
+								continue;
+							}
+							if (bldg->isKindOf(KINDOF_FS_POWER) && !bldg->isKindOf(KINDOF_CASH_GENERATOR))
 							{
 								powerUnderConstruction = true;
 							}

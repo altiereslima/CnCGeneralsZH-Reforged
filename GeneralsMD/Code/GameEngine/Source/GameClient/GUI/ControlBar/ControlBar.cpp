@@ -87,6 +87,8 @@
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GadgetTextEntry.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/Mouse.h"
+#include "GameLogic/ExperienceTracker.h"
 #include "GameClient/WindowVideoManager.h"
 #include "GameClient/GadgetListBox.h"
 #include "GameClient/HotKey.h"
@@ -148,6 +150,51 @@ static void commandButtonTooltip(GameWindow *window,
 													UnsignedInt mouse)
 {
 	TheControlBar->showBuildTooltipLayout(window);
+}
+
+/** The portrait's tooltip for a unit on a rank ladder: its rank, and its way through the step to the
+	* next one, experience since this grade's threshold over what the step costs. */
+static void portraitRankTooltip( GameWindow *window, WinInstanceData *instData, UnsignedInt mouse )
+{
+	Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
+	const Object *obj = draw ? draw->getObject() : NULL;
+	const RankLadder *ladder = obj ? TheGlobalData->getRankLadder( obj->getTemplate() ) : NULL;
+	if( ladder == NULL || !obj->getExperienceTracker()->isTrainable() )
+		return;
+
+	const Int grade = obj->getRankGrade();
+	AsciiString label;
+	label.format( "RANK:%s%d", TheVeterancySideNames[ GlobalData::veterancySideOf( obj->getTemplate() ) ],
+								ladder->insigniaIndex( grade, obj->isKindOf( KINDOF_HERO ) ) );
+	UnicodeString text = TheGameText->fetch( label );
+
+	// what the grade carries, one line a perk: RANK:Perk<kind> takes the strength as a whole percent
+	// (a radius for DETECT, a multiple's gain for SIGHT and AURA_RADIUS)
+	for( Int perk = 0; perk < RANK_PERK_COUNT; ++perk )
+	{
+		Real value = ladder->perk( grade, (RankPerk)perk );
+		if( value <= 0.0f )
+			continue;
+		if( perk == RANK_PERK_SIGHT || perk == RANK_PERK_AURA_RADIUS )
+			value -= 1.0f;
+		label.format( "RANK:Perk%s", TheRankPerkNames[ perk ] );
+		UnicodeString line;
+		line.format( TheGameText->fetch( label ), REAL_TO_INT( perk == RANK_PERK_DETECT ? value : value * 100.0f + 0.5f ) );
+		text.concat( (WideChar)'\n' );
+		text.concat( line );
+	}
+
+	if( grade < ladder->m_grades )
+	{
+		const Int unitValue = RankLadder::unitValue( obj->getTemplate() );
+		const Int from = ladder->threshold( unitValue, grade );
+		UnicodeString progress;
+		progress.format( TheGameText->fetch( "RANK:NextRank" ), obj->getExperienceTracker()->getCurrentExperience() - from,
+										 ladder->threshold( unitValue, grade + 1 ) - from );
+		text.concat( (WideChar)'\n' );
+		text.concat( progress );
+	}
+	TheMouse->setCursorTooltip( text );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2771,6 +2818,7 @@ void ControlBar::initWindows( void )
 		
 		id = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:CameoWindow" );
 		m_rightHUDCameoWindow = TheWindowManager->winGetWindowFromId( NULL, id );
+		m_rightHUDCameoWindow->winSetTooltipFunc( portraitRankTooltip );
 		for( i = 0; i < MAX_RIGHT_HUD_UPGRADE_CAMEOS; i++ )
 		{
 			windowName.format( "ControlBar.wnd:UnitUpgrade%d", i+1 );

@@ -1,0 +1,39 @@
+# geproto_oasis with the fight moved onto the Chinese cluster, for the team glow close-ups
+# (Cinema/geproto_glow.txt). In geproto_oasis the two tank groups never reached 2750,3230 and that
+# frame came back empty ground.
+#
+#   generals.exe -win -borderless -quickstart -noshellmap -multiInstance -fps 120 -noFPSLimit
+#     -particlecap 2500 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario geproto_glow
+#     -cinema geproto_glow -video 180 1560 geproto -maxframes 1620
+#   with TeamGlow = yes in the Options.ini of a ZH_USER_DATA_DIR folder for the glow
+
+# the American base
+30    spawn      0  AmericaPowerPlant             1  1950 3380
+30    spawn      0  AmericaPowerPlant             1  2040 3380
+30    spawn      0  AmericaBarracks               1  2160 3380
+30    spawn      0  AmericaWarFactory             1  2320 3370
+30    spawn      0  AmericaAirfield               1  2520 3370
+30    spawn      0  AmericaSupplyCenter           1  1980 3550
+30    spawn      0  AmericaCommandCenter          1  2200 3550
+30    spawn      0  AmericaStrategyCenter         1  2410 3550
+30    spawn      0  AmericaPatriotBattery         1  1950 3720
+30    spawn      0  AmericaParticleCannonUplink   1  2080 3730
+30    spawn      0  AmericaSupplyDropZone         1  2230 3730
+30    spawn      0  AmericaFireBase               1  2350 3720
+30    spawn      0  AmericaWarFactory             1  2480 3730
+30    spawn      0  AmericaPowerPlant             1  2600 3720
+
+# the Chinese cluster
+30    spawn      1  ChinaWarFactory               1  2850 3450
+30    spawn      1  ChinaBarracks                 1  2980 3450
+
+# traffic through the base, along the lane between the two rows
+30    spawn      0  AmericaVehicleHumvee          2  1880 3460 30
+300   move       0  AmericaVehicleHumvee             2700 3460
+
+# the fight: Crusaders onto the Chinese cluster, the Battlemasters out to meet them
+30    spawn      0  AmericaTankCrusader           4  2450 3200 40
+30    spawn      1  ChinaTankBattleMaster         4  2900 3330 40
+120   attackmove 0  AmericaTankCrusader              2880 3420
+120   attackmove 1  ChinaTankBattleMaster            2600 3300

@@ -397,7 +397,11 @@ m_role(AIROLE_AGGRESSIVE)
 	m_incomePerSecond = 0.0f;
 	m_startFortune = 0;
 	for( Int k = 0; k < 3; ++k )
-		m_factoryBackedUpSince[ k ] = 0;
+	{
+		m_factoryFullHistory[ k ] = 0;
+		m_factoryFullCount[ k ] = 0;
+	}
+	m_parkingBlockedFrame = 0;
 	m_persona = AIPERSONA_NORMAL;
 	m_personaFromRandom = FALSE;
 	m_rushSent = FALSE;
@@ -993,7 +997,8 @@ void AIPlayer::clearTeamsInQueue( void )
 Object *AIPlayer::buildStructureNow(const ThingTemplate *bldgPlan, BuildListInfo *info)
 {
 
-	// inst-construct the building
+	// inst-construct the building.  Turkiye's build list names AmericaCommandCenter (the skirmish
+	// scripts ask for it by that name); ThingFactory::newObject makes a Turkiye player's the Turkish one.
 	Object *bldg = TheBuildAssistant->buildObjectNow( NULL, 
 																						bldgPlan,
 																						info->getLocation(),
@@ -1236,9 +1241,137 @@ static void giveUpOnSpot( BuildListInfo *info )
 }
 
 // ------------------------------------------------------------------------------------------------
+/** A site this AI placed and cannot finish is cancelled for its money back, the way a player cancels
+	* one, and its spot left alone for the rung's m_siteRetrySeconds.  A supply centre put down at a far
+	* dock in enemy ground stood unbuilt all match: every dozer sent to it was killed on the way, the
+	* money was gone, and the scaffold kept the dock (and every gun the scripts asked for beside it)
+	* from going anywhere else.  A priority entry is blanked, as giveUpOnSpot does, for whoever asked to
+	* ask again; a map plan entry waits out the retry and gets its rebuild back. */
+// ------------------------------------------------------------------------------------------------
+Bool AIPlayer::watchSite( BuildListInfo *info, Object *bldg )
+{
+	const UnsignedInt now = TheGameLogic->getFrame();
+	AISiteWatch *watch = NULL;
+	for( size_t i = 0; i < m_siteWatches.size(); )
+	{
+		const Object *site = TheGameLogic->findObjectByID( m_siteWatches[ i ].m_site );
+		if( site == NULL || !site->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+		{
+			m_siteWatches.erase( m_siteWatches.begin() + i );		// finished, or gone
+			continue;
+		}
+		if( site == bldg )
+			watch = &m_siteWatches[ i ];
+		++i;
+	}
+	if( watch == NULL )
+	{
+		AISiteWatch fresh;
+		fresh.m_site = bldg->getID();
+		fresh.m_percent = bldg->getConstructionPercent();
+		fresh.m_progressFrame = now;
+		fresh.m_lostBuilder = INVALID_ID;
+		fresh.m_buildersLost = 0;
+		m_siteWatches.push_back( fresh );
+		watch = &m_siteWatches.back();
+	}
+
+	const AIDifficultyProfile *profile = getSkillProfile();
+	const ObjectID builderID = bldg->getBuilderID();
+	const Object *builder = TheGameLogic->findObjectByID( builderID );
+	// at home a site that does not move is waiting for a busy dozer, not for one that cannot get there
+	const UnsignedInt stallFrames = isAtHome( bldg->getPosition() ) ? 0 :
+		(UnsignedInt)REAL_TO_INT( profile->m_siteStallSeconds * LOGICFRAMES_PER_SECOND );
+	const AISiteVerdict verdict = aiWatchSite( watch, bldg->getConstructionPercent(), builderID,
+		builder != NULL && !builder->isEffectivelyDead(), now, stallFrames, profile->m_siteBuildersLost );
+	if( verdict == AISITE_KEEP )
+		return FALSE;
+
+	const UnsignedInt retryFrames = (UnsignedInt)REAL_TO_INT( profile->m_siteRetrySeconds * LOGICFRAMES_PER_SECOND );
+	const Int refund = bldg->testStatus( OBJECT_STATUS_RECONSTRUCTING ) ? 0 : bldg->getTemplate()->calcCostToBuild( m_player );
+	m_player->getMoney()->deposit( refund, FALSE );
+	DEBUG_LOG(("AI SITE frame %d player %d gives up '%s' at (%.0f,%.0f), %s, %.0f%% built, %d refunded, spot free at frame %d\n",
+		now, m_player->getPlayerIndex(), bldg->getTemplate()->getName().str(), bldg->getPosition()->x, bldg->getPosition()->y,
+		verdict == AISITE_STALLED ? "no progress" : "builders lost", bldg->getConstructionPercent(), refund, now + retryFrames));
+
+	for( size_t i = 0; i < m_cooledSpots.size(); )
+	{
+		if( m_cooledSpots[ i ].m_until <= now )
+			m_cooledSpots.erase( m_cooledSpots.begin() + i );
+		else
+			++i;
+	}
+	AICooledSpot spot;
+	spot.m_pos = *bldg->getPosition();
+	spot.m_until = now + retryFrames;
+	m_cooledSpots.push_back( spot );
+
+	// the dock it was for stops being the one the scripts' guns and factories go beside
+	const Object *warehouse = TheGameLogic->findObjectByID( m_curWarehouseID );
+	if( warehouse && aiSpotCooling( m_cooledSpots, warehouse->getPosition(), AI_COOLED_DOCK_RADIUS, now ) )
+		m_curWarehouseID = INVALID_ID;
+
+	info->setObjectID( INVALID_ID );
+	info->setUnderConstruction( false );
+	if( info->isPriorityBuild() )
+	{
+		info->setTemplateName( AsciiString::TheEmptyString );
+	}
+	else
+	{
+		info->incrementNumRebuilds();
+		info->setObjectTimestamp( now + retryFrames );
+	}
+	bldg->kill();		// its dozer drops the job, as when a player cancels
+	return TRUE;
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool AIPlayer::spotCooling( const Coord3D *pos )
+{
+	return aiSpotCooling( m_cooledSpots, pos, AI_COOLED_SITE_RADIUS, TheGameLogic->getFrame() );
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The base builder has its next site and is waiting for the money.  An idle dozer walks there now
+	* rather than from wherever it stopped once the money comes, so the building starts on arrival.
+	* Only one standing idle: never one on a job, the repair dozer, or a worker hauling supplies. */
+// ------------------------------------------------------------------------------------------------
+void AIPlayer::stageDozer( Object *dozer, const Coord3D *site )
+{
+	if( !isSkirmishAI() || !getSkillProfile()->m_stageDozers || dozer->getID() == m_repairDozer )
+		return;
+	AIUpdateInterface *ai = dozer->getAI();
+	if( ai->getDozerAIInterface()->isAnyTaskPending() || !ai->isIdle() )
+		return;
+	SupplyTruckAIInterface *supplyTruckAI = ai->getSupplyTruckAIInterface();
+	if( supplyTruckAI && (supplyTruckAI->isCurrentlyFerryingSupplies() || supplyTruckAI->isForcedIntoWantingState()) )
+		return;
+	const Real STANDOFF = 4 * PATHFIND_CELL_SIZE_F;		// beside the footprint, not on it
+	const Real dx = dozer->getPosition()->x - site->x;
+	const Real dy = dozer->getPosition()->y - site->y;
+	const Real distSqr = dx*dx + dy*dy;
+	if( distSqr <= sqr( 3 * STANDOFF ) || !reachableFromBase( site ) )
+		return;
+	const Real dist = sqrt( distSqr );
+	Coord3D to = *site;
+	to.x += dx / dist * STANDOFF;
+	to.y += dy / dist * STANDOFF;
+	to.z = TheTerrainLogic->getGroundHeight( to.x, to.y );
+	ai->aiMoveToPosition( &to, CMD_FROM_AI );
+	DEBUG_LOG(("AI STAGE frame %d player %d dozer %d walks %.0f ahead to (%.0f,%.0f)\n",
+		TheGameLogic->getFrame(), m_player->getPlayerIndex(), dozer->getID(), dist, site->x, site->y));
+}
+
+// ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildListInfo *info)
 {
+	// A site given up here lately is left alone until its wait runs out.
+	if (isSkirmishAI() && spotCooling(info->getLocation())) {
+		giveUpOnSpot(info);
+		return NULL;
+	}
 	// Find a dozer.
 	Object *dozer = findDozer(info->getLocation());
 	if (dozer==NULL && isSkirmishAI() && getSkillProfile()->m_economyBuildings && isPowerThin() &&
@@ -1255,10 +1388,9 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 	// Check available funds, and with a Hard AI whether the money is saved for something better.
 	Money *money = m_player->getMoney();
 	const Int cost = bldgPlan->calcCostToBuild(m_player);
-	if (!purchaseAllowed(bldgPlan->getTemplateID(), cost, purchaseKindOf(bldgPlan), TRUE, bldgPlan->getName(), personaBuildingScore(bldgPlan))) {
-		return NULL;
-	}
-	if ((Int)money->countMoney()<cost) {
+	if (!purchaseAllowed(bldgPlan->getTemplateID(), cost, purchaseKindOf(bldgPlan), TRUE, bldgPlan->getName(), personaBuildingScore(bldgPlan)) ||
+			(Int)money->countMoney()<cost) {
+		stageDozer(dozer, info->getLocation());		// the site is known, only the money is not there yet
 		return NULL;
 	}
 
@@ -1857,6 +1989,12 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 		return;
 	}
 
+	// a barracks or war factory that let a unit out was busy on this spend pass, whatever its queue
+	// reads when the pass looks (doSpending, which empties the list and runs only with the purchase queue)
+	if( purchaseQueueOn() && ( factory->isKindOf( KINDOF_FS_WARFACTORY ) || factory->isKindOf( KINDOF_FS_BARRACKS ) ) &&
+			std::find( m_producedSincePass.begin(), m_producedSincePass.end(), factory->getID() ) == m_producedSincePass.end() )
+		m_producedSincePass.push_back( factory->getID() );
+
 	for (DLINK_ITERATOR<TeamInQueue> iter = iterate_TeamBuildQueue(); !iter.done(); iter.advance())
 	{
 		TeamInQueue *team = iter.cur();
@@ -1872,6 +2010,7 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 				// put new unit into the team under construction
 				if (team->m_team)
 					unit->setTeam( team->m_team );
+				sendForSpotters( team, unit );
 				if (team->m_reinforcement) {
 					team->m_reinforcementID = unit->getID();
 				}
@@ -2539,19 +2678,147 @@ Object *AIPlayer::findFactory(const ThingTemplate *thing, Bool busyOK)
 }
 
 // ------------------------------------------------------------------------------------------------
+/** A side built out of another side's reskins runs that side's scripts, and a unit they name with
+	* no reskin for this side (America's Stealth Fighter, for Turkiye) is left out of the team rather
+	* than keeping the whole team off the build list. */
+// ------------------------------------------------------------------------------------------------
+static Bool sideCanNeverField( const Player *player, const ThingTemplate *thing )
+{
+	const AsciiString &side = player->getSide();
+	return thing->getDefaultOwningSide() != side && TheThingFactory->sideBorrowsTemplates( side ) &&
+		TheThingFactory->findSideReskin( thing, side ) == NULL;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The side's own reskin of a unit another side's scripts name, a Turkiye player's Firtina for the
+	* Tomahawk, else the unit itself.  A team order for the American template was costed and saved for
+	* at the American price while the factory made and charged the Turkish one, and Money::withdraw
+	* takes what is there: a Firtina came out for the Tomahawk's 1200 with 1200 in the bank. */
+// ------------------------------------------------------------------------------------------------
+static const ThingTemplate *ownTemplate( const Player *player, const ThingTemplate *thing )
+{
+	const ThingTemplate *own = TheThingFactory->findSideReskin( thing, player->getSide() );
+	return own != NULL ? own : thing;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The side's spotter (AISideInfo m_spotter) for a team the scripts send at the enemy that names no
+	* spotter of its own, else NULL: a gun kept at home has the base's sight. */
+// ------------------------------------------------------------------------------------------------
+static const ThingTemplate *missingSpotterFor( const Player *player, const TeamPrototype *proto )
+{
+	const AISideInfo *sideInfo = TheAI->getAiData()->findSideInfo( player );
+	if( sideInfo == NULL || sideInfo->m_spotter.isEmpty() )
+		return NULL;		// a side that never fires blind
+	const TeamTemplateInfo *info = proto->getTemplateInfo();
+	if( info->m_isBaseDefense || info->m_isPerimeterDefense || !aiTeamAttacks( info ) )
+		return NULL;
+
+	const ThingTemplate *spotter = TheThingFactory->findTemplate( sideInfo->m_spotter );
+	for( Int i = 0; i < info->m_numUnitsInfo; ++i )
+	{
+		const ThingTemplate *unit = TheThingFactory->findTemplate( info->m_unitsInfo[ i ].unitThingName, FALSE );
+		if( unit == NULL || info->m_unitsInfo[ i ].maxUnits <= 0 )
+			continue;		// an empty slot, or a map's team naming a unit this game does not have
+		if( ownTemplate( player, unit )->isEquivalentTo( spotter ) )
+			return NULL;
+	}
+	return spotter;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** A gun that fires past its own sight came out for a team still being built: it trains the rung's
+	* ArtillerySpotters of the side's spotter as part of the team, once.  They used to be ordered with
+	* the team, and a barracks turns a 700 spotter out long before a war factory has saved for a 1400
+	* gun: Hard bought 23 to 34 spotters in fifteen minutes for 5 to 11 guns, the teams whose gun never
+	* came disbanded and the spotters sat in the Sipers. */
+// ------------------------------------------------------------------------------------------------
+void AIPlayer::sendForSpotters( TeamInQueue *team, const Object *gun )
+{
+	const Int spotters = getSkillProfile()->m_artillerySpotters;
+	if( !isSkirmishAI() || spotters <= 0 || !gun->getTemplate()->acquiresBeyondVision() )
+		return;
+	const ThingTemplate *spotter = missingSpotterFor( m_player, team->m_team->getPrototype() );
+	const char *why = spotter == NULL ? "a team kept at home or with its own spotter" : "sends for its spotters";
+	for( WorkOrder *order = team->m_workOrders; spotter && order; order = order->m_next )
+		if( order->m_thing->isEquivalentTo( spotter ) )
+		{
+			why = "its spotters already sent for";		// the team's second gun
+			spotter = NULL;
+		}
+	if( spotter )
+	{
+		// a computer player holds canBuildUnits off between team orders, and the barracks check reads it
+		const Bool canBuildUnits = m_player->getCanBuildUnits();
+		m_player->setCanBuildUnits( TRUE );
+		if( findFactory( spotter, TRUE ) == NULL )
+		{
+			why = "no barracks to train its spotters";
+			spotter = NULL;
+		}
+		m_player->setCanBuildUnits( canBuildUnits );
+	}
+	if( spotter )
+	{
+		WorkOrder *order = newInstance(WorkOrder);
+		order->m_thing = spotter;
+		order->m_factoryID = INVALID_ID;
+		order->m_numRequired = spotters;
+		order->m_required = false;		// a team whose spotters are late goes out without them rather than disbanding at the build timeout
+		order->m_next = team->m_workOrders;
+		team->m_workOrders = order;
+	}
+	DEBUG_LOG(("AI ARTILLERY frame %d player %d '%s' %d comes out for team '%s', %s\n", TheGameLogic->getFrame(),
+		m_player->getPlayerIndex(), gun->getTemplate()->getName().str(), gun->getID(), team->m_team->getName().str(), why));
+}
+
+// ------------------------------------------------------------------------------------------------
+/** Can this team be given one of the side's guns (AISideInfo m_artillery): one the scripts send at the
+	* enemy, all of it on the ground, with no gun that fires past its sight already, no builder and no
+	* harvester in it. */
+// ------------------------------------------------------------------------------------------------
+static Bool takesArtillery( const Player *player, const TeamPrototype *proto )
+{
+	const TeamTemplateInfo *info = proto->getTemplateInfo();
+	if( info->m_isBaseDefense || info->m_isPerimeterDefense || !aiTeamAttacks( info ) )
+		return FALSE;
+	Bool fielded = FALSE;
+	for( Int i = 0; i < info->m_numUnitsInfo; ++i )
+	{
+		const ThingTemplate *unit = TheThingFactory->findTemplate( info->m_unitsInfo[ i ].unitThingName, FALSE );
+		if( unit == NULL || info->m_unitsInfo[ i ].maxUnits <= 0 || sideCanNeverField( player, unit ) )
+			continue;
+		unit = ownTemplate( player, unit );
+		if( unit->isKindOf( KINDOF_AIRCRAFT ) || unit->isKindOf( KINDOF_DOZER ) || unit->isKindOf( KINDOF_HARVESTER ) ||
+				unit->acquiresBeyondVision() )
+			return FALSE;
+		fielded = TRUE;
+	}
+	return fielded;
+}
+
+// ------------------------------------------------------------------------------------------------
 /** Return true if team can be considered for building */
 // ------------------------------------------------------------------------------------------------
 Bool AIPlayer::isPossibleToBuildTeam( TeamPrototype *proto, Bool requireIdleFactory, Bool &notEnoughMoney)
 {
 	/* Make sure we have at least one idle factory, and factories for all unit types. */
 	Bool anyIdle = false;
+	Bool anyFielded = false;
+	Bool anyLeftOut = false;
 	Int cost=0;
 	notEnoughMoney = false;
 	for( int i=0; i<proto->getTemplateInfo()->m_numUnitsInfo; i++ )
 	{
 		const TCreateUnitsInfo *unitInfo = &proto->getTemplateInfo()->m_unitsInfo[0];
 		const ThingTemplate *thing = TheThingFactory->findTemplate( unitInfo[i].unitThingName );
+		if (thing && sideCanNeverField(m_player, thing)) {
+			anyLeftOut = true;
+			continue;
+		}
 		if (thing) {
+			thing = ownTemplate(m_player, thing);
+			anyFielded = true;
 			Int thingCost = thing->calcCostToBuild(m_player);
 			// One walk of the build list, not two: findFactory hands back the first idle factory
 			// when there is one and a busy one only when none is idle, so its queue says which.
@@ -2567,6 +2834,8 @@ Bool AIPlayer::isPossibleToBuildTeam( TeamPrototype *proto, Bool requireIdleFact
 			cost += thingCost * ((unitInfo[i].maxUnits+unitInfo[i].minUnits)/2.0f);
 		}
 	}
+	if (anyLeftOut && !anyFielded)
+		return false;		// nothing in it this side can field
 	cost *= TheAI->getAiData()->m_teamResourcesToBuild;
 	if (m_player->getMoney()->countMoney() < cost)	{
 		notEnoughMoney = true;
@@ -2658,10 +2927,79 @@ Bool AIPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 }
 
 // ------------------------------------------------------------------------------------------------
+/** A spotter killed in the field was never replaced: the team's guns kept walking with nobody to see
+	* for them.  An attack team that still has a gun firing past its own sight and none of the side's
+	* spotter left on its list trains one as a reinforcement, which joins it where it stands.  One order at
+	* a time, and not for a team still being built, whose spotters sendForSpotters has in hand. */
+Bool AIPlayer::replaceSpotter( void )
+{
+	if( !isSkirmishAI() || getSkillProfile()->m_artillerySpotters <= 0 )
+		return false;
+	for( Player::PlayerTeamList::const_iterator t = m_player->getPlayerTeams()->begin(); t != m_player->getPlayerTeams()->end(); ++t )
+	{
+		TeamPrototype *proto = (*t);
+		const ThingTemplate *spotter = missingSpotterFor( m_player, proto );
+		if( spotter == NULL )
+			continue;
+		Bool busy = false;
+		for( DLINK_ITERATOR<TeamInQueue> iter = iterate_TeamBuildQueue(); !iter.done(); iter.advance() )
+			if( iter.cur()->m_team->getPrototype() == proto )
+				busy = true;
+		if( busy )
+			continue;
+		for( DLINK_ITERATOR<Team> iter = proto->iterate_TeamInstanceList(); !iter.done(); iter.advance() )
+		{
+			Team *team = iter.cur();
+			Bool blindGun = false;
+			Bool sighted = false;
+			for( DLINK_ITERATOR<Object> m = team->iterate_TeamMemberList(); !m.done(); m.advance() )
+			{
+				if( m.cur()->isEffectivelyDead() )
+					continue;
+				blindGun |= m.cur()->getTemplate()->acquiresBeyondVision();
+				sighted |= m.cur()->getTemplate()->isEquivalentTo( spotter );
+			}
+			if( !blindGun || sighted )
+				continue;
+
+			const Bool canBuildUnits = m_player->getCanBuildUnits();
+			m_player->setCanBuildUnits( TRUE );
+			Object *factory = findFactory( spotter, TRUE );
+			m_player->setCanBuildUnits( canBuildUnits );
+			if( factory == NULL )
+				return false;
+
+			WorkOrder *order = newInstance(WorkOrder);
+			order->m_thing = spotter;
+			order->m_factoryID = INVALID_ID;
+			order->m_numRequired = 1;
+			order->m_required = false;
+			order->m_next = NULL;
+			TeamInQueue *teamQ = newInstance(TeamInQueue);
+			prependTo_TeamBuildQueue( teamQ );
+			teamQ->m_priorityBuild = false;
+			teamQ->m_reinforcement = true;
+			teamQ->m_workOrders = order;
+			teamQ->m_frameStarted = TheGameLogic->getFrame();
+			teamQ->m_team = team;
+			DEBUG_LOG(("AI ARTILLERY frame %d player %d replaces the spotter of team '%s'\n", TheGameLogic->getFrame(),
+				m_player->getPlayerIndex(), team->getName().str()));
+			m_teamDelay = 0;
+			startTraining( order, teamQ->m_priorityBuild, teamQ->m_team->getName() );
+			return true;
+		}
+	}
+	return false;
+}
+
+// ------------------------------------------------------------------------------------------------
 /** See if any existing teams need reinforcements, and have higher priority. */
 // ------------------------------------------------------------------------------------------------
 Bool AIPlayer::selectTeamToReinforce( Int minPriority )
 {
+	if( replaceSpotter() )
+		return true;
+
 	// Find a high production priority team that needs reinforcements.
 	Player::PlayerTeamList::const_iterator t;
 	Team *curTeam = NULL;
@@ -4194,6 +4532,10 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 				if (otherSideStructureNear(m_player, obj)) {
 					continue;
 				}
+				// a site given up at this dock lately (watchSite): not straight back into the same trap
+				if (aiSpotCooling(m_cooledSpots, obj->getPosition(), AI_COOLED_DOCK_RADIUS, TheGameLogic->getFrame())) {
+					continue;
+				}
 
 				Real dx, dy;
 				dx = obj->getPosition()->x - m_baseCenter.x;
@@ -4454,12 +4796,12 @@ void AIPlayer::buildSpecificAITeam( TeamPrototype *teamProto, Bool priorityBuild
 		for( i=0; i<teamProto->getTemplateInfo()->m_numUnitsInfo; i++ )
 		{
 			const ThingTemplate *thing = TheThingFactory->findTemplate( unitInfo[i].unitThingName );
-			if (thing)
+			if (thing && !sideCanNeverField(m_player, thing))
 			{
 				int count = unitInfo[i].maxUnits-unitInfo[i].minUnits;
 				if (count>0) {
 					WorkOrder *order = newInstance(WorkOrder);
-					order->m_thing = thing;
+					order->m_thing = ownTemplate(m_player, thing);
 					order->m_factoryID = INVALID_ID;
 					order->m_numRequired = count;
 					// prepend to head of list
@@ -4472,11 +4814,11 @@ void AIPlayer::buildSpecificAITeam( TeamPrototype *teamProto, Bool priorityBuild
 		for( i=0; i<teamProto->getTemplateInfo()->m_numUnitsInfo; i++ )
 		{
 			const ThingTemplate *thing = TheThingFactory->findTemplate( unitInfo[i].unitThingName );
-			if (thing)
+			if (thing && !sideCanNeverField(m_player, thing))
 			{
 				int count = unitInfo[i].minUnits;
 				WorkOrder *order = newInstance(WorkOrder);
-				order->m_thing = thing;
+				order->m_thing = ownTemplate(m_player, thing);
 				order->m_factoryID = INVALID_ID;
 				order->m_numRequired = count;
 				order->m_required = true;
@@ -4485,7 +4827,30 @@ void AIPlayer::buildSpecificAITeam( TeamPrototype *teamProto, Bool priorityBuild
 				orders = order;
 			}
 		}
-		if (orders) 
+		// a share of the attack teams of a side whose guns fire past their own sight takes one of them
+		// (AISideInfo Artillery), when a factory is up to make it: the scripts it runs may name none
+		const AISideInfo *sideInfo = isSkirmishAI() ? TheAI->getAiData()->findSideInfo( m_player ) : NULL;
+		const ThingTemplate *gun = NULL;
+		if (orders && sideInfo && !sideInfo->m_artillery.empty() && takesArtillery( m_player, teamProto ) &&
+				GameLogicRandomValueReal( 0.0f, 1.0f ) < getSkillProfile()->m_artilleryShare)
+		{
+			gun = TheThingFactory->findTemplate( sideInfo->m_artillery[ GameLogicRandomValue( 0, (Int)sideInfo->m_artillery.size() - 1 ) ] );
+			if (findFactory( gun, true ) == NULL)
+				gun = NULL;
+		}
+		if (gun)
+		{
+			WorkOrder *order = newInstance(WorkOrder);
+			order->m_thing = gun;
+			order->m_factoryID = INVALID_ID;
+			order->m_numRequired = 1;
+			order->m_required = true;
+			order->m_next = orders;
+			orders = order;
+			DEBUG_LOG(("AI ARTILLERY frame %d player %d team '%s' takes an added '%s'\n", TheGameLogic->getFrame(),
+				m_player->getPlayerIndex(), teamProto->getName().str(), gun->getName().str()));
+		}
+		if (orders)
 		{
 			/* We have something to build. */
 			TeamInQueue *team = newInstance(TeamInQueue);
@@ -5305,6 +5670,7 @@ void AIPlayer::update( void )
 		AI_PHASE( AIP_POWER,   doPower() );							// Keep the lights on, and out of reach.
 		AI_PHASE( AIP_ECONOMY, doSuperweapons() );			// The big guns, as soon as they can be bought.
 		AI_PHASE( AIP_TACTICS, doParticleBeams() );			// ... and the Particle Cannon's beam driven across his base.
+		AI_PHASE( AIP_ECONOMY, doReadySpecialPowers() );	// The powers no script knows to fire, as soon as they are ready.
 		AI_PHASE( AIP_WAVE,    rememberEnemies() );			// Write down the enemy army in sight.
 		AI_PHASE( AIP_WAVE,    answerArmy() );					// Train the answer to the part of it nothing answers.
 		AI_PHASE( AIP_WAVE,    doMass() );							// Build the fist, and send it when it is one.
@@ -6398,7 +6764,9 @@ struct FactoryLoad
 	KindOfType kind;
 	Int finished;
 	Int constructing;
-	Int shallowest;
+	Int busy;					///< finished ones with something in the queue, or that let a unit out since the last spend pass
+	Int parkingFull;		///< finished ones with no parking place left, which refuse an aircraft to their queue
+	const std::vector<ObjectID> *producedSincePass;		///< the factories that let a unit out since the last spend pass
 };
 
 /** The production kinds the computer buys extra copies of, in m_factoryBackedUpSince's order. */
@@ -6475,17 +6843,44 @@ static void countFactoryLoad( Object *obj, void *userData )
 	ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
 	if( pu == NULL )
 		return;
-	const Int queued = (Int)pu->getProductionCount();
-	if( load->finished == 0 || queued < load->shallowest )
-		load->shallowest = queued;
+	// busy at this instant, or between two units: an Easy barracks that trains a Red Guard inside a pass
+	// was found idle on most of them and never counted as busy
+	const std::vector<ObjectID> &produced = *load->producedSincePass;
+	if( pu->getProductionCount() > 0 || std::find( produced.begin(), produced.end(), obj->getID() ) != produced.end() )
+		++load->busy;
 	++load->finished;
+	// the same question ProductionUpdate::canQueueCreateUnit asks before an aircraft goes in the queue;
+	// the answer depends only on whether the thing asked about is made at a helipad, and the airfield
+	// itself is not
+	for( BehaviorModule **m = obj->getBehaviorModules(); *m; ++m )
+	{
+		ParkingPlaceBehaviorInterface *pp = (*m)->getParkingPlaceBehaviorInterface();
+		if( pp && !pp->hasAvailableSpaceFor( obj->getTemplate() ) )
+		{
+			++load->parkingFull;
+			break;
+		}
+	}
 }
 
-static FactoryLoad readFactoryLoad( Player *player, KindOfType kind )
+static const std::vector<ObjectID> s_noneProduced;
+
+static FactoryLoad readFactoryLoad( Player *player, KindOfType kind, const std::vector<ObjectID> *producedSincePass = &s_noneProduced )
 {
-	FactoryLoad load = { kind, 0, 0, 0 };
+	FactoryLoad load = { kind, 0, 0, 0, 0, producedSincePass };
 	player->iterateObjects( countFactoryLoad, &load );
 	return load;
+}
+
+/** Whether every finished factory of the kind was full on this pass: a barracks or war factory busy
+	* now or since the last pass, an airfield by its parking while a buy was refused for it within
+	* AI_PARKING_WANT_FRAMES. */
+static Bool factoryKindFull( const FactoryLoad &load, UnsignedInt parkingBlockedFrame )
+{
+	if( load.kind != KINDOF_FS_AIRFIELD )
+		return aiQueueKindFull( load.finished, load.busy );
+	const Bool wanted = parkingBlockedFrame != 0 && TheGameLogic->getFrame() - parkingBlockedFrame <= AI_PARKING_WANT_FRAMES;
+	return aiAirfieldsFull( load.finished, load.parkingFull, wanted );
 }
 
 /** Factories of this kind the build list has yet to put up, which go up before any extra one; with
@@ -7025,22 +7420,9 @@ void AIPlayer::doEconomy( void )
 			placeNear( tmpl, &m_baseCenter, 0.5f * m_baseRadius, FALSE );
 	}
 
+	// another factory is doSpending's, on every rung
 	if( m_persona != AIPERSONA_TURTLE )
 		queueBaseDefenses( dozer );
-
-	// ... and what does not pay back for twice it, so the opening build order is not what pays for it
-	if( m_player->getMoney()->countMoney() <= 2 * profile->m_cashHoardThreshold )
-		return;
-
-	/* Another factory only once the ones standing fall behind their queues (aiWantsAnotherFactory).
-		 Airfields, and war factories and barracks while the base had no room for an income building,
-		 used to get one a pass whatever their queues, and the opening spent itself on a second barracks
-		 with the first one empty.  The kind asked first turns with each pass, so a queue that never
-		 empties does not keep the others waiting. */
-	const Int first = (Int)( ((TheGameLogic->getFrame() + phase) / ECONOMY_CHECK_RATE) % PRODUCTION_KINDS );
-	for( Int i = 0; i < PRODUCTION_KINDS; ++i )
-		if( queueExtraFactory( dozer, PRODUCTION_KIND[ (first + i) % PRODUCTION_KINDS ] ) )
-			return;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -7334,14 +7716,37 @@ void AIPlayer::buildAsap( const ThingTemplate *tmpl )
 	* lobby's superweapon setting and Pro Rules still bind beside it; canMakeUnit asks all three.
 	* If the tech building it needs is missing, that goes up first, and copies follow once the first
 	* superweapon is standing, up to AI_TECH_BUILDING_COPIES, so one of them blowing up leaves the tree
-	* standing. Hard only, like the rest of the economy. */
+	* standing. Hard only, like the rest of the economy, except for a side whose scripts cannot build its
+	* superweapon (planNamesSuperweapon): Easy and Medium put that one up here too, as late as the scripts
+	* put up America's uplink. */
 //----------------------------------------------------------------------------------------------------------
+/** The scripts build a superweapon only through the side's build list (buildSpecificAIBuilding), so a
+	* plan that names none, Turkiye's, which runs America's scripts and has no uplink, never gets one
+	* from them.  The request buildAsap puts down is a build list entry of its own, so Easy and Medium
+	* ask for one, as the scripts' once-only line does for America. */
+static Bool planNamesSuperweapon( Player *player )
+{
+	for( BuildListInfo *info = player->getBuildList(); info; info = info->getNext() )
+	{
+		const ThingTemplate *tmpl = TheThingFactory->findTemplate( info->getTemplateName() );
+		if( tmpl && tmpl->isKindOf( KINDOF_FS_SUPERWEAPON ) )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/** Easy's and Medium's first superweapon when the scripts cannot build it: America's scripts ask for
+	* the uplink at escalation 180 and 100, a point every ten seconds. */
+static const UnsignedInt SCRIPTLESS_SUPERWEAPON_FRAMES[ AISKILL_COUNT ] =
+	{ 1800 * LOGICFRAMES_PER_SECOND, 1000 * LOGICFRAMES_PER_SECOND, 0 };
+
 void AIPlayer::doSuperweapons( void )
 {
-	if( !getSkillProfile()->m_economyBuildings )
-		return;
 	const Int phase = computeUpdatePhase( m_player->getPlayerIndex(), SUPERWEAPON_CHECK_RATE );
 	if( (TheGameLogic->getFrame() + phase) % SUPERWEAPON_CHECK_RATE != 0 )
+		return;
+	if( !getSkillProfile()->m_economyBuildings &&
+			( TheGameLogic->getFrame() < SCRIPTLESS_SUPERWEAPON_FRAMES[ m_skillLevel ] || planNamesSuperweapon( m_player ) ) )
 		return;
 	if( !m_player->getCanBuildBase() || !m_baseCenterSet || !m_player->getEnergy()->hasSufficientPower() )
 		return;		// a dark base's superweapon clock is stopped anyway; the money goes to the plant
@@ -7550,6 +7955,13 @@ void AIPlayer::purchased( Int key, Int cost, AIPurchaseKind kind, const AsciiStr
 
 Bool AIPlayer::buyUnit( ProductionUpdateInterface *pu, const ThingTemplate *unit, AIPurchaseKind kind )
 {
+	// an airfield with every parking place taken refuses the aircraft (queueCreateUnit fails on it), so
+	// nothing is saved for one, and the refusal is what says the computer wants another airfield
+	if( pu->canQueueCreateUnit( unit ) == CANMAKE_PARKING_PLACES_FULL )
+	{
+		m_parkingBlockedFrame = TheGameLogic->getFrame();
+		return FALSE;
+	}
 	const Int cost = unit->calcCostToBuild( m_player );
 	// a personality's taste moves an army unit up or down the queue: the scripts' teams of a kind it
 	// does not like wait while its favoured units are saved for
@@ -7588,6 +8000,57 @@ Bool AIPlayer::buyUpgrade( ProductionUpdateInterface *pu, const UpgradeTemplate 
 		return FALSE;
 	purchased( key, cost, AIBUY_UPGRADE, upgrade->getUpgradeName() );
 	return TRUE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+static void collectObjects( Object *obj, void *userData )
+{
+	((std::vector<Object*> *)userData)->push_back( obj );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** The skirmish scripts fire the powers they name and nothing else, so a side that runs another
+	* side's scripts (Turkiye runs America's) never touched its own.  A power marked AIFiresWhenReady goes
+	* off the moment it is ready and the science behind it is bought, at the target the scripts' own
+	* "fire at most cost" would pick. */
+//----------------------------------------------------------------------------------------------------------
+static const Int SPECIAL_POWER_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
+
+void AIPlayer::doReadySpecialPowers( void )
+{
+	const Int phase = computeUpdatePhase( m_player->getPlayerIndex(), SPECIAL_POWER_CHECK_RATE );
+	if( (TheGameLogic->getFrame() + phase) % SPECIAL_POWER_CHECK_RATE != 0 )
+		return;
+	Player *enemy = getAiEnemy();
+	if( enemy == NULL )
+		return;
+
+	std::vector<Object*> owned;
+	m_player->iterateObjects( collectObjects, &owned );
+	for( std::vector<Object*>::iterator it = owned.begin(); it != owned.end(); ++it )
+	{
+		Object *obj = *it;
+		if( obj->isEffectivelyDead() || obj->isDisabled() )
+			continue;
+		for( BehaviorModule **m = obj->getBehaviorModules(); *m; ++m )
+		{
+			SpecialPowerModuleInterface *power = (*m)->getSpecialPower();
+			if( power == NULL || !power->getSpecialPowerTemplate()->isFiredByAIWhenReady() || !power->isReady() )
+				continue;
+			const ScienceType science = power->getRequiredScience();
+			if( science != SCIENCE_INVALID && !m_player->hasScience( science ) )
+				continue;
+
+			const SpecialPowerTemplate *tmpl = power->getSpecialPowerTemplate();
+			const Real radius = max( 50.0f, tmpl->getRadiusCursorRadius() );
+			Coord3D target;
+			if( !m_player->computeSuperweaponTarget( tmpl, &target, enemy->getPlayerIndex(), radius ) || target.lengthSqr() <= 0.0f )
+				continue;
+			DEBUG_LOG(("AI POWER frame %d player %d fires '%s' at (%.0f,%.0f)\n", TheGameLogic->getFrame(),
+				m_player->getPlayerIndex(), tmpl->getName().str(), target.x, target.y));
+			power->doSpecialPowerAtLocation( &target, INVALID_ANGLE, COMMAND_FIRED_BY_SCRIPT );
+		}
+	}
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -7630,8 +8093,9 @@ void AIPlayer::buyMoneyUnits( void )
 //----------------------------------------------------------------------------------------------------------
 /** One more factory of this kind, beside a held expansion or around the base.  The expansion try is
 	* local: a miss out there must not walk the base's ring cursor past the ground around the command
-	* center, or the first crowded dock skips the base itself.  Nothing while the build list still has one
-	* of this kind to put up, since that one goes first, and then only when holdsExtraFactory lets it. */
+	* center, or the first crowded dock skips the base itself.  Nothing while one of this kind is asked for
+	* and not yet up, since that one goes first, and then only when holdsExtraFactory lets it.  A plan copy
+	* the scripts have not asked for does not wait it out: they reach those at eight minutes. */
 //----------------------------------------------------------------------------------------------------------
 Bool AIPlayer::queueExtraFactory( Object *dozer, KindOfType kind )
 {
@@ -7650,7 +8114,7 @@ Bool AIPlayer::queueExtraFactory( Object *dozer, KindOfType kind )
 			favoured = load.constructing == 0 && load.finished < PERSONA_FAVOURED_FACTORIES[ m_skillLevel ];
 		}
 	}
-	if( favoured ? plannedOfKind( m_player, kind, TRUE ) > 0 : plannedOfKind( m_player, kind ) > 0 || holdsExtraFactory( tmpl ) )
+	if( plannedOfKind( m_player, kind, TRUE ) > 0 || ( !favoured && holdsExtraFactory( tmpl ) ) )
 		return FALSE;
 
 	const Object *warehouse = TheGameLogic->findObjectByID( m_curWarehouseID );
@@ -7662,8 +8126,8 @@ Bool AIPlayer::queueExtraFactory( Object *dozer, KindOfType kind )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** A second factory of a kind waits until every finished one has kept a unit waiting for
-	* AI_FACTORY_BACKLOG_SECONDS (aiWantsAnotherFactory; doSpending keeps that clock), and while one is
+/** Another factory of a kind waits until every finished one has been full on most of the spend passes
+	* of the rung's m_factoryBacklogSeconds (aiWantsAnotherFactory; doSpending samples it), and while one is
 	* going up.  The build list's own copies wait the same way: the Infantry General's plan holds four
 	* barracks, and its scripts asked for the second 38 seconds in, before the first had trained anyone,
 	* and the bank went to nothing waiting on the third. */
@@ -7679,9 +8143,8 @@ Bool AIPlayer::holdsExtraFactory( const ThingTemplate *tmpl )
 		// AI's plan airfield waited here from 3.3 minutes to 15
 		if( favouredFactoryScore( tmpl ) > 0 )
 			return load.constructing > 0 || load.finished >= PERSONA_FAVOURED_FACTORIES[ m_skillLevel ];
-		const UnsignedInt since = m_factoryBackedUpSince[ k ];
-		return !aiWantsAnotherFactory( load.finished, load.constructing, load.shallowest,
-			since == 0 ? 0 : TheGameLogic->getFrame() - since );
+		return !aiWantsAnotherFactory( load.finished, load.constructing, m_factoryFullHistory[ k ], m_factoryFullCount[ k ],
+			aiBacklogSamples( getSkillProfile()->m_factoryBacklogSeconds, ECONOMY_CHECK_RATE ) );
 	}
 	return FALSE;
 }
@@ -8633,8 +9096,8 @@ static const ThingTemplate *surplusUnit( Object *factory, const Player *owner, c
 /** The bank a computer kept was the part of its income nothing was ever bought with: a Hard AI facing
 	* Medium ended its matches on 12,300 on average, a Medium one on up to 62,000.  So every rung
 	* keeps a bank of so many seconds of what it actually earns (m_bankTargetSeconds, aiBankTarget), and
-	* what is over that goes on upgrades, on extra units within the rung's share (aiSurplusBudget), and
-	* on another factory once an income window shows the bank is not coming down (aiWantsMoreProduction).
+	* what is over that goes on upgrades and on extra units within the rung's share (aiSurplusBudget).
+	* Another factory goes up whenever every one of its kind has stayed busy (addProductionForQueues).
 	* The upgrades that pay for the standing army are bought below the target as well, each rung from
 	* its own point in the match, and all of it goes through the purchase queue, which keeps below the
 	* same target. */
@@ -8647,27 +9110,35 @@ void AIPlayer::doSpending( void )
 	if( (now + computeUpdatePhase( m_player->getPlayerIndex(), ECONOMY_CHECK_RATE ) + ECONOMY_CHECK_RATE - ECONOMY_SLOT_STEP) % ECONOMY_CHECK_RATE != 0 )
 		return;
 
-	// since when every finished factory of each kind has had a unit waiting behind the one it builds,
-	// read on every pass so a queue that ran dry in between starts the clock again (queueExtraFactory)
+	// whether every finished factory of each kind is full on this pass, into a rolling window the gate
+	// reads as a share (queueExtraFactory); one going up empties it, so the new one has to prove itself
+	// full too
+	const Int window = aiBacklogSamples( getSkillProfile()->m_factoryBacklogSeconds, ECONOMY_CHECK_RATE );
 	for( Int k = 0; k < PRODUCTION_KINDS; ++k )
 	{
-		const FactoryLoad load = readFactoryLoad( m_player, PRODUCTION_KIND[ k ] );
-		if( load.finished == 0 || load.shallowest < 2 )
-			m_factoryBackedUpSince[ k ] = 0;
-		else if( m_factoryBackedUpSince[ k ] == 0 )
-			m_factoryBackedUpSince[ k ] = now;
+		const FactoryLoad load = readFactoryLoad( m_player, PRODUCTION_KIND[ k ], &m_producedSincePass );
+		aiSampleFactories( &m_factoryFullHistory[ k ], &m_factoryFullCount[ k ],
+			factoryKindFull( load, m_parkingBlockedFrame ), load.constructing );
+		if( load.finished > 0 && m_factoryFullCount[ k ] > 0 && m_factoryFullCount[ k ] % window == 0 )
+		{
+			Int full = 0;
+			for( Int i = 0; i < window; ++i )
+				if( m_factoryFullHistory[ k ] & ( 1u << i ) )
+					++full;
+			DEBUG_LOG(("AI FACTORY frame %d player %d %s full on %d of the last %d passes, %d standing, %d in the bank\n",
+				now, m_player->getPlayerIndex(), k == 0 ? "war factory" : k == 1 ? "barracks" : "airfield",
+				full, window, load.finished, m_player->getMoney()->countMoney()));
+		}
 	}
+	m_producedSincePass.clear();
 
 	// the income, off what the score screen counts as earned: gathered, hacked, captured and given
 	const Int bank = (Int)m_player->getMoney()->countMoney();
 	const Int earned = m_player->getScoreKeeper()->getTotalMoneyEarned();
-	Bool windowEnded = FALSE;
-	Int bankWindowAgo = bank;
 	if( now - m_incomeMarkFrame >= AI_INCOME_WINDOW_FRAMES )
 	{
 		const Real window = INT_TO_REAL( earned - m_incomeMark ) * LOGICFRAMES_PER_SECOND / INT_TO_REAL( now - m_incomeMarkFrame );
-		windowEnded = m_incomeMarkFrame != 0;		// the first window has no bank before it to compare with
-		bankWindowAgo = m_bankMark;
+		const Int bankWindowAgo = m_bankMark;
 		m_incomePerSecond = m_incomeMarkFrame == 0 ? window : 0.5f * (m_incomePerSecond + window);
 		m_incomeMark = earned;
 		m_incomeMarkFrame = now;
@@ -8678,6 +9149,7 @@ void AIPlayer::doSpending( void )
 
 	if( isBaseUnderAttack() )
 		return;		// defendHome's
+	addProductionForQueues();
 	if( m_persona != AIPERSONA_NORMAL )
 		trainFavoured();
 	const Int target = bankTarget();
@@ -8691,13 +9163,11 @@ void AIPlayer::doSpending( void )
 	// A match that starts on 50,000 handed every AI a bank no income window ever saw coming: the
 	// surplus is a share of what it earns, and in the first minutes it earns nothing, so the fortune
 	// sat there while the build list ticked along. What is over the default starting cash, up to
-	// what the start gave over it, goes out at the rung's share a pass, and factories go up for it
-	// without waiting on a window. At the default cash the fortune is 0 and nothing here changes.
+	// what the start gave over it, goes out at the rung's share a pass. At the default cash the
+	// fortune is 0 and nothing here changes.
 	//
 	const Int keep = max( target, (Int)TheGlobalData->m_defaultStartingCash.countMoney() );
 	const Int fortune = aiFortuneBudget( bank, keep, m_startFortune, getSkillProfile()->m_surplusShare );
-	if( windowEnded || fortune > 0 )
-		addProductionForIncome( bank, bankWindowAgo, target );		// between windows bankWindowAgo is the bank itself
 	const Int surplus = aiSurplusBudget( (Int)m_player->getMoney()->countMoney(), target, m_incomePerSecond, getSkillProfile()->m_surplusShare );
 	if( fortune > surplus )
 		DEBUG_LOG(("AI ECONOMY frame %d player %d spends its starting fortune, %d of it this pass, %d in the bank, %d kept\n", now,
@@ -8843,57 +9313,32 @@ void AIPlayer::buyUpgradesForArmy( Bool overTarget )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** Another tank factory or barracks, whichever the base has fewer of, when an income window ends with
-	* the bank over its target and no lower than a window before, or past m_factoryBankMultiple times the
-	* target (aiWantsMoreProduction): what stands is not spending what comes in.  One at a time, and no more than the rung's m_maxProduction war
-	* factories, barracks and airfields together.  A guessed spend rate a factory stood here first: a
-	* Hard AI earning 93 a second wanted the two factories it had.  Unbuilt plan entries count as standing,
-	* or the rule adds the factory the plan is about to put up.  A bank alone is no reason: the kind's
-	* own factories have to be falling behind their queues too (queueExtraFactory), or a match started on
-	* a big bank opened on a second barracks before the first had trained anyone. */
+/** Another war factory, barracks or airfield of each kind whose every factory has stayed busy for the
+	* rung's m_factoryBacklogSeconds (queueExtraFactory), on every rung and with no cap on how many stand:
+	* a kind that keeps all of its factories busy is short of them.  A cap of 3, 5 and 8 production
+	* buildings and a bank rule stood here, behind a gate that waited for a unit queued behind the one
+	* being built, which the scripts never queue, so the computer stood one of each all match.  The
+	* money is the purchase queue's, like every other building. */
 //----------------------------------------------------------------------------------------------------------
-void AIPlayer::addProductionForIncome( Int bank, Int bankWindowAgo, Int target )
+void AIPlayer::addProductionForQueues( void )
 {
 	if( !m_player->getCanBuildBase() || !m_baseCenterSet )
 		return;
-
-	Int standing[ PRODUCTION_KINDS ];
-	Int total = 0;
-	// ... and the ones the plan has yet to put up count as standing: early on a Medium plan of two war
-	// factories and a barracks had two up, and the rule added the third the plan was about to build
-	Int planned = 0;
-	for( Int k = 0; k < PRODUCTION_KINDS; ++k )
-	{
-		const FactoryLoad load = readFactoryLoad( m_player, PRODUCTION_KIND[ k ] );
-		if( load.constructing > 0 )
-			return;		// one at a time
-		standing[ k ] = load.finished;
-		total += load.finished;
-		planned += plannedOfKind( m_player, PRODUCTION_KIND[ k ] );
-	}
-	total += planned;
-	const Int cap = getSkillProfile()->m_maxProduction;
-	if( !aiWantsMoreProduction( bank, bankWindowAgo, target, total, cap, getSkillProfile()->m_factoryBankMultiple ) )
-		return;
-
 	Object *dozer = NULL;
 	m_player->iterateObjects( findAnyDozer, &dozer );
 	if( dozer == NULL )
 		return;
-	const Int first = standing[ 1 ] < standing[ 0 ] ? 1 : 0;
-	// a personality with a unit taste asks for its favoured kind first, an airfield included
-	const Int favoured = m_persona != AIPERSONA_NORMAL ? personaFavouredKind( personaTaste() ) : -1;
-	for( Int k = favoured >= 0 ? -1 : 0; k < 2; ++k )
+	for( Int k = 0; k < PRODUCTION_KINDS; ++k )
 	{
-		const KindOfType kind = PRODUCTION_KIND[ k < 0 ? favoured : k == 0 ? first : 1 - first ];
-		if( queueExtraFactory( dozer, kind ) )
-		{
-			DEBUG_LOG(("AI ECONOMY frame %d player %d puts up another %s, %d of at most %d standing (%d of them planned), %d in the bank (%d a window ago), bank target %d, %.0f a second of income\n",
-				TheGameLogic->getFrame(), m_player->getPlayerIndex(),
-				kind == KINDOF_FS_WARFACTORY ? "war factory" : kind == KINDOF_FS_BARRACKS ? "barracks" : "airfield",
-				total, cap, planned, bank, bankWindowAgo, target, m_incomePerSecond));
-			return;
-		}
+		// the first of a kind, and one put back, is the plan's when its scripts ask: from here an
+		// Easy computer stood its barracks and airfield in the first ten seconds, ahead of its plan
+		const FactoryLoad load = readFactoryLoad( m_player, PRODUCTION_KIND[ k ] );
+		if( load.finished == 0 || !queueExtraFactory( dozer, PRODUCTION_KIND[ k ] ) )
+			continue;
+		DEBUG_LOG(("AI ECONOMY frame %d player %d puts up another %s, %d standing, %d in the bank\n",
+			TheGameLogic->getFrame(), m_player->getPlayerIndex(),
+			k == 0 ? "war factory" : k == 1 ? "barracks" : "airfield", load.finished,
+			m_player->getMoney()->countMoney()));
 	}
 }
 
@@ -10127,7 +10572,7 @@ Bool AIPlayer::isGunshipRider( const Object *obj ) const
 {
 	return obj->isKindOf( KINDOF_INFANTRY ) && !obj->isKindOf( KINDOF_HERO ) && obj->isSelectable() && !obj->isContained() &&
 		!obj->isEffectivelyDead() && obj->getAI() && leavesToFinish( obj ) && !isMassUnit( obj->getID() ) && !isSlaved( obj ) &&
-		!obj->isKindOf( KINDOF_MOB_NEXUS );
+		!obj->isKindOf( KINDOF_MOB_NEXUS ) && !obj->getTemplate()->hasSpotterSight();		// a spotter is the eyes of a gun team, not a seat filler
 }
 
 /** An infantryman who rides out with the army, where loadGunships puts him. */
@@ -10570,7 +11015,7 @@ static const ThingTemplate *gunshipRiderTemplate( Object *factory, const ThingTe
 			continue;
 		const ThingTemplate *tmpl = button->getThingTemplate();
 		if( tmpl == NULL || !tmpl->isKindOf( KINDOF_INFANTRY ) || !tmpl->canPossiblyHaveAnyWeapon() || tmpl->isKindOf( KINDOF_DOZER ) ||
-				tmpl->isKindOf( KINDOF_MONEY_HACKER ) || tmpl->isKindOf( KINDOF_HERO ) ||
+				tmpl->isKindOf( KINDOF_MONEY_HACKER ) || tmpl->isKindOf( KINDOF_HERO ) || tmpl->hasSpotterSight() ||
 				tmpl->calcCostToBuild( factory->getControllingPlayer() ) <= 0 ||
 				TheBuildAssistant->canMakeUnit( factory, tmpl ) != CANMAKE_OK )
 			continue;
@@ -10816,12 +11261,29 @@ void AIPlayer::sendWave( AIGroup *wave, const AsciiString &approach, Int pathSuf
 	* teams, and sent 319 waves instead of 134.
 	*
 	* Against an enemy with next to no army left (AIPRESSURE_FINISH) every rung calls its attack teams up
-	* this way, and sendIdleUnitsHunting takes the guards. */
+	* this way, and sendIdleUnitsHunting takes the guards.
+	*
+	* Issue #99: it was Hard's alone, and Medium and Easy kept the pile.  A Medium China on Twilight Flame
+	* stood 57 units at the lip of its plateau at minute fifteen, 109,000 in the bank and not one attack
+	* made: its wave teams had come out after the launch window and its strays were in no team at all.
+	* So every rung calls its idle attack teams up, the rungs that do not mass on a slower round
+	* (IDLE_CALLUP_SECONDS), and the strays standing idle at home go out with a team that leaves. */
 //----------------------------------------------------------------------------------------------------------
+/** How often a rung that does not mass its waves calls up what stands idle at home; 0 is every wave
+	* tick, Hard's. */
+static const Int IDLE_CALLUP_SECONDS[ AISKILL_COUNT ] = { 60, 20, 0 };
+
 void AIPlayer::sendIdleAttackTeams( void )
 {
-	if( !isSkirmishAI() || (m_pressure != AIPRESSURE_FINISH && !getSkillProfile()->m_massBeforeAttacking) || !m_baseCenterSet )
+	if( !isSkirmishAI() || !m_baseCenterSet )
 		return;
+	if( m_pressure != AIPRESSURE_FINISH && !getSkillProfile()->m_massBeforeAttacking )
+	{
+		// once a period, without a member for it: doWaves runs every WAVE_CHECK_RATE frames
+		const UnsignedInt every = (UnsignedInt)( IDLE_CALLUP_SECONDS[ m_skillLevel ] * LOGICFRAMES_PER_SECOND );
+		if( every != 0 && TheGameLogic->getFrame() % every >= (UnsignedInt)WAVE_CHECK_RATE )
+			return;
+	}
 	// a team standing at home while the base is hit is its garrison: guarding, or idle beside a fight it
 	// will pick up, it is not called away
 	if( isBaseUnderAttack() )
@@ -10875,7 +11337,9 @@ void AIPlayer::sendIdleAttackTeams( void )
 			if( holdTeamForWave( team, center, pathSuffix, FALSE ) )
 				continue;
 			AIGroup *group = TheAI->createGroup();
-			const Real power = waitingPower( team, group );
+			// two statements: both fill the group, and the order of +'s operands is the compiler's
+			Real power = waitingPower( team, group );
+			power += addHomeStrays( group );
 			Coord3D from;
 			group->getCenter( &from );
 			sendWave( group, chooseApproachLabel( &from, center, pathSuffix ), pathSuffix, 1, power, 0, "calledup" );
@@ -11211,7 +11675,7 @@ void AIPlayer::sendWaveThroughTunnels( AIGroup *wave, const Coord3D *center, Way
 	const VecObjectID members = wave->getAllIDs();
 	const Object *walker = members.empty() ? NULL : TheGameLogic->findObjectByID( members.front() );
 	Object *entrance = walker == NULL || walker->getAI() == NULL ? NULL
-		: m_player->getTunnelSystem()->findTunnelShortcut( walker, center, end->getLocation(), walk );
+		: TunnelTracker::findTunnelShortcut( walker, center, end->getLocation(), walk );
 	if( entrance == NULL )
 		return;
 
@@ -11835,6 +12299,23 @@ static const UpgradeTemplate *helixUpgradeOn( const ThingTemplate *tmpl, Int kin
 	return NULL;
 }
 
+/** A Helix of this kind flies the napalm bomb flyRaid drops.  A mod's Helix can carry a "Bomb" upgrade
+	* on its buttons and drop something else, or nothing the AI knows: ShockWave's under -modfactions
+	* came out as a raider with no such power and the raid read a null one. */
+static Bool helixCarriesNapalmBomb( const ThingTemplate *tmpl )
+{
+	const ModuleInfo &modules = tmpl->getBehaviorModuleInfo();
+	for( Int m = 0; m < modules.getCount(); ++m )
+	{
+		if( modules.getNthName( m ).compareNoCase( "SpecialAbilityUpdate" ) != 0 )
+			continue;
+		const SpecialPowerTemplate *power = static_cast<const SpecialAbilityUpdateModuleData *>( modules.getNthData( m ) )->m_specialPowerTemplate;
+		if( power && power->getSpecialPowerType() == SPECIAL_HELIX_NAPALM_BOMB )
+			return TRUE;
+	}
+	return FALSE;
+}
+
 /** How much a raid wants a building: production, then income, then power; 0 for anything else. */
 static Int raidPreference( const Object *obj )
 {
@@ -11952,7 +12433,7 @@ Int AIPlayer::helixRoleWanted( const ThingTemplate *tmpl ) const
 	const Int healersWanted = tallyBase( m_player ).army >= HEALER_THIRD_ARMY ? MAX_HEALERS : MIN_HEALERS;
 	if( healers < healersWanted && helixUpgradeOn( tmpl, HELIX_TOWER ) )
 		return HELIX_HEALER;
-	if( raiders < MAX_RAIDERS && helixUpgradeOn( tmpl, HELIX_BOMB ) )
+	if( raiders < MAX_RAIDERS && helixUpgradeOn( tmpl, HELIX_BOMB ) && helixCarriesNapalmBomb( tmpl ) )
 		return HELIX_RAIDER;
 	return -1;
 }
@@ -13370,7 +13851,7 @@ void AIPlayer::doRetreats( void )
 				fallback.z = TheTerrainLogic->getGroundHeight( fallback.x, fallback.y );
 			const Real homeX = m_baseCenter.x - centre.x;
 			const Real homeY = m_baseCenter.y - centre.y;
-			Object *homeTunnel = shortOfHome ? NULL : m_player->getTunnelSystem()->findTunnelShortcut( walker, &centre, &m_baseCenter,
+			Object *homeTunnel = shortOfHome ? NULL : TunnelTracker::findTunnelShortcut( walker, &centre, &m_baseCenter,
 				(Real)sqrt( homeX * homeX + homeY * homeY ) );
 			if( homeTunnel )
 				DEBUG_LOG(("AI RETREAT frame %d player %d falls back through tunnel %d\n", TheGameLogic->getFrame(),
@@ -14161,6 +14642,64 @@ void AIPlayer::doTransports( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
+void AIPlayer::spotterStandOff( Object *obj, TacticalStep *step )
+{
+	AIUpdateInterface *ai = obj->getAI();
+	const Coord3D *pos = obj->getPosition();
+	const UnsignedInt now = TheGameLogic->getFrame();
+	const Real sight = obj->getVisionRange();
+
+	Object *threat = NULL;
+	Real threatReach = 0.0f;
+	Real threatDistSqr = 0.0f;
+	PartitionFilterPlayerAffiliation enemies( m_player, ALLOW_ENEMIES, true );
+	PartitionFilterAlive alive;
+	PartitionFilter *filters[] = { &enemies, &alive, NULL };
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( pos, sight, FROM_CENTER_2D, filters );
+	MemoryPoolObjectHolder hold( iter );
+	for( Object *enemy = iter->first(); enemy; enemy = iter->next() )
+	{
+		if( enemy->getControllingPlayer() == m_player || m_player->getRelationship( enemy->getTeam() ) != ENEMIES )
+			continue;
+		if( enemy->isKindOf( KINDOF_PROJECTILE ) || !observerKnowsAbout( enemy, m_player->getPlayerIndex() ) )
+			continue;
+		const Real enemyRange = groundAttackRange( enemy );
+		if( enemyRange <= 0.0f )
+			continue;
+		const Real reach = enemyRange + Weapon_elevationRangeBonus( enemyRange, firingHeight( enemy ) - pos->z );
+		const Real distSqr = sqr( enemy->getPosition()->x - pos->x ) + sqr( enemy->getPosition()->y - pos->y );
+		if( distSqr > sqr( reach + KITE_WATCH_MARGIN + ai->getCurLocomotorSpeed() * KITE_TURN_FRAMES ) )
+			continue;
+		if( threat == NULL || distSqr < threatDistSqr )
+		{
+			threat = enemy;
+			threatReach = reach;
+			threatDistSqr = distSqr;
+		}
+	}
+	if( threat == NULL )
+		return;
+
+	const Real standoff = min( threatReach + KITE_MARGIN, sight );
+	if( threatDistSqr >= sqr( standoff - KITE_MARGIN ) )
+		return;		// already standing off: a step would only slide it sideways
+	Coord3D spot;
+	if( !pickTacticalSpot( obj, pos, threat->getPosition(), standoff, threat->getPosition(), sight, &spot ) )
+		return;
+	DEBUG_LOG(("AI TACTICS frame %d player %d keeps spotter '%s' out of '%s' reach %.0f, (%.0f,%.0f) to (%.0f,%.0f)\n",
+		now, m_player->getPlayerIndex(), obj->getTemplate()->getName().str(), threat->getTemplate()->getName().str(), threatReach,
+		pos->x, pos->y, spot.x, spot.y));
+	// when the step is over it attack-moves to the origin; the spot, so it does not walk back in
+	step->target = INVALID_ID;
+	step->origin = spot;
+	const Real speed = max( ai->getCurLocomotorSpeed(), 0.1f );
+	const Real walk = sqrt( sqr( spot.x - pos->x ) + sqr( spot.y - pos->y ) );
+	step->resumeFrame = now + min<UnsignedInt>( KITE_STEP_MAX_FRAMES, KITE_TURN_FRAMES + REAL_TO_INT_CEIL( walk / speed ) );
+	step->rejoin = TRUE;
+	stepCalmly( obj, step, &spot );
+}
+
+//----------------------------------------------------------------------------------------------------------
 void AIPlayer::tacticsFor( Object *obj )
 {
 	// armed, not "able to attack" this frame: that reads false while a clip reloads, which is exactly
@@ -14290,6 +14829,14 @@ void AIPlayer::tacticsFor( Object *obj )
 		stepCalmly( obj, step, &safe );
 		step->rejoin = TRUE;
 		step->leaveAloneUntil = now + LEAVE_ALONE_FRAMES;
+		return;
+	}
+
+	// a spotter is the eyes of the guns behind it, and its carbine is for show: it stays just out of
+	// reach of every armed enemy it can see and keeps that enemy in sight, rather than trade shots
+	if( obj->getTemplate()->hasSpotterSight() )
+	{
+		spotterStandOff( obj, step );
 		return;
 	}
 
@@ -15741,8 +16288,6 @@ const AIDifficultyProfile *AIPlayer::getSkillProfile( void ) const
 	p.m_bankTargetFloor = REAL_TO_INT( INT_TO_REAL( p.m_bankTargetFloor ) * w.m_bank );
 	p.m_cashHoardThreshold = REAL_TO_INT( INT_TO_REAL( p.m_cashHoardThreshold ) * w.m_hoard );
 	p.m_surplusShare = min( 1.0f, p.m_surplusShare * w.m_surplus );
-	// one that spends has the factories to spend at: an Attacker on eight sat on 42,000 at 360 a second
-	p.m_maxProduction = REAL_TO_INT( INT_TO_REAL( p.m_maxProduction ) * max( 1.0f, 0.75f * w.m_surplus ) );
 	p.m_retreatTtkRatio *= w.m_retreat;
 	p.m_counterCompositionWeight = p.m_counterCompositionWeight * w.m_counter + w.m_counterAdd;
 	p.m_upgradeStartSeconds *= w.m_upgradeStart;
@@ -16579,7 +17124,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 27;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders  11: the outward placement ring  12: the pressure level  13: falling back  14: gunship Chinooks and the boarding wait  15: transport Chinooks and the lent one  16: healer and raider Helixes  17: the seen-enemy ledger  18: the fist  19: the Ambulances  20: the last Ambulance lost  21: the purchase queue's reservation  22: the measured income  23: the Ambulances bought  24: the starting fortune  25: the factory backlog clocks  26: the personality  27: the team request inbox
+	XferVersion currentVersion = 31;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders  11: the outward placement ring  12: the pressure level  13: falling back  14: gunship Chinooks and the boarding wait  15: transport Chinooks and the lent one  16: healer and raider Helixes  17: the seen-enemy ledger  18: the fist  19: the Ambulances  20: the last Ambulance lost  21: the purchase queue's reservation  22: the measured income  23: the Ambulances bought  24: the starting fortune  25: the factory backlog clocks  26: the personality  27: the team request inbox  28: the last aircraft refused for parking  29: the watched sites and the cooled spots  30: the factory backlog as a window of passes  31: the factories that let a unit out since the last pass
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -16984,8 +17529,18 @@ void AIPlayer::xfer( Xfer *xfer )
 		xfer->xferInt( &m_ambulancesBought );
 	if( version >= 24 )
 		xfer->xferInt( &m_startFortune );
-	if( version >= 25 )
-		xfer->xferUser( m_factoryBackedUpSince, sizeof( m_factoryBackedUpSince ) );
+	// the factory backlog: from 30 the rolling window of full passes, before it a clock of frames that
+	// means nothing to the window, read and dropped so the window starts empty
+	if( version >= 30 )
+	{
+		xfer->xferUser( m_factoryFullHistory, sizeof( m_factoryFullHistory ) );
+		xfer->xferUser( m_factoryFullCount, sizeof( m_factoryFullCount ) );
+	}
+	else if( version >= 25 )
+	{
+		UnsignedInt oldClocks[ 3 ];
+		xfer->xferUser( oldClocks, sizeof( oldClocks ) );
+	}
 
 	// the ladder rung and the role, which are rolled once and must come back the same way
 	if( version >= 3 )
@@ -17029,6 +17584,44 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferUnsignedInt( &m_inbox[ k ].frame );
 		}
 		xfer->xferUnsignedInt( &m_answeredFrame );
+	}
+
+	// the last aircraft refused for parking, which keeps the airfield backlog clock running
+	if( version >= 28 )
+		xfer->xferUnsignedInt( &m_parkingBlockedFrame );
+
+	// the unfinished sites it is watching, and the spots of the ones it gave up on
+	if( version >= 29 )
+	{
+		UnsignedShort count = (UnsignedShort)m_siteWatches.size();
+		xfer->xferUnsignedShort( &count );
+		m_siteWatches.resize( count );
+		for( UnsignedShort i = 0; i < count; ++i )
+		{
+			xfer->xferObjectID( &m_siteWatches[ i ].m_site );
+			xfer->xferReal( &m_siteWatches[ i ].m_percent );
+			xfer->xferUnsignedInt( &m_siteWatches[ i ].m_progressFrame );
+			xfer->xferObjectID( &m_siteWatches[ i ].m_lostBuilder );
+			xfer->xferInt( &m_siteWatches[ i ].m_buildersLost );
+		}
+		count = (UnsignedShort)m_cooledSpots.size();
+		xfer->xferUnsignedShort( &count );
+		m_cooledSpots.resize( count );
+		for( UnsignedShort i = 0; i < count; ++i )
+		{
+			xfer->xferCoord3D( &m_cooledSpots[ i ].m_pos );
+			xfer->xferUnsignedInt( &m_cooledSpots[ i ].m_until );
+		}
+	}
+
+	// the factories that let a unit out since the last spend pass, which that pass counts as busy
+	if( version >= 31 )
+	{
+		UnsignedShort count = (UnsignedShort)m_producedSincePass.size();
+		xfer->xferUnsignedShort( &count );
+		m_producedSincePass.resize( count );
+		for( UnsignedShort i = 0; i < count; ++i )
+			xfer->xferObjectID( &m_producedSincePass[ i ] );
 	}
 
 }  // end xfer

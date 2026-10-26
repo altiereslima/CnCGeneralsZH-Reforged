@@ -155,6 +155,8 @@ IDirect3DPixelShader9 *		DX8Wrapper::Pixel_Shader								= NULL;
 
 Vector4							DX8Wrapper::Vertex_Shader_Constants[MAX_VERTEX_SHADER_CONSTANTS];
 Vector4							DX8Wrapper::Pixel_Shader_Constants[MAX_PIXEL_SHADER_CONSTANTS];
+bool DX8Wrapper::Vertex_Shader_Constants_Valid[MAX_VERTEX_SHADER_CONSTANTS] = {};
+bool DX8Wrapper::Pixel_Shader_Constants_Valid[MAX_PIXEL_SHADER_CONSTANTS] = {};
 
 LightEnvironmentClass*		DX8Wrapper::Light_Environment							= NULL;
 RenderInfoClass*				DX8Wrapper::Render_Info									= NULL;
@@ -723,6 +725,10 @@ void DX8Wrapper::Invalidate_Cached_Render_States(void)
 	render_state_changed=0;
 	CurrentDX8MaterialValid=false;
 	CurrentDX8LightsValid=0;
+	// A native pass restores device constants behind the wrapper's cache. The
+	// next setter must resend even an unchanged value (tree shroud UVs included).
+	memset(Vertex_Shader_Constants_Valid, 0, sizeof(Vertex_Shader_Constants_Valid));
+	memset(Pixel_Shader_Constants_Valid, 0, sizeof(Pixel_Shader_Constants_Valid));
 
 	int a;
 	for (a=0;a<sizeof(RenderStates)/sizeof(unsigned);++a) {
@@ -938,6 +944,18 @@ bool DX8Wrapper::Create_Device(void)
 	** Initialize all subsystems
 	*/
 	Do_Onetime_Device_Dependent_Inits();
+
+	/* A device that cannot make the 128x128 stand-in texture cannot make any texture, and calling it
+		 created only moved the fault: every load that fails ends on the stand-in, so the first one
+		 (exmask_g.tga in the screen cross fade) released a null texture during startup.  Seen three
+		 times in a row on one machine in the v3.2.0 reports, Direct3D 11 with a dxgi.dll in the game
+		 folder.  Refusing the device here gives the player the Direct3D failure message instead. */
+	IDirect3DTexture9 * missing = MissingTexture::_Get_Missing_Texture();
+	if (missing == NULL) {
+		Release_Device();
+		return false;
+	}
+	missing->Release();
 	return true;
 }
 
@@ -2355,8 +2373,13 @@ void DX8Wrapper::End_Scene(bool flip_frames)
 			IsDeviceLost=true;
 		}
 
-		// If the device was lost we need to check for cooperative level and possibly reset the device
-		if (hr==D3DERR_DEVICELOST) {
+		// If the device was lost we need to check for cooperative level and possibly reset the device.
+		// Not when the Direct3D 11 device was removed: a driver reset loses this twin too, and a fault in
+		// Reset_Device would end the process before the display reports the DXGI reason next frame.
+		if (Direct3D11_Device_Removed_Reason() != 0) {
+			// the display's ReleaseCrash names it
+		}
+		else if (hr==D3DERR_DEVICELOST) {
 			hr=_Get_D3D_Device()->TestCooperativeLevel();
 			if (hr==D3DERR_DEVICENOTRESET) {
 				Reset_Device();

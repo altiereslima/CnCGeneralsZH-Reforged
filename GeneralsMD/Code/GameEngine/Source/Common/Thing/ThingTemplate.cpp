@@ -54,6 +54,7 @@
 #include "Common/Radar.h"
 #include "Common/RandomValue.h"
 #include "Common/Science.h"
+#include "Common/StackDump.h"	// g_LastErrorDump
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingSort.h"
@@ -133,6 +134,10 @@ const FieldParse ThingTemplate::s_objectFieldParseTable[] =
 	{ "WeaponSet",						ThingTemplate::parseWeaponTemplateSet,NULL, 0},
 	{ "VisionRange",					INI::parseReal,												NULL,		offsetof( ThingTemplate, m_visionRange ) },
 	{ "ShroudClearingRange",	INI::parseReal,												NULL,		offsetof( ThingTemplate, m_shroudClearingRange ) },
+	{ "AcquiresBeyondVision",	INI::parseBool,												NULL,		offsetof( ThingTemplate, m_acquiresBeyondVision ) },
+	{ "SpotterSight",					INI::parseBool,												NULL,		offsetof( ThingTemplate, m_spotterSight ) },
+	{ "CooperativeBuilder",		INI::parseBool,												NULL,		offsetof( ThingTemplate, m_cooperativeBuilder ) },
+	{ "SpeedScale",						INI::parseReal,												NULL,		offsetof( ThingTemplate, m_speedScale ) },
 	{ "ShroudRevealToAllRange",	INI::parseReal,											NULL,		offsetof( ThingTemplate, m_shroudRevealToAllRange ) },
 
 	{ "PlacementViewAngle",		INI::parseAngleReal,									NULL,		offsetof( ThingTemplate, m_placementViewAngle ) },
@@ -627,6 +632,14 @@ void ThingTemplate::parseModuleName(INI* ini, void *instance, void* store, const
 
 	ini->setMissingReference(FALSE);
 	ModuleData* data = TheModuleFactory->newModuleDataFromINI(ini, tokenStr, type, moduleTagStr);
+	if (data == NULL)
+	{
+		// a module name this exe does not have, usually a mod written for another build
+		g_LastErrorDump.format("[LINE: %d - FILE: '%s'] Unknown module '%s' (%s) on %s\n",
+			ini->getLineNum(), ini->getFilename().str(), tokenStr.str(), moduleTagStr.str(), self->getName().str());
+		DEBUG_LOG(("%s", g_LastErrorDump.str()));
+		throw INI_UNKNOWN_TOKEN;
+	}
 	if (ini->hasMissingReference())
 	{
 		/* read to its End and dropped: a special power module with no template faults placing the
@@ -709,7 +722,9 @@ void ThingTemplate::parsePrerequisites( INI* ini, void *instance, void *store, c
 		{ 0, 0, 0, 0 }
 	};
 
-	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
+	// a patch file (MULTIFILE, TurkiyeReforged.ini) states the whole list too, not an addition to the
+	// list its reskin source left behind
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES || ini->getLoadType() == INI_LOAD_MULTIFILE)
 	{
 		self->m_prereqInfo.clear();
 	}
@@ -1146,6 +1161,10 @@ ThingTemplate::ThingTemplate() :
 	m_fenceXOffset = 0;
 	m_visionRange = 0.0f;
 	m_shroudClearingRange = -1.0f;
+	m_acquiresBeyondVision = FALSE;
+	m_spotterSight = FALSE;
+	m_cooperativeBuilder = FALSE;
+	m_speedScale = 1.0f;
 	m_shroudRevealToAllRange = -1.0f;
 
 	m_buildCost = 0;

@@ -440,6 +440,9 @@ void getExecutableDirectory( char *buf, size_t size, Bool ) { if (size > 0) buf[
 DEBUG_EXTERN_C void DebugInit( int ) {}
 #endif
 
+// GameMemory.cpp stops on a corrupt block header; here that fails the test loudly.
+DEBUG_EXTERN_C void ReleaseCrash( const char *reason ) { fprintf( stderr, "ReleaseCrash: %s\n", reason ); abort(); }
+
 #ifdef DEBUG_LOGGING
 #include <stdarg.h>
 DEBUG_EXTERN_C void DebugLog( const char *format, ... )

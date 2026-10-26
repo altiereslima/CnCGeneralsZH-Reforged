@@ -25,9 +25,8 @@
 ** declares a prefix of its block, and a longer push is legal.  Every field is a float4 or a row-major
 ** float4x4, so HLSL's packing and std140, which SDL3 asks for, agree.
 **
-** The pixel block stops after the alpha reference: the fields after it serve the Direct3D 11 backend's
-** own additions (normal maps, the shadow map, the sky), which A3 does not draw - A3 draws the Direct 3D 9
-** picture.
+** Ordinary combiners upload the small prefix. Sun/smoke receivers and cloak casters upload
+** the shared extended engine block without changing the emulated register banks.
 */
 
 #pragma once
@@ -35,7 +34,10 @@
 #ifndef SDLCONSTANTS_H
 #define SDLCONSTANTS_H
 
-#include "ffvertex.h"		// MAXIMUM_VERTEX_STAGES, MAXIMUM_VERTEX_LIGHTS
+#include <cstddef>
+#include "Platform/WaterHullVisualLayout.h"
+#include "Platform/ModernWaterMaterial.h"
+#include "../../../../Libraries/Source/WWVegas/WW3D2/ffvertex.h" // MAXIMUM_VERTEX_STAGES, MAXIMUM_VERTEX_LIGHTS
 
 struct SdlVertexConstants
 {
@@ -61,12 +63,68 @@ struct SdlPixelConstants
 	float AlphaReference[4];		///< .x is D3DRS_ALPHAREF as a whole level, 0 to 255
 };
 
-/// What an engine pixel program's b0 declares (A3e, engineshader.cpp's write_pixel_preamble): the Direct3D
-/// 11 backend's PixelConstantBlock, field for field.  The first three are SdlPixelConstants; the rest -
-/// the normal mapped lights, the terrain's sun, the shadow and the sky - are unread padding from the
-/// normal maps taken out on 2026-10-06 and the fork's Direct3D 11 additions, which A3e does not
-/// draw, and stay zero: zero shadow parameters
-/// read as a pixel the sun reaches.
+// Optional authored-surf wrapper. The original fixed-function prefix is byte-identical.
+struct SdlShorePixelConstants
+{
+	SdlPixelConstants Combiner;
+	float WorldFromClip[16];
+	float Viewport[4];
+	float Terrain[4];
+	float Scene[4];
+	float Surface[4];
+};
+static_assert(sizeof(SdlShorePixelConstants)==11*16,"shore wrapper packing");
+
+// Dedicated map-water uniforms. The common prefix keeps alpha testing and fog compatible with
+// the fixed-function pipeline; the remaining fields are used only by the SDL water shader.
+struct SdlWaterPixelConstants
+{
+	SdlPixelConstants Combiner;
+	float WorldFromClip[16];
+	float CameraPosition[4];
+	float SunDirection[4];
+	float SunColour[4];
+	float Viewport[4];
+	float ReflectionArea[4];
+	float WaterParameters[4]; // animation seconds, river flag, reflection available, mirror height
+	float TerrainParameters[4]; // height texture border, world size, height scale, available
+	float SceneParameters[4]; // refraction available, inverse scene-target width/height, scene depth available
+	float OpticalParameters[4]; // authored depth/opacity, offshore context available, flat UV0 height correction available
+	float HullParameters[4]; // number of visible vessel contours, authored ambient RGB for vessel foam
+	float HullData[80][4]; // eight vessels, ten float4 registers each; runtime waterline geometry
+	float FftParameters[4]; // x: the dedicated vertex displacement and six sampled ocean maps are bound
+	float FoamHistoryArea[4]; // world origin XY, inverse world width/height; sampled at undisplaced surface XY
+	float FoamHistoryParameters[4]; // available, water level, cell world size, simulation time of atlas
+	float ContactHullData[80][4]; // optional foam-only contours; count < 3 falls back to the matching mean hull
+	float FoamFillLights[4][4]; // two direction/colour pairs; first direction.w enables the main light for foam
+#define MODERN_WATER_CPP_UNIFORM(name) float name[4];
+	MODERN_WATER_MATERIAL_UNIFORMS(MODERN_WATER_CPP_UNIFORM)
+#undef MODERN_WATER_CPP_UNIFORM
+};
+static_assert(sizeof(SdlWaterPixelConstants) == WaterHullVisualLayout::VertexCommonRegisters * 16, "water uniform packing");
+static_assert(offsetof(SdlWaterPixelConstants,MaterialColor)==184*16
+	&& offsetof(SdlWaterPixelConstants,MaterialParameters)==185*16,"water material tail packing");
+
+// Fragment-only extension after the shared water vertex/pixel prefix.
+struct SdlWaterVisualPixelConstants
+{
+	SdlWaterPixelConstants Water;
+	float VisualHullMeta[WaterHullVisualLayout::MaxHulls][4];
+};
+static_assert(sizeof(SdlWaterVisualPixelConstants)==WaterHullVisualLayout::FragmentCommonRegisters*16,
+	"fragment hull metadata packing");
+
+// A generator adding a block must have an explicit recording/binding path. The mesh packet
+// is the only four-block fragment layout; ordinary shaders cannot silently inherit its data.
+inline bool Sdl_Draw_Uniform_Buffers_Supported(bool water_vertex, bool water_pixel,
+	unsigned vertex_buffers, unsigned pixel_buffers)
+{
+	return vertex_buffers<=(water_vertex?2u:1u)
+		&& (pixel_buffers<=1u || (water_pixel && pixel_buffers==4u));
+}
+
+/// Shared engine/generated receiver b0 layout. Normal-map and sky fields remain zero;
+/// eligible receivers fill sun/smoke fields; Windows per-pixel light counts remain zero.
 struct SdlEnginePixelConstants
 {
 	SdlPixelConstants Combiner;
@@ -80,8 +138,18 @@ struct SdlEnginePixelConstants
 	float ShadowSoftness[4];
 	float Sky[4];
 	float SkyUp[4];
+	float VolumeParameters[4];
+	float WorldFromClip[16];
+	float HeadlightParameters[4];
+	float HeadlightPosition[16][4], HeadlightDirection[16][4];
+	float BlastLightParameters[4];
+	float BlastLightPosition[32][4], BlastLightDiffuse[32][4], BlastLightAmbient[32][4];
+	float SoftParticleDepth[4];
+	float DrawEffectParameters[4];
 };
-static_assert(sizeof(SdlEnginePixelConstants) == 22 * 16, "PixelConstantBlock's 22 float4s");
+static_assert(sizeof(SdlEnginePixelConstants) == 159 * 16, "shared PixelConstantBlock packing");
+static_assert(offsetof(SdlEnginePixelConstants, VolumeParameters) == 22 * 16, "smoke follows SkyUp");
+static_assert(offsetof(SdlEnginePixelConstants, DrawEffectParameters) == 158 * 16, "caster opacity follows soft depth");
 
 static_assert(sizeof(SdlVertexConstants) % 16 == 0 && sizeof(SdlPixelConstants) % 16 == 0,
 	"whole float4s, as std140 lays them out");

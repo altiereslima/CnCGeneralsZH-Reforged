@@ -117,6 +117,38 @@ struct CombinerDescription
 	// fog and the alpha test (DRAW_EFFECT_SAMPLING).  RTS3DScene::renderOneObject picks it and
 	// the mesh renderer hands it to the backend around each of the object's draws.
 	unsigned DrawEffect = 0;
+
+	// D3D11 only: a sorted billboard of a fire or explosion system (FIRE_LOOK_*, FIRE_LOOK_SAMPLING).
+	// FIRE_LOOK_ALPHA wears the flame away through the alpha, for a SRCALPHA blend; FIRE_LOOK_COLOUR
+	// through the colour, for an additive one.  Initialised here for a caller that fills the rest
+	// field by field.
+	unsigned FireLook = 0;
+
+	// D3D11 only: a house colour mesh under the Team Glow option (DX11BackendClass::Set_Team_Glow).  After
+	// the shade the pixel gains its own hue at full brightness, worth TEAM_GLOW_GAIN, the hue's
+	// saturation and how far the texel's luminance is between TEAM_GLOW_LOW and TEAM_GLOW_HIGH, then
+	// the colour is scaled as one so no channel passes TEAM_GLOW_CEILING.  Initialised here for a
+	// caller that fills the rest field by field.
+	bool TeamGlow = false;
+};
+
+// What the brightest house colour texel adds on top of itself under TeamGlow, in units of its own
+// brightest channel.  The bloom's threshold is 1.0, so a whole texel lit past 0.2 goes over, which
+// is a stripe in shade as well as in the sun.
+#define TEAM_GLOW_GAIN "0.8"
+// The texel luminance where the glow starts and where it is whole: the panel's grey stays paint
+// and only the stripe's highlights glow.
+#define TEAM_GLOW_LOW "0.45"
+#define TEAM_GLOW_HIGH "0.8"
+// The brightest channel a glowing pixel may reach, the rest scaled with it: at most half a unit
+// past the bloom's threshold, where the tone curve still keeps a saturated hue apart from white.
+#define TEAM_GLOW_CEILING "1.5"
+
+enum
+{
+	FIRE_LOOK_NONE = 0,
+	FIRE_LOOK_ALPHA = 1,
+	FIRE_LOOK_COLOUR = 2
 };
 
 enum
@@ -155,8 +187,8 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"float sun_reaching(float4 position)\n" \
 	"{\n" \
 	"    if (ShadowParameters.z <= 0.0) return 1.0;\n" \
-	"    float2 ndc = float2(position.x * ShadowViewport.x * 2.0 - 1.0,\n" \
-	"                        1.0 - position.y * ShadowViewport.y * 2.0);\n" \
+	"    float2 ndc = float2((position.x - ShadowViewport.z) * ShadowViewport.x * 2.0 - 1.0,\n" \
+	"                        1.0 - (position.y - ShadowViewport.w) * ShadowViewport.y * 2.0);\n" \
 	"    float4 sun = mul(float4(ndc, position.z, 1.0), ShadowFromClip);\n" \
 	"    if (sun.w <= 0.0) return 1.0;\n" \
 	"    sun /= sun.w;\n" \
@@ -241,9 +273,7 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 #define SHADOW_APPLY SHADOW_LIT \
 	"    current.rgb *= lerp(1.0, sun_reaching(input.Position), shadow_lit);\n"
 
-// The smoke in the sun's light, for the Direct3D 11 programs only: written after SHADOW_SAMPLING,
-// whose map and matrix it reads, and kept out of the SDL3 GPU text, which declares neither the
-// field it adds to the constant block nor a texture at t6.
+// Shared Windows and SDL smoke sampling, following SHADOW_SAMPLING.
 //
 // The smoke has a map of its own over the same sun (DX11BackendClass::Fill_Smoke_Map).  Each texel
 // holds three sums over the particles the sun sees through it: their optical depth, that times
@@ -261,14 +291,14 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 // plume's sun side lit.  .z is one for a draw whose vertices are in camera space already, which is the
 // particles: they take the sun's map through four wide taps, because a smoke sprite drawn twenty
 // deep would otherwise pay the fifty taps the ground pays, twenty times over.
-#define VOLUMETRIC_SAMPLING \
+#define SUN_SMOKE_SAMPLING \
 	"Texture2D SmokeMap : register(t6);\n" \
 	"SamplerState SmokeSampler : register(s6);\n" \
 	"\n" \
 	"bool sun_point(float4 position, out float3 sun)\n" \
 	"{\n" \
-	"    float2 ndc = float2(position.x * ShadowViewport.x * 2.0 - 1.0,\n" \
-	"                        1.0 - position.y * ShadowViewport.y * 2.0);\n" \
+	"    float2 ndc = float2((position.x - ShadowViewport.z) * ShadowViewport.x * 2.0 - 1.0,\n" \
+	"                        1.0 - (position.y - ShadowViewport.w) * ShadowViewport.y * 2.0);\n" \
 	"    float4 at = mul(float4(ndc, position.z, 1.0), ShadowFromClip);\n" \
 	"    sun = float3(0.0, 0.0, 0.0);\n" \
 	"    if (at.w <= 0.0) return false;\n" \
@@ -330,9 +360,9 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"    else sun = sun_reaching(position);\n" \
 	"    return sun * smoke_reaching(position);\n" \
 	"}\n" \
-	"\n" \
-	HEADLIGHT_SAMPLING \
-	BLAST_LIGHT_SAMPLING
+	"\n"
+
+#define VOLUMETRIC_SAMPLING SUN_SMOKE_SAMPLING HEADLIGHT_SAMPLING BLAST_LIGHT_SAMPLING
 
 // Vehicle headlights on a night map, Direct3D 11 only and riding on the smoke's text for that
 // reason: one spot light per lit vehicle, the nearest HEADLIGHT_SLOTS to the camera
@@ -451,6 +481,73 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"}\n" \
 	"\n"
 
+// A fire or explosion billboard on Direct3D 11 (CombinerDescription::FireLook).  Nothing in the
+// constant block: the particle's age and a seed ride in the second coordinate set's v, packed as
+// seed + 0.01 + 0.98 * age with the seed a whole number below 256, eight times a random number below
+// 32 plus the flipbook's log2 frames a side (W3DParticleSys.cpp,
+// fillBillboards), and the vertex half hands the set on (VertexPipelineDescription::FireLook).  The
+// margins keep the interpolated value off a whole number, where floor would flip the seed.
+//
+// Three things, all driven by the age, so the noise runs on the game's clock and stops with it.
+// FIRE_LOOK_BEND, before the stages, pushes the card's texture coordinates through two scrolling
+// noise fields, more as the flame ages, so a static card flickers and licks.  After the stages the
+// flame's own shape in its texture (the alpha, or for an additive card its brightest channel) and
+// the age give a heat that runs a temperature ramp, white through yellow, orange and red to soot, and
+// the ramp takes most of the colour the keyframes left while keeping their brightness, so the INI's
+// fade still times the flame.  Then the flame burns away from its thin edges in: a threshold that
+// rises with the age against the shape broken up by finer noise, instead of only the flat fade.
+#define FIRE_LOOK_SAMPLING \
+	"float fire_hash(float2 p)\n" \
+	"{\n" \
+	"    return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);\n" \
+	"}\n" \
+	"\n" \
+	"float fire_noise(float2 p)\n" \
+	"{\n" \
+	"    float2 i = floor(p);\n" \
+	"    float2 f = frac(p);\n" \
+	"    f = f * f * (3.0 - 2.0 * f);\n" \
+	"    return lerp(lerp(fire_hash(i), fire_hash(i + float2(1.0, 0.0)), f.x),\n" \
+	"                lerp(fire_hash(i + float2(0.0, 1.0)), fire_hash(i + float2(1.0, 1.0)), f.x), f.y);\n" \
+	"}\n" \
+	"\n" \
+	"float3 fire_ramp(float heat)\n" \
+	"{\n" \
+	"    float3 c = lerp(float3(0.12, 0.08, 0.06), float3(0.80, 0.14, 0.03), saturate(heat * 4.0));\n" \
+	"    c = lerp(c, float3(1.00, 0.46, 0.08), saturate(heat * 4.0 - 1.0));\n" \
+	"    c = lerp(c, float3(1.00, 0.80, 0.32), saturate(heat * 4.0 - 2.0));\n" \
+	"    return lerp(c, float3(1.00, 0.97, 0.90), saturate(heat * 4.0 - 3.0));\n" \
+	"}\n" \
+	"\n"
+
+// The whole number's low three bits are the flipbook's log2 frames a side (ParticleSystemTemplate's
+// FlipbookGrid, 0 for a plain card), and the bend works in the frame's own coordinates and stays
+// inside its cell, so a flipbook frame flickers like a whole card and never reaches into the next
+// frame.  The cell comes from the interpolated coordinate itself: only a pixel on a cell's very edge
+// can land in the neighbour, and every frame's edge is empty.
+#define FIRE_LOOK_BEND \
+	"    float fire_age = saturate((frac(input.TexCoord1.y) - 0.01) / 0.98);\n" \
+	"    float fire_seed = floor(input.TexCoord1.y);\n" \
+	"    float fire_cells = (float)(1u << ((uint)fire_seed & 7u));\n" \
+	"    float2 fire_cell = min(floor(input.TexCoord0 * fire_cells), fire_cells - 1.0);\n" \
+	"    float2 fire_local = input.TexCoord0 * fire_cells - fire_cell;\n" \
+	"    float2 fire_at = fire_local * 3.0 + fire_seed * float2(0.37, 0.61);\n" \
+	"    float2 fire_bend = float2(fire_noise(fire_at + float2(0.0, fire_age * 5.0)),\n" \
+	"                              fire_noise(fire_at * 1.7 + float2(4.1, fire_age * 7.0))) - 0.5;\n" \
+	"    input.TexCoord0 = (fire_cell + saturate(fire_local + fire_bend * (0.06 + 0.06 * fire_age))) / fire_cells;\n"
+
+// After the stages, with the shape read from the last stage's texel into fire_shape, by one of the
+// two expressions below; the caller applies fire_keep to the alpha or to the whole colour.
+#define FIRE_LOOK_BURN_SHAPE_ALPHA "texel.a"
+#define FIRE_LOOK_BURN_SHAPE_COLOUR "max(texel.r, max(texel.g, texel.b))"
+#define FIRE_LOOK_BURN \
+	"    float fire_grain = fire_noise(fire_at * 2.3 + float2(fire_age * 3.0, -fire_age * 6.0));\n" \
+	"    float fire_heat = saturate((1.0 - fire_age) * 0.85 + fire_shape * 0.35 - 0.1);\n" \
+	"    float fire_level = max(current.r, max(current.g, current.b));\n" \
+	"    current.rgb = lerp(current.rgb, fire_ramp(fire_heat) * fire_level, 0.65);\n" \
+	"    float fire_edge = fire_age * fire_age * 0.9 - 0.1;\n" \
+	"    float fire_keep = smoothstep(fire_edge, fire_edge + 0.2, fire_shape * (0.5 + 0.5 * fire_grain));\n"
+
 // The constant block's fields for it, declared after SkyUp: DX11BackendClass::PixelConstantBlock.
 // The soft particles' field closes it, so a program that fades declares the whole block.
 #define VOLUMETRIC_CONSTANTS \
@@ -473,6 +570,22 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 // cloak reads the scene as it stood before the translucent objects went in, at t8, by pixel.
 #define DRAW_EFFECT_CONSTANTS \
 	"    float4 DrawEffectParameters;\n"
+
+// Ordered cloak coverage reads only the caster opacity; it needs no scene texture.
+#define CLOAK_SHADOW_SAMPLING \
+	"/* Own stealthed unit drawn into the sun's map.  A depth map holds a caster or not, so the\n" \
+	"   cloaked one keeps a share of its texels, an ordered four by four pattern, and the receiving\n" \
+	"   filter, which averages a square of taps over several texels, turns that share into a shadow\n" \
+	"   that strength.  Half the stealth opacity: a quarter to a half, breathing with the body. */\n" \
+	"float4 effect_cloak_shadow(float4 current, float4 position)\n" \
+	"{\n" \
+	"    uint2 cell = uint2(position.xy) & 3u;\n" \
+	"    uint bayer = ((cell.x ^ cell.y) & 1u) * 8u + (cell.y & 1u) * 4u\n" \
+	"        + (((cell.x ^ cell.y) >> 1) & 1u) * 2u + ((cell.y >> 1) & 1u);\n" \
+	"    clip(DrawEffectParameters.w * 0.5 - ((float)bayer + 0.5) / 16.0);\n" \
+	"    return current;\n" \
+	"}\n" \
+	"\n"
 
 #define DRAW_EFFECT_SAMPLING \
 	"Texture2D SceneColour : register(t8);\n" \
@@ -643,19 +756,7 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"    return current;\n" \
 	"}\n" \
 	"\n" \
-	"/* Own stealthed unit drawn into the sun's map.  A depth map holds a caster or not, so the\n" \
-	"   cloaked one keeps a share of its texels, an ordered four by four pattern, and the receiving\n" \
-	"   filter, which averages a square of taps over several texels, turns that share into a shadow\n" \
-	"   that strength.  Half the stealth opacity: a quarter to a half, breathing with the body. */\n" \
-	"float4 effect_cloak_shadow(float4 current, float4 position)\n" \
-	"{\n" \
-	"    uint2 cell = uint2(position.xy) & 3u;\n" \
-	"    uint bayer = ((cell.x ^ cell.y) & 1u) * 8u + (cell.y & 1u) * 4u\n" \
-	"        + (((cell.x ^ cell.y) >> 1) & 1u) * 2u + ((cell.y >> 1) & 1u);\n" \
-	"    clip(DrawEffectParameters.w * 0.5 - ((float)bayer + 0.5) / 16.0);\n" \
-	"    return current;\n" \
-	"}\n" \
-	"\n"
+	CLOAK_SHADOW_SAMPLING
 
 // SHADOW_APPLY with the smoke in it.  A particle takes the shade whatever its own brightness: the
 // threshold is there for ground under the shroud, and on smoke it tied the shade to the colour, so

@@ -1,0 +1,74 @@
+# Footage of the explosions (FXListReforged.ini; the flipbook ones of v3.3.0 to v3.4.1 against EA's
+# fireballs in experiments/proofs/2026-10-25/explosions) on Twilight Flame, close: tank shells bursting (WeaponFX_GenericTankShellDetonation), tanks dying
+# (FX_GenericTankDeathExplosion) and medium buildings falling (FX_StructureMediumDeath). An American
+# base at start 0 (537,3188) on the firelook spots; Crusaders and Paladins meet Battlemasters and
+# Overlords east of it, while a second Overlord group shells the barracks and the War Factory.
+# Seat 0 America, seat 1 China, everyone hostile, nothing thinks but this file.
+# Filmed with Cinema/explfx.txt:
+#
+#   generals.exe -win -xres 1280 -yres 720 -msaa 0 -fps 120 -noFPSLimit -particlecap 2500
+#     -quickstart -noshellmap -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario explfx -cinema explfx -video <from> <to> explfx -maxframes <to + 20>
+
+# the base round the command centre
+10    spawn       0  AmericaPowerPlant            1   start0:-240:160
+10    spawn       0  AmericaWarFactory            1   start0:40:-340
+10    spawn       0  AmericaBarracks              1   start0:60:320
+10    spawn       0  AmericaSupplyCenter          1   start0:-260:440
+
+# the tank fight east of the base: shells both ways, Crusaders and Paladins dying
+20    spawn       0  AmericaTankCrusader          6   start0:160:-120  45
+20    spawn       0  AmericaTankPaladin           2   start0:100:-40   45
+20    spawn       0  AmericaInfantryRanger        8   start0:180:60    20
+20    spawn       1  ChinaTankBattleMaster       12   start0:400:-100  40
+40    attackmove  0  AmericaTankCrusader              start0:400:-100
+40    attackmove  0  AmericaTankPaladin               start0:400:-100
+40    attackmove  0  AmericaInfantryRanger            start0:400:0
+40    attack      1  ChinaTankBattleMaster            0 AmericaTankCrusader
+
+# the siege group: Overlords on the barracks, then the War Factory
+20    spawn       1  ChinaTankOverlord            5   start0:360:440   60
+40    attack      1  ChinaTankOverlord                0 AmericaBarracks
+
+300   attackmove  1  ChinaTankOverlord                start0:200:-100
+
+# a second American wave so the fight keeps going
+300   spawn       0  AmericaTankCrusader          4   start0:120:-200  45
+315   attackmove  0  AmericaTankCrusader              start0:460:-100
+
+30    tally       0  AmericaTankCrusader
+60    tally       0  AmericaTankCrusader
+90    tally       0  AmericaTankCrusader
+120   tally       0  AmericaTankCrusader
+150   tally       0  AmericaTankCrusader
+180   tally       0  AmericaTankCrusader
+210   tally       0  AmericaTankCrusader
+240   tally       0  AmericaTankCrusader
+270   tally       0  AmericaTankCrusader
+300   tally       0  AmericaTankCrusader
+360   tally       0  AmericaTankCrusader
+420   tally       0  AmericaTankCrusader
+480   tally       0  AmericaTankCrusader
+60    tally       0  AmericaTankPaladin
+120   tally       0  AmericaTankPaladin
+180   tally       0  AmericaTankPaladin
+240   tally       0  AmericaTankPaladin
+300   tally       0  AmericaTankPaladin
+60    tally       1  ChinaTankOverlord
+120   tally       1  ChinaTankBattleMaster
+180   tally       1  ChinaTankOverlord
+240   tally       1  ChinaTankBattleMaster
+300   tally       1  ChinaTankOverlord
+360   tally       1  ChinaTankBattleMaster
+60    tally       0  AmericaBarracks
+90    tally       0  AmericaBarracks
+120   tally       0  AmericaBarracks
+150   tally       0  AmericaBarracks
+180   tally       0  AmericaBarracks
+210   tally       0  AmericaBarracks
+240   tally       0  AmericaBarracks
+270   tally       0  AmericaBarracks
+300   tally       0  AmericaBarracks
+360   tally       0  AmericaBarracks
+420   tally       0  AmericaBarracks

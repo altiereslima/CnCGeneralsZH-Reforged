@@ -34,6 +34,7 @@
 
 #include "Common/StackDump.h"
 #include "Common/Debug.h"
+#include "Common/FileWriteQueue.h"
 
 
 //*****************************************************************************
@@ -426,10 +427,76 @@ void WriteStackLine(void*address, void (*callback)(const char*))
 }
 
 
+static HANDLE gsCrashRecordHandle = NULL;	// the debug log's own handle, set when it opens
+
+void SetCrashRecordHandle( void *handle )
+{
+	gsCrashRecordHandle = (HANDLE)handle;
+}
+
+static char *appendText( char *out, const char *text )
+{
+	while (*text)
+		*out++ = *text++;
+	return out;
+}
+
+static char *appendHex( char *out, unsigned long long value )
+{
+	out = appendText( out, "0x" );
+	for (int shift = 60; shift >= 0; shift -= 4)
+		*out++ = "0123456789ABCDEF"[(value >> shift) & 15];
+	return out;
+}
+
+/* Written before anything that allocates, locks or formats.  A second fault inside the dump below, or
+	 a lock the faulting thread already held, left a log with no trace of the crash at all, its last
+	 queued second included (a 0xC0000005 report whose tail was an ordinary frame).  A stack buffer, no
+	 CRT, and WriteFile straight into the log file past its queue; the queued lines follow it. */
+static void writeCrashRecord( EXCEPTION_POINTERS *e_info )
+{
+	if (gsCrashRecordHandle == NULL)
+		return;		// no log file open
+	void *pc = e_info->ExceptionRecord->ExceptionAddress;
+	void *base = NULL;
+	RtlPcToFileHeader( pc, &base );
+
+	char record[ 256 ];
+	char *out = appendText( record, "\r\nEXCEPTION RECORD code " );
+	out = appendHex( out, e_info->ExceptionRecord->ExceptionCode );
+	out = appendText( out, " at " );
+	out = appendHex( out, (ULONG_PTR)pc );
+	out = appendText( out, " module " );
+	out = appendHex( out, (ULONG_PTR)base );
+	out = appendText( out, " + " );
+	out = appendHex( out, (ULONG_PTR)pc - (ULONG_PTR)base );
+	out = appendText( out, " thread " );
+	out = appendHex( out, GetCurrentThreadId() );
+	out = appendText( out, "\r\n" );
+	// At the end each time: the log writer may be mid-flush, and a write at the handle's own pointer
+	// would land on its bytes.
+	DWORD written;
+	SetFilePointer( gsCrashRecordHandle, 0, NULL, FILE_END );
+	WriteFile( gsCrashRecordHandle, record, (DWORD)(out - record), &written, NULL );
+
+	// The module's name second: GetModuleFileName takes the loader lock, which the faulting thread may hold.
+	char name[ MAX_PATH + 2 ];
+	const DWORD length = base != NULL ? GetModuleFileNameA( (HMODULE)base, name, MAX_PATH ) : 0;
+	if (length != 0)
+	{
+		name[ length ] = '\r';
+		name[ length + 1 ] = '\n';
+		SetFilePointer( gsCrashRecordHandle, 0, NULL, FILE_END );
+		WriteFile( gsCrashRecordHandle, name, length + 2, &written, NULL );
+	}
+}
+
 //*****************************************************************************
 //*****************************************************************************
 void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 {
+	writeCrashRecord( e_info );
+	FileWriteQueue::flushAll();		// the last second of queued lines, before the dump and its stack walk, which can fault
    DEBUG_LOG(( "\n********** EXCEPTION DUMP ****************\n" ));
 	/*
 	** List of possible exceptions

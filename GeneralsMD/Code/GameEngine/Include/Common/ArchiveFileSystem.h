@@ -197,6 +197,10 @@ class ArchiveFileSystem : public SubsystemInterface
 	/// mod has before ours take every name both define
 	void									getModUICopies( const AsciiString& directory, std::vector<AsciiString> &names ) const;
 
+	/// the folder init loaded the base game's archives from, trailing slash included; empty when they sit
+	/// beside the exe or nowhere.  The base campaign movies are loose files in its Data\Movies.
+	AsciiString						m_baseGameDirectory;
+
 protected:
 	virtual void					loadIntoDirectoryTree(const ArchiveFile *archiveFile, const AsciiString& archiveFilename, Bool overwrite = FALSE );	///< load the archive file's header information and apply it to the global archive directory tree.
 	void									addToTree(ArchivedDirectoryInfo &root, const ArchiveFile *archiveFile, const AsciiString& archiveFilename, Bool overwrite);

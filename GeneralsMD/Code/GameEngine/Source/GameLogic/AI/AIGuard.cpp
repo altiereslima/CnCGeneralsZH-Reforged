@@ -678,6 +678,19 @@ StateReturnType AIGuardReturnState::onEnter( void )
 	{
 		TheAI->pathfinder()->adjustDestination(getMachineOwner(), ai->getLocomotorSet(), &m_goalPosition);
 	}
+
+	// A deployed unit (Nuke Cannon, Sentry Drone) that is still standing at its post has nothing
+	// to return to. Asking for a path anyway made DeployStyleAIUpdate pack it up after every kill,
+	// drive nowhere, then unpack again on guard idle.
+	const Coord3D *pos = getMachineOwner()->getPosition();
+	Real dx = m_goalPosition.x - pos->x;
+	Real dy = m_goalPosition.y - pos->y;
+	m_stayedAtPost = getMachineOwner()->testStatus(OBJECT_STATUS_DEPLOYED) && dx*dx + dy*dy <= 4*PATHFIND_CELL_SIZE_F*PATHFIND_CELL_SIZE_F;
+	if (m_stayedAtPost)
+	{
+		return STATE_SUCCESS;
+	}
+
 	setAdjustsDestination(true);
 	return AIInternalMoveToState::onEnter();
 }
@@ -700,6 +713,8 @@ StateReturnType AIGuardReturnState::update( void )
 //--------------------------------------------------------------------------------------
 void AIGuardReturnState::onExit( StateExitType status )
 {
+	if (m_stayedAtPost)
+		return;
 	AIInternalMoveToState::onExit( status );
 }
 

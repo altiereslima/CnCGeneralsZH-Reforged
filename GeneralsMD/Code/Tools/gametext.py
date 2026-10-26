@@ -31,8 +31,8 @@ argument, and Turkish writes a percentage as "%10", which is a directive.
     python gametext.py selfcheck
 
 round-trips synthetic strings through the writer and the parser, proves check catches a changed
-directive, and checks the tracked Turkish and German masters: on their own always, and against the
-English when Run/EnglishZH.big is there.  Run by CTest as gametext_selfcheck.
+directive, and checks the tracked Turkish, German, Ukrainian, Russian and French masters: on their
+own always, and against the English when Run/EnglishZH.big is there.  Run by CTest as gametext_selfcheck.
 """
 
 import argparse
@@ -49,7 +49,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _CODE = os.path.dirname(_HERE)
 
 MASTERS = [(language, os.path.join(_CODE, "Data", language, "Generals.str"))
-           for language in ("Turkish", "German")]
+           for language in ("Turkish", "German", "Ukrainian", "Russian", "French")]
 PATCH_STRINGS = os.path.join(_CODE, "Data", "Patch.str")
 ENGLISH_ARCHIVE = os.path.join(_CODE, "..", "Run", "EnglishZH.big")
 

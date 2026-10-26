@@ -107,8 +107,9 @@
 //=================================================================
 
 StreamingArchiveFile::StreamingArchiveFile()
-: m_file(NULL), 
-	m_startingPos(0), 
+: m_file(NULL),
+	m_archiveLock(NULL),
+	m_startingPos(0),
 	m_size(0), 
 	m_curPos(0)
 {
@@ -166,7 +167,7 @@ Bool StreamingArchiveFile::open( File *file )
 //============================================================================
 // StreamingArchiveFile::openFromArchive
 //============================================================================
-Bool StreamingArchiveFile::openFromArchive(File *archiveFile, const AsciiString& filename, Int offset, Int size) 
+Bool StreamingArchiveFile::openFromArchive(File *archiveFile, std::mutex &archiveLock, const AsciiString& filename, Int offset, Int size)
 {
 	//USE_PERF_TIMER(StreamingArchiveFile)
 	if (archiveFile == NULL) {
@@ -178,14 +179,17 @@ Bool StreamingArchiveFile::openFromArchive(File *archiveFile, const AsciiString&
 	}
 
 	m_file = archiveFile;
+	m_archiveLock = &archiveLock;
 	m_startingPos = offset;
 	m_size = size;
 	m_curPos = 0;
 
+	// read() seeks before every read, so the position left here is only the check's
+	std::lock_guard<std::mutex> lock( archiveLock );
 	if (m_file->seek(offset, File::START) != offset) {
 		return FALSE;
 	}
-	
+
 	if (m_file->seek(size) != m_startingPos + size) {
 		return FALSE;
 	}
@@ -222,20 +226,25 @@ Int StreamingArchiveFile::read( void *buffer, Int bytes )
 		return 0;
 	}
 
-	// There shouldn't be a way that this can fail, because we've already verified that the file 
-	// contains at least this many bits.
-	m_file->seek(m_startingPos + m_curPos, File::START);
-
-	if (bytes + m_curPos > m_size) 
+	if (bytes + m_curPos > m_size)
 		bytes = m_size - m_curPos;
 
-	Int bytesRead = m_file->read(buffer, bytes);
+	Int bytesRead;
+	{
+		std::lock_guard<std::mutex> lock( *m_archiveLock );
+		// There shouldn't be a way that this can fail, because we've already verified that the file
+		// contains at least this many bits.
+		m_file->seek(m_startingPos + m_curPos, File::START);
+		bytesRead = m_file->read(buffer, bytes);
+	}
 	// the archive's drive gone under a stream (music, speech): see Win32BIGFile::openFile.  From the audio's
 	// thread GameDataGone only records it, and the main loop stops the game (GameDataGoneCheck).
 	if (bytesRead < 0 && m_file->deviceGone())
 		GameDataGone(m_file->getName());
 
-	m_curPos += bytesRead;
+	// a failed read moved nothing; adding its -1 walked the stream back over bytes already played
+	if (bytesRead > 0)
+		m_curPos += bytesRead;
 
 	return bytesRead;
 }

@@ -104,6 +104,13 @@ static GameWindow *buttonMoneySend[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, N
 static GameWindow *staticTextMoneyTitle = NULL;
 static Int moneyToSend[MAX_SLOTS] = {0, 0, 0, 0, 0, 0, 0, 0};
 
+// Each player's ping and frame rate (fork, Tools/diplomacy_layout.py), from the run-ahead metrics
+// every machine sends every other twice a second (ConnectionManager::updateRunAhead).
+static GameWindow *staticTextPing[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static GameWindow *staticTextFps[MAX_SLOTS] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static GameWindow *staticTextPingTitle = NULL;
+static GameWindow *staticTextFpsTitle = NULL;
+
 //-------------------------------------------------------------------------------------------------
 
 static WindowLayout *theLayout = NULL;
@@ -150,9 +157,16 @@ static void grabWindowPointers( void )
 		buttonMoneySend[i] = TheWindowManager->winGetWindowFromId(theWindow, buttonMoneySendID[i]);
 		staticTextMoney[i] = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY(temp));
 
+		temp.format("Diplomacy.wnd:StaticTextPing%d", i);
+		staticTextPing[i] = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY(temp));
+		temp.format("Diplomacy.wnd:StaticTextFps%d", i);
+		staticTextFps[i] = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY(temp));
+
 		slotNumInRow[i] = -1;
 	}
 	staticTextMoneyTitle = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY("Diplomacy.wnd:StaticTextMoneyTitle"));
+	staticTextPingTitle = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY("Diplomacy.wnd:StaticTextPingTitle"));
+	staticTextFpsTitle = TheWindowManager->winGetWindowFromId(theWindow, NAMEKEY("Diplomacy.wnd:StaticTextFpsTitle"));
 }
 
 static void releaseWindowPointers( void )
@@ -169,10 +183,59 @@ static void releaseWindowPointers( void )
 		staticTextMoney[i] = NULL;
 		buttonMoneyPlus[i] = NULL;
 		buttonMoneySend[i] = NULL;
+		staticTextPing[i] = NULL;
+		staticTextFps[i] = NULL;
 
 		slotNumInRow[i] = -1;
 	}
 	staticTextMoneyTitle = NULL;
+	staticTextPingTitle = NULL;
+	staticTextFpsTitle = NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+// Ping and frame rate.  Only a network game has them: a skirmish or a replay hides the columns.
+
+static void showNetCell( GameWindow *cell, Int value, Color color )
+{
+	if (cell == NULL)
+		return;
+	UnicodeString text;
+	if (value >= 0)
+		text.format(u"%d", value);
+	else
+		text = UnicodeString(u"-");
+	cell->winSetEnabledTextColors(color, GameMakeColor(0, 0, 0, 255));
+	GadgetStaticTextSetText(cell, text);
+}
+
+static void updateNetColumns( void )
+{
+	const Bool show = TheNetwork != NULL;
+	if (staticTextPingTitle)
+		staticTextPingTitle->winHide(!show);
+	if (staticTextFpsTitle)
+		staticTextFpsTitle->winHide(!show);
+
+	const Int slowest = show ? TheNetwork->getSlowestSlot() : -1;
+	for (Int row = 0; row < MAX_SLOTS; ++row)
+	{
+		const Int slotNum = slotNumInRow[row];
+		// a computer player runs on every machine, so it has no ping or frame rate of its own
+		const Bool hasNumbers = show && slotNum >= 0 && TheGameInfo->getConstSlot(slotNum)->isHuman()
+														&& TheNetwork->isPlayerConnected(slotNum);
+		if (staticTextPing[row])
+			staticTextPing[row]->winHide(!hasNumbers);
+		if (staticTextFps[row])
+			staticTextFps[row]->winHide(!hasNumbers);
+		if (!hasNumbers)
+			continue;
+
+		const Color color = (slotNum == slowest) ? GameMakeColor(255, 255, 0, 255) : GameMakeColor(255, 255, 255, 255);
+		const Real latency = TheNetwork->getSlotAverageLatency(slotNum);
+		showNetCell(staticTextPing[row], latency > 0.0f ? REAL_TO_INT(latency * 1000.0f) : -1, color);
+		showNetCell(staticTextFps[row], TheNetwork->getSlotAverageFPS(slotNum), color);
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -259,6 +322,10 @@ static void updateFunc( WindowLayout *layout, void *param )
 		if (theAnimateWindowManager->isFinished() && !wasFinished && theAnimateWindowManager->isReversed())
 			theWindow->winHide( TRUE );
 	}
+
+	// the metrics arrive twice a second; twice a second is as often as the numbers can change
+	if (theWindow && !theWindow->winIsHidden() && TheGameClient->getFrame() % 30 == 0)
+		updateNetColumns();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -753,6 +820,7 @@ void PopulateInGameDiplomacyPopup( void )
 
 		++rowNum;
 	}
+	updateNetColumns();
 }
 
 

@@ -1,0 +1,69 @@
+# Scud Launchers at tank packs (Discord, v3.2.0: "the Scuds fly low and flat past the tanks and never
+# come down"). Each pack of twelve Crusaders, 25 apart, has three Scuds of its own standing 210 (just
+# over the 200 minimum range), about 285 and about 335 west of it: seat 0's at a pack that stays put,
+# seat 2's at one that drives up and down 400 across their line of fire, seat 4's at one that drives
+# 250 towards them and back. Every seat is on one team and the Scuds' attack is a forced one, so
+# no tank drives off to kill a Scud before it has fired (on two teams the Crusaders killed the
+# nearest Scuds within two seconds). The orders are given again every ten seconds, so a Scud whose
+# target died takes the next tank.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 6 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -side 2 FactionGLA -side 3 FactionAmerica
+#     -side 4 FactionGLA -side 5 FactionAmerica
+#     -team 0 0 -team 1 0 -team 2 0 -team 3 0 -team 4 0 -team 5 0 -seed 7 -scenario scud_pack
+#     -maxframes 3000 -logPrefix scud_pack_
+#
+# The tallies at 1490 give what each pack lost.
+
+# --- the pack that stands still, round 1600,3700 ------------------------------------------------
+10    spawn       1  AmericaTankCrusader       12  1600 3700  25
+10    spawn       0  GLAVehicleScudLauncher     1  1390 3700
+10    spawn       0  GLAVehicleScudLauncher     1  1320 3620
+10    spawn       0  GLAVehicleScudLauncher     1  1270 3780
+
+# --- the pack that drives across, round 2450,3650 -----------------------------------------------
+10    spawn       3  AmericaTankCrusader       12  2450 3650  25
+10    spawn       2  GLAVehicleScudLauncher     1  2240 3650
+10    spawn       2  GLAVehicleScudLauncher     1  2170 3570
+10    spawn       2  GLAVehicleScudLauncher     1  2120 3730
+
+# --- the pack that drives along the line of fire, round 2500,3200 -------------------------------
+10    spawn       5  AmericaTankCrusader       12  2500 3200  25
+10    spawn       4  GLAVehicleScudLauncher     1  2290 3200
+10    spawn       4  GLAVehicleScudLauncher     1  2220 3120
+10    spawn       4  GLAVehicleScudLauncher     1  2170 3280
+
+30    tally       1  AmericaTankCrusader
+30    tally       3  AmericaTankCrusader
+30    tally       5  AmericaTankCrusader
+
+40    attack      0  GLAVehicleScudLauncher  1  AmericaTankCrusader
+40    attack      2  GLAVehicleScudLauncher  3  AmericaTankCrusader
+40    attack      4  GLAVehicleScudLauncher  5  AmericaTankCrusader
+40    move        3  AmericaTankCrusader     2450 3850
+40    move        5  AmericaTankCrusader     2400 3200
+340   attack      0  GLAVehicleScudLauncher  1  AmericaTankCrusader
+340   attack      2  GLAVehicleScudLauncher  3  AmericaTankCrusader
+340   attack      4  GLAVehicleScudLauncher  5  AmericaTankCrusader
+340   move        3  AmericaTankCrusader     2450 3450
+340   move        5  AmericaTankCrusader     2650 3200
+640   attack      0  GLAVehicleScudLauncher  1  AmericaTankCrusader
+640   attack      2  GLAVehicleScudLauncher  3  AmericaTankCrusader
+640   attack      4  GLAVehicleScudLauncher  5  AmericaTankCrusader
+640   move        3  AmericaTankCrusader     2450 3850
+640   move        5  AmericaTankCrusader     2400 3200
+940   attack      0  GLAVehicleScudLauncher  1  AmericaTankCrusader
+940   attack      2  GLAVehicleScudLauncher  3  AmericaTankCrusader
+940   attack      4  GLAVehicleScudLauncher  5  AmericaTankCrusader
+940   move        3  AmericaTankCrusader     2450 3450
+940   move        5  AmericaTankCrusader     2650 3200
+1240  attack      0  GLAVehicleScudLauncher  1  AmericaTankCrusader
+1240  attack      2  GLAVehicleScudLauncher  3  AmericaTankCrusader
+1240  attack      4  GLAVehicleScudLauncher  5  AmericaTankCrusader
+1240  move        3  AmericaTankCrusader     2450 3850
+1240  move        5  AmericaTankCrusader     2400 3200
+
+1490  tally       1  AmericaTankCrusader
+1490  tally       3  AmericaTankCrusader
+1490  tally       5  AmericaTankCrusader

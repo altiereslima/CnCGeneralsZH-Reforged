@@ -125,6 +125,9 @@ public:
 	static WideChar buttonKeyIn( const AsciiString& button, WideChar labelKey, Int commandType,
 		const std::map< std::string, WideChar >& keys );
 	static WideChar fixedKey( const AsciiString& button, Int commandType );	///< the bar's fixed letter, or 0
+	/// FixedOrderKeys in Hotkeys.ini: FALSE gives the orders their labels' letters, as shipped
+	static Bool fixedOrderKeys( void );
+	static void setFixedOrderKeys( Bool fixed );
 	/** The name Hotkeys.ini gives a button: a mod's own (-modfactions' "M<n>~") or, under a plain
 		* -mod, the last mod's as "<scope>:<button>", retail's as it is; what findPlayerKey looks up. */
 	static std::string fileButtonName( const AsciiString& button );
@@ -180,6 +183,8 @@ struct HotkeysFile
 	std::map< std::string, std::string > buttons;				///< button name to its letter, "" for none
 	std::map< std::string, HotkeyBinding > commands;		///< command to its key, key "" for none
 	std::string launcherPart;	///< what followed HOTKEYS_LAUNCHER_PART, verbatim; empty when the file had none
+	Bool fixedOrderKeys;			///< FixedOrderKeys' Enabled; written only when off
+	HotkeysFile() : fixedOrderKeys( TRUE ) {}
 };
 
 /** The rows of the shipped Data\<language>\CommandMap.ini text, then the commands it leaves unbound

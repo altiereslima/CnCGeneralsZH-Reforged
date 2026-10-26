@@ -564,8 +564,9 @@ if [ "$LIVE_CRC0" != "$LIVE_CRC1" ] || [ "$LIVE_FRAME0" != "$LIVE_FRAME1" ]; the
 fi
 
 # edit_replay corrupt|strip <replay> <CRC message type> <frame>: the replay's MSG_LOGIC_CRC records
-# (Recorder.cpp writeToFile) are u32 frame, the message type, i32 player, 2 argument groups (one
-# integer, one boolean), the CRC and the boolean; the type's number is the one this build logged ("CRC
+# (Recorder.cpp writeToFile) are u32 frame, the message type, i32 player, 3 argument groups (one
+# integer, one boolean, one integer), the CRC, the boolean and the frame the CRC is of; the type's
+# number is the one this build logged ("CRC
 # message is N").  corrupt changes by one bit every CRC recorded at the first CRC frame at or after
 # <frame>; strip removes every record of the first CRC frame.  Prints that frame, or "none".
 edit_replay() {
@@ -573,8 +574,8 @@ edit_replay() {
 import struct, sys
 mode, path, msgtype, at = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 b = bytearray(open(path, "rb").read())
-tag, groups, size = struct.pack("<i", msgtype), bytes([2, 0, 1, 2, 1]), 22
-records = [i for i in range(len(b) - size + 1) if b[i + 4:i + 8] == tag and b[i + 12:i + 17] == groups]
+tag, groups, size = struct.pack("<i", msgtype), bytes([3, 0, 1, 2, 1, 0, 1]), 28
+records = [i for i in range(len(b) - size + 1) if b[i + 4:i + 8] == tag and b[i + 12:i + 19] == groups]
 frames = sorted({struct.unpack_from("<I", b, i)[0] for i in records if struct.unpack_from("<I", b, i)[0] >= at})
 if not frames:
     print("none"); sys.exit(0)
@@ -582,7 +583,7 @@ frame = frames[0]
 chosen = [i for i in records if struct.unpack_from("<I", b, i)[0] == frame]
 if mode == "corrupt":
     for i in chosen:
-        struct.pack_into("<I", b, i + 17, struct.unpack_from("<I", b, i + 17)[0] ^ 1)
+        struct.pack_into("<I", b, i + 19, struct.unpack_from("<I", b, i + 19)[0] ^ 1)
 else:
     for i in reversed(chosen):
         del b[i:i + size]

@@ -405,6 +405,20 @@ void ConnectionManager::doRelay() {
 			NetCommandList *cmdList = packet->getCommandList();
 			NetCommandRef *cmd = cmdList->getFirstMessage();
 
+			/* Who put this packet on the wire, as opposed to who wrote the commands in it.  An ack has
+				 to reach the queue that keeps resending the copy, and that queue is the sender's.  A
+				 packet from an address no connection owns leaves it MAX_SLOTS, and ackCommand then routes
+				 the way it always did. */
+			UnsignedInt senderSlot = MAX_SLOTS;
+			for (Int s = 0; s < MAX_SLOTS; ++s) {
+				if ((m_connections[s] != NULL) &&
+						(m_connections[s]->getUser()->GetIPAddr() == m_transport->m_inBuffer[i].addr) &&
+						(m_connections[s]->getUser()->GetPort() == m_transport->m_inBuffer[i].port)) {
+					senderSlot = s;
+					break;
+				}
+			}
+
 			// Iterate through the commands in this packet and send them to the proper connections.
 			while (cmd != NULL) {
 				//DEBUG_LOG(("ConnectionManager::doRelay() - Looking at a command of type %s\n",
@@ -418,7 +432,7 @@ void ConnectionManager::doRelay() {
 				}
 
 				if (CommandRequiresAck(cmd->getCommand())) {
-					ackCommand(cmd, m_localSlot);
+					ackCommand(cmd, m_localSlot, senderSlot);
 				}
 				if (!processNetCommand(cmd)) {
 					sendRemoteCommand(cmd);
@@ -533,7 +547,12 @@ Bool ConnectionManager::processNetCommand(NetCommandRef *ref) {
 
 	if (msg->getNetCommandType() == NETCOMMANDTYPE_RUNAHEADMETRICS) {
 		processRunAheadMetrics((NetRunAheadMetricsCommandMsg *)msg);
-		return TRUE;
+
+		// the packet router passes them on to everyone else (updateRunAhead)
+		UnsignedByte relay = ref->getRelay();
+		relay = relay & (0xff ^ (1 << m_localSlot));
+		ref->setRelay(relay);
+		return FALSE;
 	}
 
 	if (msg->getNetCommandType() == NETCOMMANDTYPE_KEEPALIVE) {
@@ -910,7 +929,7 @@ void ConnectionManager::processFrameInfo(NetFrameCommandMsg *msg) {
 	if ((playerID >= 0) && (playerID < MAX_SLOTS)) {
 		if (m_frameData[playerID] != NULL) {
 //			DEBUG_LOG(("ConnectionManager::processFrameInfo - player %d, frame %d, command count %d, received on frame %d\n", playerID, msg->getExecutionFrame(), msg->getCommandCount(), TheGameLogic->getFrame()));
-			m_frameData[playerID]->setFrameCommandCount(msg->getExecutionFrame(), msg->getCommandCount());
+			m_frameData[playerID]->setFrameCommandCount(msg->getExecutionFrame(), msg->getCommandCount(), msg->getID());
 		}
 	}
 }
@@ -942,7 +961,13 @@ void ConnectionManager::processAckStage1(NetCommandMsg *msg) {
 	}
 
 	if (ref != NULL) {
-		if (ref->getCommand()->getNetCommandType() == NETCOMMANDTYPE_FRAMEINFO) {
+		/* The run-ahead's latency is the round trip of our own frame info through the packet router.
+			 An ack from another player, or for another slot's frame info we passed on, is for a frame
+			 resend answer (see ackCommand), whose frame went out long before the stopwatch this would
+			 read, so it is no sample.  A non-router's queue to the router only ever held its own. */
+		if ((ref->getCommand()->getNetCommandType() == NETCOMMANDTYPE_FRAMEINFO) &&
+				((m_localSlot == m_packetRouterSlot) ||
+				 ((playerID == m_packetRouterSlot) && (ref->getCommand()->getPlayerID() == m_localSlot)))) {
 			m_frameMetrics.processLatencyResponse(((NetFrameCommandMsg *)(ref->getCommand()))->getExecutionFrame());
 		}
 
@@ -1113,12 +1138,24 @@ void ConnectionManager::handleLocalPlayerLeaving(UnsignedInt frame) {
 /**
  * We just got a message that needs to be ack'd, so ack it!
  */
-void ConnectionManager::ackCommand(NetCommandRef *ref, UnsignedInt localSlot) {
+void ConnectionManager::ackCommand(NetCommandRef *ref, UnsignedInt localSlot, UnsignedInt senderSlot) {
 	NetCommandMsg *msg = ref->getCommand();
 	NetCommandMsg *ackmsg;
 	UnsignedShort commandID;
 	UnsignedByte originalPlayerID;
 	UnsignedByte sendRelay = 0;
+
+	/* A copy that a player other than the packet router sent us straight, which is how a frame
+		 resend request is answered: the asked player's own commands and the frames it holds for every
+		 other slot.  That copy sits in the sender's queue to us.  EA acked it to the packet router,
+		 which only clears the router's own queue, or, on the router, to the command's author, so in a
+		 room of three or more the sender never heard back and resent the copy every retry timeout for
+		 the rest of the match.  It goes back to the sender now, as a stage 1 ack only: we have it, but
+		 only the router can say everyone has.  Two players never take this branch - one of the two is
+		 the router, and the router's own traffic and its author's sends route as before. */
+	const Bool directReply = (CommandRequiresDirectSend(msg) == FALSE) && (senderSlot < MAX_SLOTS) &&
+		(senderSlot != m_packetRouterSlot) && (m_connections[senderSlot] != NULL) &&
+		!((m_localSlot == m_packetRouterSlot) && (senderSlot == msg->getPlayerID()));
 
 	// Make send relay a bitmask for the connections that the relay will actually be sent to. This is
 	// necessary to determine whether or not we have to wait to send a stage 2 ack.
@@ -1133,7 +1170,7 @@ void ConnectionManager::ackCommand(NetCommandRef *ref, UnsignedInt localSlot) {
 #endif
 
 	sendRelay = sendRelay & ref->getRelay();
-	if (sendRelay == 0) {
+	if ((sendRelay == 0) && (directReply == FALSE)) {
 		NetAckBothCommandMsg *bothmsg = newInstance(NetAckBothCommandMsg)(ref->getCommand());
 		ackmsg = bothmsg;
 		commandID = bothmsg->getCommandID();
@@ -1164,6 +1201,8 @@ void ConnectionManager::ackCommand(NetCommandRef *ref, UnsignedInt localSlot) {
 				m_connections[msg->getPlayerID()]->sendNetCommandMsg(ackmsg, 1 << msg->getPlayerID());
 			}
 		}
+	} else if (directReply) {
+		m_connections[senderSlot]->sendNetCommandMsg(ackmsg, 1 << senderSlot);
 	} else {
 		// The local connection may be the packet router, in that case, the connection would be NULL.  So do something about it!
 		if ((m_packetRouterSlot >= 0) && (m_packetRouterSlot < MAX_SLOTS)) {
@@ -1317,25 +1356,34 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 	time_t curTime = Clock_Milliseconds();
 
 	if ((lasttimesent == 0) || ((curTime - lasttimesent) > TheGlobalData->m_networkRunAheadMetricsTime)) {
+		m_latencyAverages[m_localSlot] = m_frameMetrics.getAverageLatency();
+
+		// FrameMetrics measures the logic frame rate again (it briefly measured the display rate,
+		// see FrameMetrics::doPerFrameMetrics), so EA's original rule applies once more: a
+		// self-slug is a *voluntary* slowdown to let the room catch up, not this machine running
+		// out of capacity.  Reporting the slugged rate as our capability would feed the slowdown
+		// back into minFps and shrink the run-ahead that the slug was buying margin for.  EA left
+		// this half commented out for the other seats, so only the packet router's own slug was
+		// forgiven and the room was commanded down to a frame or two under 30 on every lossy link.
+		if (didSelfSlug) {
+			m_fpsAverages[m_localSlot] = frameRate;
+		} else {
+			m_fpsAverages[m_localSlot] = m_frameMetrics.getAverageFPS();
+		}
+
+		/* EA sent these to the packet router alone, so only the router knew who was slow.  Everyone
+			 gets them now, the router's own included, and the Tab screen shows each player's ping and
+			 frame rate on every machine.  The router relays them like a chat line (processNetCommand). */
+		NetRunAheadMetricsCommandMsg *metrics = newInstance(NetRunAheadMetricsCommandMsg);
+		metrics->setPlayerID(m_localSlot);
+		metrics->setID(GenerateNextCommandID());
+		metrics->setAverageLatency(m_latencyAverages[m_localSlot]);
+		metrics->setAverageFps(m_fpsAverages[m_localSlot]);
+		sendLocalCommand(metrics, 0xff ^ (1 << m_localSlot));
+		metrics->detach();
+
 		if (m_localSlot == m_packetRouterSlot) {
 			// We are the packet router, time to compute a new run ahead for this game.
-			m_latencyAverages[m_localSlot] = m_frameMetrics.getAverageLatency();
-
-			// FrameMetrics measures the logic frame rate again (it briefly measured the display rate,
-			// see FrameMetrics::doPerFrameMetrics), so EA's original rule applies once more: a
-			// self-slug is a *voluntary* slowdown to let the room catch up, not this machine running
-			// out of capacity.  Reporting the slugged rate as our capability would feed the slowdown
-			// back into minFps and shrink the run-ahead that the slug was buying margin for.
-			if (didSelfSlug) {
-				m_fpsAverages[m_localSlot] = frameRate;
-			} else {
-				m_fpsAverages[m_localSlot] = m_frameMetrics.getAverageFPS();
-			}
-			if (didSelfSlug) {
-				//DEBUG_LOG(("ConnectionManager::updateRunAhead - local player run ahead metrics, fps = %d, actual fps = %d, latency = %f, didSelfSlug = true\n", m_fpsAverages[m_localSlot], m_frameMetrics.getAverageFPS(), m_latencyAverages[m_localSlot]));
-			} else {
-				//DEBUG_LOG(("ConnectionManager::updateRunAhead - local player run ahead metrics, fps = %d, latency = %f, didSelfSlug = false\n", m_fpsAverages[m_localSlot], m_latencyAverages[m_localSlot]));
-			}
 			Int minFps;
 			Int minFpsPlayer;
 			getMinimumFps(minFps, minFpsPlayer);
@@ -1430,35 +1478,6 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 
 			msg->detach();
 			msg2->detach();
-		} else {
-			// We are not the packet router, send our metrics info to the packet router.
-			NetRunAheadMetricsCommandMsg *msg = newInstance(NetRunAheadMetricsCommandMsg);
-			msg->setPlayerID(m_localSlot);
-			if (DoesCommandRequireACommandID(msg->getNetCommandType())) {
-				msg->setID(GenerateNextCommandID());
-			}
-			msg->setAverageLatency(m_frameMetrics.getAverageLatency());
-
-			/* See above.  EA left this half commented out, so only the packet router's own slug was
-				 forgiven: the other seat's voluntary 10 % slowdown came back as its capacity and the
-				 room was commanded down to it, a frame or two under 30 on every lossy link. */
-			if (didSelfSlug) {
-				msg->setAverageFps(frameRate);
-			} else {
-				msg->setAverageFps(m_frameMetrics.getAverageFPS());
-			}
-			if (didSelfSlug) {
-				//DEBUG_LOG(("ConnectionManager::updateRunAhead - average latency = %f, average fps = %d, actual fps = %d, didSelfSlug = true\n", m_frameMetrics.getAverageLatency(), m_frameMetrics.getAverageFPS(), m_frameMetrics.getAverageFPS()));
-			} else {
-				//DEBUG_LOG(("ConnectionManager::updateRunAhead - average latency = %f, average fps = %d, didSelfSlug = false\n", m_frameMetrics.getAverageLatency(), m_frameMetrics.getAverageFPS()));
-			}
-			// Every other m_connections[m_packetRouterSlot] in this file is bounds tested first; this one
-			// was not, and it is the one that runs twice a second.  m_packetRouterSlot is MAX_SLOTS when
-			// the fallback plan has run out, and used to be able to hold a whole IP address.
-			if ((m_packetRouterSlot < MAX_SLOTS) && (m_connections[m_packetRouterSlot] != NULL)) {
-				m_connections[m_packetRouterSlot]->sendNetCommandMsg(msg, 1 << m_packetRouterSlot);
-			}
-			msg->detach();
 		}
 		lasttimesent = curTime;
 	}
@@ -1736,15 +1755,39 @@ Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* 
 			? stalledMS
 			: (UnsignedInt)(now - m_resendLastRequest);
 
+		/* The frame comes the way every frame comes, through the packet router unless we are the
+			 router, so that link's timeout is the wait.  The request and its answer go straight between
+			 us and the player we wait on, though, so once that link has been measured a slower one
+			 stretches the wait, or we ask again before the answer can land.  Unmeasured, it sits at its
+			 2000 ms ceiling, which made every such stall wait two seconds before asking.  With two
+			 players the router is the player we wait on, so nothing changes there. */
 		UnsignedInt retryTimeoutMS = FRAME_RESEND_MIN_TIMEOUT_MS;
-		if (m_connections[notReadyPlayer] != NULL) {
-			retryTimeoutMS = m_connections[notReadyPlayer]->getRetryTimeMS();
+		Connection *direct = m_connections[notReadyPlayer];
+		if ((m_packetRouterSlot < MAX_SLOTS) && (m_connections[m_packetRouterSlot] != NULL)) {
+			retryTimeoutMS = m_connections[m_packetRouterSlot]->getRetryTimeMS();
+			if ((direct != NULL) && direct->hasLatencySample() && (direct->getRetryTimeMS() > retryTimeoutMS)) {
+				retryTimeoutMS = direct->getRetryTimeMS();
+			}
+		} else if (direct != NULL) {
+			retryTimeoutMS = direct->getRetryTimeMS();
 		}
 
+		/* Ask everyone the frame is still missing from, not only the first.  The loop above stops at
+			 the first player that is not ready, so with three or more seats a frame lost from two of
+			 them was asked for one seat at a time, the second only after the first had answered and a
+			 whole new wait had run out: 1.5 to 3 seconds frozen on frame 60 at the start of every lossy
+			 three-player match.  The players before notReadyPlayer were ready, or the loop would have
+			 stopped on them. */
 		if (shouldRequestFrameResend(stalledMS, sinceLastRequestMS, retryTimeoutMS)) {
-			DEBUG_LOG(("ConnectionManager::allCommandsReady - frame %d still missing from player %d after %d ms, asking again (retry timeout %d ms)\n",
-				frame, notReadyPlayer, stalledMS, retryTimeoutMS));
-			requestFrameDataResend(notReadyPlayer, frame);
+			for (i = notReadyPlayer; i < MAX_SLOTS; ++i) {
+				if ((m_frameData[i] == NULL) || m_frameData[i]->getIsQuitting() ||
+						(m_frameData[i]->getFrameCommandCount(frame) == m_frameData[i]->getCommandCount(frame))) {
+					continue;
+				}
+				DEBUG_LOG(("ConnectionManager::allCommandsReady - frame %d still missing from player %d after %d ms, asking again (retry timeout %d ms)\n",
+					frame, i, stalledMS, retryTimeoutMS));
+				requestFrameDataResend(i, frame);
+			}
 			m_resendLastRequest = now;
 		}
 	}
@@ -2487,12 +2530,30 @@ Int ConnectionManager::getSlotAverageFPS(Int slot) {
 	if ((slot < 0) || (slot >= MAX_SLOTS)) {
 		return -1;
 	}
-	if ((m_packetRouterSlot != m_localSlot) && (slot == m_localSlot)) {
-		// our framerate data isn't valid for other players unless we are the
-		// packet router, so don't fake someone out.
+	return m_fpsAverages[slot];
+}
+
+/// the slot's last reported round trip to the packet router, in seconds (FrameMetrics), or 0
+Real ConnectionManager::getSlotAverageLatency(Int slot) {
+	// the router's own figure times every client's acks, so one laggy client made the host look laggy
+	if ((slot < 0) || (slot >= MAX_SLOTS) || (slot == (Int)m_packetRouterSlot)) {
+		return 0.0f;
+	}
+	return m_latencyAverages[slot];
+}
+
+/// the player whose frame rate sets the room's speed, as the packet router picks him, or -1 when
+/// he keeps up with the match anyway
+Int ConnectionManager::getSlowestSlot( void ) {
+	Int minFps;
+	Int minFpsPlayer;
+	getMinimumFps(minFps, minFpsPlayer);
+	// nobody is holding the room back while everyone keeps within 10 % of the match's speed; a frame
+	// or two of jitter under the cap would otherwise light a different player every half second
+	if (minFps * 10 >= getMatchFps() * 9) {
 		return -1;
 	}
-	return m_fpsAverages[slot];
+	return minFpsPlayer;
 }
 
 /**
@@ -2638,13 +2699,21 @@ void ConnectionManager::sendSlotFrameToPlayer(UnsignedInt playerID, UnsignedInt 
 			ref = ref->getNext();
 		}
 	}
+	/* A command is known by its author and id together, and ours is the only id counter we own.  EA
+		 stamped another slot's frame info with an id from that counter, and the counters run nearly in
+		 step, so the copy could carry the very id of a command that slot really had in flight: the
+		 receiver's ack then cleared that command from a queue still owing it, and a packet holding both
+		 kept one.  Another slot's frame info goes out under the id its author gave it, and not at all
+		 when it never reached us, since then we have no count to vouch for either. */
+	Int frameInfoID = (slot == m_localSlot) ? (Int)GenerateNextCommandID() : m_frameData[slot]->getFrameInfoID(frame);
+	if (frameInfoID < 0) {
+		return;
+	}
 	UnsignedInt frameCommandCount = m_frameData[slot]->getFrameCommandCount(frame);
 	NetFrameCommandMsg *msg = newInstance(NetFrameCommandMsg);
 	msg->setExecutionFrame(frame);
 	msg->setCommandCount(frameCommandCount);
-	if (DoesCommandRequireACommandID(msg->getNetCommandType())) {
-		msg->setID(GenerateNextCommandID());
-	}
+	msg->setID((UnsignedShort)frameInfoID);
 	msg->setPlayerID(slot);
 	DEBUG_LOG(("ConnectionManager::sendFrameDataToPlayer - sending frame info from player %d to player %d for frame %d with command count %d and ID %d and relay %d\n", slot, playerID, msg->getExecutionFrame(), msg->getCommandCount(), msg->getID(), relay));
 	sendLocalCommandDirect(msg, relay);

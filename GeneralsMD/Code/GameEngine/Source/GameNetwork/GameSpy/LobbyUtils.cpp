@@ -52,6 +52,7 @@
 #include "GameClient/MessageBox.h"
 #include "GameClient/Mouse.h"
 #include "GameNetwork/GameSpyOverlay.h"
+#include "GameNetwork/GameInfo.h"
 
 #include "GameClient/LanguageFilter.h"
 #include "GameNetwork/GameSpy/BuddyDefs.h"
@@ -880,7 +881,7 @@ void playerTemplateComboBoxTooltip(GameWindow *wndComboBox, WinInstanceData *ins
 	GadgetComboBoxGetSelectedPos(wndComboBox, &index);
 	Int templateNum = (Int)(intptr_t)GadgetComboBoxGetItemData(wndComboBox, index);
 	UnicodeString ustringTooltip;
-	if (templateNum == -1)
+	if (IsRandomPlayerTemplate(templateNum))
 	{
 			// the "Random" template is always first
 			ustringTooltip = TheGameText->fetch("TOOLTIP:BioStrategyLong_Random");
@@ -911,7 +912,7 @@ void playerTemplateListBoxTooltip(GameWindow *wndListBox, WinInstanceData *instD
 
 	Int templateNum = (Int)(intptr_t)GadgetListBoxGetItemData(wndListBox, row, col);
 	UnicodeString ustringTooltip;
-	if (templateNum == -1)
+	if (IsRandomPlayerTemplate(templateNum))
 	{
 			// the "Random" template is always first
 			ustringTooltip = TheGameText->fetch("TOOLTIP:BioStrategyLong_Random");

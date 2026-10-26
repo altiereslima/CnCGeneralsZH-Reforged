@@ -1047,7 +1047,7 @@ void ScoreScreenGraphsInit( GameWindow *backdrop )
 		mapName = map->m_displayName;
 	else
 		mapName.translate( TheGameState->getMapLeafName( TheGlobalData->m_mapName ) );
-	s_title = newText( UIStyle::capitals( mapName ), UIStyle::titleFont( UIStyle::TEXT_TITLE ) );
+	s_title = newText( UIStyle::nameCapitals( mapName ), UIStyle::titleFont( UIStyle::TEXT_TITLE ) );
 	GameFont *wordmarkFont = UIStyle::font( UIStyle::TEXT_STRONG, TRUE );
 	s_wordmark[ 0 ] = newText( UnicodeString( u"Zero Hour" ), wordmarkFont );
 	s_wordmark[ 1 ] = newText( UnicodeString( u" Reforged" ), wordmarkFont );

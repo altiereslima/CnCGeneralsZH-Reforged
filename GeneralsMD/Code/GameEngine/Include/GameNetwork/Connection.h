@@ -143,6 +143,8 @@ public:
 	/** This connection's measured retry timeout, in milliseconds.  How long a packet on this link is
 		  given before it is worth sending again - see FrameResendPolicy.h. */
 	UnsignedInt getRetryTimeMS( void ) const { return (UnsignedInt)m_retryTime; }
+	/** FALSE while the retry timeout is still the unmeasured ceiling. */
+	Bool hasLatencySample( void ) const { return m_smoothedLatency >= 0.0f; }
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	void debugPrintCommands();

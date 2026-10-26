@@ -1,0 +1,24 @@
+# Does a guarding Nuke Cannon stay deployed between kills?
+#
+# One Nuke Cannon put on guard where it stands, and a GLA Technical driven into its range every
+# twenty seconds. Each kill used to send the guard back to its post through a path request, which
+# DeployStyleAIUpdate read as a move and packed the cannon up for, so it unpacked again for every
+# target. Fixed, the log has one deploy and no undeploy after the guard order.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionGLA -seed 1 -maxframes 5400
+#     -scenario deployguard -logPrefix deployguard_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn       0  ChinaVehicleNukeLauncher   1  700 500
+60    shiftguard  0  ChinaVehicleNukeLauncher   700 500  400
+
+600   spawn       1  GLAVehicleTechnical        1  1000 500
+1200  spawn       1  GLAVehicleTechnical        1  1000 540
+1800  spawn       1  GLAVehicleTechnical        1  1000 460
+2400  spawn       1  GLAVehicleTechnical        1  1000 500
+
+2690  tally       1  GLAVehicleTechnical*
+2690  tally       0  ChinaVehicleNukeLauncher

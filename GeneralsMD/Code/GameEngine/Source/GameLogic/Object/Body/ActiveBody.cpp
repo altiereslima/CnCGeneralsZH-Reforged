@@ -561,6 +561,8 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 			// Apply the damage scalar (extra bonuses -- like strategy center defensive battle plan)
 			// And remember not to adjust unresistable damage, just like the armor code can't.
 			amount *= m_damageScalar;
+			// a leader's guard aura, a fallen leader's rally, a rank's guard standing still
+			amount *= obj->getRankDamageTakenScalar();
 		}
 
 		// one hit kill: anything that got through the armour at all takes the whole bar
@@ -1567,18 +1569,8 @@ void ActiveBody::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLeve
 		} );
 	}
 
-	Real oldBonus = TheGlobalData->m_healthBonus[oldLevel];
-	Real newBonus = TheGlobalData->m_healthBonus[newLevel];
-	Real mult = newBonus / oldBonus;
-
-	// get this before calling setMaxHealth, since it can clip curHealth
-	//Real newHealth = m_currentHealth * mult;
-
-	// change the max
-	setMaxHealth(m_maxHealth * mult, PRESERVE_RATIO );
-
-	// now change the cur (setMaxHealth now handles it)
-	//internalChangeHealth( newHealth - m_currentHealth );
+	// the health bonus moves with the grade as well as the level, so Object::onRankChanged scales max
+	// health for both
 
 	switch (newLevel)
 	{

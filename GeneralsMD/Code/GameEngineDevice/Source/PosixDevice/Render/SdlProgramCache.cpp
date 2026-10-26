@@ -24,10 +24,14 @@
 #include "engineshader.h"
 #include "ffshader.h"
 #include "ffvertex.h"
+#include "sdl3target.h"
+#include "Platform/WaterFftSampling.h"
+#include "Platform/WaterShoreOverlay.h"
 
 #include <SDL3/SDL.h>
 
 #include <stdio.h>
+#include "SdlSunShadowDebug.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -217,6 +221,28 @@ const SdlProgram &SdlProgramCache::Vertex_Program(const VertexPipelineDescriptio
 	return made;
 }
 
+const SdlProgram &SdlProgramCache::Water_Vertex_Program(const VertexPipelineDescription &description)
+{
+	if (SdlProgram *found = WaterVertexByBytes.Find(&description, sizeof(description))) {
+		++found->Uses;
+		return *found;
+	}
+	const std::string key = "water-fft:" + VertexShader_Key(description);
+	std::map<std::string, SdlProgram>::iterator existing = VertexPrograms.find(key);
+	if (existing != VertexPrograms.end()) {
+		++existing->second.Uses;
+		WaterVertexByBytes.Add(&description, sizeof(description), &existing->second);
+		return existing->second;
+	}
+	std::string hlsl;
+	const bool generated = !description.LightingEnabled
+		&& VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D11, hlsl)
+		&& WaterFftSampling::WrapVertex(hlsl) && SDL3_Shader_Retarget(hlsl, true);
+	const SdlProgram &made = Make(VertexPrograms, key, generated, hlsl, true);
+	WaterVertexByBytes.Add(&description, sizeof(description), &VertexPrograms[key]);
+	return made;
+}
+
 const SdlProgram &SdlProgramCache::Engine_Vertex_Program(int program)
 {
 	if (SdlProgram *found = EngineVertexByBytes.Find(&program, sizeof(program))) {
@@ -279,7 +305,61 @@ const SdlProgram &SdlProgramCache::Pixel_Program(const CombinerDescription &desc
 	}
 	std::string hlsl;
 	const bool generated = CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, hlsl);
+	if (description.ShadowReceiving && Sdl_Sun_Shadow_Fault("receiver-program"))
+		hlsl += "\n#error injected sun receiver compilation failure\n";
 	const SdlProgram &made = Make(PixelPrograms, key, generated, hlsl, false);
 	PixelByBytes.Add(&description, sizeof(description), &PixelPrograms[key]);
+	return made;
+}
+
+// Preserve the shared alpha/discard logic but expose no fragment color output on a depth-only pass.
+const SdlProgram &SdlProgramCache::Sun_Pixel_Program(const CombinerDescription &description, int engine)
+{
+    struct { CombinerDescription Description; int Engine; } lookup = {};
+    memcpy(&lookup.Description, &description, sizeof(description));
+    lookup.Engine = engine;
+    if (SdlProgram *found = SunPixelByBytes.Find(&lookup, sizeof(lookup))) {
+        ++found->Uses;
+        return *found;
+    }
+    const bool fixed = engine == ENGINE_SHADER_NONE;
+    const std::string key = "sun-caster:" + (fixed ? CombinerShader_Key(description)
+        : std::string(EngineShader_Name((EngineShaderProgram)engine)) + CombinerShader_Pipeline_Key(description.PixelPipeline));
+    auto existing = PixelPrograms.find(key);
+    if (existing != PixelPrograms.end()) {
+        ++existing->second.Uses;
+        SunPixelByBytes.Add(&lookup, sizeof(lookup), &existing->second);
+        return existing->second;
+    }
+    std::string hlsl;
+    bool generated = fixed ? CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, hlsl)
+        : EngineShader_Pixel_Program((EngineShaderProgram)engine, description.PixelPipeline, hlsl, COMBINER_SHADER_TARGET_SDL3_GPU);
+    const std::string entry = "float4 main(Input input) : SV_Target";
+    const size_t at = hlsl.find(entry);
+    generated = generated && at != std::string::npos;
+    if (generated) {
+        hlsl.replace(at, entry.size(), "float4 sunCasterPixel(Input input)");
+        hlsl += "\nvoid main(Input input) { sunCasterPixel(input); }\n";
+    }
+    const SdlProgram &made = Make(PixelPrograms, key, generated, hlsl, false);
+    SunPixelByBytes.Add(&lookup, sizeof(lookup), &PixelPrograms[key]);
+    return made;
+}
+
+// Only an explicit authored-track draw tag may select this optional variant.
+const SdlProgram &SdlProgramCache::Shore_Pixel_Program(const CombinerDescription &description)
+{
+	if (SdlProgram *found=ShorePixelByBytes.Find(&description,sizeof(description))) {
+		++found->Uses;return *found;
+	}
+	const std::string key="shore-overlay:"+CombinerShader_Key(description);
+	std::string hlsl;
+	bool generated=!description.ShadowReceiving && !description.SoftParticle && !description.DrawEffect
+		&& !description.SmokeGlow && description.StageCount<=2
+		&& CombinerShader_Generate(description,COMBINER_SHADER_TARGET_D3D11,hlsl)
+		&& WaterShoreOverlay::WrapPixel(hlsl);
+	if(generated) generated=SDL3_Shader_Retarget(hlsl,false);
+	const SdlProgram &made=Make(PixelPrograms,key,generated,hlsl,false);
+	ShorePixelByBytes.Add(&description,sizeof(description),&PixelPrograms[key]);
 	return made;
 }

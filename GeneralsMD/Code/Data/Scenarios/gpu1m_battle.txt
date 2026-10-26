@@ -1,0 +1,518 @@
+# Footage for the Direct3D 11 GPU particle overflow: trailer_chaos's three-way battle on Twilight
+# Flame (America, China and the GLA attack-moving on 1135,3696, the particle beam, the nuke and the
+# Scud Storm landing there from about 31 s) with the ground round the fight burning, about a
+# million particles live through the second half of the match.
+#
+# The mass is CINE_U05_SootySmokeColumn02, the burning-debris column of the USA05 cinematic: a
+# forever ALPHA system, five puffs a retail frame for 150 frames, orange at the foot and soot
+# above, small puffs (about 10 units at most), GPU eligible, so past the CPU cap every puff goes to
+# the GPU ring. 290 plumes of five copies 9 apart, laid at random (seed 11): every seventh 170 to
+# 450 out from the fight, the rest 500 to 1350 out, so the camera sees the battle between columns
+# and most of the million burns in the background. Laid from scenario frame 60 to 700, so the
+# field spreads as the armies close. Every near plume and every fifth far one has two
+# FireFactionLarge at the foot, the near ones an AutoFireLarge01 too: fire-look systems, which
+# stay on the CPU. On Dark Night (the first try) the soot read as black walls on black ground,
+# and big ALPHA puffs (BurningBridgeBeam, SmoulderSmoke) as flat blotches that cost 40 ms of fill.
+#
+# 2026-10-24, 1280x720, RTX 2060 (display on the Intel adapter, ddagrab running): the live count
+# reaches 1,040,000 by logic frame 1600 and holds there with the 1 << 20 ring full and recycling;
+# HEADLESS FRAMETIME mean 4.59 p50 3.75 p95 9.50 p99 12.00 p99.9 15.50 worst 73.24 ms, 0.06% of
+# frames over 16.7 ms, the logic at 60 Hz throughout.
+#
+#   set ZH_USER_DATA_DIR=D:\zhr-shots\gpu1m\ud
+#   generals.exe -win -borderless -xres 1280 -yres 720 -msaa 0 -quickstart -noshellmap
+#     -multiInstance -noFPSLimit -noDynamicLOD -gpuparticles -particlecap 2500
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3 -takeover -observer
+#     -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario gpu1m_battle -cinema gpu1m_battle -maxframes 3300 -logPrefix gpu1m_
+#
+# Filmed paced at normal speed with the desktop captured (ffmpeg ddagrab), not with -video, so the
+# info strip's hz and fps are the real ones; the game window is brought to the front and made
+# topmost first. The sound is a second pass of the same line with -turbo -wav 841 3260, the
+# camera following the logic frame, aligned on the strip's frame counter. Grep the log for
+# GPUPARTICLES and HEADLESS FRAMETIME (printed because -maxframes, not the shot list, ends it).
+
+# --- the buildings, far out of frame -------------------------------------------------------
+10    spawn      0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn      0  AmericaPowerPlant               3   start0:-260:40    90
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+10    spawn      2  GLACommandCenter                1   start2:-260:0
+
+# --- the armies ----------------------------------------------------------------------------
+30    spawn      0  AmericaTankCrusader             12  790 3420   36
+30    spawn      0  AmericaTankPaladin              6   700 3520   40
+30    spawn      0  AmericaVehicleTomahawk          4   690 3380   40
+30    spawn      0  AmericaTankMicrowave            3   860 3330   40
+30    spawn      0  AmericaInfantryRanger           16  880 3480   18
+30    spawn      0  AmericaVehicleComanche          6   700 3300   60
+30    spawn      0  AmericaJetRaptor                4   640 3250   70
+
+30    spawn      1  ChinaTankOverlord               5   1480 3980  50
+30    spawn      1  ChinaTankBattleMaster           10  1400 4040  40
+30    spawn      1  ChinaTankGattling               5   1560 3900  36
+30    spawn      1  ChinaTankDragon                 4   1380 3920  36
+30    spawn      1  ChinaVehicleInfernoCannon       4   1540 4060  40
+30    spawn      1  ChinaInfantryRedguard           16  1330 4010  18
+30    spawn      1  ChinaVehicleHelix               3   1600 4050  60
+30    spawn      1  ChinaJetMIG                     4   1650 4120  70
+
+30    spawn      2  GLATankScorpion                 10  1460 3380  36
+30    spawn      2  GLATankMarauder                 5   1450 3270  40
+30    spawn      2  GLAVehicleRocketBuggy           6   1400 3330  32
+30    spawn      2  GLAVehicleQuadCannon            4   1520 3330  36
+30    spawn      2  GLAVehicleToxinTruck            3   1640 3300  36
+30    spawn      2  GLAVehicleTechnical             6   1340 3400  30
+30    spawn      2  GLAInfantryRebel                16  1300 3330  18
+
+60    attackmove 0  *  1135 3696
+60    attackmove 1  *  1135 3696
+60    attackmove 2  *  1135 3696
+
+# --- the second wave, so the fight is still being fed while the camera rolls --------------
+600   spawn      0  AmericaTankCrusader             8   790 3420   36
+600   spawn      0  AmericaTankPaladin              4   700 3520   40
+600   spawn      1  ChinaTankBattleMaster           8   1400 4040  40
+600   spawn      1  ChinaTankOverlord               3   1480 3980  50
+600   spawn      2  GLATankScorpion                 8   1460 3380  36
+600   spawn      2  GLATankMarauder                 3   1450 3270  40
+630   attackmove 0  *  1135 3696
+630   attackmove 1  *  1135 3696
+630   attackmove 2  *  1135 3696
+
+# --- the sky and the superweapons, trailer_chaos's ---------------------------------------
+450   power      0  AmericaCommandCenter  1135 3696  SuperweaponSpectreGunship
+560   power      0  AmericaCommandCenter  980 3600   SuperweaponA10ThunderboltMissileStrike
+640   power      1  ChinaCommandCenter    1300 3700  Early_SuperweaponChinaCarpetBomb
+700   power      2  GLACommandCenter      1150 3560  SuperweaponAnthraxBomb
+855   power      0  AmericaParticleCannonUplink  1080 3740
+830   power      1  ChinaNuclearMissileLauncher  1060 3790
+930   power      2  GLAScudStorm                 1200 3640
+
+# --- the burning field -------------------------------------------------------------------
+65    particles  0  CINE_U05_SootySmokeColumn02  5  299 2986  9
+65    particles  0  CINE_U05_SootySmokeColumn02  5  489 3503  9
+67    particles  0  CINE_U05_SootySmokeColumn02  5  2414 3868  9
+68    particles  0  CINE_U05_SootySmokeColumn02  5  1775 3439  9
+72    particles  0  CINE_U05_SootySmokeColumn02  5  360 3625  9
+72    particles  0  FireFactionLarge             2  360 3625  12
+73    particles  0  CINE_U05_SootySmokeColumn02  5  2167 3739  9
+75    particles  0  CINE_U05_SootySmokeColumn02  5  1337 4054  9
+78    particles  0  CINE_U05_SootySmokeColumn02  5  1513 3724  9
+78    particles  0  FireFactionLarge             2  1513 3724  12
+78    particles  0  AutoFireLarge01              1  1513 3724
+79    particles  0  CINE_U05_SootySmokeColumn02  5  250 4031  9
+80    particles  0  CINE_U05_SootySmokeColumn02  5  1585 4051  9
+80    particles  0  FireFactionLarge             2  1585 4051  12
+80    particles  0  CINE_U05_SootySmokeColumn02  5  604 3164  9
+82    particles  0  CINE_U05_SootySmokeColumn02  5  2336 4126  9
+82    particles  0  CINE_U05_SootySmokeColumn02  5  773 3942  9
+83    particles  0  CINE_U05_SootySmokeColumn02  5  660 3902  9
+85    particles  0  CINE_U05_SootySmokeColumn02  5  682 3348  9
+94    particles  0  CINE_U05_SootySmokeColumn02  5  941 4067  9
+94    particles  0  FireFactionLarge             2  941 4067  12
+96    particles  0  CINE_U05_SootySmokeColumn02  5  250 4044  9
+97    particles  0  CINE_U05_SootySmokeColumn02  5  1958 4128  9
+97    particles  0  FireFactionLarge             2  1958 4128  12
+97    particles  0  CINE_U05_SootySmokeColumn02  5  250 3725  9
+98    particles  0  CINE_U05_SootySmokeColumn02  5  870 3702  9
+98    particles  0  FireFactionLarge             2  870 3702  12
+98    particles  0  AutoFireLarge01              1  870 3702
+99    particles  0  CINE_U05_SootySmokeColumn02  5  1794 4215  9
+99    particles  0  FireFactionLarge             2  1794 4215  12
+99    particles  0  CINE_U05_SootySmokeColumn02  5  1610 4472  9
+101   particles  0  CINE_U05_SootySmokeColumn02  5  1264 4080  9
+102   particles  0  CINE_U05_SootySmokeColumn02  5  2103 3810  9
+102   particles  0  FireFactionLarge             2  2103 3810  12
+103   particles  0  CINE_U05_SootySmokeColumn02  5  1287 3303  9
+103   particles  0  FireFactionLarge             2  1287 3303  12
+104   particles  0  CINE_U05_SootySmokeColumn02  5  1175 2778  9
+110   particles  0  CINE_U05_SootySmokeColumn02  5  1159 3196  9
+111   particles  0  CINE_U05_SootySmokeColumn02  5  1979 4236  9
+118   particles  0  CINE_U05_SootySmokeColumn02  5  250 3800  9
+118   particles  0  CINE_U05_SootySmokeColumn02  5  2368 4032  9
+127   particles  0  CINE_U05_SootySmokeColumn02  5  693 4029  9
+127   particles  0  CINE_U05_SootySmokeColumn02  5  636 3930  9
+129   particles  0  CINE_U05_SootySmokeColumn02  5  1649 3857  9
+131   particles  0  CINE_U05_SootySmokeColumn02  5  752 3005  9
+131   particles  0  FireFactionLarge             2  752 3005  12
+131   particles  0  CINE_U05_SootySmokeColumn02  5  1418 3740  9
+131   particles  0  FireFactionLarge             2  1418 3740  12
+131   particles  0  AutoFireLarge01              1  1418 3740
+132   particles  0  CINE_U05_SootySmokeColumn02  5  1498 3211  9
+132   particles  0  FireFactionLarge             2  1498 3211  12
+134   particles  0  CINE_U05_SootySmokeColumn02  5  250 4087  9
+135   particles  0  CINE_U05_SootySmokeColumn02  5  1961 4387  9
+135   particles  0  FireFactionLarge             2  1961 4387  12
+137   particles  0  CINE_U05_SootySmokeColumn02  5  1120 3081  9
+137   particles  0  FireFactionLarge             2  1120 3081  12
+139   particles  0  CINE_U05_SootySmokeColumn02  5  1520 3374  9
+139   particles  0  FireFactionLarge             2  1520 3374  12
+140   particles  0  CINE_U05_SootySmokeColumn02  5  482 3568  9
+141   particles  0  CINE_U05_SootySmokeColumn02  5  2040 3475  9
+141   particles  0  CINE_U05_SootySmokeColumn02  5  1348 4515  9
+141   particles  0  CINE_U05_SootySmokeColumn02  5  923 4223  9
+145   particles  0  CINE_U05_SootySmokeColumn02  5  1506 4118  9
+146   particles  0  CINE_U05_SootySmokeColumn02  5  805 3219  9
+146   particles  0  FireFactionLarge             2  805 3219  12
+146   particles  0  CINE_U05_SootySmokeColumn02  5  2185 3457  9
+146   particles  0  CINE_U05_SootySmokeColumn02  5  1902 3477  9
+151   particles  0  CINE_U05_SootySmokeColumn02  5  1832 4225  9
+152   particles  0  CINE_U05_SootySmokeColumn02  5  250 3052  9
+157   particles  0  CINE_U05_SootySmokeColumn02  5  1081 3460  9
+157   particles  0  FireFactionLarge             2  1081 3460  12
+157   particles  0  AutoFireLarge01              1  1081 3460
+159   particles  0  CINE_U05_SootySmokeColumn02  5  1246 3276  9
+159   particles  0  FireFactionLarge             2  1246 3276  12
+160   particles  0  CINE_U05_SootySmokeColumn02  5  956 3936  9
+160   particles  0  FireFactionLarge             2  956 3936  12
+160   particles  0  AutoFireLarge01              1  956 3936
+160   particles  0  CINE_U05_SootySmokeColumn02  5  250 3601  9
+161   particles  0  CINE_U05_SootySmokeColumn02  5  550 4475  9
+161   particles  0  CINE_U05_SootySmokeColumn02  5  531 3668  9
+161   particles  0  CINE_U05_SootySmokeColumn02  5  335 3694  9
+164   particles  0  CINE_U05_SootySmokeColumn02  5  854 3659  9
+164   particles  0  FireFactionLarge             2  854 3659  12
+164   particles  0  AutoFireLarge01              1  854 3659
+164   particles  0  CINE_U05_SootySmokeColumn02  5  968 3639  9
+164   particles  0  FireFactionLarge             2  968 3639  12
+164   particles  0  AutoFireLarge01              1  968 3639
+167   particles  0  CINE_U05_SootySmokeColumn02  5  410 4214  9
+168   particles  0  CINE_U05_SootySmokeColumn02  5  497 4095  9
+168   particles  0  FireFactionLarge             2  497 4095  12
+169   particles  0  CINE_U05_SootySmokeColumn02  5  1688 3737  9
+169   particles  0  CINE_U05_SootySmokeColumn02  5  572 3659  9
+169   particles  0  FireFactionLarge             2  572 3659  12
+170   particles  0  CINE_U05_SootySmokeColumn02  5  250 3512  9
+174   particles  0  CINE_U05_SootySmokeColumn02  5  991 3216  9
+174   particles  0  FireFactionLarge             2  991 3216  12
+176   particles  0  CINE_U05_SootySmokeColumn02  5  1304 3959  9
+176   particles  0  FireFactionLarge             2  1304 3959  12
+176   particles  0  AutoFireLarge01              1  1304 3959
+179   particles  0  CINE_U05_SootySmokeColumn02  5  440 3574  9
+180   particles  0  CINE_U05_SootySmokeColumn02  5  2110 3279  9
+182   particles  0  CINE_U05_SootySmokeColumn02  5  1531 4460  9
+182   particles  0  FireFactionLarge             2  1531 4460  12
+182   particles  0  CINE_U05_SootySmokeColumn02  5  250 3954  9
+185   particles  0  CINE_U05_SootySmokeColumn02  5  913 2801  9
+187   particles  0  CINE_U05_SootySmokeColumn02  5  1156 2969  9
+191   particles  0  CINE_U05_SootySmokeColumn02  5  1295 3767  9
+191   particles  0  FireFactionLarge             2  1295 3767  12
+191   particles  0  AutoFireLarge01              1  1295 3767
+193   particles  0  CINE_U05_SootySmokeColumn02  5  1411 4198  9
+193   particles  0  CINE_U05_SootySmokeColumn02  5  2099 3438  9
+198   particles  0  CINE_U05_SootySmokeColumn02  5  351 3453  9
+198   particles  0  FireFactionLarge             2  351 3453  12
+198   particles  0  CINE_U05_SootySmokeColumn02  5  383 3594  9
+199   particles  0  CINE_U05_SootySmokeColumn02  5  1296 3834  9
+199   particles  0  FireFactionLarge             2  1296 3834  12
+199   particles  0  AutoFireLarge01              1  1296 3834
+199   particles  0  CINE_U05_SootySmokeColumn02  5  309 3118  9
+199   particles  0  FireFactionLarge             2  309 3118  12
+200   particles  0  CINE_U05_SootySmokeColumn02  5  603 3840  9
+200   particles  0  CINE_U05_SootySmokeColumn02  5  541 4042  9
+200   particles  0  FireFactionLarge             2  541 4042  12
+202   particles  0  CINE_U05_SootySmokeColumn02  5  1957 3290  9
+202   particles  0  FireFactionLarge             2  1957 3290  12
+210   particles  0  CINE_U05_SootySmokeColumn02  5  1455 3246  9
+211   particles  0  CINE_U05_SootySmokeColumn02  5  2008 3732  9
+211   particles  0  CINE_U05_SootySmokeColumn02  5  1066 3919  9
+211   particles  0  FireFactionLarge             2  1066 3919  12
+211   particles  0  AutoFireLarge01              1  1066 3919
+213   particles  0  CINE_U05_SootySmokeColumn02  5  1537 3786  9
+213   particles  0  FireFactionLarge             2  1537 3786  12
+213   particles  0  AutoFireLarge01              1  1537 3786
+213   particles  0  CINE_U05_SootySmokeColumn02  5  817 3763  9
+213   particles  0  FireFactionLarge             2  817 3763  12
+213   particles  0  AutoFireLarge01              1  817 3763
+216   particles  0  CINE_U05_SootySmokeColumn02  5  250 3570  9
+216   particles  0  FireFactionLarge             2  250 3570  12
+217   particles  0  CINE_U05_SootySmokeColumn02  5  1071 4359  9
+218   particles  0  CINE_U05_SootySmokeColumn02  5  997 3333  9
+218   particles  0  FireFactionLarge             2  997 3333  12
+218   particles  0  CINE_U05_SootySmokeColumn02  5  1216 4480  9
+219   particles  0  CINE_U05_SootySmokeColumn02  5  1825 3318  9
+220   particles  0  CINE_U05_SootySmokeColumn02  5  1018 4238  9
+220   particles  0  FireFactionLarge             2  1018 4238  12
+220   particles  0  CINE_U05_SootySmokeColumn02  5  894 4153  9
+221   particles  0  CINE_U05_SootySmokeColumn02  5  1857 2900  9
+221   particles  0  FireFactionLarge             2  1857 2900  12
+221   particles  0  CINE_U05_SootySmokeColumn02  5  1153 3253  9
+222   particles  0  CINE_U05_SootySmokeColumn02  5  250 4276  9
+222   particles  0  CINE_U05_SootySmokeColumn02  5  1420 3119  9
+222   particles  0  CINE_U05_SootySmokeColumn02  5  986 2982  9
+224   particles  0  CINE_U05_SootySmokeColumn02  5  2454 3563  9
+224   particles  0  FireFactionLarge             2  2454 3563  12
+224   particles  0  CINE_U05_SootySmokeColumn02  5  1693 4289  9
+225   particles  0  CINE_U05_SootySmokeColumn02  5  546 4138  9
+227   particles  0  CINE_U05_SootySmokeColumn02  5  1596 4101  9
+228   particles  0  CINE_U05_SootySmokeColumn02  5  1357 4173  9
+229   particles  0  CINE_U05_SootySmokeColumn02  5  1508 4005  9
+230   particles  0  CINE_U05_SootySmokeColumn02  5  373 3836  9
+230   particles  0  CINE_U05_SootySmokeColumn02  5  525 3755  9
+231   particles  0  CINE_U05_SootySmokeColumn02  5  1760 4475  9
+231   particles  0  FireFactionLarge             2  1760 4475  12
+234   particles  0  CINE_U05_SootySmokeColumn02  5  1032 2813  9
+234   particles  0  FireFactionLarge             2  1032 2813  12
+234   particles  0  CINE_U05_SootySmokeColumn02  5  1491 4338  9
+234   particles  0  CINE_U05_SootySmokeColumn02  5  1107 4051  9
+235   particles  0  CINE_U05_SootySmokeColumn02  5  948 3510  9
+235   particles  0  FireFactionLarge             2  948 3510  12
+235   particles  0  AutoFireLarge01              1  948 3510
+237   particles  0  CINE_U05_SootySmokeColumn02  5  1612 4395  9
+238   particles  0  CINE_U05_SootySmokeColumn02  5  2083 3303  9
+238   particles  0  FireFactionLarge             2  2083 3303  12
+241   particles  0  CINE_U05_SootySmokeColumn02  5  1765 3728  9
+243   particles  0  CINE_U05_SootySmokeColumn02  5  2023 3372  9
+246   particles  0  CINE_U05_SootySmokeColumn02  5  488 3151  9
+246   particles  0  CINE_U05_SootySmokeColumn02  5  675 4076  9
+248   particles  0  CINE_U05_SootySmokeColumn02  5  532 3247  9
+252   particles  0  CINE_U05_SootySmokeColumn02  5  1934 3879  9
+255   particles  0  CINE_U05_SootySmokeColumn02  5  773 3226  9
+255   particles  0  FireFactionLarge             2  773 3226  12
+257   particles  0  CINE_U05_SootySmokeColumn02  5  478 3789  9
+259   particles  0  CINE_U05_SootySmokeColumn02  5  2052 4326  9
+260   particles  0  CINE_U05_SootySmokeColumn02  5  1104 4350  9
+261   particles  0  CINE_U05_SootySmokeColumn02  5  824 3175  9
+263   particles  0  CINE_U05_SootySmokeColumn02  5  1328 3610  9
+263   particles  0  FireFactionLarge             2  1328 3610  12
+263   particles  0  AutoFireLarge01              1  1328 3610
+267   particles  0  CINE_U05_SootySmokeColumn02  5  250 3407  9
+267   particles  0  CINE_U05_SootySmokeColumn02  5  1558 3627  9
+267   particles  0  FireFactionLarge             2  1558 3627  12
+267   particles  0  AutoFireLarge01              1  1558 3627
+268   particles  0  CINE_U05_SootySmokeColumn02  5  2213 3236  9
+269   particles  0  CINE_U05_SootySmokeColumn02  5  839 4206  9
+270   particles  0  CINE_U05_SootySmokeColumn02  5  780 3515  9
+270   particles  0  FireFactionLarge             2  780 3515  12
+270   particles  0  AutoFireLarge01              1  780 3515
+271   particles  0  CINE_U05_SootySmokeColumn02  5  250 4246  9
+275   particles  0  CINE_U05_SootySmokeColumn02  5  250 3970  9
+276   particles  0  CINE_U05_SootySmokeColumn02  5  2095 3551  9
+279   particles  0  CINE_U05_SootySmokeColumn02  5  250 3472  9
+281   particles  0  CINE_U05_SootySmokeColumn02  5  1862 3878  9
+282   particles  0  CINE_U05_SootySmokeColumn02  5  416 3781  9
+282   particles  0  CINE_U05_SootySmokeColumn02  5  1656 3921  9
+287   particles  0  CINE_U05_SootySmokeColumn02  5  1600 3958  9
+288   particles  0  CINE_U05_SootySmokeColumn02  5  452 3280  9
+288   particles  0  CINE_U05_SootySmokeColumn02  5  1433 3492  9
+288   particles  0  FireFactionLarge             2  1433 3492  12
+288   particles  0  AutoFireLarge01              1  1433 3492
+290   particles  0  CINE_U05_SootySmokeColumn02  5  1798 3324  9
+290   particles  0  FireFactionLarge             2  1798 3324  12
+290   particles  0  CINE_U05_SootySmokeColumn02  5  1379 4017  9
+292   particles  0  CINE_U05_SootySmokeColumn02  5  566 3402  9
+292   particles  0  CINE_U05_SootySmokeColumn02  5  1746 3059  9
+293   particles  0  CINE_U05_SootySmokeColumn02  5  1389 3853  9
+293   particles  0  FireFactionLarge             2  1389 3853  12
+293   particles  0  AutoFireLarge01              1  1389 3853
+293   particles  0  CINE_U05_SootySmokeColumn02  5  567 3844  9
+297   particles  0  CINE_U05_SootySmokeColumn02  5  1371 3616  9
+297   particles  0  FireFactionLarge             2  1371 3616  12
+297   particles  0  AutoFireLarge01              1  1371 3616
+301   particles  0  CINE_U05_SootySmokeColumn02  5  1217 4435  9
+301   particles  0  CINE_U05_SootySmokeColumn02  5  1484 3299  9
+303   particles  0  CINE_U05_SootySmokeColumn02  5  959 3414  9
+303   particles  0  FireFactionLarge             2  959 3414  12
+303   particles  0  AutoFireLarge01              1  959 3414
+303   particles  0  CINE_U05_SootySmokeColumn02  5  2187 3753  9
+304   particles  0  CINE_U05_SootySmokeColumn02  5  1601 3475  9
+305   particles  0  CINE_U05_SootySmokeColumn02  5  535 3326  9
+306   particles  0  CINE_U05_SootySmokeColumn02  5  2252 3844  9
+308   particles  0  CINE_U05_SootySmokeColumn02  5  1626 3893  9
+317   particles  0  CINE_U05_SootySmokeColumn02  5  1434 4354  9
+318   particles  0  CINE_U05_SootySmokeColumn02  5  991 3200  9
+320   particles  0  CINE_U05_SootySmokeColumn02  5  1411 3848  9
+320   particles  0  FireFactionLarge             2  1411 3848  12
+320   particles  0  AutoFireLarge01              1  1411 3848
+322   particles  0  CINE_U05_SootySmokeColumn02  5  1677 3207  9
+323   particles  0  CINE_U05_SootySmokeColumn02  5  1708 3792  9
+323   particles  0  CINE_U05_SootySmokeColumn02  5  601 4409  9
+324   particles  0  CINE_U05_SootySmokeColumn02  5  1362 3663  9
+324   particles  0  FireFactionLarge             2  1362 3663  12
+324   particles  0  AutoFireLarge01              1  1362 3663
+325   particles  0  CINE_U05_SootySmokeColumn02  5  270 3840  9
+327   particles  0  CINE_U05_SootySmokeColumn02  5  932 3111  9
+329   particles  0  CINE_U05_SootySmokeColumn02  5  2024 4261  9
+332   particles  0  CINE_U05_SootySmokeColumn02  5  712 3231  9
+333   particles  0  CINE_U05_SootySmokeColumn02  5  2175 3664  9
+335   particles  0  CINE_U05_SootySmokeColumn02  5  1638 3929  9
+335   particles  0  FireFactionLarge             2  1638 3929  12
+335   particles  0  CINE_U05_SootySmokeColumn02  5  1288 3301  9
+338   particles  0  CINE_U05_SootySmokeColumn02  5  2080 4075  9
+338   particles  0  FireFactionLarge             2  2080 4075  12
+342   particles  0  CINE_U05_SootySmokeColumn02  5  812 3364  9
+346   particles  0  CINE_U05_SootySmokeColumn02  5  637 3773  9
+346   particles  0  CINE_U05_SootySmokeColumn02  5  250 3456  9
+346   particles  0  CINE_U05_SootySmokeColumn02  5  1019 3604  9
+346   particles  0  FireFactionLarge             2  1019 3604  12
+346   particles  0  AutoFireLarge01              1  1019 3604
+348   particles  0  CINE_U05_SootySmokeColumn02  5  250 3631  9
+351   particles  0  CINE_U05_SootySmokeColumn02  5  1735 4077  9
+357   particles  0  CINE_U05_SootySmokeColumn02  5  964 2830  9
+357   particles  0  FireFactionLarge             2  964 2830  12
+358   particles  0  CINE_U05_SootySmokeColumn02  5  427 3699  9
+359   particles  0  CINE_U05_SootySmokeColumn02  5  250 4198  9
+361   particles  0  CINE_U05_SootySmokeColumn02  5  1382 4203  9
+362   particles  0  CINE_U05_SootySmokeColumn02  5  507 4058  9
+362   particles  0  FireFactionLarge             2  507 4058  12
+366   particles  0  CINE_U05_SootySmokeColumn02  5  250 4132  9
+366   particles  0  FireFactionLarge             2  250 4132  12
+368   particles  0  CINE_U05_SootySmokeColumn02  5  2472 3812  9
+371   particles  0  CINE_U05_SootySmokeColumn02  5  373 4182  9
+371   particles  0  CINE_U05_SootySmokeColumn02  5  1923 3976  9
+371   particles  0  CINE_U05_SootySmokeColumn02  5  1464 2790  9
+374   particles  0  CINE_U05_SootySmokeColumn02  5  1635 3599  9
+375   particles  0  CINE_U05_SootySmokeColumn02  5  335 4123  9
+375   particles  0  CINE_U05_SootySmokeColumn02  5  1821 2983  9
+375   particles  0  FireFactionLarge             2  1821 2983  12
+379   particles  0  CINE_U05_SootySmokeColumn02  5  860 3671  9
+379   particles  0  FireFactionLarge             2  860 3671  12
+379   particles  0  AutoFireLarge01              1  860 3671
+382   particles  0  CINE_U05_SootySmokeColumn02  5  1138 4532  9
+384   particles  0  CINE_U05_SootySmokeColumn02  5  1928 3166  9
+384   particles  0  CINE_U05_SootySmokeColumn02  5  1333 4239  9
+384   particles  0  CINE_U05_SootySmokeColumn02  5  1208 3333  9
+385   particles  0  CINE_U05_SootySmokeColumn02  5  1874 3956  9
+385   particles  0  FireFactionLarge             2  1874 3956  12
+385   particles  0  CINE_U05_SootySmokeColumn02  5  1491 3636  9
+385   particles  0  FireFactionLarge             2  1491 3636  12
+385   particles  0  AutoFireLarge01              1  1491 3636
+387   particles  0  CINE_U05_SootySmokeColumn02  5  898 4338  9
+387   particles  0  CINE_U05_SootySmokeColumn02  5  2031 3737  9
+387   particles  0  CINE_U05_SootySmokeColumn02  5  1021 4224  9
+388   particles  0  CINE_U05_SootySmokeColumn02  5  615 3186  9
+388   particles  0  CINE_U05_SootySmokeColumn02  5  476 3485  9
+390   particles  0  CINE_U05_SootySmokeColumn02  5  2123 4196  9
+392   particles  0  CINE_U05_SootySmokeColumn02  5  754 3397  9
+399   particles  0  CINE_U05_SootySmokeColumn02  5  536 3187  9
+404   particles  0  CINE_U05_SootySmokeColumn02  5  747 3759  9
+404   particles  0  FireFactionLarge             2  747 3759  12
+404   particles  0  AutoFireLarge01              1  747 3759
+411   particles  0  CINE_U05_SootySmokeColumn02  5  1215 2930  9
+421   particles  0  CINE_U05_SootySmokeColumn02  5  1773 3982  9
+423   particles  0  CINE_U05_SootySmokeColumn02  5  673 3468  9
+429   particles  0  CINE_U05_SootySmokeColumn02  5  1503 2801  9
+430   particles  0  CINE_U05_SootySmokeColumn02  5  1500 4530  9
+430   particles  0  FireFactionLarge             2  1500 4530  12
+431   particles  0  CINE_U05_SootySmokeColumn02  5  1559 4135  9
+432   particles  0  CINE_U05_SootySmokeColumn02  5  382 3181  9
+432   particles  0  FireFactionLarge             2  382 3181  12
+432   particles  0  CINE_U05_SootySmokeColumn02  5  2034 3809  9
+437   particles  0  CINE_U05_SootySmokeColumn02  5  917 3636  9
+437   particles  0  FireFactionLarge             2  917 3636  12
+437   particles  0  AutoFireLarge01              1  917 3636
+442   particles  0  CINE_U05_SootySmokeColumn02  5  1815 3005  9
+443   particles  0  CINE_U05_SootySmokeColumn02  5  955 3657  9
+443   particles  0  FireFactionLarge             2  955 3657  12
+443   particles  0  AutoFireLarge01              1  955 3657
+444   particles  0  CINE_U05_SootySmokeColumn02  5  1352 3132  9
+446   particles  0  CINE_U05_SootySmokeColumn02  5  601 3959  9
+448   particles  0  CINE_U05_SootySmokeColumn02  5  1256 3561  9
+448   particles  0  FireFactionLarge             2  1256 3561  12
+448   particles  0  AutoFireLarge01              1  1256 3561
+449   particles  0  CINE_U05_SootySmokeColumn02  5  669 3357  9
+459   particles  0  CINE_U05_SootySmokeColumn02  5  1472 2917  9
+462   particles  0  CINE_U05_SootySmokeColumn02  5  1112 2944  9
+464   particles  0  CINE_U05_SootySmokeColumn02  5  1985 3412  9
+464   particles  0  CINE_U05_SootySmokeColumn02  5  779 3829  9
+464   particles  0  FireFactionLarge             2  779 3829  12
+464   particles  0  AutoFireLarge01              1  779 3829
+467   particles  0  CINE_U05_SootySmokeColumn02  5  475 3670  9
+467   particles  0  CINE_U05_SootySmokeColumn02  5  1657 3457  9
+467   particles  0  FireFactionLarge             2  1657 3457  12
+469   particles  0  CINE_U05_SootySmokeColumn02  5  616 3474  9
+470   particles  0  CINE_U05_SootySmokeColumn02  5  890 3814  9
+470   particles  0  FireFactionLarge             2  890 3814  12
+470   particles  0  AutoFireLarge01              1  890 3814
+481   particles  0  CINE_U05_SootySmokeColumn02  5  1073 4523  9
+481   particles  0  CINE_U05_SootySmokeColumn02  5  484 3143  9
+484   particles  0  CINE_U05_SootySmokeColumn02  5  582 4106  9
+494   particles  0  CINE_U05_SootySmokeColumn02  5  1177 3173  9
+502   particles  0  CINE_U05_SootySmokeColumn02  5  1479 3009  9
+506   particles  0  CINE_U05_SootySmokeColumn02  5  573 4059  9
+506   particles  0  FireFactionLarge             2  573 4059  12
+509   particles  0  CINE_U05_SootySmokeColumn02  5  1979 4127  9
+509   particles  0  CINE_U05_SootySmokeColumn02  5  250 3964  9
+511   particles  0  CINE_U05_SootySmokeColumn02  5  829 4189  9
+513   particles  0  CINE_U05_SootySmokeColumn02  5  250 4106  9
+519   particles  0  CINE_U05_SootySmokeColumn02  5  250 3142  9
+521   particles  0  CINE_U05_SootySmokeColumn02  5  2010 3792  9
+531   particles  0  CINE_U05_SootySmokeColumn02  5  497 3656  9
+540   particles  0  CINE_U05_SootySmokeColumn02  5  771 4387  9
+544   particles  0  CINE_U05_SootySmokeColumn02  5  1570 4309  9
+547   particles  0  CINE_U05_SootySmokeColumn02  5  1860 4189  9
+548   particles  0  CINE_U05_SootySmokeColumn02  5  250 3539  9
+552   particles  0  CINE_U05_SootySmokeColumn02  5  987 3588  9
+552   particles  0  FireFactionLarge             2  987 3588  12
+552   particles  0  AutoFireLarge01              1  987 3588
+554   particles  0  CINE_U05_SootySmokeColumn02  5  1404 4129  9
+555   particles  0  CINE_U05_SootySmokeColumn02  5  1246 3606  9
+555   particles  0  FireFactionLarge             2  1246 3606  12
+555   particles  0  AutoFireLarge01              1  1246 3606
+556   particles  0  CINE_U05_SootySmokeColumn02  5  250 3244  9
+563   particles  0  CINE_U05_SootySmokeColumn02  5  2215 3942  9
+563   particles  0  FireFactionLarge             2  2215 3942  12
+566   particles  0  CINE_U05_SootySmokeColumn02  5  672 3227  9
+567   particles  0  CINE_U05_SootySmokeColumn02  5  250 3721  9
+584   particles  0  CINE_U05_SootySmokeColumn02  5  858 3268  9
+585   particles  0  CINE_U05_SootySmokeColumn02  5  426 4268  9
+588   particles  0  CINE_U05_SootySmokeColumn02  5  250 3759  9
+588   particles  0  CINE_U05_SootySmokeColumn02  5  2119 3424  9
+592   particles  0  CINE_U05_SootySmokeColumn02  5  511 3256  9
+597   particles  0  CINE_U05_SootySmokeColumn02  5  250 4168  9
+597   particles  0  CINE_U05_SootySmokeColumn02  5  1309 3654  9
+597   particles  0  FireFactionLarge             2  1309 3654  12
+597   particles  0  AutoFireLarge01              1  1309 3654
+604   particles  0  CINE_U05_SootySmokeColumn02  5  2101 4139  9
+606   particles  0  CINE_U05_SootySmokeColumn02  5  1917 3398  9
+606   particles  0  CINE_U05_SootySmokeColumn02  5  928 2892  9
+606   particles  0  FireFactionLarge             2  928 2892  12
+607   particles  0  CINE_U05_SootySmokeColumn02  5  1024 3430  9
+607   particles  0  FireFactionLarge             2  1024 3430  12
+607   particles  0  AutoFireLarge01              1  1024 3430
+607   particles  0  CINE_U05_SootySmokeColumn02  5  1253 2937  9
+607   particles  0  FireFactionLarge             2  1253 2937  12
+609   particles  0  CINE_U05_SootySmokeColumn02  5  250 3767  9
+611   particles  0  CINE_U05_SootySmokeColumn02  5  548 3770  9
+613   particles  0  CINE_U05_SootySmokeColumn02  5  818 3182  9
+613   particles  0  CINE_U05_SootySmokeColumn02  5  729 4507  9
+618   particles  0  CINE_U05_SootySmokeColumn02  5  1894 3957  9
+622   particles  0  CINE_U05_SootySmokeColumn02  5  1329 3724  9
+622   particles  0  FireFactionLarge             2  1329 3724  12
+622   particles  0  AutoFireLarge01              1  1329 3724
+624   particles  0  CINE_U05_SootySmokeColumn02  5  764 3051  9
+625   particles  0  CINE_U05_SootySmokeColumn02  5  860 3272  9
+637   particles  0  CINE_U05_SootySmokeColumn02  5  1275 3427  9
+637   particles  0  FireFactionLarge             2  1275 3427  12
+637   particles  0  AutoFireLarge01              1  1275 3427
+638   particles  0  CINE_U05_SootySmokeColumn02  5  859 3619  9
+638   particles  0  FireFactionLarge             2  859 3619  12
+638   particles  0  AutoFireLarge01              1  859 3619
+641   particles  0  CINE_U05_SootySmokeColumn02  5  373 3701  9
+643   particles  0  CINE_U05_SootySmokeColumn02  5  1628 3342  9
+646   particles  0  CINE_U05_SootySmokeColumn02  5  1806 2877  9
+647   particles  0  CINE_U05_SootySmokeColumn02  5  1562 4550  9
+647   particles  0  FireFactionLarge             2  1562 4550  12
+652   particles  0  CINE_U05_SootySmokeColumn02  5  683 2907  9
+655   particles  0  CINE_U05_SootySmokeColumn02  5  925 3918  9
+655   particles  0  FireFactionLarge             2  925 3918  12
+655   particles  0  AutoFireLarge01              1  925 3918
+657   particles  0  CINE_U05_SootySmokeColumn02  5  537 3681  9
+657   particles  0  FireFactionLarge             2  537 3681  12
+665   particles  0  CINE_U05_SootySmokeColumn02  5  2034 3695  9
+665   particles  0  FireFactionLarge             2  2034 3695  12
+668   particles  0  CINE_U05_SootySmokeColumn02  5  1523 3579  9
+668   particles  0  FireFactionLarge             2  1523 3579  12
+668   particles  0  AutoFireLarge01              1  1523 3579
+673   particles  0  CINE_U05_SootySmokeColumn02  5  975 3206  9
+675   particles  0  CINE_U05_SootySmokeColumn02  5  250 4162  9
+680   particles  0  CINE_U05_SootySmokeColumn02  5  388 4062  9
+688   particles  0  CINE_U05_SootySmokeColumn02  5  373 4080  9
+688   particles  0  CINE_U05_SootySmokeColumn02  5  250 3313  9
+690   particles  0  CINE_U05_SootySmokeColumn02  5  811 3684  9
+690   particles  0  FireFactionLarge             2  811 3684  12
+690   particles  0  AutoFireLarge01              1  811 3684

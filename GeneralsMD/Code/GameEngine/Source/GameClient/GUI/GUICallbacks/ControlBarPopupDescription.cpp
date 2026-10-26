@@ -1064,13 +1064,16 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	// it still needs
 	if( card.hasStats )
 	{
+		// each figure ends in a short gloss of what it counts, so the card reads without a manual
 		UnicodeString figures;
-		auto row = [&]( const char *label, const UnicodeString &value )
+		auto row = [&]( const char *label, const UnicodeString &value, const char *hint )
 		{
 			figures.concat( u"\n" );
 			figures.concat( TheGameText->fetch( label ) );
 			figures.concat( u": " );
 			figures.concat( value );
+			figures.concat( u" " );
+			figures.concat( TheGameText->fetch( hint ) );
 		};
 		auto number = []( Int value )
 		{
@@ -1079,19 +1082,20 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			return text;
 		};
 		if( card.health > 0 )
-			row( "TOOLTIP:StatHealth", number( card.health ) );
+			row( "TOOLTIP:StatHealth", number( card.health ), "TOOLTIP:StatHealthHint" );
 		if( card.damage > 0 )
 		{
 			// a bomb that kills its carrier goes off once, so it has no rate
 			const Bool once = card.attacksPerSecond <= 0.0f;
-			row( "TOOLTIP:StatDamage", number( card.damage ) );
-			row( "TOOLTIP:StatAttackSpeed", once ? UnicodeString( u"-" ) : UnicodeString( MultiByteToWideCharSingleLine( rateFigure( card.attacksPerSecond ).c_str() ).c_str() ) );
-			row( "TOOLTIP:StatDamagePerSecond", once ? UnicodeString( u"-" ) : number( card.damagePerSecond ) );
-			row( "TOOLTIP:StatRange", number( card.range ) );
+			row( "TOOLTIP:StatDamage", number( card.damage ), "TOOLTIP:StatDamageHint" );
+			row( "TOOLTIP:StatAttackSpeed", once ? UnicodeString( u"-" ) : UnicodeString( MultiByteToWideCharSingleLine( rateFigure( card.attacksPerSecond ).c_str() ).c_str() ),
+					 "TOOLTIP:StatAttackSpeedHint" );
+			row( "TOOLTIP:StatDamagePerSecond", once ? UnicodeString( u"-" ) : number( card.damagePerSecond ), "TOOLTIP:StatDamagePerSecondHint" );
+			row( "TOOLTIP:StatRange", number( card.range ), "TOOLTIP:StatRangeHint" );
 		}
 		UnicodeString seconds;
 		seconds.format( TheGameText->fetch( "TOOLTIP:StatSeconds" ), card.buildSeconds );
-		row( "TOOLTIP:StatTime", seconds );
+		row( "TOOLTIP:StatTime", seconds, "TOOLTIP:StatTimeHint" );
 		if( !descrip.isEmpty() )
 			descrip.concat( u"\n" );
 		descrip.concat( figures );
@@ -1100,6 +1104,8 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	{
 		descrip.concat( u"\n\n" );
 		descrip.concat( TheGameText->fetch( card.hasStats ? "TOOLTIP:Upgrades" : "TOOLTIP:UpgradeChanges" ) );
+		descrip.concat( u" " );
+		descrip.concat( TheGameText->fetch( card.hasStats ? "TOOLTIP:UpgradesHint" : "TOOLTIP:UpgradeChangesHint" ) );
 		for( size_t each = 0; each < card.upgrades.size(); ++each )
 		{
 			const BuildTooltipUpgrade &upgrade = card.upgrades[ each ];
@@ -1124,7 +1130,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				if( !line.from.empty() )
 				{
 					descrip.concat( MultiByteToWideCharSingleLine( line.from.c_str() ).c_str() );
-					descrip.concat( u" → " );
+					descrip.concat( u" \x2192 " );
 				}
 				descrip.concat( MultiByteToWideCharSingleLine( line.to.c_str() ).c_str() );
 			}

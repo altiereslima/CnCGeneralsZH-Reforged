@@ -46,8 +46,12 @@
 
 #include "Platform/RenderTypes.h"
 #include "Platform/D3D9Posix.h"
+#include "Platform/WaterShoreOverlay.h"
+#include "Platform/WaterHullVisualLayout.h"
+#include <memory>
 
 #include <atomic>
+#include <memory>
 #include <map>
 #include <string>
 #include <vector>
@@ -61,6 +65,8 @@ struct CombinerDescription;
 struct VertexPipelineDescription;
 struct SdlVertexConstants;
 struct SdlPixelConstants;
+struct SdlWaterPixelConstants;
+struct SdlWaterVisualPixelConstants;
 
 /// AddRef and Release for one of the interfaces, counted as COM counts.
 template <class Interface>
@@ -159,10 +165,37 @@ public:
 		STREAM_COUNT = 16,
 		RENDER_TARGET_COUNT = 4,
 		VERTEX_SHADER_CONSTANT_COUNT = 256,
-		PIXEL_SHADER_CONSTANT_COUNT = 32
+		// Existing water uses c0-c175; exact mesh metadata is c176-c183, c184-c191
+		// remains spare, and c192-c895 supplies the three bounded fragment packet blocks.
+		PIXEL_SHADER_CONSTANT_COUNT = WaterHullVisualLayout::PixelRegisterCount
 	};
 
 	PosixDevice9(PosixDirect3D9 *adapter, RenderWindow window, const D3DPRESENT_PARAMETERS &parameters);
+
+	bool Fill_Sun_Smoke(const float *casters, unsigned count, float strength);
+	void Set_Sun_Caster_Effect(unsigned effect, const float parameters[4]);
+	void Get_Sun_Caster_Effect(unsigned &effect, float parameters[4]) const;
+	void Set_Smoke_Glow(bool glow) { SmokeGlow = glow; }
+	bool Begin_Sun_Shadow(unsigned size);
+	// Optional submission status is independent of whether the shadow image can be used.
+	bool End_Sun_Shadow(bool *submission_ok = NULL);
+	bool Set_Sun_Shadow_Parameters(float bias, float strength, float widest, float narrowest,
+		float texelsPerGap, float unitsPerDepth, float skyFill);
+	bool Sun_Receives_View();
+	bool Sun_Owns_Scene_Shadows();
+	bool Enter_Sun_Scene(bool eligible);
+	void Leave_Sun_Scene(bool eligible);
+	void Exclude_Sun_Receivers(bool exclude);
+	bool Sun_Receivers_Excluded() const { return SunExclusions != 0 || SunSceneExclusions != 0; }
+	bool Sun_Scene_Excluded() const { return SunSceneExclusions != 0; }
+	void Clear_Sun_Shadow();
+	std::string Sun_Shadow_Report();
+	bool Read_Sun_Shadow(std::vector<float> &depth);
+	// Render-only explicit metadata: never infers .wak ownership from texture names.
+	void Shore_Begin(bool enabled);
+	void Shore_End();
+	void Shore_Patch(const WaterShoreOverlay::Quad *patch);
+	void Shore_Track(const WaterShoreOverlay::Quad *track);
 
 	// What the resource code (PosixDevice9Resources.cpp) reads.
 	const D3DPRESENT_PARAMETERS & Get_Present_Parameters() const { return Parameters; }
@@ -230,6 +263,9 @@ public:
 	bool Build_Vertex_Description(VertexPipelineDescription &description, std::string *refusal = NULL) const;
 	/// The two constant blocks, packed to match the descriptions above.
 	void Build_Constants(SdlVertexConstants &vertex, SdlPixelConstants &pixel) const;
+	void Build_Water_Constants(const SdlPixelConstants &pixel, SdlWaterPixelConstants &water) const;
+	void Build_Water_Visual_Constants(const SdlWaterPixelConstants &water, SdlWaterVisualPixelConstants &visual) const;
+	bool Water_Foam_History_Available() const;
 
 	/// Makes the implicit back buffer (and depth surface, when the present parameters ask for one) from
 	/// the present parameters, and binds them as render target 0 and the depth surface.  CreateDevice and
@@ -326,6 +362,37 @@ public:
 	RenderResult SetPixelShaderConstantF(unsigned int start, const float *data, unsigned int count) override;
 
 protected:
+	struct SunCapture;
+	std::shared_ptr<SunCapture> Sun;
+	bool SunActive = false, SunFailed = false, SunReady = false;
+	bool SmokeGlow = false;
+	unsigned SunCasterEffect = 0;
+	float SunCasterOpacity = 1;
+	bool Sun_Camera_Space() const;
+	bool Sun_Target(struct SdlTarget &target) const;
+	unsigned SunExclusions = 0;
+	unsigned SunSceneDepth = 0, SunSceneExclusions = 0;
+	uint64_t SunSceneGeneration = 0;
+	uint64_t SunSolidReceivers = 0, SunGroundReceivers = 0;
+	uint64_t SunCameraReceivers = 0, SunAlphaReceivers = 0, SunCloakCasters = 0;
+	uint64_t SunReceiversAtSceneStart = 0;
+	std::string SunReceiverFailure, SunCaptureFailure;
+	void Fail_Sun_Receiver(const char *reason);
+	bool Sun_Receives_Target(const struct SdlTarget &target) const;
+	bool Sun_Receiving(int vertexProgram, int pixelProgram, const struct SdlTarget &target) const;
+	void Build_Sun_Constants(struct SdlEnginePixelConstants &constants) const;
+	struct SDL_GPUTexture *Sun_Texture() const;
+	struct SDL_GPUSampler *Sun_Sampler() const;
+	struct ShoreRegion {
+		WaterShoreOverlay::Quad patch;
+		WaterShoreOverlay::View view;
+		float terrain[4];
+		std::shared_ptr<IDirect3DBaseTexture9> height, optical;
+	};
+	bool ShoreActive=false, ShoreHasPatch=false, ShoreHasTrack=false;
+	WaterShoreOverlay::Quad ShorePatch, ShoreTrack;
+	std::vector<ShoreRegion> ShoreRegions; // <=128; COM refs released at scope end/reset/destruction
+
 	~PosixDevice9() override;
 
 	/// Drops every implicit surface and every render target and depth binding.  Reset and the destructor.

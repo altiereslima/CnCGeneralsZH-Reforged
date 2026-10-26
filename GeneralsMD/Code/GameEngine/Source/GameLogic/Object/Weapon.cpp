@@ -236,6 +236,8 @@ const FieldParse WeaponTemplate::TheWeaponTemplateFieldParseTable[] =
 	{ "RequestAssistRange",				INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_requestAssistRange) },		
 	{ "AcceptableAimDelta",				INI::parseAngleReal,										NULL,							offsetof(WeaponTemplate, m_aimDelta) },		
 	{ "ScatterRadius",						INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_scatterRadius) },		
+	{ "BlindScatterRadius",				INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_blindScatterRadius) },
+	{ "SeeksMostValuable",				INI::parseBool,													NULL,							offsetof(WeaponTemplate, m_seeksMostValuable) },
 	{ "ScatterTargetScalar",			INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_scatterTargetScalar) },		
 	{ "ScatterRadiusVsInfantry",	INI::parseReal,													NULL,							offsetof( WeaponTemplate, m_infantryInaccuracyDist ) },
 	{ "DamageType",								DamageTypeFlags::parseSingleBitFromINI,	NULL,							offsetof(WeaponTemplate, m_damageType) },		
@@ -243,7 +245,9 @@ const FieldParse WeaponTemplate::TheWeaponTemplateFieldParseTable[] =
 	{ "DeathType",								INI::parseIndexList,										TheDeathNames,		offsetof(WeaponTemplate, m_deathType) },		
 	{ "WeaponSpeed",							INI::parseVelocityReal,									NULL,							offsetof(WeaponTemplate, m_weaponSpeed) },		
 	{ "MinWeaponSpeed",						INI::parseVelocityReal,									NULL,							offsetof(WeaponTemplate, m_minWeaponSpeed) },		
-	{ "ScaleWeaponSpeed",					INI::parseBool,													NULL,							offsetof(WeaponTemplate, m_isScaleWeaponSpeed) },		
+	{ "ScaleWeaponSpeed",					INI::parseBool,													NULL,							offsetof(WeaponTemplate, m_isScaleWeaponSpeed) },
+	{ "BallisticFlightTime",			INI::parseDurationUnsignedInt,					NULL,							offsetof(WeaponTemplate, m_ballisticFlightFrames) },
+	{ "BallisticPeakHeight",			INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_ballisticPeakHeight) },
 	{ "WeaponRecoil",							INI::parseAngleReal,										NULL,							offsetof(WeaponTemplate, m_weaponRecoil) },		
 	{ "MinTargetPitch",						INI::parseAngleReal,										NULL,							offsetof(WeaponTemplate, m_minTargetPitch) },		
 	{ "MaxTargetPitch",						INI::parseAngleReal,										NULL,							offsetof(WeaponTemplate, m_maxTargetPitch) },		
@@ -323,6 +327,8 @@ WeaponTemplate::WeaponTemplate() : m_nextTemplate(NULL)
 	m_requestAssistRange						= 0.0f;
 	m_aimDelta											= 0.0f;
 	m_scatterRadius									= 0.0f;
+	m_blindScatterRadius						= 0.0f;
+	m_seeksMostValuable							= FALSE;
 	m_scatterTargetScalar						= 0.0f;
 	m_shockWaveAmount								= 0.0f;
 	m_shockWaveRadius								= 0.0f;
@@ -332,6 +338,8 @@ WeaponTemplate::WeaponTemplate() : m_nextTemplate(NULL)
 	m_weaponSpeed										= 999999.0f;	// effectively instant
 	m_minWeaponSpeed								= 999999.0f;	// effectively instant
 	m_isScaleWeaponSpeed						= FALSE;
+	m_ballisticFlightFrames					= 0;
+	m_ballisticPeakHeight						= 0.0f;
 	m_weaponRecoil									= 0.0f;		// no recoil
 	m_minTargetPitch								= -PI;
 	m_maxTargetPitch								= PI;
@@ -562,6 +570,17 @@ Real WeaponTemplate::getMinimumAttackRange() const
 Real WeaponTemplate::getUnmodifiedAttackRange() const
 {
 	return m_attackRange;
+}
+
+//-------------------------------------------------------------------------------------------------
+// A parabola that lands on time and peaks h over the line at mid flight leaves at a vertical speed of
+// (rise + 4h) over the flight time, against a horizontal speed of distance over the same time, so
+// the time cancels out of the pitch. A close target gets the steep lob, a far one the flat shot.
+Real WeaponTemplate::getBallisticLaunchPitch(const Coord3D& from, const Coord3D& to) const
+{
+	const Real PEAK_HEIGHT_TO_LAUNCH_RISE = 4.0f;
+	Real run = sqrtf(sqr(to.x - from.x) + sqr(to.y - from.y));
+	return ATan2(to.z - from.z + PEAK_HEIGHT_TO_LAUNCH_RISE * m_ballisticPeakHeight, run);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1054,11 +1073,18 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 
 	Coord3D projectileDestination = *victimPos; //Need to copy this, as we have a pointer to their actual position
 	Real scatterRadius = 0.0f;
-	if( m_scatterRadius > 0.0f || m_infantryInaccuracyDist > 0.0f && victimObj && victimObj->isKindOf( KINDOF_INFANTRY ) )
+	/* Turkiye's artillery fires past its own sight and leans on a spotter.  A shot at ground its
+		 player does not see (a force fire into the fog, a target the spotter lost) spreads by
+		 BlindScatterRadius on top.  The shroud is logic state, the same every machine reads. */
+	Real blindScatter = 0.0f;
+	if( m_blindScatterRadius > 0.0f && sourceObj && sourceObj->getControllingPlayer() &&
+			ThePartitionManager->getShroudStatusForPlayer( sourceObj->getControllingPlayer()->getPlayerIndex(), victimPos ) != CELLSHROUD_CLEAR )
+		blindScatter = m_blindScatterRadius;
+	if( m_scatterRadius > 0.0f || blindScatter > 0.0f || m_infantryInaccuracyDist > 0.0f && victimObj && victimObj->isKindOf( KINDOF_INFANTRY ) )
 	{
 		// This weapon scatters, so clear the victimObj, as we are no longer shooting it directly,
 		// and find a random point within the radius to shoot at as victimPos
-		scatterRadius = m_scatterRadius;
+		scatterRadius = m_scatterRadius + blindScatter;
 
 		// if it's an object, aim at the center, not the ground part (srj)
 		PathfindLayerEnum targetLayer = LAYER_GROUND;
@@ -1078,6 +1104,10 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 		}
 
 		//victimObj = NULL; // his position is already in victimPos, if he existed
+
+		// a rank's steadier hand on the guns
+		if( sourceObj )
+			scatterRadius *= 1.0f - sourceObj->getRankPerk( RANK_PERK_SCATTER );
 
 		//Randomize the scatter radius (sometimes it can be more accurate than others)
 		scatterRadius = GameLogicRandomValueReal( 0, scatterRadius );
@@ -2121,8 +2151,34 @@ void Weapon::computeBonus(const Object *source, WeaponBonusConditionFlags extraB
 			flags |= theirContain->getWeaponBonusPassedToPassengers();
 	}
 
-	if (TheGlobalData->m_weaponBonusSet)
+	// a unit on a rank ladder takes its grade's rate of fire, damage and range instead of the global
+	// VETERAN, ELITE and HERO lines, and from the Veteran pin its side's own lines (China's horde)
+	const ThingTemplate* sourceTemplate = source->getTemplate();
+	const RankLadder* ladder = TheGlobalData->getRankLadder(sourceTemplate);
+	if (ladder)
+	{
+		const WeaponBonusConditionFlags RANK_FLAGS = (1 << WEAPONBONUSCONDITION_VETERAN)
+			| (1 << WEAPONBONUSCONDITION_ELITE) | (1 << WEAPONBONUSCONDITION_HERO);
+		TheGlobalData->m_weaponBonusSet->appendBonuses(flags & ~RANK_FLAGS, bonus);
+		const WeaponBonusSet* sideSet = TheGlobalData->getVeterancyWeaponBonus(sourceTemplate, source->getVeterancyLevel());
+		if (sideSet)
+			sideSet->appendBonuses(flags, bonus);
+		const Real* stat = ladder->m_stat[MIN(source->getRankGrade(), ladder->m_grades)];
+		bonus.setField(WeaponBonus::RATE_OF_FIRE, bonus.getField(WeaponBonus::RATE_OF_FIRE) + stat[RANK_STAT_RATE_OF_FIRE] - 1.0f);
+		bonus.setField(WeaponBonus::DAMAGE, bonus.getField(WeaponBonus::DAMAGE) + stat[RANK_STAT_DAMAGE] - 1.0f);
+		bonus.setField(WeaponBonus::RANGE, bonus.getField(WeaponBonus::RANGE) + stat[RANK_STAT_RANGE] - 1.0f);
+	}
+	else if (TheGlobalData->m_weaponBonusSet)
 		TheGlobalData->m_weaponBonusSet->appendBonuses(flags, bonus);
+
+	// a leader's auras reach any friendly unit, on a ladder or not; range only an artillery piece's
+	const Real auraRateOfFire = MIN(source->getRankAura(RANK_AURA_RATE_OF_FIRE), TheGlobalData->m_rankAuraRateOfFireCap);
+	if (auraRateOfFire > 0.0f)
+		bonus.setField(WeaponBonus::RATE_OF_FIRE, bonus.getField(WeaponBonus::RATE_OF_FIRE) + auraRateOfFire);
+	const Real auraRange = source->getRankAura(RANK_AURA_RANGE);
+	if (auraRange > 0.0f && (sourceTemplate->acquiresBeyondVision() || m_template->getMinimumAttackRange() > 0.0f))
+		bonus.setField(WeaponBonus::RANGE, bonus.getField(WeaponBonus::RANGE) + auraRange);
+
 	const WeaponBonusSet* extra = m_template->getExtraBonus();
 	if (extra)
 		extra->appendBonuses(flags, bonus);
@@ -3053,9 +3109,63 @@ void Weapon::preFireWeapon( const Object *source, const Object *victim )
 }
 
 //-------------------------------------------------------------------------------------------------
+struct ValuedEnemy
+{
+	Int cost;
+	Object *obj;
+};
+
+static Bool isMoreValuable( const ValuedEnemy& a, const ValuedEnemy& b )
+{
+	if( a.cost != b.cost )
+		return a.cost > b.cost;
+	return a.obj->getID() < b.obj->getID();
+}
+
+void Weapon_findMostValuableEnemies( const Object *source, const Coord3D *center, Real radius,
+																		 Int maxCount, std::vector<Object*>& found )
+{
+	found.clear();
+
+	PartitionFilterRelationship filterEnemies( source, PartitionFilterRelationship::ALLOW_ENEMIES );
+	PartitionFilterAlive filterAlive;
+	PartitionFilterSameMapStatus filterMapStatus( source );
+	PartitionFilterStealthedAndUndetected filterHidden( source, FALSE );
+	PartitionFilter *filters[] = { &filterEnemies, &filterAlive, &filterMapStatus, &filterHidden, NULL };
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( center, radius, FROM_CENTER_2D, filters );
+	MemoryPoolObjectHolder hold( iter );
+
+	std::vector<ValuedEnemy> candidates;
+	for( Object *obj = iter->first(); obj; obj = iter->next() )
+	{
+		if( obj->isAirborneTarget() || obj->isKindOf( KINDOF_PROJECTILE ) || obj->isKindOf( KINDOF_MINE ) ||
+				obj->isKindOf( KINDOF_UNATTACKABLE ) || obj->isKindOf( KINDOF_INERT ) )
+			continue;
+
+		ValuedEnemy candidate;
+		candidate.cost = obj->getTemplate()->calcCostToBuild( obj->getControllingPlayer() );
+		candidate.obj = obj;
+		candidates.push_back( candidate );
+	}
+
+	std::sort( candidates.begin(), candidates.end(), isMoreValuable );
+	for( Int i = 0; i < (Int)candidates.size() && i < maxCount; ++i )
+		found.push_back( candidates[ i ].obj );
+}
+
+//-------------------------------------------------------------------------------------------------
 Bool Weapon::fireWeapon(const Object *source, Object *target, ObjectID* projectileID)
 {
 	//CRCDEBUG_LOG(("Weapon::fireWeapon() for %s at %s\n", DescribeObject(source).str(), DescribeObject(target).str()));
+	/* Turkiye's swarm software: the munition picks its own target, the most expensive enemy it can
+		 reach, whatever the drone was aimed at. */
+	if( m_template->seeksMostValuable() && target )
+	{
+		std::vector<Object*> found;
+		Weapon_findMostValuableEnemies( source, source->getPosition(), getAttackRange( source ), 1, found );
+		if( !found.empty() )
+			target = found.front();
+	}
 	return privateFireWeapon( source, target, NULL, false, false, 0, projectileID, TRUE );
 }
 

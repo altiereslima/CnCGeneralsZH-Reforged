@@ -1,0 +1,21 @@
+# Renderer prototype pairs on Alpine Assault (Cinema/geproto_alpine.txt): the minefx Chinese outpost
+# by the rail yard, two supply trucks shuttling across the field and an American column that reaches
+# the outpost and fights it. Same seed and frames for every switch set.
+#
+#   generals.exe -win -borderless -quickstart -noshellmap -multiInstance -fps 120 -noFPSLimit
+#     -particlecap 2500 -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionChina -side 1 FactionAmerica -seed 1 -scenario geproto_alpine
+#     -cinema geproto_alpine -video 180 1380 geproto -maxframes 1440 [-protoXxx]
+
+30    spawn      0  ChinaPowerPlant         1  620 780
+30    spawn      0  ChinaBarracks           1  900 770
+30    spawn      0  ChinaBunker             1  880 1000
+
+30    spawn      0  ChinaVehicleSupplyTruck 2  980 960 40
+40    move       0  ChinaVehicleSupplyTruck    620 940
+600   move       0  ChinaVehicleSupplyTruck    980 960
+
+600   spawn      1  AmericaTankCrusader     3  1020 830 30
+600   spawn      1  AmericaVehicleHumvee    1  1080 830
+610   attackmove 1  AmericaTankCrusader        760 880
+610   attackmove 1  AmericaVehicleHumvee       760 880

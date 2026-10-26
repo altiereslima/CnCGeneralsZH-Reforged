@@ -166,8 +166,11 @@ public:
 	/** The skirmish side a computer player on pt copies its scripts from, and in *teams (when asked) the
 		* record its teams are in.  Under -modfactions a mod faction takes its own mod's side of the same
 		* Side (that mod's SkirmishScripts.scb, loadModSkirmishScripts) and retail's when the mod ships
-		* none; a retail faction takes retail's.  NULL when there is none. */
+		* none; a retail faction takes retail's.  A faction no script was written for (Turkiye) takes its
+		* BaseSide's original faction's.  NULL when there is none. */
 	SidesInfo *findSkirmishSideFor(const PlayerTemplate *pt, TeamsInfoRec **teams);
+	/// findSkirmishSideFor's search for one Side name
+	SidesInfo *findSkirmishSideNamed(const AsciiString& side, Int mod, TeamsInfoRec **teams);
 	/// how well a skirmish side of candidateSide from candidateMod (-1 retail) fits a player of side from
 	/// mod: 2 the player's own, 1 retail's standing in for a mod faction, 0 not at all
 	static Int skirmishSideFit(const AsciiString& candidateSide, Int candidateMod, const AsciiString& side, Int mod);

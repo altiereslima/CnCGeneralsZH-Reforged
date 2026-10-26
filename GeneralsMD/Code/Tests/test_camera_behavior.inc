@@ -541,6 +541,23 @@ TEST(right_drag_pans_past_the_drag_tolerance_and_middle_drag_turns)
 	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP, 350, 300);
 	CHECK(!f.camera.isMovingCamera());
 
+	// Shift flips the 45 degree steps for the drag: with them off, the held key lands it on an eighth,
+	// and with them on it turns freely.  0.1 off an eighth is no eighth, so each check can fail.
+	f.view.setAngle( 0.1f );
+	f.keyboard.modifiers(KEY_STATE_LSHIFT);
+	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_DOWN, 300, 300);
+	mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 370, 300);
+	CHECK_NEAR(f.view.getAngle(), PI / 4.0f, 0.0001f);
+	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP, 370, 300);
+	f.global->m_snapCameraRotateTo45 = TRUE;
+	f.view.setAngle( 0.1f );
+	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_DOWN, 300, 300);
+	mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 310, 300);
+	CHECK_NEAR(f.view.getAngle(), 0.2f, 0.0001f);
+	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP, 310, 300);
+	f.keyboard.modifiers(0);
+	f.global->m_snapCameraRotateTo45 = FALSE;
+
 	// Classic's right drag is the same retail scroll, started by the press itself as 1.04 started it
 	f.global->m_mouseStyle = MOUSE_STYLE_CLASSIC;
 	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300);

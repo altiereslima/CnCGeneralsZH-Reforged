@@ -73,8 +73,9 @@ public:
 	ProductionEntry( void );
 	// virtual destructor provided by memory pool object
 
-	/// query what kind of thing is being produced by this entry
-	const ThingTemplate *getProductionObject( void ) const { return m_objectToProduce; }
+	/// query what kind of thing is being produced by this entry; NULL for an upgrade, whose template
+	/// shares the storage and read as a ThingTemplate is garbage
+	const ThingTemplate *getProductionObject( void ) const { return m_type == PRODUCTION_UNIT ? m_objectToProduce : NULL; }
 
 	/// query what kind of upgrade is being produced by this entry
 	const UpgradeTemplate *getProductionUpgrade( void ) const { return m_upgradeToResearch; }

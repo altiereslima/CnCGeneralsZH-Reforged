@@ -32,6 +32,7 @@
 #include "Common/ActionManager.h"
 #include "Common/GlobalData.h"
 #include "Common/MiscAudio.h"
+#include "Common/Player.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
 #include "GameClient/Drawable.h"
@@ -244,8 +245,10 @@ static ParkingPlaceBehaviorInterface* getPP(ObjectID id, Object** airfieldPP = N
 	if (airfieldPP)
 		*airfieldPP = NULL;
 
+	// the Kargu base's drones roll off a superweapon's runways, which is no airfield to anyone else
 	Object* airfield = TheGameLogic->findObjectByID( id );
-	if (airfield == NULL || airfield->isEffectivelyDead() || !airfield->isKindOf(KINDOF_FS_AIRFIELD) || airfield->testStatus(OBJECT_STATUS_SOLD))
+	if (airfield == NULL || airfield->isEffectivelyDead() || airfield->testStatus(OBJECT_STATUS_SOLD) ||
+			!(airfield->isKindOf(KINDOF_FS_AIRFIELD) || airfield->isKindOf(KINDOF_FS_SUPERWEAPON)))
 		return NULL;
 
 	if (airfieldPP)
@@ -1978,6 +1981,7 @@ JetAIUpdateModuleData::JetAIUpdateModuleData()
 	m_lockonFreq = ConvertRetailPerFrameRate(0.5f);
 	m_lockonAngleSpin = 720;
 	m_returnToBaseIdleTime = 0;
+	m_kamikazeRange = 0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2007,6 +2011,7 @@ JetAIUpdateModuleData::JetAIUpdateModuleData()
 		{ "LockonAngleSpin",							INI::parseAngleReal, NULL, offsetof( JetAIUpdateModuleData, m_lockonAngleSpin ) },
 		{ "LockonBlinky",									INI::parseBool, NULL, offsetof( JetAIUpdateModuleData, m_lockonBlinky ) },
 		{ "ReturnToBaseIdleTime",					INI::parseDurationUnsignedInt, NULL, offsetof( JetAIUpdateModuleData, m_returnToBaseIdleTime ) },
+		{ "KamikazeRange",								INI::parseReal, NULL, offsetof( JetAIUpdateModuleData, m_kamikazeRange ) },
 		{ 0, 0, 0, 0 }
 	};
   p.add(dataFieldParse);
@@ -2037,6 +2042,7 @@ JetAIUpdate::JetAIUpdate( Thing *thing, const ModuleData* moduleData ) : AIUpdat
 	m_returnToBaseFrame = 0;
 	m_lockonDrawable = NULL;
 	m_landingPosForHelipadStuff.zero();
+	m_kamikazeArea.zero();
 
 	//Added By Sadullah Nader
 	//Initializations missing and needed 
@@ -2149,6 +2155,27 @@ void JetAIUpdate::getProducerLocation()
 }
 
 //-------------------------------------------------------------------------------------------------
+/// a kamikaze looking for a new target weighs this many of the dearest in its area
+static const Int KAMIKAZE_RETARGET_CANDIDATES = 32;
+
+/// what the other live drones of one kind and owner are heading for
+struct KamikazeHeadings
+{
+	const Object* self;
+	std::vector<ObjectID> targets;
+};
+
+static void collectKamikazeHeading(Object* obj, void* userData)
+{
+	KamikazeHeadings* headings = (KamikazeHeadings*)userData;
+	// the template itself: isEquivalentTo would take the jet a drone is a reskin of as well
+	if (obj == headings->self || obj->isEffectivelyDead() ||
+			obj->getTemplate()->getFinalOverride() != headings->self->getTemplate()->getFinalOverride())
+		return;
+	headings->targets.push_back(obj->getAIUpdateInterface()->getJetAIUpdate()->friend_getKamikazeTargetID());
+}
+
+//-------------------------------------------------------------------------------------------------
 UpdateSleepTime JetAIUpdate::update()
 {
 	const JetAIUpdateModuleData* d = getJetAIUpdateModuleData();
@@ -2158,6 +2185,36 @@ UpdateSleepTime JetAIUpdate::update()
 	Object* jet = getObject();
 
 	ParkingPlaceBehaviorInterface* pp = getPP(getObject()->getProducerID());
+
+	// a kamikaze whose target is gone takes the dearest enemy left in the area it was sent to that no
+	// other drone of its swarm is heading for, the dearest of all when every one has a drone already, or
+	// dives into the area, rather than flying home with its one shot (notifyVictimIsDead) to land and wait
+	if (d->m_kamikazeRange > 0.0f && getFlag(ALLOW_AIR_LOCO) && !getFlag(TAKEOFF_IN_PROGRESS) &&
+			!getFlag(LANDING_IN_PROGRESS) && !getFlag(HAS_PENDING_COMMAND) && AIUpdateInterface::isIdle())
+	{
+		std::vector<Object*> found;
+		Weapon_findMostValuableEnemies(jet, &m_kamikazeArea, d->m_kamikazeRange, KAMIKAZE_RETARGET_CANDIDATES, found);
+		KamikazeHeadings headings;
+		headings.self = jet;
+		jet->getControllingPlayer()->iterateObjects(collectKamikazeHeading, &headings);
+		Object* pick = found.empty() ? NULL : found.front();
+		for (std::vector<Object*>::const_iterator it = found.begin(); it != found.end(); ++it)
+		{
+			if (std::find(headings.targets.begin(), headings.targets.end(), (*it)->getID()) == headings.targets.end())
+			{
+				pick = *it;
+				break;
+			}
+		}
+		DEBUG_LOG(("KAMIKAZE frame %d '%s' %d lost its target at (%.0f,%.0f), %s %d\n", TheGameLogic->getFrame(), jet->getTemplate()->getName().str(),
+			jet->getID(), jet->getPosition()->x, jet->getPosition()->y, pick ? pick->getTemplate()->getName().str() : "dives into the area",
+			pick ? (Int)pick->getID() : 0));
+		// a script's order, as the scramble gave (ParkingPlaceBehavior::launchScramble), so it chases
+		if (pick)
+			aiAttackObject(pick, NO_MAX_SHOTS_LIMIT, CMD_FROM_SCRIPT);
+		else
+			aiAttackPosition(&m_kamikazeArea, NO_MAX_SHOTS_LIMIT, CMD_FROM_SCRIPT);
+	}
 
 	// If idle & out of ammo, return
 	// have to call our parent's isIdle, because we override it to never return true
@@ -2364,6 +2421,15 @@ UpdateSleepTime JetAIUpdate::update()
 
 
 	/*UpdateSleepTime ret =*/ AIUpdateInterface::update();
+
+	// a kamikaze's shot is the jet itself: the projectile it just let go flies on from where it was
+	if (d->m_kamikazeRange > 0.0f && getFlag(ALLOW_AIR_LOCO) && isOutOfSpecialReloadAmmo())
+	{
+		DEBUG_LOG(("KAMIKAZE frame %d '%s' %d dives from (%.0f,%.0f) at %.0f above the ground\n", TheGameLogic->getFrame(),
+			jet->getTemplate()->getName().str(), jet->getID(), jet->getPosition()->x, jet->getPosition()->y, jet->getHeightAboveTerrain()));
+		TheGameLogic->destroyObject(jet);
+	}
+
 	//return (mine < ret) ? mine : ret;
 	/// @todo srj -- someday, make sleepy. for now, must not sleep.
 	return UPDATE_SLEEP_NONE;
@@ -2598,6 +2664,16 @@ Bool JetAIUpdate::getTreatAsAircraftForLocoDistToGoal() const
 }
 
 //----------------------------------------------------------------------------------------
+/** A scrambled jet skips the taxi, the wait for the runway and the pause on it: the order it was
+	* given stays pending, as on any jet on the ground, and is flown once it is airborne. */
+void JetAIUpdate::friend_takeOffNow()
+{
+	getStateMachine()->clear();
+	getStateMachine()->setState( TAKING_OFF );
+	friend_enableAfterburners( true );
+}
+
+//----------------------------------------------------------------------------------------
 /**
  * Follow the path defined by the given array of points
  */
@@ -2739,7 +2815,7 @@ void JetAIUpdate::aiDoCommand(const AICommandParms* parms)
 
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
-		
+
 	// note that we always store this, even if nothing will be "pending".
 	m_mostRecentCommand.store(*parms);
 
@@ -2944,13 +3020,14 @@ void JetAIUpdate::crc( Xfer *xfer )
 	* 1: Initial version
 	* 2: Save engine on/off state.
 	* 3: TheSuperHackers @bugfix Save the helipad landing position.
-	* 4: the most recent command keeps its source */
+	* 4: the most recent command keeps its source
+	* 5: a kamikaze's area */
 // ------------------------------------------------------------------------------------------------
 void JetAIUpdate::xfer( Xfer *xfer )
 {
 
   // version
-  XferVersion currentVersion = 4;
+  XferVersion currentVersion = 5;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -3007,6 +3084,11 @@ void JetAIUpdate::xfer( Xfer *xfer )
 	if( version >= 3 )
 	{
 		xfer->xferCoord3D( &m_landingPosForHelipadStuff );
+	}
+
+	if( version >= 5 )
+	{
+		xfer->xferCoord3D( &m_kamikazeArea );
 	}
 
 }  // end xfer

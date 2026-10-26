@@ -34,14 +34,17 @@
 	rather than desyncing partway through it. The fingerprint test in
 	test_gameengine.cpp fails until the version and the recorded CRCs agree, so
 	the bump cannot be forgotten. */
-#define RANDOM_MAP_GENERATOR_VERSION 15
+#define RANDOM_MAP_GENERATOR_VERSION 17
 
-/// How much ground the map gives everybody, before the per-player share.
+/** How much ground the map gives everybody, before the per-player share. Players see them as
+	Tiny, Small, Medium, Large and Extra Large. */
 enum RandomMapSize
 {
-	RANDOM_MAP_SIZE_SMALL = 0,
+	RANDOM_MAP_SIZE_TINY = 0,
+	RANDOM_MAP_SIZE_SMALL,
 	RANDOM_MAP_SIZE_NORMAL,
 	RANDOM_MAP_SIZE_LARGE,
+	RANDOM_MAP_SIZE_HUGE,
 
 	RANDOM_MAP_SIZE_COUNT
 };
@@ -54,15 +57,21 @@ struct RandomMapSettings
 	Int m_seed;						///< drives the whole layout
 	Int m_playableCells;			///< cells per side of the playable area
 	Int m_numPlayers;				///< start positions to place
+	Int m_style;					///< 0: the seed picks the kind of map; else a shipped map's style (RandomMapGenerator::styleNamed)
+	AsciiString m_template;			///< the shipped map the layout is synthesised from, as MapCache names it ("maps\twilight flame\twilight flame.map", lowercase); empty: the generator above, untouched
+	UnsignedInt m_templateCRC;		///< CRC of that map's stored bytes; 0 until clampSettings reads it off the installed file. It is in the name, so a machine holding other bytes under the same path does not build a different map under it
 
-	RandomMapSettings() : m_seed(0), m_playableCells(0), m_numPlayers(2) { }
+	RandomMapSettings() : m_seed(0), m_playableCells(0), m_numPlayers(2), m_style(0), m_templateCRC(0) { }
 };
 
 class RandomMapGenerator
 {
 public:
 	enum { MIN_PLAYERS = 2, MAX_PLAYERS = 8 };
-	enum { MIN_CELLS = 64, MAX_CELLS = 512 };
+	/** 768 plus the 20-cell border each side is 808 across: past the largest shipped map (Death
+		Valley, 550 playable, 710 with its border) and inside the 1024 the shroud texture and the
+		terrain assume (DEFAULT_TERRAIN_SIZE in W3DShroud.cpp). */
+	enum { MIN_CELLS = 64, MAX_CELLS = 768 };
 	enum { PREVIEW_PIXELS = 128 };		///< what getMapPreviewImage expects of the tga
 
 	/// Build an uncompressed CkMp map image. Deterministic in the settings alone.
@@ -80,8 +89,21 @@ public:
 		duel map. */
 	static Int cellsFor( RandomMapSize size, Int numPlayers );
 
-	/// Settings clamped the way generate() clamps them, so callers can report the truth.
+	/** The same for a map built from a shipped one: Medium gives each player the ground a seat has
+		on the template, the other sizes a fixed share more or less of it. An empty or uninstalled
+		template falls back to the plain table. */
+	static Int cellsFor( RandomMapSize size, Int numPlayers, const AsciiString& templatePath );
+
+	/** That rule on a template's playable cells and seats, for the tests. */
+	static Int cellsForTemplate( RandomMapSize size, Int numPlayers, Int cellsX, Int cellsY, Int seats );
+
+	/** Settings clamped the way generate() clamps them, so callers can report the truth. A template
+		drops the style, and one that is not an installed shipped map is dropped itself. */
 	static void clampSettings( RandomMapSettings& settings );
+
+	/** The style a name such as "twilight" stands for, 0 when none does. A style is baked into the
+		exe rather than read from a file, because every machine rebuilds the map from its name. */
+	static Int styleNamed( const char *name );
 };
 
 /** Generate the map and its preview and keep both in memory under a path in the
@@ -90,6 +112,11 @@ public:
 	the map cache, the loader and the CRC all read it the way they read any other
 	map. On success mapPathOut is what -map wants. */
 extern Bool stageRandomMap( const RandomMapSettings& settings, AsciiString& mapPathOut );
+
+/** The generated map at this path made again for another number of players and staged: the same
+	seed, template or style and size, the size read back from the cells the name carries. A room
+	calls it when its seat count changes. FALSE when the path is not a generated map. */
+extern Bool restageRandomMap( const AsciiString& path, Int numPlayers, AsciiString& mapPathOut );
 
 /** Is this the path of a generated map or its preview, or the map.ini beside a
 	map that snows? The settings are in the name, which is what lets a replay, a
@@ -108,6 +135,18 @@ extern Bool generatedMapBytes( const AsciiString& path, const char **bytesOut, I
 /** Every generated map the store is holding, so the map cache can carry an
 	entry for each without a directory to scan. */
 extern void generatedMapPaths( std::vector<AsciiString>& pathsOut );
+
+/** The shipped map a generated map's path was built from ("maps\twilight flame\twilight flame.map"),
+	for the name the map list shows. FALSE for a plain generated map or any other path. */
+extern Bool generatedMapTemplate( const AsciiString& path, AsciiString& templatePathOut );
+
+/** A generated map's folder name as the lobby's options string carries it, and back. The string
+	has 400 bytes for eight seats, so the numbers go in base 36 and "_t<CRC>_<template folder>" as
+	"~" and four base-36 letters of the folder's name; the template's CRC stays home, since the map's
+	own CRC beside it already tells a machine whose template differs. FALSE for any other folder, or
+	a wire name no shipped map here answers. */
+extern Bool generatedMapWireName( const AsciiString& folder, AsciiString& wireOut );
+extern Bool generatedMapFromWireName( const AsciiString& wire, AsciiString& folderOut );
 
 /** A ChunkInputStream over a block of memory, so a generated map can be handed
 	to the same readers that parse maps off disk. */

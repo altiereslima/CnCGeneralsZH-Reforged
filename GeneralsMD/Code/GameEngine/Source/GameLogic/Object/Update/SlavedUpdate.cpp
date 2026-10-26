@@ -235,8 +235,8 @@ UpdateSleepTime SlavedUpdate::update( void )
 	if( data->m_scoutRange )
 	{
 		//3RD PRIORITY: Hover above master's current move destination (as close as wander distance
-		//allows).
-		if( masterAI->getPath() )
+		//allows). A master with no AI is a building and never moves.
+		if( masterAI && masterAI->getPath() )
 		{
 			const Coord3D *masterDest = masterAI->getPath()->getLastNode()->getPosition();
 

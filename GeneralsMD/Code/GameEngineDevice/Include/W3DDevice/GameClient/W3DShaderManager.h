@@ -114,6 +114,9 @@ public:
 	static Bool filterPreRender(FilterTypes filter, Bool &skipRender, CustomScenePassModes &scenePassMode); ///< Set up at start of render.  Only applies to screen filter shaders.
 	static Bool filterPostRender(FilterTypes filter, enum FilterModes mode, Coord2D &scrollDelta, Bool &doExtraRender); ///< Called after render.  Only applies to screen filter shaders.
 	static Bool filterSetup(FilterTypes filter, enum FilterModes mode);
+	/// The Warm Light haze for this frame (levels, shroud, field step, wakes), once a frame from
+	/// W3DDisplay::draw before the views render, whatever screen filter is running.
+	static void pushProtoHaze(void);
 
 	// Support routines for filter methods.
 	static Bool canRenderToTexture(void) { return (m_oldRenderSurface && m_newRenderSurface);}

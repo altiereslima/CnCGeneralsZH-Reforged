@@ -121,6 +121,8 @@ struct RateReading
 };
 
 // forward declarations
+class AsciiString;
+class UnicodeString;
 class AudioManager;
 class GameLogic;
 class GameClient;
@@ -167,6 +169,11 @@ public:
 	virtual void serviceWindowsOS(void) {};		///< service the native OS
 	virtual Bool isActive(void) {return m_isActive;}	///< returns whether app has OS focus.
 	virtual void setIsActive(Bool isActive) { m_isActive = isActive; };
+
+	/// The device's audio endpoints, for the options menu: the index-th one's id and name, FALSE past
+	/// the last.  An id is what setAudioOutputDevice takes and Options.ini keeps; "" is the default.
+	virtual Bool getAudioOutputDevice(Int index, AsciiString &id, UnicodeString &name) { return FALSE; }
+	virtual void setAudioOutputDevice(const AsciiString &id) {}
 
 	/** LOGIC-THREAD.md phase 3, step 3b.  Called by GameClient::update in front of the draw at
 		* -logicthread 1 and 2: in a single-player game it runs this pass's message stream and asks the

@@ -690,17 +690,41 @@ TextureClass * W3DAssetManager::Recolor_Texture_One_Time(TextureClass *texture, 
 	if (!texture->Is_Initialized())
 		TextureLoader::Request_Foreground_Loading(texture);
 
-	SurfaceClass::SurfaceDescription desc;
+	SurfaceClass::SurfaceDescription desc = {};
 	SurfaceClass *newsurf, *oldsurf;
-	texture->Get_Level_Description(desc);		
+
+	// A lost device (alt-tab) leaves the texture without a source level and fails
+	// CreateOffscreenPlainSurface without a word, and Copy would dereference the missing surface.
+	// The unit keeps the texture uncoloured.
+	oldsurf=texture->Get_Surface_Level();
+	if (oldsurf == NULL)
+	{
+		DEBUG_LOG(("Can't recolor texture %s: no surface, device lost?\n", name));
+		return NULL;
+	}
+	texture->Get_Level_Description(desc);
 
 	Int psize;
 	psize=PixelSize(desc);
-	DEBUG_ASSERTCRASH( psize == 2 || psize == 4, ("Can't Recolor Texture %s", name) );
-
-	oldsurf=texture->Get_Surface_Level();
+	// The palette remap reads 16- and 32-bit pixels and nothing else.  A mod's house-colour texture
+	// shipped compressed (DXT) or in another format has nothing it can remap, and Direct3D 9 refuses
+	// the scratch surface for some of them (a DXT image whose sides are not multiples of 4), which
+	// left newsurf without a surface for Copy to crash on.  The unit keeps the texture uncoloured.
+	if (psize != 2 && psize != 4)
+	{
+		DEBUG_LOG(("Can't recolor texture %s: format %d is not 16 or 32 bit\n", name, (Int)desc.Format));
+		REF_PTR_RELEASE(oldsurf);
+		return NULL;
+	}
 
 	newsurf=NEW_REF(SurfaceClass,(desc.Width,desc.Height,desc.Format));
+	if (newsurf->Peek_D3D_Surface() == NULL)
+	{
+		DEBUG_LOG(("Can't recolor texture %s: no surface, device lost?\n", name));
+		REF_PTR_RELEASE(oldsurf);
+		REF_PTR_RELEASE(newsurf);
+		return NULL;
+	}
 	newsurf->Copy(0,0,0,0,desc.Width,desc.Height,oldsurf);
 
 	const char *kind = Mod_Bare_Name(name) + 3;	// the letter after "ZHC"
@@ -917,11 +941,17 @@ RenderObjClass * W3DAssetManager::Create_Render_Obj(
 	}
 #endif
 
-	W3DPrototypeClass *w3dproto = newInstance(W3DPrototypeClass)(rendobj, newname);	
-	rendobj->Release_Ref();
-	Add_Prototype(w3dproto);
+	// A recolour while the device is lost (alt-tab) comes back uncoloured.  Cached under the
+	// team-colour name, the model would stay that way all session, so it goes back uncached and
+	// the next request recolours it again.
+	if (!(reallycolor && DX8Wrapper::Is_Device_Lost()))
+	{
+		W3DPrototypeClass *w3dproto = newInstance(W3DPrototypeClass)(rendobj, newname);
+		rendobj->Release_Ref();
+		Add_Prototype(w3dproto);
 
-	rendobj = w3dproto->Create();
+		rendobj = w3dproto->Create();
+	}
 	rendobj->Set_ObjectColor(color);
 
 #ifdef DUMP_PERF_STATS
@@ -966,6 +996,10 @@ int W3DAssetManager::Recolor_Mesh(RenderObjClass *robj, const int color)
 		strncasecmp(meshName,"HOUSECOLOR", 10) == 0)
 	{	for (i=0; i<material->Vertex_Material_Count(); i++)
 			Recolor_Vertex_Material(material->Peek_Vertex_Material(i),color);
+		// The whole mesh is the side's colour, so the whole mesh glows (Direct3D 11 only).  The model
+		// is this recoloured prototype's own: Make_Mesh_Unique cloned it.
+		if (TheGlobalData->m_teamGlow)
+			model->Set_Flag(MeshGeometryClass::TEAM_GLOW, true);
 		didRecolor=1;
 	}
 
@@ -1694,6 +1728,11 @@ TextureClass * W3DAssetManager::Recolor_Texture_One_Time(TextureClass *texture, 
 	// if texture is monochrome and no value shifting
 	// return NULL	
 	smallsurf=texture->Get_Surface_Level((TextureClass::MipCountType)texture->Get_Mip_Level_Count()-1);
+	if (smallsurf == NULL)
+	{
+		DEBUG_LOG(("Can't recolor texture %s: no surface, device lost?\n", name));
+		return NULL;
+	}
 	if (hsv_shift.Z==0.0f && smallsurf->Is_Monochrome())
 	{
 		REF_PTR_RELEASE(smallsurf);
@@ -1704,6 +1743,14 @@ TextureClass * W3DAssetManager::Recolor_Texture_One_Time(TextureClass *texture, 
 	oldsurf=texture->Get_Surface_Level();
 
 	newsurf=NEW_REF(SurfaceClass,(desc.Width,desc.Height,desc.Format));
+	// Lost device: see the same check in the team-colour Recolor_Texture_One_Time.
+	if (oldsurf == NULL || newsurf->Peek_D3D_Surface() == NULL)
+	{
+		DEBUG_LOG(("Can't recolor texture %s: no surface, device lost?\n", name));
+		REF_PTR_RELEASE(oldsurf);
+		REF_PTR_RELEASE(newsurf);
+		return NULL;
+	}
 	newsurf->Copy(0,0,0,0,desc.Width,desc.Height,oldsurf);
 	newsurf->Hue_Shift(hsv_shift);
 	TextureClass * newtex=NEW_REF(TextureClass,(newsurf,(TextureClass::MipCountType)texture->Get_Mip_Level_Count()));

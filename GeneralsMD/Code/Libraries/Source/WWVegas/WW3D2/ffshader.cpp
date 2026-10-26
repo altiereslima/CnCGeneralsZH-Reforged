@@ -239,11 +239,16 @@ static bool generate_combiners(const CombinerDescription & description,
 bool CombinerShader_Generate(const CombinerDescription & description, CombinerShaderTarget target,
 	std::string & hlsl)
 {
-	// The SDL3 GPU program is the D3D11 one with its bindings rewritten, so everything below only
-	// ever sees the two profiles it was written for.  It goes without the smoke: its backend binds
-	// nothing at t6 and uploads no field past SkyUp (SdlEnginePixelConstants).
+	// SDL shares D3D11 arithmetic and constant layouts, then rewrites resource bindings.
+	// Its cloak caster needs only ordered coverage, without cosmetic scene resources.
 	if (target == COMBINER_SHADER_TARGET_SDL3_GPU) {
-		return generate_combiners(description, COMBINER_SHADER_TARGET_D3D11, hlsl, false)
+		CombinerDescription supported = description;
+		// Scene-depth fading and cosmetic refraction still have separate SDL integration work.
+		supported.SoftParticle = SOFT_PARTICLE_NONE;
+		// The fire look's coordinates come out of the Direct3D 11 vertex half, which SDL does not run.
+		supported.FireLook = FIRE_LOOK_NONE;
+		if (supported.DrawEffect != DRAW_EFFECT_CLOAK_SHADOW) supported.DrawEffect = DRAW_EFFECT_NONE;
+		return generate_combiners(supported, target, hlsl, true)
 			&& SDL3_Shader_Retarget(hlsl, false);
 	}
 	return generate_combiners(description, target, hlsl, target == COMBINER_SHADER_TARGET_D3D11);
@@ -252,18 +257,25 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 static bool generate_combiners(const CombinerDescription & description,
 	CombinerShaderTarget target, std::string & hlsl, bool volumetric)
 {
-	// The soft particles ride on the Direct3D 11 text for the smoke's reason: the SDL3 backend binds
-	// nothing at t7 and uploads nothing past SkyUp.
+	const bool sdl = target == COMBINER_SHADER_TARGET_SDL3_GPU;
+	if (sdl) target = COMBINER_SHADER_TARGET_D3D11;
+	// Depth-faded particles remain Windows-only until SDL supplies the scene depth at t7.
 	const bool soft = volumetric && description.SoftParticle != SOFT_PARTICLE_NONE;
-	// The per-object looks likewise: nothing past SoftParticleDepth reaches the SDL3 programs.
+	// SDL accepts only the cloak caster variant; Windows also supplies the cosmetic scene effects.
 	const unsigned effect = (volumetric && description.DrawEffect < DRAW_EFFECT_COUNT)
 		? description.DrawEffect : DRAW_EFFECT_NONE;
+	// The fire look reads no constant, but the vertex half that feeds it is the D3D11 one's.
+	const unsigned fire = volumetric ? description.FireLook : FIRE_LOOK_NONE;
 	volumetric = volumetric && description.ShadowReceiving;
 	if (description.StageCount == 0 || description.StageCount > MAXIMUM_COMBINER_STAGES) {
 		return false;
 	}
 
 	std::string body;
+	// Black until stage 0 samples, so a team glow draw with no stage glows not at all.
+	if (description.TeamGlow) {
+		body += "    float4 team_texel = float4(0.0, 0.0, 0.0, 0.0);\n";
+	}
 	for (unsigned stage = 0; stage < description.StageCount; ++stage) {
 		const CombinerStage & source = description.Stages[stage];
 
@@ -293,6 +305,11 @@ static bool generate_combiners(const CombinerDescription & description,
 			snprintf(line, sizeof(line), "    texel = float4(1.0, 1.0, 1.0, 1.0);\n");
 		}
 		body += line;
+		// The paint, kept for the team glow's brightness: a later stage's texel is a detail or an
+		// environment map, not the house colour's pattern.
+		if (stage == 0 && description.TeamGlow) {
+			body += "    team_texel = texel;\n";
+		}
 
 		std::string colour_argument0, colour_argument1, colour_argument2;
 		std::string alpha_argument0, alpha_argument1, alpha_argument2;
@@ -401,7 +418,12 @@ static bool generate_combiners(const CombinerDescription & description,
 			hlsl += SOFT_PARTICLE_SAMPLING;
 		}
 		if (effect != DRAW_EFFECT_NONE) {
-			hlsl += DRAW_EFFECT_SAMPLING;
+			// SDL admits only the cloak caster. The complete cosmetic helper declares
+			// SceneColour at t8 even when unused, exceeding its eight-slot draw layout.
+			hlsl += sdl ? CLOAK_SHADOW_SAMPLING : DRAW_EFFECT_SAMPLING;
+		}
+		if (fire != FIRE_LOOK_NONE) {
+			hlsl += FIRE_LOOK_SAMPLING;
 		}
 	}
 	else {
@@ -449,7 +471,29 @@ static bool generate_combiners(const CombinerDescription & description,
 		"{\n"
 		"    float4 texel;\n";
 	hlsl += "    float4 current = input.Diffuse;\n";
+	if (fire != FIRE_LOOK_NONE) {
+		hlsl += FIRE_LOOK_BEND;
+	}
 	hlsl += body;
+	// Before the shade and the fog, as the art's own colour would be.
+	if (fire != FIRE_LOOK_NONE) {
+		hlsl += (fire == FIRE_LOOK_COLOUR)
+			? "    float fire_shape = " FIRE_LOOK_BURN_SHAPE_COLOUR ";\n" FIRE_LOOK_BURN
+				"    current *= fire_keep;\n"
+			: "    float fire_shape = " FIRE_LOOK_BURN_SHAPE_ALPHA ";\n" FIRE_LOOK_BURN
+				"    current.a *= fire_keep;\n";
+	}
+	// The house colour's hue at full brightness, taken from the lit colour before the shade touches
+	// it, so the light's level drops out.  Only the texture's bright texels get it, and only as much
+	// as the hue is saturated: a grey or white team, or a dull panel, would glow white.
+	if (description.TeamGlow) {
+		hlsl += "    float team_peak = max(max(current.r, current.g), max(current.b, 1.0 / 64.0));\n"
+			"    float3 team_hue = current.rgb / team_peak;\n"
+			"    float team_saturation = 1.0 - min(min(team_hue.r, team_hue.g), team_hue.b);\n"
+			"    float team_bright = smoothstep(" TEAM_GLOW_LOW ", " TEAM_GLOW_HIGH ","
+			" dot(team_texel.rgb, float3(0.299, 0.587, 0.114)));\n"
+			"    float3 team_glow = team_hue * (team_bright * team_saturation * " TEAM_GLOW_GAIN ");\n";
+	}
 	if (description.SpecularAdd && !description.SmokeGlow) {
 		// Before the fog and the alpha test, as D3D9 orders them; the alpha is the stages'.
 		hlsl += "    current.rgb = saturate(current.rgb + input.Specular.rgb);\n";
@@ -463,6 +507,17 @@ static bool generate_combiners(const CombinerDescription & description,
 	// After the shade, so the light a fire throws on smoke is not dimmed by the smoke it lights.
 	if (description.SmokeGlow) {
 		hlsl += "    current.rgb = saturate(current.rgb + input.Specular.rgb * texel.rgb);\n";
+	}
+
+	// After the shade, past 1.0 for the bloom on the half float target, then the whole colour scaled
+	// down until its brightest channel is at TEAM_GLOW_CEILING.  One factor on all three channels
+	// keeps their ratio, where a per-channel clamp (or the tone curve on a channel far past it)
+	// flattens the top one and moves the hue toward white.  Before the fog, so a fogged base still
+	// fades with distance.
+	if (description.TeamGlow) {
+		hlsl += "    current.rgb += team_glow;\n"
+			"    current.rgb *= min(1.0, " TEAM_GLOW_CEILING
+			" / max(max(current.r, current.g), max(current.b, 1.0 / 64.0)));\n";
 	}
 
 	if (target == COMBINER_SHADER_TARGET_D3D11
@@ -564,12 +619,19 @@ std::string CombinerShader_Key(const CombinerDescription & description)
 	if (description.SmokeGlow) {
 		key += ":G";
 	}
+	if (description.TeamGlow) {
+		key += ":H";
+	}
 	if (description.SoftParticle != SOFT_PARTICLE_NONE) {
 		snprintf(field, sizeof(field), ":Z%u", description.SoftParticle);
 		key += field;
 	}
 	if (description.DrawEffect != DRAW_EFFECT_NONE) {
 		snprintf(field, sizeof(field), ":X%u", description.DrawEffect);
+		key += field;
+	}
+	if (description.FireLook != FIRE_LOOK_NONE) {
+		snprintf(field, sizeof(field), ":B%u", description.FireLook);
 		key += field;
 	}
 	return key;

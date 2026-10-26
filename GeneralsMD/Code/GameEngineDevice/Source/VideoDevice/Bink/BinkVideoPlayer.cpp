@@ -48,6 +48,7 @@
 
 #include "Lib/BaseType.h"
 #include "VideoDevice/Bink/BinkVideoPlayer.h"
+#include "Common/ArchiveFileSystem.h"
 #include "Common/AudioAffect.h"
 #include "Common/GameAudio.h"
 #include "Common/GameMemory.h"
@@ -285,6 +286,22 @@ VideoStreamInterface*	BinkVideoPlayer::open( AsciiString movieTitle )
 			snprintf( filePath, ARRAY_SIZE(filePath), "%s\\%s.%s", VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
 			handle = BinkOpen(filePath , BINKPRELOADALL );
 			DEBUG_ASSERTLOG(!handle, ("opened bink file %s\n", localizedFilePath));
+		}
+
+		// the original Generals campaign movies stay loose in the base game's own folder (Steam's
+		// ZH_Generals\Data\Movies), which none of the paths above reach
+		const AsciiString &baseDir = TheArchiveFileSystem->m_baseGameDirectory;
+		if (!handle && baseDir.isNotEmpty())
+		{
+			char filePath[ _MAX_PATH ];
+			snprintf( filePath, ARRAY_SIZE(filePath), "%s" VIDEO_LANG_PATH_FORMAT, baseDir.str(), GetRegistryLanguage().str(), pVideo->m_filename.str(), VIDEO_EXT );
+			handle = BinkOpen(filePath , BINKPRELOADALL );
+			if (!handle)
+			{
+				snprintf( filePath, ARRAY_SIZE(filePath), "%s%s\\%s.%s", baseDir.str(), VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
+				handle = BinkOpen(filePath , BINKPRELOADALL );
+			}
+			DEBUG_ASSERTLOG(!handle, ("opened bink file %s\n", filePath));
 		}
 
 		DEBUG_LOG(("BinkVideoPlayer::createStream() - About to create stream\n"));

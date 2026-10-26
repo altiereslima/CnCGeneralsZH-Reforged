@@ -303,6 +303,8 @@ private:
 	MemoryPoolBlob		*m_lastBlob;								///< tail of linked list: last blob for this pool. (needed for efficiency)
 	MemoryPoolBlob		*m_firstBlobWithFreeBlocks;	///< first blob in this pool that has at least one unallocated block.
 
+	friend class MemoryPoolBlob;	///< walks m_firstBlob to find the blob holding a corrupt block header
+
 private:
 	/// create a new blob with the given number of blocks.
 	MemoryPoolBlob* createBlob(Int allocationCount);

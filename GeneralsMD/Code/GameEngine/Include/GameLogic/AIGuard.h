@@ -227,6 +227,7 @@ public:
 	AIGuardReturnState( StateMachine *machine ) : AIInternalMoveToState( machine, "AIGuardReturn" ) 
 	{
 		m_nextReturnScanTime = 0;
+		m_stayedAtPost = FALSE;
 	}
 	virtual Bool isAttack() const { return FALSE; }
 	virtual StateReturnType onEnter( void );
@@ -239,6 +240,7 @@ protected:
 	virtual void loadPostProcess();
 private:
 	UnsignedInt m_nextReturnScanTime;
+	Bool m_stayedAtPost;	///< onEnter skipped the move, so there is no move for onExit to end
 };
 EMPTY_DTOR(AIGuardReturnState)
 

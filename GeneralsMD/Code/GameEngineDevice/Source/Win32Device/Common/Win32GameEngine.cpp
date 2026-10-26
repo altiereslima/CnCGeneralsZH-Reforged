@@ -31,7 +31,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <windows.h>
-#include "Win32Device/Common/Win32GameEngine.h"
+#include "Win32Device/Common/Win32GameEngine.h"	// MSS/MSS.h through MilesAudioManager.h
 #include "Common/PerfTimer.h"
 
 #include "GameNetwork/LANAPICallbacks.h"
@@ -175,4 +175,27 @@ void Win32GameEngine::serviceWindowsOS( void )
 	}  // end while
 
 }  // end ServiceWindowsOS
+
+//-------------------------------------------------------------------------------------------------
+/** The audio backend's endpoints (miles_xaudio2.cpp), and the one it plays on */
+//-------------------------------------------------------------------------------------------------
+static const Int AUDIO_DEVICE_ID_BYTES = 256;
+static const Int AUDIO_DEVICE_NAME_CHARS = 128;
+
+Bool Win32GameEngine::getAudioOutputDevice( Int index, AsciiString &id, UnicodeString &name )
+{
+	char deviceId[AUDIO_DEVICE_ID_BYTES];
+	U16 deviceName[AUDIO_DEVICE_NAME_CHARS];
+	if (!AIL_ex_enumerate_output_devices(index, deviceId, AUDIO_DEVICE_ID_BYTES, deviceName, AUDIO_DEVICE_NAME_CHARS)) {
+		return FALSE;
+	}
+	id = deviceId;
+	name = UnicodeString((const WideChar *)deviceName);
+	return TRUE;
+}
+
+void Win32GameEngine::setAudioOutputDevice( const AsciiString &id )
+{
+	AIL_ex_set_output_device(id.str());
+}
 

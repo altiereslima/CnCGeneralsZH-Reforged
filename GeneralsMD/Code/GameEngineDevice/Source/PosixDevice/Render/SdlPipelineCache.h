@@ -107,7 +107,7 @@ public:
 	explicit SdlPipelineCache(SDL_GPUDevice *device);
 	~SdlPipelineCache();
 	/// Null when the device refuses it; logged once per key.
-	SDL_GPUGraphicsPipeline *Pipeline(const SdlPipelineKey &key);
+	SDL_GPUGraphicsPipeline *Pipeline(const SdlPipelineKey &key, bool sunReceiver = false);
 	unsigned int Pipelines_Built() const { return Built; }
 	/// Names a program for a refusal's log line (the device points it at SdlProgramCache::Key_Of).
 	std::function<std::string(const SDL_GPUShader *)> Describe_Shader;

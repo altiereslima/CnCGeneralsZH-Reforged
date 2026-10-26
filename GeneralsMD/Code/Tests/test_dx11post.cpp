@@ -687,3 +687,96 @@ TEST(dx11post_the_scene_takes_its_occlusion_once_a_frame_and_the_chain_then_skip
 	device.Set_Scene_View(NULL);
 	delete [] picture;
 }
+
+// The prototype haze, white over a black scene, with the given wakes; hands back the level at the
+// middle of the picture and at a corner.  The clip to world matrix is the identity, so a pixel's
+// world x and y are its own clip x and y and the depth, cleared to a half, is its height: under the
+// haze's top of one.
+static bool haze_levels(DeviceFixture & fixture, const float (*segments)[8], unsigned count,
+	unsigned char & middle_level, unsigned char & corner_level)
+{
+	const float WAKE_SPREAD = 0.05f;
+	const float OPEN_SOFT = 0.05f;
+	const float HAZE_TOP = 1.0f;
+	const float HAZE_THICKNESS = 1.0f;
+	const float HAZE_STRENGTH = 1.0f;
+	const float HAZE_REACH = 1000.0f;
+	const float NO_WATER = -1.0e6f;
+	const float NOISE_SCALE = 1.0f;
+	const float STIR = 0.85f;
+	const float SCENE_DEPTH = 0.5f;
+	const float CLOCK = 1.0f;
+	DX11DeviceClass & device = fixture.Get_Device();
+	DX11PostProcessClass & post = fixture.Get_Post();
+
+	DX11Post_Set_Haze_Wakes(segments, count, WAKE_SPREAD, OPEN_SOFT, CLOCK);
+	const float white[3] = { 1.0f, 1.0f, 1.0f };
+	DX11Post_Set_Haze(white, HAZE_TOP, HAZE_THICKNESS, HAZE_STRENGTH, HAZE_REACH, NO_WATER);
+	const float field[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+	const float overhead[3] = { 0.0f, 0.0f, 1.0f };
+	DX11Post_Set_Haze_Motion(field, 0.0f, 0.0f, NOISE_SCALE, STIR, overhead, 0.0f);
+
+	unsigned char picture[SURFACE_SIZE * SURFACE_SIZE * BYTES_A_PIXEL];
+	fill_flat(picture, DARK_LEVEL);
+	const DX11PostEffect copy_only[] = { DX11_POST_COPY };
+	post.Set_Chain(copy_only, 1);
+	post.Compile_Haze_Program();
+	post.Open_Frame();
+	post.Begin_Frame();
+	device.Set_Scene_View(post.Scene_View());
+	device.Get_Context()->ClearDepthStencilView(device.Get_Depth_Stencil_View(), D3D11_CLEAR_DEPTH,
+		SCENE_DEPTH, 0);
+	const float identity[16] = {
+		1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+	const bool drawn = write_scene(device, post, picture)
+		&& post.Haze_Scene(device.Get_Depth_Texture(), identity) && post.Run_Chain();
+	device.Set_Scene_View(NULL);
+	DX11Post_Set_Haze(white, 0.0f, HAZE_THICKNESS, 0.0f, HAZE_REACH, NO_WATER);
+	DX11Post_Set_Haze_Wakes(segments, 0, WAKE_SPREAD, OPEN_SOFT, CLOCK);
+
+	unsigned pitch = 0;
+	unsigned char * result = drawn ? read_back_buffer(device, pitch) : NULL;
+	if (result == NULL) {
+		return false;
+	}
+	middle_level = pixel_level(result, pitch, SURFACE_SIZE / 2, SURFACE_SIZE / 2);
+	corner_level = pixel_level(result, pitch, 1, 1);
+	delete [] result;
+	return true;
+}
+
+// A hovering helicopter's rotor wash, drawn for real: the disc inside its ring clears, and the haze
+// well outside it is left as it was.  The ring sits in a late slot behind segments far off the
+// picture, which is where the second half of each segment lives past the first 32.
+TEST(dx11post_a_hover_ring_parts_the_haze_inside_it_in_any_slot)
+{
+	DeviceFixture fixture;
+	if (!fixture.Create()) {
+		printf("skip: no Direct3D 11 device on this machine\n");
+		return;
+	}
+
+	const unsigned RING_SLOT = 40;
+	const float RING_RADIUS = 0.5f;
+	const float RING_AGE = 0.3f;
+	const float FAR_OFF = 100.0f;
+	const unsigned char CLEARED_BY_AT_LEAST = 8;
+	float segments[RING_SLOT + 1][8];
+	for (unsigned slot = 0; slot < RING_SLOT; ++slot) {
+		const float far_segment[8] = { FAR_OFF, FAR_OFF, FAR_OFF + 1.0f, FAR_OFF, 0.0f, 0.2f, 1.0f, 0.01f };
+		memcpy(segments[slot], far_segment, sizeof(far_segment));
+	}
+	const float ring[8] = { 0.0f, 0.0f, 0.0f, 0.0f, RING_RADIUS, -1.0f, 1.0f, RING_AGE };
+	memcpy(segments[RING_SLOT], ring, sizeof(ring));
+
+	unsigned char calm_middle = 0;
+	unsigned char calm_corner = 0;
+	unsigned char washed_middle = 0;
+	unsigned char washed_corner = 0;
+	CHECK(haze_levels(fixture, segments, RING_SLOT, calm_middle, calm_corner));
+	CHECK(haze_levels(fixture, segments, RING_SLOT + 1, washed_middle, washed_corner));
+	printf("middle %u calm, %u washed; corner %u calm, %u washed\n", calm_middle, washed_middle,
+		calm_corner, washed_corner);
+	CHECK(calm_middle >= washed_middle + CLEARED_BY_AT_LEAST);
+	CHECK_EQ(calm_corner, washed_corner);
+}

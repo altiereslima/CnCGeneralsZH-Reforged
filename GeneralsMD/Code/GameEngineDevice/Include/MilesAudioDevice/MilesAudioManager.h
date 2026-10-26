@@ -23,6 +23,7 @@
 // Author: John K. McDonald, July 2002
 
 #include "Common/AsciiString.h"
+#include "Common/AudioSettings.h"
 #include "Common/GameAudio.h"
 #include "MSS/MSS.h"
 #include "mutex.h"
@@ -84,7 +85,24 @@ struct PlayingAudio
 	/// Asked to fade out.  Moving from the playing list to the fading list writes two lists, so it
 	/// happens in processPlayingList holding both locks rather than wherever the fade is asked for.
 	Bool m_fade;
-	Int m_framesFaded;
+	/// logic frames of the fade gone by, counted on the audio clock: a pass a frame made a fade at 120
+	/// fps a quarter of TimeToFadeAudio, and a music crossfade a drop followed by a slow rise
+	Real m_framesFaded;
+	/// Doppler's velocity for a 3D sound, units a second, and where the source was the last time the
+	/// logic clock had moved (MilesAudioManager::trackVelocity).
+	Bool m_tracked;
+	Coord3D m_lastPosition;
+	Coord3D m_velocity;
+	/// A sound that started late by its distance stops late by it too: the stop is held here, in
+	/// logic milliseconds still to wait, and m_stopHeld stays set once it has gone through.
+	Bool m_stopHeld;
+	Real m_stopInMs;
+	/// A world sound behind a hill or a building (MilesAudioManager::updateOcclusion): how muffled it
+	/// is now, 0 to 1, what the last look along the line said it should be, and EA's off-screen low pass
+	/// it was started with, which the muffle never goes under.
+	Real m_occlusion;
+	Real m_occlusionTarget;
+	Real m_offscreenOcclusion;
 
 	PlayingAudio() :
 		m_type(PAT_INVALID),
@@ -96,8 +114,17 @@ struct PlayingAudio
 		m_sample(0),
 		m_3DSample(0),
 		m_stream(0),
-		m_framesFaded(0)
-	{ }
+		m_framesFaded(0.0f),
+		m_tracked(false),
+		m_stopHeld(false),
+		m_stopInMs(0.0f),
+		m_occlusion(0.0f),
+		m_occlusionTarget(0.0f),
+		m_offscreenOcclusion(0.0f)
+	{
+		m_lastPosition.zero();
+		m_velocity.zero();
+	}
 
 	/// An entry past PS_Playing is waiting for the sweep that frees it: its Miles handle may already
 	/// be back in the pool, so it must not be counted, touched or picked as a victim.
@@ -232,6 +259,26 @@ class MilesAudioManager : public AudioManager
 		Bool killLowestPrioritySoundImmediately( AudioEventRTS *event );
 		AudioEventRTS* findLowestPrioritySound( AudioEventRTS *event );
 
+		// The battle mix: replies held back as they start (playAudioEvent), identical shots folded
+		// together and a budget for battle voices through doesViolateLimit, the question every sound is
+		// asked before it plays.  None of them touches a sound logic asked for (getIsLogicalAudio).
+		Bool doesViolateEventLimit( AudioEventRTS *event ) const;
+		Bool refuseReply( AudioEventRTS *event ) const;
+		Bool coalesceShot( AudioEventRTS *event ) const;
+		void noteShot( AudioEventRTS *event ) const;
+		Bool refuseOverBudget( AudioEventRTS *event ) const;
+		Real getLoudness( AudioEventRTS *event ) const;
+		void logMix( void );
+		void noteReach( const PlayingAudio *playing, const Coord3D *pos ) const;
+		void setSampleDistances( H3DSAMPLE sample3D, const AudioEventRTS *event ) const;
+
+		// Occlusion: the line from the microphone to a world sound, through the ground and the buildings.
+		Real lookForOcclusion( const Coord3D *pos ) const;
+		void updateOcclusion( PlayingAudio *playing, const Coord3D *pos, Bool look );
+		void applyOcclusion( PlayingAudio *playing );
+		void buildBlockers( void );
+		Real getBlockerHeight( Real x, Real y ) const;
+
 		virtual void adjustVolumeOfPlayingAudio(AsciiString eventName, Real newVolume);
 
 		virtual void removePlayingAudio( AsciiString eventName );
@@ -243,6 +290,12 @@ class MilesAudioManager : public AudioManager
 
 		Bool shouldProcessRequestThisFrame( AudioRequest *req ) const;
 		void adjustRequest( AudioRequest *req );
+		void advanceAudioClock( void );
+		void trackVelocity( PlayingAudio *playing, const Coord3D *pos );
+		void setRoomFromMap( void );
+		void applyLegacySound( void );
+		void updateAmbienceBed( void );
+		void duckForBlast( AudioEventRTS *event, H3DSAMPLE sample3D );
 		Bool checkForSample( AudioRequest *req );
 
 		virtual void setHardwareAccelerated(Bool accel);
@@ -270,7 +323,7 @@ class MilesAudioManager : public AudioManager
 		void playStream( AudioEventRTS *event, HSTREAM stream );
 		// Returns the file handle for attachment to the PlayingAudio structure
 		void *playSample( AudioEventRTS *event, HSAMPLE sample );
-		void *playSample3D( AudioEventRTS *event, H3DSAMPLE sample3D );
+		void *playSample3D( PlayingAudio *audio );
 
 	protected:
 		void buildProviderList( void );
@@ -280,7 +333,7 @@ class MilesAudioManager : public AudioManager
 		void initSamplePools( void );
 		void processRequest( AudioRequest *req );
 
-		void playAudioEvent( AudioEventRTS *event, Bool requestStop );
+		void playAudioEvent( AudioEventRTS *event, Bool requestStop, Bool nextLoop );
 		void stopAudioEvent( AudioHandle handle );
 		void pauseAudioEvent( AudioHandle handle );
 
@@ -309,7 +362,7 @@ class MilesAudioManager : public AudioManager
 		
 	protected:
 		void initFilters( HSAMPLE sample, const AudioEventRTS *eventInfo );
-		void initFilters3D( H3DSAMPLE sample, const AudioEventRTS *eventInfo, const Coord3D *pos );
+		void initFilters3D( PlayingAudio *audio, const Coord3D *pos );
 
 	protected:
 		ProviderInfo m_provider3D[MAXPROVIDERS];
@@ -324,6 +377,25 @@ class MilesAudioManager : public AudioManager
 		HDIGDRIVER m_digitalHandle;
 		H3DPOBJECT m_listener;
 		HPROVIDER m_delayFilter;
+
+		/// The logic clock as update() last read it, and the milliseconds of logic time since the read
+		/// before: the request list's delays and doppler's velocity run on it, so both keep to the
+		/// picture at any render rate and in a -wav run.  Out of a game a pass counts as one frame.
+		UnsignedInt m_clockFrame;
+		Real m_clockElapsedMs;
+		UnsignedInt m_clockMovedAt;	///< Clock_Milliseconds when the logic clock last moved on
+		AsciiString m_roomMap;	///< the map setRoomFromMap last set the room for
+		Bool m_legacySound;	///< what applyLegacySound last put into m_audioSettings
+		Real m_roomAbsorption;	///< the air's absorption distance the room asks for, before the range scale
+		Real m_airScale;	///< the range scale the backend's air was last given with, 0 to give it again
+		AudioSettings m_engineSettings;	///< AudioSettings.ini as init read it, for Legacy sound turned off again
+		Bool m_askingOnArrival;	///< checkForSample is asking canPlayNow about a sound that waited out its distance
+
+		/// The map's ambience bed (AmbienceBed* in AudioSettings.h): the event setRoomFromMap chose, the
+		/// handle of the one playing, and the logic frame it was last started at.
+		AsciiString m_bedEvent;
+		AudioHandle m_bedHandle;
+		UnsignedInt m_bedStartedAt;
 
 		// LOGIC-THREAD.md M7: what the tick asks, as captureForLogic found it at the sync point
 		std::vector<AudioHandle> m_playingAtSync;											///< every handle isCurrentlyPlaying said yes to, sorted
@@ -381,6 +453,39 @@ class MilesAudioManager : public AudioManager
 		std::list<CompletedAudio> m_completedAudio;
 		std::map<UnsignedIntPtr, UnsignedInt> m_audioStarts;
 		CriticalSectionClass m_completedAudioCS;
+
+		/// A one-shot battle sound let through, for the ones asked for right after it to fold into.
+		struct RecentShot
+		{
+			AsciiString name;
+			Coord3D position;
+			UnsignedInt frame;
+			AudioHandle handle;
+			Int merged;
+			Real volume;	///< the volume it was asked at, before anything was folded into it
+		};
+		mutable std::vector<RecentShot> m_recentShots;
+		mutable std::map<UnsignedInt, UnsignedInt> m_replyAtMs;	///< object -> Clock_Milliseconds of its last reply
+		mutable UnsignedInt m_lastReplyAtMs;
+		/// What the mix did since the last AUDIO MIX line, and the most 3D voices heard at once.
+		struct MixCounts
+		{
+			Int started3D, merged, stolen, overBudget, repliesLet, repliesHeld, looks;
+			UnsignedInt peak3D, peakBattle;
+			Real occludedPeak;
+			// the AUDIO REACH line (noteReach): battle sounds started in the middle of the screen, on the
+			// rest of it and off it, their summed distance, gain in dB and cutoff in Hz
+			Int reachCount[3];
+			Real reachDistance[3], reachGainDb[3], reachCutoff[3];
+		};
+		mutable MixCounts m_mixCounts;
+		UnsignedInt m_mixLoggedAt;
+		UnsignedInt m_occlusionCursor;
+		/// The tallest roof over each cell, for occlusion, rebuilt now and then from the drawables.
+		std::vector<Real> m_blockers;
+		Int m_blockerColumns;
+		Int m_blockerRows;
+		UnsignedInt m_blockersBuiltAt;
 
 		AudioFileCache *m_audioCache;
 		PlayingAudio *m_binkHandle;

@@ -1,8 +1,9 @@
 """Every unit the build menus offer against every other, one on one, as a self-contained HTML table.
 
 Reads the INIs the way the engine loads them: the retail archives in Run (Patch*.big over the rest,
-a loose file under Run over every archive), the fork's masters under Code/Data over both, and
-BalanceReforged.ini then FixesReforged.ini patched over every Object, Weapon and Armor. Each cell
+a loose file under Run over every archive), the fork's masters under Code/Data over both,
+BalanceReforged.ini then FixesReforged.ini patched over every Object, Weapon and Armor, and Turkiye's
+reskins (TurkiyeReforged.ini) and weapons (TurkiyeWeaponReforged.ini) after them. Each cell
 is the AI's own matchup arithmetic (AIPlayer.cpp shotPatternAgainst and computeTemplateFramesToKill,
 AI.cpp aiFramesToKill): best weapon of the unconditioned WeaponSet against the target's
 unconditioned ArmorSet and body MaxHealth, frames to kill both ways. The page divides the two and
@@ -75,9 +76,16 @@ VANILLA_SIDES = {
     "GLAToxinGeneral": ("GLA Toxin General", "GLA Toksin", "TKS"),
     "GLADemolitionGeneral": ("GLA Demolition General", "GLA Yıkım", "YKM"),
     "GLAStealthGeneral": ("GLA Stealth General", "GLA Gizlilik", "GZL"),
+    "Turkiye": ("Turkiye (Experimental)", "Türkiye", "TÜR"),
 }
-VANILLA_FACTIONS = {"usa": "ABD", "china": "Çin", "gla": "GLA"}
-PATCH_FILES = ("Data/INI/BalanceReforged.ini", "Data/INI/FixesReforged.ini")
+VANILLA_FACTIONS = {"usa": "ABD", "china": "Çin", "gla": "GLA", "turkiye": "Türkiye"}
+# a side that is a faction of its own on the page although its BaseSide names another one: Turkiye says
+# USA so the AI runs the American scripts, and it is the fork's fourth faction, not a US general
+OWN_FACTION_SIDES = {"Turkiye"}
+# GameEngine::init: Balance and Fixes over EA's objects, then Turkiye's reskins of what they left
+PATCH_FILES = ("Data/INI/BalanceReforged.ini", "Data/INI/FixesReforged.ini", "Data/INI/TurkiyeReforged.ini")
+# Object::look: a unit sees no further than half as far again as its longest weapon reaches
+SIGHT_PER_WEAPON_RANGE = 1.5
 MODS_DIR = Path(os.environ.get("ZH_USER_DATA_DIR", Path.home() / "Documents" / "Command and Conquer Generals Zero Hour Data")) / "Mods"
 
 Shots = collections.namedtuple("Shots", "damage delay clip reload opening")
@@ -237,7 +245,7 @@ def percent(token):
 # ---- weapons, armor, locomotors ------------------------------------------------------------------------
 
 def new_weapon(name):
-    return {"name": name, "damage": 0.0, "type": "EXPLOSION", "range": 0.0, "delay": (0, 0), "clip": 0,
+    return {"name": name, "damage": 0.0, "type": "EXPLOSION", "range": 0.0, "min_range": 0.0, "delay": (0, 0), "clip": 0,
             "reload": 0, "anti_air": False, "anti_ground": True, "reload_type": "YES", "pre_attack": 0,
             "prefire": "PER_SHOT", "fire_one": None, "fire_two": None, "bonus": {}}
 
@@ -251,6 +259,8 @@ def apply_weapon(weapon, children):
             weapon["type"] = value[0].upper()
         elif key == "attackrange":
             weapon["range"] = real(value[0])
+        elif key == "minimumattackrange":
+            weapon["min_range"] = real(value[0])
         elif key == "delaybetweenshots":
             # WeaponTemplate::parseShotDelay: one number, or Min:a Max:b
             parts = re.split(r"[\s:=]+", " ".join(value))
@@ -309,6 +319,10 @@ class Thing:
         self.cost = 0.0
         self.display = ""
         self.locomotor = None
+        self.speed_scale = 1.0              # SpeedScale: Turkiye's speeds on the American locomotors
+        self.sight = 0.0                    # ShroudClearingRange, before Object::look caps it
+        self.spotter = False                # SpotterSight: the cap does not apply
+        self.beyond_vision = False          # AcquiresBeyondVision: picks targets out to its range from what the team sees
         self.variations = []                # BuildVariations: what the factory really makes
         self.command_sets = [""]            # its CommandSet, then any a CommandSetUpgrade switches to
         self.body = None                   # (tag, MaxHealth or 0 for a body that cannot be hurt)
@@ -330,7 +344,7 @@ class Thing:
         sets = self.sets[kind]
         return min(sets, key=lambda entry: len(entry[0]))[1] if sets else None
 
-    def apply(self, children, multifile):
+    def apply(self, children, multifile, weapons=None):
         for line, nested in children:
             key, value = field(line)
             if key == "kindof":
@@ -343,12 +357,20 @@ class Thing:
                 self.display = value[0]
             elif key == "locomotor" and value[0].upper() == "SET_NORMAL":
                 self.locomotor = value[1].lower()
+            elif key == "speedscale":
+                self.speed_scale = real(value[0])
+            elif key == "shroudclearingrange":
+                self.sight = real(value[0])
+            elif key == "spottersight":
+                self.spotter = yes(value[0])
+            elif key == "acquiresbeyondvision":
+                self.beyond_vision = yes(value[0])
             elif key == "buildvariations":
                 self.variations = [name.lower() for name in value]
             elif key == "commandset":
                 self.command_sets = [value[0].lower()] + self.command_sets[1:]
             elif key in ("weaponset", "armorset"):
-                self.add_set(key[:-3], nested, multifile)
+                self.add_set(key[:-3], nested, multifile, weapons)
             elif key == "removemodule":
                 self.drop_module(value[0])
             elif key == "replacemodule":
@@ -373,7 +395,7 @@ class Thing:
             elif bit != "NONE" and bit not in self.kinds:
                 self.kinds.append(bit)
 
-    def add_set(self, kind, children, multifile):
+    def add_set(self, kind, children, multifile, weapons):
         conditions = frozenset()
         content = {} if kind == "weapon" else None
         for line, _ in children:
@@ -384,6 +406,10 @@ class Thing:
                 content[value[0].upper()] = None if value[1].upper() == "NONE" else value[1].lower()
             elif kind == "armor" and key == "armor":
                 content = value[0].lower()
+        # ThingTemplate::parseWeaponTemplateSet: a patch file's set naming a weapon the data lacks is
+        # skipped (Turkiye's Korkut keeps the Avenger's dummy laser, which ShockWave has not)
+        if multifile and kind == "weapon" and any(name and name not in weapons for name in content.values()):
+            return
         sets = self.sets[kind]
         if self.sets_copied[kind]:
             self.sets_copied[kind] = False
@@ -434,8 +460,9 @@ class GameData:
         self.things = {}
         self.skipped = []                  # patch blocks naming what this data does not have
 
-        # WeaponReforged.ini right after Weapon.ini, as GameEngine::init loads it: the fork's own names
-        for path in ("Data/INI/Weapon.ini", "Data/INI/WeaponReforged.ini"):
+        # WeaponReforged.ini and TurkiyeWeaponReforged.ini right after Weapon.ini, as GameEngine::init
+        # loads them: the fork's own names
+        for path in ("Data/INI/Weapon.ini", "Data/INI/WeaponReforged.ini", "Data/INI/TurkiyeWeaponReforged.ini"):
             for keyword, args, children in ini_blocks(files.text(path)):
                 if keyword.lower() == "weapon" and args[0].lower() not in self.weapons:
                     self.weapons[args[0].lower()] = new_weapon(args[0])
@@ -489,7 +516,8 @@ class GameData:
                         todo.append(button["object"][0].lower())
                         if command == "UNIT_BUILD":
                             units.add(button["object"][0].lower())
-        return units
+        # a button can name what this data never made: a Turkiye reskin of an object the mod dropped
+        return units & self.things.keys()
 
     def load_objects(self, text, multifile):
         # a patch of an Object, Weapon or Armor the data never built, and a reskin of a missing original,
@@ -510,7 +538,7 @@ class GameData:
             elif keyword == "object":
                 if args[0].lower() not in self.things:
                     self.things[args[0].lower()] = self.default.copy_as(args[0])
-                self.things[args[0].lower()].apply(children, multifile)
+                self.things[args[0].lower()].apply(children, multifile, self.weapons)
             elif keyword == "weapon" and multifile:
                 apply_weapon(self.weapons[args[0].lower()], children)
             elif keyword == "armor" and multifile:
@@ -589,19 +617,26 @@ def best_attack(data, attacker, target):
 
 # ---- the page ------------------------------------------------------------------------------------------
 
+def parse_str(table):
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "Generals.str"
+        path.write_bytes(table)
+        return gametext.parse_str(path, strict=False)
+
+
 def game_strings(files):
-    """GameTextManager::init: Data/Generals.str when there is one, the English CSF otherwise."""
+    """GameTextManager::init: Data/Generals.str when there is one, the English CSF otherwise, and
+    Data/Patch.str over it, which names the fork's own units and sides (Turkiye's among them)."""
     names = {}
     table = files.read("Data/Generals.str")
-    if table is None:
-        entries = gametext.read_csf(files.read("Data/English/generals.csf"))
-    else:
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "Generals.str"
-            path.write_bytes(table)
-            entries = gametext.parse_str(path, strict=False)
+    entries = gametext.read_csf(files.read("Data/English/generals.csf")) if table is None else parse_str(table)
     for label, text in entries:
         names.setdefault(label.lower(), text)
+    patch = files.read("Data/Patch.str")
+    overlay = {}
+    for label, text in parse_str(patch) if patch else ():
+        overlay.setdefault(label.lower(), text)
+    names.update(overlay)
     return names
 
 
@@ -615,7 +650,8 @@ def playable_sides(files, names):
         if template and enabled and not yes(enabled.group(1)):
             locked.add(template.group(1).lower())
     templates = {}
-    for path in ("Data/INI/Default/PlayerTemplate.ini", "Data/INI/PlayerTemplate.ini"):
+    # PlayerTemplateReforged.ini after EA's, MULTIFILE: a new name (FactionTurkiye) is added, an old one edited
+    for path in ("Data/INI/Default/PlayerTemplate.ini", "Data/INI/PlayerTemplate.ini", "Data/INI/PlayerTemplateReforged.ini"):
         for keyword, args, children in ini_blocks(files.text(path)) if files.read(path) else ():
             if keyword.lower() == "playertemplate":
                 templates.setdefault(args[0].lower(), {}).update(field(line) for line, _ in children)
@@ -629,7 +665,7 @@ def playable_sides(files, names):
         side = fields["side"][0]
         starts[side] = [words[0] for key, words in fields.items()
                         if words and (key == "startingbuilding" or key.startswith("startingunit"))]
-        faction = fields.get("baseside", [side])[0].lower()
+        faction = (side if side in OWN_FACTION_SIDES else fields.get("baseside", [side])[0]).lower()
         lobby = names.get("side:" + side.lower()) or names.get(fields.get("displayname", [""])[0].lower(), side)
         vanilla = VANILLA_SIDES.get(side)
         if vanilla and vanilla[0] == lobby:
@@ -687,15 +723,23 @@ def build(files):
         weapon_set = fighter.unconditioned("weapon") or {}
         weapons = [data.weapons[weapon_set[slot]] for slot in WEAPON_SLOTS if weapon_set.get(slot)]
         armor = fighter.unconditioned("armor")
+        # Object::look: the weapon caps the sight of all but a structure, a dozer and a spotter; the dummy
+        # weapons count, as getLargestWeaponRange counts every slot
+        reach = max((weapon["range"] for weapon in weapons), default=-1.0)
+        sight = fighter.sight
+        if reach > 0.0 and not fighter.spotter and not {"STRUCTURE", "DOZER"} & set(fighter.kinds):
+            sight = min(sight, reach * SIGHT_PER_WEAPON_RANGE)
         return dict(describe(index), cost=candidates[index].cost, health=fighter.health(),
                     kinds=sorted(kind for kind in fighter.kinds if kind in SHOWN_KINDS),
                     armor=data.armor_names[armor] if armor else None,
-                    speed=data.locomotors.get(fighter.locomotor, 0.0),
+                    speed=data.locomotors.get(fighter.locomotor, 0.0) * fighter.speed_scale,
+                    sight=sight, beyondVision=fighter.beyond_vision,
                     weapons=[weapon["name"] for weapon in weapons if weapon["damage"] >= DUMMY_DAMAGE])
 
     def attack(fight):
         frames, weapon = fight
-        return {"frames": round(frames, 3), "weapon": weapon["name"], "range": weapon["range"]}
+        return {"frames": round(frames, 3), "weapon": weapon["name"], "range": weapon["range"],
+                "minRange": weapon["min_range"]}
 
     # what the reader could not make a fighter of: a body with no health it knows
     unread = ["%s (%s)" % (fighter.name, fighter.modules.get(fighter.body[0].lower(), "?") if fighter.body else "no body")
@@ -1255,6 +1299,10 @@ table.matrix {
       <span class="label">Menzil</span>
       <label class="toggle" for="useRange"><input type="checkbox" id="useRange">Kısa menzilli yaklaşırken ateş yer</label>
     </div>
+    <div class="control">
+      <span class="label">Görüş</span>
+      <label class="toggle" for="spotted"><input type="checkbox" id="spotted">Gözcü var, herkes menzilinin sonuna kadar görüyor</label>
+    </div>
     <div class="legend" aria-hidden="true">
       <div class="legend-bar" id="legendBar"></div>
       <div class="legend-ticks"><span>−20 zayıf</span><span>−3</span><span>eşit</span><span>3</span><span>20 güçlü</span></div>
@@ -1282,6 +1330,7 @@ table.matrix {
       <p>Oyundaki yapay zekâ karşı birim seçerken aynı hesabı yapıyor (<code>aiFramesToKill</code>), bu tablo onun gördüğü sayıları gösteriyor.</p>
       <p>"Aynı para ile" oranı iki birimin fiyat oranıyla çarpıyor. Doğrusal bir düzeltme bu: 900'lük Crusader'a karşı 600'lük birimden bir buçuk tane geldiğini varsayıyor, kalabalığın kendi ateş gücünü katlamasını hesaba katmıyor.</p>
       <p>Menzil açıkken kısa menzilli taraf aradaki farkı kendi <code>Speed</code> değeriyle kapatana kadar ateş yiyor ve bu süre onun öldürme süresine ekleniyor. Kaçıp ateş etme hesapta yok.</p>
+      <p>Menzil açıkken bir birim gördüğünden uzağa ateş edemiyor. Görüş oyunun hesapladığı gibi: <code>ShroudClearingRange</code>, en uzun silah menzilinin bir buçuk katıyla sınırlı (gözcüler ve inşaatçılar hariç). Türkiye'nin <code>GÖZ</code> etiketli topçusu (Firtina ve Sakarya) 100 görüyor, 500-600 atıyor ve 100'den yakına ateş edemiyor: tek başına hiç atış bulamıyor, bunu bir gözcünün ya da başka bir birimin gözü için yapıyor. "Gözcü var" açılınca herkes menzilinin sonuna kadar görüyor sayılıyor, topçu ancak o zaman menzilinden ateş ediyor.</p>
     </div>
     <div>
       <h2>Hesapta olmayanlar</h2>
@@ -1328,17 +1377,28 @@ function readState() {
     mode: document.querySelector("input[name=mode]:checked").value,
     sort: document.querySelector("input[name=sort]:checked").value,
     useRange: $("useRange").checked,
+    spotted: $("spotted").checked,
   };
+}
+
+// how far a unit shoots in a fight of its own: no further than it sees, unless a spotter sees for it
+function reach(unitIndex, attack, state) {
+  return state.spotted ? attack.range : Math.min(attack.range, UNITS[unitIndex].sight);
 }
 
 function killFrames(attackerIndex, targetIndex, state) {
   const attack = ATTACKS[attackerIndex][targetIndex];
   const reply = ATTACKS[targetIndex][attackerIndex];
   if (!attack) return { frames: Infinity, closing: 0 };
+  if (!state.useRange) return { frames: attack.frames, closing: 0 };
+  const own = reach(attackerIndex, attack, state);
+  // what it can see is inside the distance it may not fire at: alone it never gets a shot
+  if (own <= attack.minRange) return { frames: Infinity, closing: 0, blind: true };
   let closing = 0;
-  if (state.useRange && reply && reply.range > attack.range) {
+  const theirs = reply ? reach(targetIndex, reply, state) : 0;
+  if (reply && theirs > own) {
     const attacker = UNITS[attackerIndex];
-    closing = attacker.speed > 0 ? (reply.range - attack.range) / attacker.speed * FPS : Infinity;
+    closing = attacker.speed > 0 ? (theirs - own) / attacker.speed * FPS : Infinity;
   }
   return { frames: attack.frames + closing, closing };
 }
@@ -1399,6 +1459,15 @@ function sideOrder(indices) {
   });
 }
 
+// AcquiresBeyondVision: artillery that shoots far past its own sight at what a spotter shows its team
+function unitTags(unit) {
+  return SIDES[unit.side].tag + (unit.beyondVision ? " GÖZ" : "");
+}
+
+function spotterNote(unit) {
+  return unit.beyondVision ? ` · kendi görüşü ${unit.sight}, menzilinin gerisini gözcü görür` : "";
+}
+
 let view = { rows: [], cols: [], state: null };
 
 function render() {
@@ -1420,12 +1489,12 @@ function render() {
   parts.push('<th class="corner" scope="col"><div class="corner-key">Hedef →<br><strong>Saldıran</strong> ↓</div></th>');
   cols.forEach((index, position) => {
     const unit = UNITS[index];
-    parts.push(`<th scope="col" class="${groupStart(cols, position) ? "group-start" : ""}" title="${unit.name} (${SIDES[unit.side].label})"><span class="col-label">${unit.name}<span class="tag">${SIDES[unit.side].tag}</span></span></th>`);
+    parts.push(`<th scope="col" class="${groupStart(cols, position) ? "group-start" : ""}" title="${unit.name} (${SIDES[unit.side].label})${spotterNote(unit)}"><span class="col-label">${unit.name}<span class="tag">${unitTags(unit)}</span></span></th>`);
   });
   parts.push("</tr></thead><tbody>");
   rows.forEach((rowIndex, rowPosition) => {
     const unit = UNITS[rowIndex];
-    parts.push(`<tr class="${groupStart(rows, rowPosition) ? "group-start" : ""}"><th scope="row" title="${unit.name} (${SIDES[unit.side].label})">${unit.name}<span class="tag">${SIDES[unit.side].tag}</span></th>`);
+    parts.push(`<tr class="${groupStart(rows, rowPosition) ? "group-start" : ""}"><th scope="row" title="${unit.name} (${SIDES[unit.side].label})${spotterNote(unit)}">${unit.name}<span class="tag">${unitTags(unit)}</span></th>`);
     cols.forEach((colIndex, colPosition) => {
       const value = ratio(rowIndex, colIndex, state);
       const classes = rowIndex === colIndex ? ["diag", bin(value)] : [bin(value)];
@@ -1463,14 +1532,18 @@ function describeTooltip(rowPosition, colPosition) {
 
   const line = (unit, kill, attack) => {
     const closing = kill.closing > 0 && kill.closing !== Infinity ? ` <span class="tip-weapon">(${(kill.closing / FPS).toFixed(1)} sn yaklaşma dahil)</span>` : "";
-    const weapon = attack ? `<br><span class="tip-weapon">${attack.weapon} · menzil ${attack.range}</span>` : "";
+    const sight = attack && attack.range > unit.sight
+      ? ` · görüş ${unit.sight}, ötesini ${unit.beyondVision ? "bir gözcü görünce" : "ancak başkası görünce"} vurur`
+      : "";
+    const blind = kill.blind ? ` · en az ${attack.minRange} uzağa ateş ediyor, tek başına hiç atış bulamaz` : "";
+    const weapon = attack ? `<br><span class="tip-weapon">${attack.weapon} · menzil ${attack.range}${sight}${blind}</span>` : "";
     return `<span>${unit.name}</span><span>${seconds(kill.frames)}${closing}${weapon}</span>`;
   };
   const costLine = state.mode === "cost" ? `<span>fiyat</span><span>${rowUnit.cost} / ${colUnit.cost}</span>` : "";
 
   return `<div class="tip-row">
-      <span>saldıran</span><span class="tip-title">${rowUnit.name} <span class="tag">${SIDES[rowUnit.side].tag}</span></span>
-      <span>hedef</span><span class="tip-title">${colUnit.name} <span class="tag">${SIDES[colUnit.side].tag}</span></span>
+      <span>saldıran</span><span class="tip-title">${rowUnit.name} <span class="tag">${unitTags(rowUnit)}</span></span>
+      <span>hedef</span><span class="tip-title">${colUnit.name} <span class="tag">${unitTags(colUnit)}</span></span>
     </div>
     <div class="tip-ratio">${verdict}</div>
     <div class="tip-row">
@@ -1523,7 +1596,7 @@ function buildControls() {
   $("legendBar").innerHTML = steps.map(step => `<span class="${step}" style="background: var(--${step === "n" ? "neutral-cell" : step})"></span>`).join("");
   const excluded = DATA.excluded.map(unit => unit.name);
   const uniqueExcluded = [...new Set(excluded)].sort((a, b) => a.localeCompare(b, "tr"));
-  $("excluded").textContent = `Matrise girmeyen ${excluded.length} kayıt, silahı öldürücü olmayan ya da hasarını başka nesnelere yaptıran birimler: ${uniqueExcluded.join(", ")}. Avenger'ın lazerleri, Battle Bus ve Troop Crawler'ın yolcuları ayrı nesneler olduğu için bu hesabın dışında kaldı.`;
+  $("excluded").textContent = `Matrise girmeyen ${excluded.length} kayıt, silahı öldürücü olmayan ya da hasarını başka nesnelere yaptıran birimler: ${uniqueExcluded.join(", ")}. Avenger'ın lazerleri, Korkut'un topu, Battle Bus ve Troop Crawler'ın yolcuları ayrı nesneler olduğu için bu hesabın dışında kaldı.`;
 }
 
 buildControls();

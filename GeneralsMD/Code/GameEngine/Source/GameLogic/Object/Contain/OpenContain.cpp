@@ -290,6 +290,22 @@ void OpenContain::addOrRemoveObjFromWorld(Object* obj, Bool add)
 //-------------------------------------------------------------------------------------------------
 void OpenContain::addToContain( Object *rider )
 {
+	//
+	// Only the object's own contain module may hold riders.  A mod that gives an object two contain
+	// modules gets both onCollide calls, and the one Object::getContain() does not name took the
+	// rider into a list nothing else looks at: the rider's exit, death and destruction all go through
+	// getContain(), so it was deleted while still on that list, and the next redeployOccupants put a
+	// freed object at a fire point.  That is the shape of the RebornV5 crash, a Lazr_AmericaVehicleHumvee
+	// taking a pilot.
+	//
+	if( getObject()->getContain() != this )
+	{
+		DEBUG_LOG(( "'%s' has more than one contain module; '%s' goes only into the one getContain() names\n",
+								getObject()->getTemplate()->getName().str(),
+								rider->getTemplate()->getName().str() ));
+		return;
+	}
+
 	if( getObject()->checkAndDetonateBoobyTrap(rider) )
 	{
 		// Whoops, I was mined.  Cancel if I (or they) am now dead.
@@ -488,6 +504,7 @@ void OpenContain::killAllContained( void )
 
       onRemoving( rider );
 	    rider->onRemovedFrom( getObject() );
+      rider->forgoRankRally();	// it dies inside, though no longer counted in
       rider->kill();
 
     }
@@ -1754,11 +1771,13 @@ void OpenContain::xfer( Xfer *xfer )
 
 		}  // end if
 
-		// contain list size
-		xfer->xferUnsignedInt( &m_containListSize );
+		// contain list size; the count stays at the empty list's zero until loadPostProcess fills the
+		// list, so a load that throws before then leaves no container claiming riders it has not got
+		UnsignedInt containCount;
+		xfer->xferUnsignedInt( &containCount );
 
 		// read all contained items
-		for( UnsignedInt i = 0; i < m_containListSize; ++i )
+		for( UnsignedInt i = 0; i < containCount; ++i )
 		{
 
 			// read id
@@ -1918,6 +1937,7 @@ void OpenContain::loadPostProcess( void )
 
 		// put object on list
 		m_containList.push_back( obj );
+		m_containListSize++;
 
 		// remove this object from the world if we need to
 		if( isEnclosingContainerFor( obj ) )
@@ -1940,10 +1960,6 @@ void OpenContain::loadPostProcess( void )
 				m_heroUnitsContained++;
 		}
 	}
-
-	// sanity
-	DEBUG_ASSERTCRASH( m_containListSize == m_containList.size(),
-										 ("OpenContain::loadPostProcess - contain list count mismatch\n") );
 
 	// clear the list as we don't need it anymore
 	m_xferContainIDList.clear();

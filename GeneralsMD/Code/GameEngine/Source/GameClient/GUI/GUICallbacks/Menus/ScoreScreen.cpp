@@ -840,25 +840,21 @@ void finishSinglePlayerInit( void )
 			{
 				GameDifficulty difficulty = TheCampaignManager->getGameDifficulty();
 				SkirmishBattleHonors stats;
-				if (campaign->m_name.compareNoCase("USA") == 0)
+				// an original Generals campaign earns its side's honour too
+				const AsciiString side = campaign->getSide();
+				if (side.compareNoCase("USA") == 0)
 				{
 					stats.setUSACampaignComplete(difficulty);
 					stats.setHonors(BATTLE_HONOR_CAMPAIGN_USA);
 				}
 
-				if (campaign->m_name.compareNoCase("China") == 0)
+				if (side.compareNoCase("China") == 0)
 				{
 					stats.setCHINACampaignComplete(difficulty);
 					stats.setHonors(BATTLE_HONOR_CAMPAIGN_CHINA);
 				}
 
-				if (campaign->m_name.compareNoCase("GLA") == 0)
-				{
-					stats.setGLACampaignComplete(difficulty);
-					stats.setHonors(BATTLE_HONOR_CAMPAIGN_GLA);
-				}
-
-				if (campaign->m_name.compareNoCase("GLA") == 0)
+				if (side.compareNoCase("GLA") == 0)
 				{
 					stats.setGLACampaignComplete(difficulty);
 					stats.setHonors(BATTLE_HONOR_CAMPAIGN_GLA);
@@ -1729,7 +1725,7 @@ void populatePlayerInfo( Player *player, Int pos)
  					if (disCons >= 0)
  						stats.discons[ptIdx] = disCons;
 
-					stats.gamesAsRandom += (localSlot->getOriginalPlayerTemplate() == PLAYERTEMPLATE_RANDOM);
+					stats.gamesAsRandom += IsRandomPlayerTemplate(localSlot->getOriginalPlayerTemplate());
 
 					if (stats.lastGeneral != ptIdx)
 						stats.gamesInRowWithLastGeneral = 0;

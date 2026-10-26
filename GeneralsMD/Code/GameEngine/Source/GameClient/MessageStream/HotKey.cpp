@@ -128,7 +128,8 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 			const UINT virtualKey = MapVirtualKeyExW(scanCode, MAPVK_VSC_TO_VK, layout);
 			BYTE keys[256] = { 0 };
 			WCHAR out[4] = { 0 };
-			if( virtualKey != 0 && ToUnicodeEx(virtualKey, scanCode, keys, out, 4, 0x4, layout) == 1 )
+			// a Cyrillic or other non-Latin letter never names a hotkey, so that player keeps the US position
+			if( virtualKey != 0 && ToUnicodeEx(virtualKey, scanCode, keys, out, 4, 0x4, layout) == 1 && out[0] < 0x0250 )
 				typed = (WideChar)out[0];
 		}
 #endif
@@ -340,6 +341,10 @@ static std::map< std::string, WideChar > s_playerButtonKeys;
 	* stands too, the order gets the key (addHotKey).  The launcher holds the same table (hotkeys.js,
 	* FIXED_KEYS). */
 static const WideChar FIXED_KEYS[] = { 'A', 'S', 'G', 'Y', 'V', 'N', 'C', 'H' };
+/** FixedOrderKeys in Hotkeys.ini: with Enabled = No none of the above holds, and every button, the
+	* orders included, wears its label's letter or the player's, as in the game as shipped.  Read with
+	* the button keys, back to on before each read. */
+static Bool s_fixedOrderKeys = TRUE;
 static const char *const FIXED_H_BUTTONS[] =
 {
 	"command_upgradechinamines", "command_upgradeempmines", "command_upgradecamonetting", "command_upgradeglacamonetting",
@@ -349,6 +354,8 @@ static const char FIXED_H_PREFIX[] = "command_becomerealgla";	///< a fake buildi
 
 static WideChar fixedButtonKey( const AsciiString& lowerName, Int commandType )
 {
+	if( !s_fixedOrderKeys )
+		return 0;
 	if( strncmp( lowerName.str(), FIXED_H_PREFIX, sizeof( FIXED_H_PREFIX ) - 1 ) == 0 )
 		return 'H';
 	for( Int each = 0; each < (Int)( sizeof( FIXED_H_BUTTONS ) / sizeof( FIXED_H_BUTTONS[ 0 ] ) ); each++ )
@@ -508,9 +515,35 @@ WideChar HotKeyManager::buttonKeyIn( const AsciiString& button, WideChar labelKe
 		letter -= 'a' - 'A';
 	// a label's own fixed letter gives way; one the player chose stays, and the bar's fixed order
 	// still takes it first (addHotKey)
-	if( !chosen && isOneOf( letter, FIXED_KEYS, (Int)( sizeof( FIXED_KEYS ) / sizeof( FIXED_KEYS[ 0 ] ) ) ) )
+	if( !chosen && s_fixedOrderKeys && isOneOf( letter, FIXED_KEYS, (Int)( sizeof( FIXED_KEYS ) / sizeof( FIXED_KEYS[ 0 ] ) ) ) )
 		return 0;
 	return letter;
+}
+
+//-----------------------------------------------------------------------------
+Bool HotKeyManager::fixedOrderKeys( void )
+{
+	return s_fixedOrderKeys;
+}
+
+void HotKeyManager::setFixedOrderKeys( Bool fixed )
+{
+	s_fixedOrderKeys = fixed;
+}
+
+//-----------------------------------------------------------------------------
+/** FixedOrderKeys, Enabled = Yes or No, End: whether the orders hold their fixed letters (FIXED_KEYS). */
+/*static*/ void INI::parseFixedOrderKeysDefinition( INI *ini )
+{
+	static const FieldParse fields[] =
+	{
+		{ "Enabled", INI::parseBool, NULL, 0 },
+		{ NULL, NULL, NULL, 0 }
+	};
+	Bool enabled = TRUE;
+	ini->initFromINI( &enabled, fields );
+	s_fixedOrderKeys = enabled;
+	DEBUG_LOG(( "HOTKEYS: fixed order keys %s\n", enabled ? "on" : "off" ));
 }
 
 //-----------------------------------------------------------------------------
@@ -557,6 +590,7 @@ WideChar HotKeyManager::buttonKeyIn( const AsciiString& button, WideChar labelKe
 void HotKeyManager::loadPlayerKeys( void )
 {
 	s_playerButtonKeys.clear();
+	s_fixedOrderKeys = TRUE;
 	AsciiString hotkeys = TheGlobalData->getPath_UserData();
 	hotkeys.concat( "Hotkeys.ini" );
 	if( !TheFileSystem->doesFileExist( hotkeys.str() ) )
@@ -581,6 +615,7 @@ void HotKeyManager::reloadKeys( void )
 	commandMap.format( "Data\\%s\\CommandMap.ini", GetRegistryLanguage().str() );
 	INI ini;
 	ini.load( commandMap, INI_LOAD_OVERWRITE, NULL );
+	TheMetaMap->keepArrowsForCamera();
 #if defined(_DEBUG) || defined(_INTERNAL)
 	ini.load( "Data\\INI\\CommandMapDebug.ini", INI_LOAD_MULTIFILE, NULL );
 #endif
@@ -759,7 +794,11 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 		if( block.type != "CommandMap" || startsWith( block.name, "DEMO_" ) || startsWith( block.name, "DEBUG_" )
 				|| startsWith( block.name, "CHEAT_" ) || startsWith( block.name, "END_" ) || !Hotkeys_isKeyName( key ) )
 			continue;
-		HotkeyCommandRow row = commandRow( block.name, block.field( "Category", "MISC" ), key.c_str(), block.field( "Modifiers", "NONE" ).c_str() );
+		// a bare arrow goes to Ctrl, as the game loads it (MetaMap::keepArrowsForCamera)
+		std::string modifiers = block.field( "Modifiers", "NONE" );
+		if( modifiers == "NONE" && ( key == "KEY_UP" || key == "KEY_DOWN" || key == "KEY_LEFT" || key == "KEY_RIGHT" ) )
+			modifiers = "CTRL";
+		HotkeyCommandRow row = commandRow( block.name, block.field( "Category", "MISC" ), key.c_str(), modifiers.c_str() );
 		row.usableIn = block.field( "UseableIn", "GAME" );
 		row.label = block.field( "DisplayName", "" );
 		if( startsWith( block.name, "BEGIN_" ) )
@@ -780,6 +819,7 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 	unbound.push_back( commandRow( "SIGNAL_ATTACK", "INFORMATION" ) );
 	unbound.push_back( commandRow( "SIGNAL_DEFEND", "INFORMATION" ) );
 	unbound.push_back( commandRow( "SIGNAL_ATTENTION", "INFORMATION" ) );
+	unbound.push_back( commandRow( "REQUEST_MONEY", "INFORMATION" ) );
 	char name[ 32 ];
 	for( Int slot = 1; slot <= 8; slot++ )
 	{
@@ -791,13 +831,18 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 		snprintf( name, sizeof( name ), "COMMAND_SLOT%02d", slot );
 		unbound.push_back( commandRow( name, "GRID" ) );
 	}
-	// LAUNCHER_DEFAULTS: I, free in the shipped map, for the next idle worker
+	// LAUNCHER_DEFAULTS: I, free in the shipped map, for the next idle worker, and Alt with Z, X, C
+	// and V, which nothing in the shipped map holds, for the requests to the allies
+	static const char *const DEFAULTS[][ 3 ] = { { "SELECT_NEXT_IDLE_WORKER", "KEY_I", "NONE" },
+		{ "SIGNAL_ATTACK", "KEY_Z", "ALT" }, { "SIGNAL_DEFEND", "KEY_X", "ALT" }, { "SIGNAL_ATTENTION", "KEY_C", "ALT" },
+		{ "REQUEST_MONEY", "KEY_V", "ALT" } };
 	for( size_t each = 0; each < unbound.size(); each++ )
-		if( unbound[ each ].id == "SELECT_NEXT_IDLE_WORKER" )
-		{
-			unbound[ each ].binding.key = "KEY_I";
-			unbound[ each ].launcherDefault = TRUE;
-		}
+		for( size_t row = 0; row < sizeof( DEFAULTS ) / sizeof( DEFAULTS[ 0 ] ); row++ )
+			if( unbound[ each ].id == DEFAULTS[ row ][ 0 ] )
+			{
+				unbound[ each ].binding = HotkeyBinding( DEFAULTS[ row ][ 1 ], DEFAULTS[ row ][ 2 ] );
+				unbound[ each ].launcherDefault = TRUE;
+			}
 
 	// HOLD_COMMANDS: KEY_NONE and a modifier in the shipped file, which the rows above leave out.
 	// Force Attack's is set from its command bar button, the other two on the commands list.
@@ -834,7 +879,12 @@ HotkeysFile Hotkeys_parse( const std::string& text, const std::vector< HotkeyCom
 	{
 		const HotkeyIniBlock& block = blocks[ each ];
 		const std::string key = block.field( "Key", "" );
-		if( block.type == "CommandButtonHotKey" )
+		if( block.type == "FixedOrderKeys" )
+		{
+			const std::string enabled = lowered( block.field( "Enabled", "yes" ) );
+			file.fixedOrderKeys = !( enabled == "no" || enabled == "false" );
+		}
+		else if( block.type == "CommandButtonHotKey" )
 		{
 			const Bool letter = key.size() == 1 && isalpha( (unsigned char)key[ 0 ] );
 			file.buttons[ block.name ] = letter ? std::string( 1, (char)toupper( (unsigned char)key[ 0 ] ) ) : std::string();
@@ -955,6 +1005,8 @@ std::string Hotkeys_format( const HotkeysFile& file, const std::vector< HotkeyCo
 		"; Zero Hour Reforged hotkeys, written by the launcher's Hotkeys page. Only what differs from the\r\n"
 		"; game is here. The game reads it at start; it is not part of the multiplayer checksum.\r\n"
 		"\r\n";
+	if( !file.fixedOrderKeys )
+		out += "FixedOrderKeys\r\n  Enabled = No\r\nEnd\r\n\r\n";
 	std::map< std::string, Bool > named;
 	std::vector< std::string > ids = sortedNames( file.commands );
 	for( size_t each = 0; each < ids.size(); each++ )

@@ -58,6 +58,9 @@ void GetFunctionDetails(void *pointer, char*name, size_t nameSize, char*filename
 // Dumps out the exception info and stack trace.  Windows only: EXCEPTION_POINTERS is a structured
 // exception's, and C5 owns what a crash reports elsewhere.  StackDumpPosix.cpp is the other body.
 void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info );
+// The debug log's own file handle, or NULL while it is closed.  DumpExceptionInfo writes a short
+// fixed record into it first, past the log's queue (Debug.cpp sets it).
+void SetCrashRecordHandle( void *handle );
 #endif
 
 #else
@@ -75,6 +78,7 @@ __inline void GetFunctionDetails(void *pointer, char*name, size_t nameSize, char
 #if defined(_WIN32)
 // Dumps out the exception info and stack trace.
 __inline void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info ) {};
+__inline void SetCrashRecordHandle( void *handle ) {}
 #endif
 
 #endif

@@ -1,0 +1,15 @@
+# A fog of war edge on flat ground for the haze shroud check, Golden Oasis open scrub, seen from
+# seat 0 (no -observer). A Humvee drives east from 2000,3537 to 2400,3537 and parks, so the frame
+# holds its lit vision circle, the fogged strip it drove through and never-seen shroud. Diagnostic
+# only: the parked Humvee stands still on purpose. Frames here count 30 a second.
+#
+#   generals.exe -win -borderless -quickstart -noshellmap -multiInstance -fps 120 -noFPSLimit
+#     -particlecap 2500 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario geproto_fogedge
+#     -camera 2000 3537 -screenshot 600 -maxframes 640
+#   with MapLight = yes in the Options.ini of a ZH_USER_DATA_DIR folder for the haze
+#
+# At -camera 2250 the whole frame is inside the Humvee's sight; at 2000 the left third is fogged.
+
+30    spawn      0  AmericaVehicleHumvee      1  2000 3537
+45    move       0  AmericaVehicleHumvee         2400 3537

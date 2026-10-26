@@ -143,6 +143,11 @@ enum { TEXTURE_FILTER_MODE_COUNT = 3 };
 // stores the level; the thickness each level stands for is in OptionsCatalog.cpp.
 enum { SMOKE_LEVEL_COUNT = 3 };
 
+// Classic is the original surface; Modern is the SDL wave and optical surface.
+enum { WATER_STYLE_COUNT = 2 };
+// Classic is the original hazard effect; Volumetric is the Linux toxin/radiation cloud.
+enum { CLOUD_STYLE_COUNT = 2 };
+
 // Shadow quality is the size of the sun's depth map, low, medium and high: 1024, 2048 and 4096
 // texels a side (W3DVolumetricShadow.cpp, renderShadowMap).  Medium is the size the map always had.
 enum { SHADOW_QUALITY_COUNT = 3 };
@@ -150,10 +155,49 @@ enum { SHADOW_QUALITY_COUNT = 3 };
 // What colours a health bar: 0 the health, green through red, 1 the owner's player colour.
 enum { HEALTH_BAR_COLORS_COUNT = 2 };
 
+//-----------------------------------------------------------------------------
+// The Performance / Quality slider on the Graphics page.  One row per graphics setting the Graphics
+// and Effects pages carry, holding what that setting's control shows at each step of the slider:
+// step 0 is the fastest picture, the last step the best looking, and a setting that costs little
+// frame time turns up at an earlier step than one that costs much.  The four detail presets are
+// steps on it (TheGraphicsQualityAnchors), so GameLODManager::init takes the presets' values for the
+// GameLOD.ini fields from here too.  A new graphics setting is one more row.
+//
+// Not in it: the resolution, the window, the monitor, VSync, gamma and ClassicGraphics, which are
+// the screen and a choice of art rather than a price paid in frame time, the behind-buildings
+// marker, which is there to read the battlefield, and trees, which GameLogic reads as a map loads.
+// A setting the simulation reads stays out of the slider.
+enum { GRAPHICS_QUALITY_STEPS = 11 };
+
+struct GraphicsQualityRow
+{
+	const char	*control;		///< the control's name in OptionsMenu.wnd, without "OptionsMenu.wnd:"
+	Real				costMs;			///< Direct3D 11 GPU milliseconds a frame the row's last step costs over its first, 0 under the noise
+	Int					values[ GRAPHICS_QUALITY_STEPS ];	///< per step: a check box 0 or 1, a combo box its entry, a slider its position
+};
+
+extern const GraphicsQualityRow TheGraphicsQualityTable[];
+extern const Int TheGraphicsQualityTableCount;
+
+/** The slider's step for each detail preset, indexed by StaticGameLODLevel: Low, Medium, High, Ultra. */
+extern const Int TheGraphicsQualityAnchors[];
+
+/** The row for this control, or NULL. */
+extern const GraphicsQualityRow *findGraphicsQualityRow( const char *control );
+
 /** Options.ini -> TheWritableGlobalData, for every row.  A key that is absent leaves the field at
 	* whatever GlobalData's constructor put there, which is what makes an old Options.ini keep
-	* working when a row is added. */
+	* working when a row is added.  A file that names a detail preset and no GraphicsQuality, one
+	* written before the slider or by the launcher alone, first gets that preset's column of
+	* TheGraphicsQualityTable, so the keys it does carry still win. */
 extern void loadOptionsFromPreferences( UserPreferences& pref );
+
+/** The first detail preset GameLODManager applies, when Options.ini had no GraphicsQuality: every
+	* catalog row its column names goes to that column, except a row Options.ini named or a switch or
+	* ClassicGraphics changed after the load.  This is how a first run with no Options.ini, whose
+	* preset is picked only once the display starts, gets the boxes its preset shows.  Custom, and
+	* every later call, changes nothing. */
+extern void applyGraphicsQualityColumnAtStartup( Int staticGameLODLevel );
 
 /** TheGlobalData -> Options.ini, for every row.  The options menu's Accept writes only the rows the
 	* player changed instead, so a value the command line or ClassicGraphics put in GlobalData for one

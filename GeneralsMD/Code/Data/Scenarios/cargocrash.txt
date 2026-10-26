@@ -1,0 +1,50 @@
+# A Supply Drop cargo plane shot down over its own side's base, for the rule that a crash spares the
+# plane's player and allies (Reforged_BigJetCrashBlast and Reforged_JetCrashFireWeapon in
+# WeaponReforged.ini). Seat 0 owns the plane, seat 1 the anti-air. jetcrash.txt's B-52 lane on
+# Twilight Flame with an AmericaJetCargoPlane in it (same B52Locomotor, same 1000 health) and a row of
+# power plants for each seat beside the strip.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 2000
+#     -scenario cargocrash -logPrefix cargocrash_
+#
+# Reading the log: the HEADLESS TALLY lines at 40 and 800. AmericaJetCargoPlane at 800 must read 0
+# alive, or the plane got through and the deltas mean nothing. Seat 0's Hackers and power plants
+# are the plane's own side and must keep every point of health; seat 1's lose some. Hackers carry
+# no weapon and an Avenger's laser only shoots aircraft, so the crash is the only damage. The strip
+# skips x 2350-2550, a cliff band on this line. Before the rule (seed 7) both seats lost 10 Hackers
+# and seat 0's plants 136 health, seat 1's 160.
+
+15    spawn      0  AmericaPowerPlant      1   2250 4020
+15    spawn      0  AmericaPowerPlant      1   2700 4020
+15    spawn      1  ChinaPowerPlant        1   2250 4180
+15    spawn      1  ChinaPowerPlant        1   2700 4180
+
+20    spawn      1  AmericaTankAvenger     8   2100 4100   40
+20    spawn      0  ChinaInfantryHacker    4   2200 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2200 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2250 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2250 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2300 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2300 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2600 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2600 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2650 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2650 4120   20
+20    spawn      0  ChinaInfantryHacker    4   2700 4080   20
+20    spawn      1  ChinaInfantryHacker    4   2700 4120   20
+
+30    spawn      0  AmericaJetCargoPlane   1   900 4100
+31    move       0  AmericaJetCargoPlane       4400 4100
+
+40    tally      0  ChinaInfantryHacker
+40    tally      1  ChinaInfantryHacker
+40    tally      0  AmericaPowerPlant
+40    tally      1  ChinaPowerPlant
+
+800   tally      0  AmericaJetCargoPlane
+800   tally      0  ChinaInfantryHacker
+800   tally      1  ChinaInfantryHacker
+800   tally      0  AmericaPowerPlant
+800   tally      1  ChinaPowerPlant

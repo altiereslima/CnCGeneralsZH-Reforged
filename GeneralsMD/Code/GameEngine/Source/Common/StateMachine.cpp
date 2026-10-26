@@ -588,6 +588,13 @@ StateReturnType StateMachine::setState( StateID newStateID )
  */
 StateReturnType StateMachine::internalSetState( StateID newStateID )
 {
+	// The same hold updateStateMachine takes, for a change of state that does not come from an update:
+	// setState and initDefaultState from a parent state.  An onEnter or onExit on the way can make the
+	// parent leave the state that owns this machine, which drops the parent's reference.  Without this
+	// one the machine was freed under the transition, the next lookup read a dead state map, and the
+	// fall back to the default state (an attack that failed straight back to idle) spun the frame forever.
+	StateMachineRefHolder refThis( this );
+
 	State *newState = NULL;
 
 	// anytime the state changes, stop sleeping

@@ -1,0 +1,18 @@
+# Scenarios/firelook.txt filmed close, for the Direct3D 11 fire look against -d3d9 (command line in
+# the scenario's header, -video 420 1620). Three takes round 650,3330 on Twilight Flame: the Dragons
+# flaming the Rangers with the barracks going up behind, the Inferno firestorms over the base, and
+# the fire walls and burning wrecks after the tank fight.
+
+7.0   cut     660 3320 0.8 90 0
+7.1   zoom    0.6 6
+7.1   orbit   30 6.4
+
+13.5  cut     600 3420 0.65 160 -2
+13.6  zoom    0.55 6.8
+13.6  orbit   -25 6.8
+
+20.5  cut     640 3250 0.7 60 -4
+20.6  zoom    0.58 6.4
+20.6  orbit   20 6.4
+
+27.2  end

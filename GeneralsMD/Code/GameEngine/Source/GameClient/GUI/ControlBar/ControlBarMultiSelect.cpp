@@ -197,17 +197,15 @@ void ControlBar::updateMultiSelectStrip( void )
 
 	//
 	// the portrait bar's rule, the owner's: each selected type once, its own tile with its count, and
-	// no upgrades, which belong to one unit.  The portrait is still set to the focused type for the
-	// bar's own bookkeeping, and the page shrinks its window to nothing.  setPortraitByObject hides the
-	// cells, so it goes first
+	// no upgrades, which belong to one unit.  The well is emptied, upgrades and all: the portrait
+	// window is larger than a grid cell and would show through every cell no type fills.
+	// setPortraitByObject hides the cells, so it goes first
 	//
-	Drawable *focused = TheGameClient->findDrawableByID( m_multiSelectGroupFirst[ m_multiSelectFocus ] );
-	setPortraitByObject( focused ? focused->getObject() : NULL );
-	for( Int upgrade = 0; upgrade < MAX_RIGHT_HUD_UPGRADE_CAMEOS; upgrade++ )
-		m_rightHUDUpgradeCameos[ upgrade ]->winHide( TRUE );
+	setPortraitByObject( NULL );
 
 	// one cell per selected type with its count; the focused type is the lit one, the rest
-	// wear the darkened overlay state
+	// wear the darkened overlay state.  A cell is drawn from the portrait art, as large as the
+	// well itself for a one-type selection; the button cameo stretched to that size is a blur
 	for( size_t i = 0; i < m_multiSelectTiles.size(); i++ )
 	{
 		GameWindow *win = m_multiSelectTiles[ i ];
@@ -216,8 +214,9 @@ void ControlBar::updateMultiSelectStrip( void )
 
 		if( (Int)i < m_multiSelectGroupCount )
 		{
+			const ThingTemplate *type = m_multiSelectGroupTemplate[ i ];
 			win->winHide( FALSE );
-			win->winSetEnabledImage( 0, m_multiSelectGroupTemplate[ i ]->getButtonImage() );
+			win->winSetEnabledImage( 0, type->getSelectedPortraitImage() ? type->getSelectedPortraitImage() : type->getButtonImage() );
 			win->winEnable( (Int)i == m_multiSelectFocus );
 			GadgetButtonSetCount( win, m_multiSelectGroupSize[ i ] );
 		}
@@ -300,14 +299,20 @@ Bool ControlBar::describePortraitBarWindow( GameWindow *window, UnicodeString &n
 			continue;
 
 		name = TheGameText->fetch( shown->getDisplayNameLabel().str() );
-		// the description is the one on the button that buys it, when there is such a button
+		// the description is the one on the button that buys it, when there is such a button;
+		// retail's unused Command_UpgradeCamoNetting has a typo'd label, so skip labels the string table lacks
 		description.clear();
 		for( const CommandButton *button = TheCommandStore->getCommandButtons(); button; button = button->getNext() )
 		{
 			if( button->getUpgradeTemplate() == shown && button->getDescriptionLabel().isNotEmpty() )
 			{
-				description = TheGameText->fetch( button->getDescriptionLabel() );
-				break;
+				Bool exists = FALSE;
+				UnicodeString text = TheGameText->fetch( button->getDescriptionLabel(), &exists );
+				if( exists )
+				{
+					description = text;
+					break;
+				}
 			}
 		}
 		return TRUE;

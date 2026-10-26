@@ -46,6 +46,12 @@ TITLE = (566, 58, 194, 30)
 
 CONTROLS = ["ButtonMoneyMinus", "StaticTextMoney", "ButtonMoneyPlus", "ButtonMoneySend"]
 
+# ping and frame rate, in room EA's side column left: side names fit in 138 pixels of Arial 10
+SIDE_RIGHT = 318
+PING = (320, 42)
+FPS = (366, 40)
+NET_CONTROLS = ["StaticTextPing", "StaticTextFps"]
+
 # every string the money column asks TheGameText for
 STRINGS = [
     "GUI:MoneyTransferTitle",
@@ -56,6 +62,9 @@ STRINGS = [
     "GUI:MoneyTransferSent",
     "GUI:MoneyTransferReceived",
     "TOOLTIP:MoneyTransfer",
+    "GUI:DiplomacyPing",
+    "GUI:DiplomacyFps",
+    "TOOLTIP:DiplomacyNet",
 ]
 
 
@@ -103,7 +112,34 @@ def build(layout):
                                              "GUI:MoneyTransferPlus"))
         in_game.children.append(small_button(hide, "ButtonMoneySend%d" % row, SEND[0], top, SEND[1],
                                              "GUI:MoneyTransferSend"))
+
+    add_net_columns(layout)
     return layout
+
+
+def add_net_columns(layout):
+    """Each player's ping and frame rate, between the side and the team."""
+    in_game = layout.find("InGameParent")
+    status = layout.find("StaticTextStatus0")
+    status_title = layout.find("StaticTextStatusTitle")
+
+    for name, (left, width), text in (("StaticTextPingTitle", PING, "GUI:DiplomacyPing"),
+                                      ("StaticTextFpsTitle", FPS, "GUI:DiplomacyFps")):
+        title = clone(status_title, "Diplomacy.wnd:%s" % name)
+        title.place(left, 58, width, 30)
+        title.set_prop("TEXT", '"%s"' % text)
+        title.put_prop("TOOLTIPTEXT", '"TOOLTIP:DiplomacyNet"')
+        in_game.children.append(title)
+
+    for row in range(ROWS):
+        top = ROW_TOP + row * ROW_STEP
+        side = layout.find("StaticTextSide%d" % row)
+        l, t, r, b, cw, ch = side.rect
+        side.rect = (l, t, SIDE_RIGHT, b, cw, ch)
+        for name, (left, width) in (("StaticTextPing", PING), ("StaticTextFps", FPS)):
+            cell = clone(status, "Diplomacy.wnd:%s%d" % (name, row))
+            cell.place(left, top, width, ROW_HEIGHT)
+            in_game.children.append(cell)
 
 
 def read_strings():
@@ -129,7 +165,8 @@ def selfcheck():
         problems.append("Diplomacy.wnd is not tracked under Data/Window")
     else:
         layout = wndlayout.load(path)
-        names = ["StaticTextMoneyTitle"] + ["%s%d" % (c, r) for r in range(ROWS) for c in CONTROLS]
+        names = ["StaticTextMoneyTitle", "StaticTextPingTitle", "StaticTextFpsTitle"]
+        names += ["%s%d" % (c, r) for r in range(ROWS) for c in CONTROLS + NET_CONTROLS]
         for name in names:
             if layout.find(name) is None:
                 problems.append("Diplomacy.wnd has no %s" % name)

@@ -162,6 +162,10 @@ public:
 	// Meshes a shadow pass left out as light rather than matter, counted until the caller resets it.
 	static int						Shadow_Pass_Light_Meshes;
 
+	// Set by the sun's depth pass while a Direct3D 11 map is bound: an opaque rigid mesh's base
+	// pass goes to DX8MeshRendererClass::Add_Shadow_Caster rather than to its texture categories.
+	static bool						Shadow_Lean_Casters;
+
 	void								Replace_Texture(TextureClass* texture,TextureClass* new_texture);
 	void								Replace_VertexMaterial(VertexMaterialClass* vmat,VertexMaterialClass* new_vmat);
 

@@ -110,6 +110,10 @@ DX11BufferTwinClass * Direct3D11_Twin_Index_Buffer(unsigned byte_count, bool dyn
 // first bind and kept on it, so nothing in the loaders has to know this exists.
 void Direct3D11_Mirror_Texture(unsigned stage, struct IDirect3DBaseTexture9 * texture);
 
+// The shroud texture the terrain draws its fog with, handed to the Warm Light haze with the
+// terrain's world to texture mapping (DX11Post_Set_Haze_Shroud).  Null reads everything as in sight.
+void Direct3D11_Set_Haze_Shroud(struct IDirect3DBaseTexture9 * texture, const float rect[4]);
+
 // The vehicle headlights for the frame, nearest the camera first, eight floats each: world
 // position, reach, world direction, cosine of the cone's edge; and what a pixel gains per channel
 // per unit of their light.  A Direct3D 9 run ignores them.
@@ -162,6 +166,52 @@ void Direct3D11_Clear_Shadow_Parameters();
 // caller keeps its older shade under the clouds.
 bool Direct3D11_Fill_Smoke_Map(const float * casters, unsigned count, float strength);
 
+// The sun's opaque casters, depth only and instanced, while the map is bound
+// (DX11BackendClass::Upload_Shadow_Casters and Draw_Shadow_Casters): the pass's instances go up
+// once, a world an instance as the three rows of its Matrix3D (NULL for an identity world) and the
+// first bone of a skinned one, with the pass's bones, three rows of a Matrix3D each.  A run is
+// one piece of one mesh model drawn once for each of its instances.  An alpha tested run samples
+// the texture set on stage 0, so the runs are drawn a texture at a time.  False with nothing drawn
+// when there is no backend, it refused a program or a buffer, or alpha tested runs find no texture
+// on stage 0, and the caller draws those casters the old way.
+enum DX11ShadowCasterKind
+{
+	DX11_SHADOW_CASTER_RIGID,
+	DX11_SHADOW_CASTER_ALPHA_TESTED,
+	DX11_SHADOW_CASTER_SKINNED
+};
+struct DX11ShadowCasterRun
+{
+	DX11ShadowCasterKind Kind;
+	DX11BufferTwinClass * Vertices;		///< NULL for a skinned run, which reads the skin source
+	unsigned Stride;
+	unsigned TextureOffset;					///< bytes into a vertex to stage 0's coordinates
+	DX11BufferTwinClass * Indices;
+	unsigned StartIndex;
+	unsigned IndexCount;
+	unsigned BaseVertex;
+	bool Strip;
+	unsigned long CullMode;			///< D3DCULL
+	unsigned long DepthFunction;	///< D3DCMPFUNC
+	unsigned FirstInstance;
+	unsigned InstanceCount;
+};
+bool Direct3D11_Upload_Shadow_Casters(const float * const * worlds, const unsigned * first_bones,
+	unsigned instance_count, const float * const * bones, unsigned bone_count);
+bool Direct3D11_Draw_Shadow_Casters(const DX11ShadowCasterRun * runs, unsigned run_count);
+
+// A skin's bind pose for the depth pass to skin on the GPU (DX11BackendClass::Upload_Shadow_Skin):
+// a position in its bone's space and the bone, a vertex at a time.  The first vertex comes back
+// with the generation it is good for; a model uploaded under an older one uploads again.
+struct DX11ShadowSkinVertex
+{
+	float Position[3];
+	unsigned Bone;
+};
+bool Direct3D11_Upload_Shadow_Skin(const DX11ShadowSkinVertex * vertices, unsigned count,
+	unsigned & first_vertex);
+unsigned Direct3D11_Shadow_Skin_Generation();
+
 // The scene camera's view, in the device's layout, set by the shadow pass once the frame's camera is
 // back.  A draw made in camera space (identity view, perspective projection: the sorted particles)
 // looks its shadow up through it.
@@ -170,6 +220,18 @@ void Direct3D11_Set_Scene_View(const float view[16]);
 // The draws that follow carry a fire's glow in their normals, to be added after the shade
 // (DX11BackendClass::Set_Smoke_Glow).  The sorting pool sets it around the smoke billboards' runs.
 void Direct3D11_Set_Smoke_Glow(bool glow);
+
+// The draws that follow are a fire or explosion system's billboards, with each particle's age and
+// seed in the second coordinate set (DX11BackendClass::Set_Fire_Look).  The sorting pool sets it.
+void Direct3D11_Set_Fire_Look(bool fire);
+
+// The draws that follow are an Emissive particle system's billboards, which take no shadow and no
+// smoke shade (DX11BackendClass::Set_Emissive).  The sorting pool sets it.
+void Direct3D11_Set_Emissive(bool emissive);
+
+// The draws that follow are a house colour mesh that glows past white for the bloom
+// (DX11BackendClass::Set_Team_Glow, the Team Glow option).  The mesh renderer sets it around the mesh.
+void Direct3D11_Set_Team_Glow(bool glow);
 
 // The look one object's draws are dressed in (DRAW_EFFECT_* in ffshader.h) and its four numbers
 // (DX11BackendClass::Set_Draw_Effect).  The mesh renderer sets it around a mesh's draws and puts
@@ -244,6 +306,9 @@ bool Direct3D11_Can_Tear();
 // True once, the first time a present was refused, with the HRESULT it was refused with.  WW3D2
 // has no logging in a shipping build, so the display asks and writes the line.
 bool Direct3D11_Take_Present_Failure(long & result);
+// After a refused present, why the device went: DXGI's removed reason (a driver reset, a hung or
+// removed card), or 0 while the device is alive.  A removed device never comes back.
+long Direct3D11_Device_Removed_Reason();
 
 // Wait for the monitor on the Direct3D 11 present.  DXGI takes the interval per Present, so this
 // does not need a device reset the way Direct3D 9's presentation interval does.
@@ -316,6 +381,11 @@ void Direct3D11_Register_Engine_Shader(const void * shader, const char * file_pa
 void Direct3D11_Mirror_Vertex_Shader_Constant(unsigned first_register, const float * values,
 	unsigned count);
 
+// The Modern water's pixel registers, c0 to the last hull packet (DX11_WATER_REGISTERS), which
+// W3DWater sets for its own draws and nothing else reads; and what its draws did, for the log.
+void Direct3D11_Set_Water_Constants(unsigned first_register, const float * values, unsigned count);
+std::string Direct3D11_Water_Report();
+
 // The draw, made alongside the Direct3D 9 one rather than instead of it: phase 2 is finished when
 // the D3D11 picture can replace the D3D9 one, and until then both have to be able to produce it.
 // False means the backend could not resolve a pipeline for this state and drew nothing, which is
@@ -356,7 +426,10 @@ void Direct3D11_Statistics(unsigned & pipelines_built, unsigned long long & draw
 
 // How many compiled programs came with the game (dx11shaders.shipped) and how many the backend holds now,
 // shipped, cached and compiled together: a run whose held count exceeds the shipped one compiled something.
-void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held);
+// Of those compiled, how many the worker built off the frame, the longest one from queue to landing, and
+// the draws left out while they were built.
+void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held, unsigned & off_frame,
+	double & longest_milliseconds, unsigned long long & draws_waited);
 
 // What the frame since the last call spent building pipelines and copying textures, and how many
 // of each, how many times the soft particles copied the scene's depth, and how many constant blocks

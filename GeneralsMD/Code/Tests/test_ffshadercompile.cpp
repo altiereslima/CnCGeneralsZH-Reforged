@@ -206,10 +206,8 @@ TEST(ffshadercompile_the_tree_shadow_program_compiles)
 	CHECK(compiles(compile, eleven, D3D11_PROFILE));
 }
 
-// A program that takes the sun's shadow takes the smoke's with it on Direct3D 11: the smoke's map at
-// t6 and the field after SkyUp.  The SDL3 GPU text is made from the same generator and must stay
-// without both, because that backend binds no map there and uploads no such field.
-TEST(ffshadercompile_a_shadow_receiving_program_reads_the_smoke_on_d3d11_only)
+// Windows and SDL receivers share the smoke map at t6 and its constants after SkyUp.
+TEST(ffshadercompile_shadow_receivers_share_the_smoke_filter)
 {
 	CombinerDescription description;
 	memset(&description, 0, sizeof(description));
@@ -227,8 +225,9 @@ TEST(ffshadercompile_a_shadow_receiving_program_reads_the_smoke_on_d3d11_only)
 
 	std::string sdl;
 	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, sdl));
-	CHECK(sdl.find("SmokeMap") == std::string::npos);
-	CHECK(sdl.find("VolumeParameters") == std::string::npos);
+	CHECK(sdl.find("register(t6, space2)") != std::string::npos);
+	CHECK(sdl.find("VolumeParameters") > sdl.find("SkyUp"));
+	CHECK(sdl.find("light_reaching(input.Position)") != std::string::npos);
 
 	D3DCompileFunction compile = load_compiler();
 	if (compile == NULL) {
@@ -368,7 +367,8 @@ TEST(ffshadercompile_each_draw_effect_compiles_on_d3d11_only)
 			std::string nine;
 			CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, sdl));
 			CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D9, nine));
-			CHECK(sdl.find("effect_") == std::string::npos);
+			CHECK((sdl.find("current = effect_cloak_shadow(") != std::string::npos) == (effect == DRAW_EFFECT_CLOAK_SHADOW));
+			if (effect != DRAW_EFFECT_CLOAK_SHADOW) CHECK(sdl.find("effect_") == std::string::npos);
 			CHECK(nine.find("effect_") == std::string::npos);
 
 			if (compile != NULL) {
@@ -379,4 +379,54 @@ TEST(ffshadercompile_each_draw_effect_compiles_on_d3d11_only)
 	if (compile == NULL) {
 		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
 	}
+}
+
+// A fire billboard bends its coordinates before the stages sample and burns after them, before the
+// fog and the soft fade; an additive one wears away through the colour, a blended one through the
+// alpha.  It declares no constant of its own, so an additive flame with no fade keeps the short
+// block.  SDL3 and D3D9 get none of it.
+TEST(ffshadercompile_a_fire_billboard_burns_on_d3d11_only)
+{
+	CombinerDescription description;
+	memset(&description, 0, sizeof(description));
+	description.StageCount = 1;
+	description.Stages[0] = one_stage(D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE,
+		D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE, 0, true);
+	description.PixelPipeline.FogEnabled = true;
+	const std::string plain_key = CombinerShader_Key(description);
+
+	description.FireLook = FIRE_LOOK_COLOUR;
+	CHECK(CombinerShader_Key(description) == plain_key + ":B2");
+	std::string flame;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, flame));
+	const size_t bend = flame.find("input.TexCoord0 = (fire_cell + saturate(");
+	const size_t sample = flame.find("Texture0.Sample(");
+	const size_t burn = flame.find("current *= fire_keep;");
+	const size_t fog = flame.find("FogColour.rgb, current.rgb");
+	CHECK(bend != std::string::npos && sample != std::string::npos);
+	CHECK(burn != std::string::npos && fog != std::string::npos);
+	CHECK(bend < sample && sample < burn && burn < fog);
+	CHECK(flame.find("VolumeParameters") == std::string::npos);
+
+	description.FireLook = FIRE_LOOK_ALPHA;
+	description.SoftParticle = SOFT_PARTICLE_ALPHA;
+	description.ShadowReceiving = true;
+	std::string fireball;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, fireball));
+	CHECK(fireball.find("current.a *= fire_keep;") < fireball.find("soft_particle_fade(input.Position"));
+
+	std::string sdl;
+	std::string nine;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, sdl));
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D9, nine));
+	CHECK(sdl.find("fire_") == std::string::npos);
+	CHECK(nine.find("fire_") == std::string::npos);
+
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+		return;
+	}
+	CHECK(compiles(compile, flame, D3D11_PROFILE));
+	CHECK(compiles(compile, fireball, D3D11_PROFILE));
 }

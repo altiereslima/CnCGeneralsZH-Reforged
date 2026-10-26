@@ -56,6 +56,8 @@
 
 #include "Common/file.h"
 
+#include <mutex>
+
 //----------------------------------------------------------------------------
 //           Forward References
 //----------------------------------------------------------------------------
@@ -82,7 +84,7 @@ class RAMFile : public File
 		Char				*m_data;											///< File data in memory
 		Int					m_pos;												///< current read position
 		Int					m_size;												///< size of file in memory
-		
+
 	public:
 		
 		RAMFile();
@@ -101,7 +103,9 @@ class RAMFile : public File
 		virtual Bool	scanString(AsciiString &newString);									///< return what gets read as a string from the current memory position.
 
 		virtual Bool	open( File *file );																	///< Open file for fast RAM access
-		virtual Bool	openFromArchive(File *archiveFile, const AsciiString& filename, Int offset, Int size); ///< copy file data from the given file at the given offset for the given size.
+		/// copy file data from the given file at the given offset for the given size, holding
+		/// archiveLock (the archive's ArchiveFile::m_readLock) across the seek and the read
+		virtual Bool	openFromArchive(File *archiveFile, std::mutex &archiveLock, const AsciiString& filename, Int offset, Int size);
 		virtual Bool	openFromMemory(const Char *data, Int size, const AsciiString& filename); ///< read a block somebody else is holding, for a file that was never on a disk
 		virtual Bool	copyDataToFile(File *localFile);										///< write the contents of the RAM file to the given local file.  This could be REALLY slow.
 

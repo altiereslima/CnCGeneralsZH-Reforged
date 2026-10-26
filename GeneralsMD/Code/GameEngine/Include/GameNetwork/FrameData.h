@@ -52,6 +52,8 @@ public:
 	NetCommandList * getCommandList();
 	void setFrameCommandCount(UnsignedInt totalCommandCount);
 	UnsignedInt getFrameCommandCount();
+	void setFrameInfoID(UnsignedShort id);
+	Int getFrameInfoID();						///< id of the FRAMEINFO that set the count, -1 when none came
 	void addCommand(NetCommandMsg *msg);
 	UnsignedInt getCommandCount();
 	void zeroFrame();
@@ -60,6 +62,7 @@ public:
 protected:
 	UnsignedInt m_frame;
 	UnsignedInt m_frameCommandCount;
+	Int m_frameInfoID;
 	UnsignedInt m_commandCount;
 	NetCommandList *m_commandList;
 	UnsignedInt m_lastFailedCC;

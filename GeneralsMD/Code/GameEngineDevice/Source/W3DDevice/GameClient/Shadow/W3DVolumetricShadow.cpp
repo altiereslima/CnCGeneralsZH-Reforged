@@ -59,6 +59,7 @@
 #include "Common/DrawModule.h"
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
+#include "W3DDevice/GameClient/SunShadowCasterCull.h"
 #include "WW3D2/statistics.h"
 #include "Common/PerfTimer.h"
 #include "GameLogic/TerrainLogic.h"
@@ -74,11 +75,15 @@
 #include "WW3D2/sortingrenderer.h"
 #include "GameClient/View.h"
 #include "Platform/RenderTypes.h"
+#include "Platform/SunShadow.h"
 #include "Lib/Clock.h"		// Clock_Ticks: QueryPerformanceCounter on Windows, a monotonic clock elsewhere
 #include "GameClient/ParticleSys.h"
 #include "W3DDevice/GameClient/W3DParticleSys.h"
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
+#include "Common/JobSystem.h"
+#include "Common/LogicThread.h"
 #include <algorithm>
+#include <cstddef>
 #include <vector>
 
 #ifdef _INTERNAL
@@ -179,7 +184,7 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 
 // Whether the sun's map took this frame.  The volumes read it to know whether to stand down, and it
 // is false on a machine with no Direct3D 11 device, which is what keeps that machine's shadows.
-static Bool theShadowMapHoldsTheFrame = FALSE;
+
 
 //#define SV_DEBUG
 //#define SV_DEBUG_BOUNDS
@@ -3887,22 +3892,11 @@ DECLARE_PERF_TIMER(stencilShadows)
 DECLARE_PERF_TIMER(shadowVolumeUpdate)
 DECLARE_PERF_TIMER(shadowVolumeSubmit)
 
-/// The systems the last fill marked, by id: a particle update since may have retired any of them.
-static std::vector<ParticleSystemID> s_systemsInSunMap;
-
-/** Nothing of this frame's smoke is in the map: every system keeps its blob.  Only a system the last
-		fill marked can be marked, so only those are looked up, not every system there is. */
+/** Nothing of this frame's smoke is in the map: every system keeps its blob.  A new stamp drops every
+		mark at once; finding each system the last fill marked was a list walk and a map lookup apiece. */
 static void forgetSmokeInSunMap( void )
 {
-	if (TheParticleSystemManager == NULL)
-		return;
-	for (size_t i = 0; i < s_systemsInSunMap.size(); ++i)
-	{
-		ParticleSystem *sys = TheParticleSystemManager->findParticleSystem( s_systemsInSunMap[ i ] );
-		if (sys)		// gone since, with its mark
-			sys->setInSunMap( FALSE );
-	}
-	s_systemsInSunMap.clear();
+	ParticleSystem::forgetAllInSunMap();
 }
 
 /** One particle on its way into the smoke map, with the system it came from and how far it is from
@@ -3914,6 +3908,10 @@ struct SmokeCaster
 	ParticleSystem *system;
 	bool operator<( const SmokeCaster &other ) const { return distanceSqr < other.distanceSqr; }
 };
+// the smoke cull copies the five floats the backend reads straight out of both
+static_assert( offsetof( SmokeCaster, opticalDepth ) == 4 * sizeof(Real), "SmokeCaster leads with the backend's five floats" );
+static_assert( offsetof( W3DParticleSystemManager::SunMapCaster, opticalDepth ) == 4 * sizeof(Real),
+	"SunMapCaster leads with the backend's five floats" );
 
 /** The smoke into the sun's light: every alpha-blended billboard particle as a soft ball, its optical
 		depth the one its own alpha implies (particleSunMapOpticalDepth), handed to the backend's smoke
@@ -3923,42 +3921,153 @@ struct SmokeCaster
 		particles nearest the camera's focus win, so a new fire on screen is never starved by old smoke
 		at the edge.  Every system with a particle in the map is marked, and those lose their blob;
 		with the option off, or the map refused, none is. */
-static void fillSmokeMap( const Matrix3D &sunTransform, const Vector3 &focus, Real halfWidth, Real farClip )
+struct SmokeMapJob
+{
+	const W3DParticleSystemManager::SunMapCaster *candidates;
+	size_t count;
+	Int chunks;
+	Matrix3D sunTransform;
+	Real halfWidth, farClip;
+	Real *packed;							///< five floats a candidate, each chunk at its own candidates' offset
+	ParticleSystem **runs;		///< each chunk's runs of one system, at its own candidates' offset
+	UnsignedInt *kept;				///< particles each chunk kept
+	UnsignedInt *noted;				///< runs each chunk noted
+};
+static SmokeMapJob s_smoke;
+static std::vector<Real> s_smokePacked;					// kept, and never shrunk, so not filled again each frame
+static std::vector<ParticleSystem *> s_smokeRuns;
+static std::vector<UnsignedInt> s_smokeChunkCounts;
+#define SMOKE_CANDIDATES_PER_CHUNK 512		// short enough that no chunk is the fork's long pole
+
+/** The box the depth map covers, in the sun's own frame: it looks down its -Z. */
+static inline Bool inSunBox( const W3DParticleSystemManager::SunMapCaster &candidate )
+{
+	const Real radius = candidate.radius;
+	Vector3 inSun;
+	Matrix3D::Inverse_Transform_Vector( s_smoke.sunTransform, Vector3( candidate.x, candidate.y, candidate.z ), &inSun );
+	const Real reach = s_smoke.halfWidth + radius;
+	return !(inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach
+		|| -inSun.Z < SHADOW_MAP_NEAR_CLIP - radius || -inSun.Z > s_smoke.farClip + radius);
+}
+
+/** The smoke map's CPU half, before the fork: the old marks dropped, the candidates taken and every
+		buffer the chunks write sized here, because a job does not allocate.  The particles are walked
+		once a particle update (getSunMapCasters, its own fork); a pass drawn in between, half of them
+		late in a match and most of them early, only culls that list to its own sun. */
+static void beginSmokeMap( const Matrix3D &sunTransform, Real halfWidth, Real farClip )
+{
+	forgetSmokeInSunMap();
+	s_smoke.count = 0;
+	s_smoke.chunks = 0;
+	if (!TheGlobalData->m_volumetricSmokeShadows || TheParticleSystemManager == NULL)
+		return;
+	const std::vector<W3DParticleSystemManager::SunMapCaster> &candidates =
+		((W3DParticleSystemManager *)TheParticleSystemManager)->getSunMapCasters();
+	if (candidates.empty())
+		return;
+	const size_t count = candidates.size();
+	const Int chunks = (Int)((count + SMOKE_CANDIDATES_PER_CHUNK - 1) / SMOKE_CANDIDATES_PER_CHUNK);
+	if (s_smokePacked.size() < count * 5)
+		s_smokePacked.resize( count * 5 );
+	if (s_smokeRuns.size() < count)
+		s_smokeRuns.resize( count );
+	if (s_smokeChunkCounts.size() < (size_t)chunks * 2)
+		s_smokeChunkCounts.resize( (size_t)chunks * 2 );
+	s_smoke.candidates = &candidates[ 0 ];
+	s_smoke.count = count;
+	s_smoke.chunks = chunks;
+	s_smoke.sunTransform = sunTransform;
+	s_smoke.halfWidth = halfWidth;
+	s_smoke.farClip = farClip;
+	s_smoke.packed = &s_smokePacked[ 0 ];
+	s_smoke.runs = &s_smokeRuns[ 0 ];
+	s_smoke.kept = &s_smokeChunkCounts[ 0 ];
+	s_smoke.noted = &s_smokeChunkCounts[ chunks ];
+}
+
+/** One chunk of the cull, on any thread: the in-box particles straight into what the backend reads
+		(x, y, z, radius and optical depth lead a SunMapCaster in that order), and a system noted when it
+		changes rather than with every particle, since a list's particles come a system at a time.  The
+		distance to the focus only decides anything past the limit, which endSmokeMap handles. */
+static void cullSmokeChunk( Int chunk )
+{
+	const size_t first = (size_t)chunk * SMOKE_CANDIDATES_PER_CHUNK;
+	const size_t end = (std::min)( first + (size_t)SMOKE_CANDIDATES_PER_CHUNK, s_smoke.count );
+	Real *out = s_smoke.packed + first * 5;
+	ParticleSystem **runs = s_smoke.runs + first;
+	UnsignedInt kept = 0;
+	UnsignedInt noted = 0;
+	ParticleSystem *last = NULL;
+	for (size_t i = first; i < end; ++i)
+	{
+		const W3DParticleSystemManager::SunMapCaster &candidate = s_smoke.candidates[ i ];
+		if (!inSunBox( candidate ))
+			continue;
+		memcpy( out + kept * 5, &candidate.x, 5 * sizeof(Real) );
+		++kept;
+		if (candidate.system != last)
+		{
+			last = candidate.system;
+			runs[ noted++ ] = last;
+		}
+	}
+	s_smoke.kept[ chunk ] = kept;
+	s_smoke.noted[ chunk ] = noted;
+}
+
+/** The smoke into the sun's light: every alpha-blended billboard particle as a soft ball, its optical
+		depth the one its own alpha implies (particleSunMapOpticalDepth), handed to the backend's smoke
+		map.  The systems are read as the last client update left them, because the pass runs before
+		the frame's particles are drawn.  Fire is additive and casts nothing; a ground-aligned system is
+		a decal already.  Only what stands in the sun's box counts, and past the map's limit the
+		particles nearest the camera's focus win, so a new fire on screen is never starved by old smoke
+		at the edge.  Every system with a particle in the map is marked, and those lose their blob;
+		with the option off, or the map refused, none is.  The chunks culled beside the casters' poses;
+		here they close up in list order, which is the order one walk wrote, and go to the device. */
+static void endSmokeMap( const Vector3 &focus )
 {
 	static std::vector<SmokeCaster> found;	// kept: a burning base is thousands of particles every frame
-	static std::vector<Real> packed;
 	static Bool reported = FALSE;
 	static UnsignedInt nextReportFrame = 0;
 	const size_t mostCasters = 16384;		// the backend's own SMOKE_MOST_CASTERS
 
-	forgetSmokeInSunMap();
-	found.clear();
-	packed.clear();
-
-	if (TheGlobalData->m_volumetricSmokeShadows && TheParticleSystemManager != NULL)
+	// a chunk's output never sits before where it closes up to, so both moves only go down
+	size_t inBox = 0;
+	size_t runCount = 0;
+	ParticleSystem *last = NULL;
+	for (Int chunk = 0; chunk < s_smoke.chunks; ++chunk)
 	{
-		// The particles are walked once a particle update (getSunMapCasters); a pass drawn in between,
-		// half of them late in a match and most of them early, only culls that list to its own sun.
-		const std::vector<W3DParticleSystemManager::SunMapCaster> &candidates =
-			((W3DParticleSystemManager *)TheParticleSystemManager)->getSunMapCasters();
-		for (size_t i = 0; i < candidates.size(); ++i)
+		const size_t first = (size_t)chunk * SMOKE_CANDIDATES_PER_CHUNK;
+		const UnsignedInt kept = s_smoke.kept[ chunk ];
+		if (kept != 0 && first != inBox)
+			memmove( s_smoke.packed + inBox * 5, s_smoke.packed + first * 5, kept * 5 * sizeof(Real) );
+		inBox += kept;
+		for (UnsignedInt r = 0; r < s_smoke.noted[ chunk ]; ++r)
 		{
-			const W3DParticleSystemManager::SunMapCaster &candidate = candidates[ i ];
-			const Real radius = candidate.radius;
+			ParticleSystem *system = s_smoke.runs[ first + r ];
+			if (system != last)
+			{
+				last = system;
+				s_smoke.runs[ runCount++ ] = system;
+			}
+		}
+	}
+	size_t casters = inBox;
 
-			// the box the depth map covers, in the sun's own frame: it looks down its -Z
-			Vector3 inSun;
-			Matrix3D::Inverse_Transform_Vector( sunTransform, Vector3( candidate.x, candidate.y, candidate.z ), &inSun );
-			const Real reach = halfWidth + radius;
-			if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach
-					|| -inSun.Z < SHADOW_MAP_NEAR_CLIP - radius || -inSun.Z > farClip + radius)
+	// past the limit the particles nearest the camera's focus win, picked as they always were
+	if (inBox > mostCasters)
+	{
+		found.clear();
+		for (size_t i = 0; i < s_smoke.count; ++i)
+		{
+			const W3DParticleSystemManager::SunMapCaster &candidate = s_smoke.candidates[ i ];
+			if (!inSunBox( candidate ))
 				continue;
-
 			SmokeCaster caster;
 			caster.x = candidate.x;
 			caster.y = candidate.y;
 			caster.z = candidate.z;
-			caster.radius = radius;
+			caster.radius = candidate.radius;
 			caster.opticalDepth = candidate.opticalDepth;
 			const Real dx = candidate.x - focus.X;
 			const Real dy = candidate.y - focus.Y;
@@ -3966,37 +4075,34 @@ static void fillSmokeMap( const Matrix3D &sunTransform, const Vector3 &focus, Re
 			caster.system = candidate.system;
 			found.push_back( caster );
 		}
-	}
-
-	const size_t inBox = found.size();
-	if (found.size() > mostCasters)
-	{
 		std::nth_element( found.begin(), found.begin() + mostCasters, found.end() );
 		found.resize( mostCasters );
+		casters = mostCasters;
+		runCount = 0;
+		last = NULL;
+		for (size_t i = 0; i < casters; ++i)
+		{
+			memcpy( s_smoke.packed + i * 5, &found[ i ].x, 5 * sizeof(Real) );
+			if (found[ i ].system != last)
+			{
+				last = found[ i ].system;
+				s_smoke.runs[ runCount++ ] = last;
+			}
+		}
 	}
 
-	packed.reserve( found.size() * 5 );
-	for (size_t i = 0; i < found.size(); ++i)
-	{
-		packed.push_back( found[ i ].x );
-		packed.push_back( found[ i ].y );
-		packed.push_back( found[ i ].z );
-		packed.push_back( found[ i ].radius );
-		packed.push_back( found[ i ].opticalDepth );
-	}
-
-	const Bool held = Direct3D11_Fill_Smoke_Map( packed.empty() ? NULL : &packed[ 0 ],
-		(unsigned)found.size(), SMOKE_SHADOW_STRENGTH );
+	const Bool held = SunShadow::FillSmoke(DX8Wrapper::_Get_D3D_Device(), casters ? s_smoke.packed : NULL,
+		(unsigned)casters, SMOKE_SHADOW_STRENGTH );
 	if (!held)
 		return;
 
 	Int systemsHeld = 0;
-	for (size_t i = 0; i < found.size(); ++i)
+	for (size_t i = 0; i < runCount; ++i)
 	{
-		if (!found[ i ].system->isInSunMap())
+		ParticleSystem *system = s_smoke.runs[ i ];
+		if (!system->isInSunMap())
 		{
-			found[ i ].system->setInSunMap( TRUE );
-			s_systemsInSunMap.push_back( found[ i ].system->getSystemID() );
+			system->setInSunMap( TRUE );
 			++systemsHeld;
 		}
 	}
@@ -4004,13 +4110,13 @@ static void fillSmokeMap( const Matrix3D &sunTransform, const Vector3 &focus, Re
 	// A run's log says whether the smoke was in the map at all: the first frame it held any, and
 	// every ten seconds while it does.
 	const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
-	if (!found.empty() && (!reported || frame >= nextReportFrame))
+	if (casters && (!reported || frame >= nextReportFrame))
 	{
 		nextReportFrame = frame + 10 * LOGICFRAMES_PER_SECOND;
 		reported = TRUE;
 		DEBUG_LOG(("SMOKEMAP: frame %u, %d casters from %d systems in the sun's map, %d more past its limit;"
 			" fire light %s\n",
-			frame, (Int)found.size(), systemsHeld, (Int)( inBox - found.size() ),
+			frame, (Int)casters, systemsHeld, (Int)( inBox - casters ),
 			TheGlobalData->m_smokeFireLighting ? "on" : "off"));
 	}
 }
@@ -4039,6 +4145,11 @@ static void fillSmokeMap( const Matrix3D &sunTransform, const Vector3 &focus, Re
 		water areas; the grid mesh never does. */
 static Bool waterMirrorReadsTheMap()
 {
+#if defined(__linux__)
+	// SDL gives reflections a separate, excluded scene scope and never samples this
+	// capture through their camera. Keep culling against the actual receiving view.
+	return FALSE;
+#else
 	if (TheWaterRenderObj == NULL)
 		return FALSE;
 	if (TheGlobalData->m_waterType == WaterRenderObjClass::WATER_TYPE_3_GRIDMESH)
@@ -4051,37 +4162,7 @@ static Bool waterMirrorReadsTheMap()
 			return TRUE;
 	}
 	return FALSE;
-}
-
-/** Whether anything a pixel of this frame samples can be shadowed by a caster.  The caster is its
-		bounding sphere, and what it can darken lies downwind of it: the sphere swept away from the sun
-		from its own sun side down to the lowest ground on the map, widened by how far the receiving
-		filter reaches across the map.  That capsule runs from upwind to downwind with this radius.
-		Only the four sides of the view are tested: a draw with a depth-biased projection reads the
-		map through near and far planes that are not the camera's, and the sides are the same for
-		every one of them.  The overlay's quads sit at z = 0 whatever the ground does, so for them the
-		capsule runs on to overlayDownwind, swept down to z = 0 when the lowest ground is above it. */
-static Bool shadowReachesTheFrame( const FrustumClass &view, const Vector3 &upwind,
-	const Vector3 &downwind, const Vector3 &overlayDownwind, Real radius )
-{
-	Bool inView = TRUE;
-	for (Int side = 1; side <= 4 && inView; ++side)
-	{
-		const PlaneClass &plane = view.Planes[ side ];
-		inView = Vector3::Dot_Product( plane.N, upwind ) - plane.D <= radius
-			|| Vector3::Dot_Product( plane.N, downwind ) - plane.D <= radius;
-	}
-	if (inView)
-		return TRUE;
-
-	// the 2D scene's and the interface's quads, at the world's origin
-	const Vector3 along = overlayDownwind - upwind;
-	const Real lengthSqr = along.Length2();
-	Real t = (lengthSqr > 0.0f) ? -Vector3::Dot_Product( upwind, along ) / lengthSqr : 0.0f;
-	t = WWMath::Clamp( t, 0.0f, 1.0f );
-	const Vector3 nearest = upwind + along * t;
-	const Real reach = radius + SHADOW_MAP_OVERLAY_REACH;
-	return nearest.Length2() <= reach * reach;
+#endif
 }
 
 /** Render() is not only a draw.  Animatable3DObjClass::Render moves a playing animation on to the
@@ -4114,6 +4195,79 @@ public:
 		hlod->Set_Sub_Object_Transforms_Dirty( true );
 	}
 };
+
+/** Every enabled caster in list order, and what the gather decided for each.  Kept: five hundred
+		casters every frame in a fight. */
+enum CasterVerdict
+{
+	CASTER_OUT_OF_BOX,		///< not in the sun's box
+	CASTER_OUT_OF_VIEW,		///< in the box, its shadow reaching nothing drawn
+	CASTER_DRAWN,
+	CASTER_ON_MAIN,				///< a part of another model: gathered on the main thread after the fork
+};
+static std::vector<RenderObjClass *> s_casters;
+static std::vector<UnsignedByte> s_casterVerdicts;
+
+/** What goes into the map is what stands in the sun's box, not what the tactical camera can see.
+		Culling by the camera meant a tank just off the left of the screen stopped casting, so its shadow
+		blinked out while the shadow of the tank beside it stayed - and scrolling turned that into a row
+		of shadows flickering along the edge of the frame.  That tank is still in the map, because its
+		shadow sweeps onto the screen.  What can be left out is a caster whose shadow, followed downwind
+		to the lowest ground and widened by the filter, never meets the frame: no pixel drawn this frame
+		reads a texel it is nearest the sun in, so the map reads the same everywhere it is read.  A
+		caster drawn is posed here as well (Render's own first half, the clock and the bones), so the
+		whole of a caster's CPU work is one job item. */
+static UnsignedByte gatherCaster( RenderObjClass *robj, const Matrix3D &sun, Real halfWidth,
+	const SunShadowCasterCull &casterCull )
+{
+	SphereClass bound = robj->Get_Bounding_Sphere();
+	const Bool posed = W3DModelDraw::getPosedBoundingSphere( robj, bound );	// see casterSphere
+	Vector3 inSun;
+	Matrix3D::Inverse_Transform_Vector( sun, posed ? bound.Center : robj->Get_Position(), &inSun );
+	const Real reach = halfWidth + bound.Radius;
+	if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach)
+		return CASTER_OUT_OF_BOX;
+	if (!casterCull.Visible(bound))
+	{
+		CasterAnimationClock::advance(robj);
+		return CASTER_OUT_OF_VIEW;
+	}
+	if (robj->Class_ID() == RenderObjClass::CLASSID_HLOD)
+		((HLodClass *)robj)->Pose_For_Render();
+	return CASTER_DRAWN;
+}
+
+/** One fork for the pass's CPU work, so the main thread works through it with the pool instead of
+		waiting on it: the smoke cull's chunks first, the heaviest items, then one caster an item, so
+		no thread is left holding a long group at the end.  A caster's gather reads it, its HTree and
+		the shared animation data, and writes only the caster and its sub-objects: the motion channels'
+		shared caches are safe across threads and decode the same values from any cache state
+		(motchan.cpp), the combo motions are peeked rather than counted, and an embedded animation sound
+		never plays because nothing hands AnimatedSoundMgrClass a sound library, so Trigger_Sound
+		returns its frame untouched.  A part of another model is left to the main thread, since its
+		transform reaches up into a container a second caster may share.  Each verdict goes to the
+		caster's own slot, and Render then draws in list order as before, the pose current. */
+struct ShadowPassJob
+{
+	Int smokeChunks;
+	const Matrix3D *sun;
+	Real halfWidth;
+	const SunShadowCasterCull *casterCull;
+};
+
+static void shadowPassItem( Int index, void *context )
+{
+	const ShadowPassJob &job = *(const ShadowPassJob *)context;
+	if (index < job.smokeChunks)
+	{
+		cullSmokeChunk( index );
+		return;
+	}
+	const Int c = index - job.smokeChunks;
+	RenderObjClass *robj = s_casters[ c ];
+	s_casterVerdicts[ c ] = robj->Get_Container() != NULL ? (UnsignedByte)CASTER_ON_MAIN
+		: gatherCaster( robj, *job.sun, job.halfWidth, *job.casterCull );
+}
 
 /** Where an edge of the view crosses the level z, held to the stretch between its near and far
 		planes. */
@@ -4199,7 +4353,22 @@ static void wholeMapSunBox( const Vector3 &toSun, Vector3 *focus, Real *halfWidt
 		more than one view.  SHADOW-MAP-PLAN.md phase 1. */
 void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 {
-	theShadowMapHoldsTheFrame = FALSE;
+	// A failed, disabled or empty pass must not expose the previous view's shadow.
+	SunShadow::Clear(DX8Wrapper::_Get_D3D_Device());
+#if defined(__linux__)
+	// The SDL device reads the D3D9 state it was handed.  Under Direct3D 11 nothing reads it back,
+	// and a flush here would send every held-back state to a device that draws nothing, every frame.
+	DX8Wrapper::Flush_Deferred_D3D9_State();
+#endif
+	// Trees historically cast under either shadow option. Smoke has its own option;
+	// it may keep an otherwise empty depth capture alive without enabling geometry.
+#if defined(__linux__)
+	const Bool geometryShadows = TheGlobalData->m_useShadowVolumes || TheGlobalData->m_useShadowDecals;
+	const Bool captureShadows = geometryShadows || TheGlobalData->m_volumetricSmokeShadows;
+#else
+	const Bool geometryShadows = TRUE;
+	const Bool captureShadows = m_shadowList != NULL;
+#endif
 
 	/* The freecam asks for a map four times as wide and makes do with the usual one if refused.  A
 		 refusal is remembered until the freecam lands: asking again every frame released the usual
@@ -4214,9 +4383,9 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	const UnsignedInt chosenTexels = (SHADOW_MAP_TEXELS / 2) << TheGlobalData->m_shadowQuality;
 	UnsignedInt texels = chosenTexels;
 	Bool begun = FALSE;
-	if (TheGlobalData->m_shadowMap && m_shadowList != NULL && TheTacticalView != NULL)
+	if (TheGlobalData->m_shadowMap && captureShadows && TheTacticalView != NULL)
 	{
-		if (wholeMap && !wholeMapRefused && Direct3D11_Begin_Shadow_Map( SHADOW_MAP_WHOLE_MAP_TEXELS ))
+		if (wholeMap && !wholeMapRefused && SunShadow::Begin( DX8Wrapper::_Get_D3D_Device(), SHADOW_MAP_WHOLE_MAP_TEXELS ))
 		{
 			texels = SHADOW_MAP_WHOLE_MAP_TEXELS;
 			begun = TRUE;
@@ -4225,14 +4394,14 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		{
 			if (wholeMap)
 				wholeMapRefused = TRUE;
-			begun = Direct3D11_Begin_Shadow_Map( chosenTexels );
+			begun = SunShadow::Begin( DX8Wrapper::_Get_D3D_Device(), chosenTexels );
 		}
 	}
 	if (!begun)
 	{
 		//no Direct3D 11 device, or it refused the surface: the volumes keep the frame, no smoke is
 		//read out of a map the last frame filled, and every cloud keeps its blob
-		Direct3D11_Fill_Smoke_Map( NULL, 0, 0.0f );
+		SunShadow::FillSmoke(DX8Wrapper::_Get_D3D_Device(), NULL, 0, 0.0f );
 		forgetSmokeInSunMap();
 		return;
 	}
@@ -4334,6 +4503,17 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	// MeshClass::Render leaves the light pieces (beams, glows) out under this hint.
 	sunInfo.Push_Override_Flags( RenderInfoClass::RINFO_OVERRIDE_SHADOW_RENDERING );
 	MeshClass::Shadow_Pass_Light_Meshes = 0;
+	/* On Direct3D 11 the opaque casters (rigid, alpha tested and skins, the last skinned on the GPU)
+		 skip the texture categories and go into instanced depth-only draws, one a piece of a model
+		 (DX8MeshRendererClass::Flush_Shadow_Casters).  The SDL device has no such draw, and
+		 -shadowmapoldcasters keeps the old way for an A/B. */
+#if defined(__linux__)
+	MeshClass::Shadow_Lean_Casters = false;
+#else
+	MeshClass::Shadow_Lean_Casters = Direct3D11_Shadow_Map_Bound() && !TheGlobalData->m_shadowMapOldCasters;
+#endif
+	DX8MeshRendererClass::Reset_Shadow_Caster_Counts();
+	const unsigned shadowOldDrawsBefore = DX8Wrapper::Get_Draw_Calls();
 #ifndef DEBUG_LOGGING
 	Int castersCounted = 0;
 #endif
@@ -4360,44 +4540,53 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	const FrustumClass &seen = sceneCamera.Get_Frustum();
 	const Real filterReach = (widest * 1.5f + 2.0f) * texelWidth;
 	const Bool cullToFrame = toSun.Z > 0.01f && !waterMirrorReadsTheMap();
+	const SunShadowCasterCull casterCull={seen,toSun,lowestReceiver,SHADOW_MAP_CASTER_PAD,filterReach,SHADOW_MAP_OVERLAY_REACH,cullToFrame};
 
-	for (W3DVolumetricShadow *shadow = m_shadowList; shadow; shadow = shadow->m_next)
+#if defined(__linux__)
+	W3DVolumetricShadow *firstCaster = TheGlobalData->m_useShadowVolumes ? m_shadowList : NULL;
+#else
+	W3DVolumetricShadow *firstCaster = m_shadowList;
+#endif
+	beginSmokeMap( transform, halfWidth, farClip );
+	/* A tick running beside the render (-logicthread 1 and 2) can reach a live model through
+		 getDrawModulesFlushed and set its state or read its bones, so it waits here from the casters'
+		 gathering to the end of their poses (LogicThread::g_liveModelLock). */
+	std::unique_lock<std::recursive_mutex> liveModels( LogicThread::g_liveModelLock );
+	s_casters.clear();
+	for (W3DVolumetricShadow *shadow = firstCaster; shadow; shadow = shadow->m_next)
 	{
 		RenderObjClass *robj = shadow->getRenderObject();
-		if (robj == NULL || !shadow->isRenderEnabled() || shadow->isInvisibleEnabled())
-			continue;
+		if (robj != NULL && shadow->isRenderEnabled() && !shadow->isInvisibleEnabled())
+			s_casters.push_back( robj );
+	}
+	s_casterVerdicts.resize( s_casters.size() );
 
-		/* What goes into the map is what stands in the sun's box, not what the tactical camera can
-			 see.  Culling by the camera meant a tank just off the left of the screen stopped casting,
-			 so its shadow blinked out while the shadow of the tank beside it stayed - and scrolling
-			 turned that into a row of shadows flickering along the edge of the frame. */
-		SphereClass bound = robj->Get_Bounding_Sphere();
-		const Bool posed = W3DModelDraw::getPosedBoundingSphere( robj, bound );	// see casterSphere
-		Vector3 inSun;
-		Matrix3D::Inverse_Transform_Vector( transform, posed ? bound.Center : robj->Get_Position(), &inSun );
-		const Real reach = halfWidth + bound.Radius;
-		if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach)
-			continue;
+	{
+		ShadowPassJob job;
+		job.smokeChunks = s_smoke.chunks;
+		job.sun = &transform;
+		job.halfWidth = halfWidth;
+		job.casterCull = &casterCull;
+		const Int items = job.smokeChunks + (Int)s_casters.size();
+		if (items > 0)
+			JobSystem::parallel_for( items, 1, shadowPassItem, &job );
+	}
 
-		/* That tank is still in the map, because its shadow sweeps onto the screen.  What can be left
-			 out is a caster whose shadow, followed downwind to the lowest ground and widened by the
-			 filter, never meets the frame: no pixel drawn this frame reads a texel it is nearest the
-			 sun in, so the map reads the same everywhere it is read. */
-		if (cullToFrame)
-		{
-			const Real casterRadius = bound.Radius + SHADOW_MAP_CASTER_PAD;
-			const Real radius = casterRadius + filterReach;
-			const Real sweep = WWMath::Max( (bound.Center.Z - lowestReceiver + radius) / toSun.Z, 0.0f );
-			const Real overlaySweep = WWMath::Max(
-				(bound.Center.Z - WWMath::Min( lowestReceiver, 0.0f ) + radius) / toSun.Z, 0.0f );
-			if (!shadowReachesTheFrame( seen, bound.Center + toSun * casterRadius,
-					bound.Center - toSun * sweep, bound.Center - toSun * overlaySweep, radius ))
-			{
-				CasterAnimationClock::advance( robj );
-				++castersOutOfView;
-				continue;
-			}
-		}
+	// the parts of other models, their containers posed by now
+	for (size_t c = 0; c < s_casters.size(); ++c)
+	{
+		if (s_casterVerdicts[ c ] == CASTER_ON_MAIN)
+			s_casterVerdicts[ c ] = gatherCaster( s_casters[ c ], transform, halfWidth, casterCull );
+		if (s_casterVerdicts[ c ] == CASTER_OUT_OF_VIEW)
+			++castersOutOfView;
+	}
+	liveModels.unlock();
+
+	for (size_t c = 0; c < s_casters.size(); ++c)
+	{
+		if (s_casterVerdicts[ c ] != CASTER_DRAWN)
+			continue;
+		RenderObjClass *robj = s_casters[ c ];
 
 		/* An own stealthed unit casts only a share of its shadow, breathing with its fade, the way
 			 the cloak lets the ground show through its body (effect_cloak_shadow in ffshader.h).  A
@@ -4405,7 +4594,7 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		sunInfo.drawEffect = DRAW_EFFECT_NONE;
 		const DrawableInfo *casterInfo = (const DrawableInfo *)robj->Get_User_Data();
 		const Drawable *caster = casterInfo ? casterInfo->m_drawable : NULL;
-		if (caster && Direct3D11_Draw_Effects()
+		if (caster && SunShadow::CasterEffects(DX8Wrapper::_Get_D3D_Device())
 			&& (caster->getStealthDrawnLook() == STEALTHLOOK_VISIBLE_FRIENDLY
 				|| caster->getStealthDrawnLook() == STEALTHLOOK_VISIBLE_FRIENDLY_DETECTED)
 			&& !caster->isKindOf( KINDOF_MINE )
@@ -4418,6 +4607,17 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		robj->Render( sunInfo );
 		++castersCounted;
 	}
+	// Trees have no volume-shadow entry: batched foliage and object palms used
+	// separate flattened silhouettes. Capture their actual geometry in the sun map.
+	sunInfo.drawEffect = DRAW_EFFECT_NONE;
+	// Use the trees actually present. The loader can override ShowTrees for multiplayer,
+	// and changing that preference does not remove trees from an already loaded map.
+	if (geometryShadows)
+		castersCounted += TheTerrainRenderObject->renderTreeShadowCasters(sunInfo, &sceneCamera, casterCull);
+	// Off before anything below renders a mesh: the sort lists' meshes come through Render again,
+	// after the instanced casters have gone.
+	TheDX8MeshRenderer.Flush_Shadow_Casters();
+	MeshClass::Shadow_Lean_Casters = false;
 	TheDX8MeshRenderer.Flush();
 	/* A mesh the material system calls translucent goes to the sort lists rather than to the mesh
 		 renderer, and a helicopter's rotor disc is one of them: without this the map holds the
@@ -4442,19 +4642,38 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		 wrapper's cached value, which an invalidate leaves as a sentinel. */
 	const float bridgeSlopeBias = SHADOW_MAP_BRIDGE_SLOPE_BIAS;
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_SLOPESCALEDEPTHBIAS, *(const uint32 *)&bridgeSlopeBias );
-	TheTerrainRenderObject->getBridgeBuffer()->drawBridgeShadowCasters();
+	if (geometryShadows)
+		TheTerrainRenderObject->getBridgeBuffer()->drawBridgeShadowCasters();
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_SLOPESCALEDEPTHBIAS, 0 );
 
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE,
 		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE
 		| D3DCOLORWRITEENABLE_ALPHA );
 
-	Direct3D11_End_Shadow_Map();
+	// Invalidate the engine caches before restoring the device snapshot: invalidation itself
+	// unbinds textures and flushes deferred states. The restored scene must be the last writer.
+#if defined(__linux__)
+	DX8Wrapper::Invalidate_Cached_Render_States();
+	const bool captured = SunShadow::End(DX8Wrapper::_Get_D3D_Device());
+#else
+	SunShadow::End(DX8Wrapper::_Get_D3D_Device());	// Direct3D 11 carries on whether or not it bound
+#endif
 
 	// The smoke goes into a map of its own through the sun the casters were just drawn with.
 	// past the map's limit the smoke nearest the camera wins: the freecam's box is centred on the
 	// map's middle, which is not where it is looking from
-	fillSmokeMap( transform, wholeMap ? sceneCamera.Get_Position() : focus, halfWidth, farClip );
+	// The cull ran beside the casters' poses (beginSmokeMap, cullSmokeChunk).
+#if defined(__linux__)
+	if (captured)
+		endSmokeMap( wholeMap ? sceneCamera.Get_Position() : focus );
+	else {
+		SunShadow::FillSmoke(DX8Wrapper::_Get_D3D_Device(), NULL, 0, 0.0f );
+		forgetSmokeInSunMap();
+	}
+#else
+	// Direct3D 11 fills the smoke map whether or not the depth capture bound, as it always has.
+	endSmokeMap( wholeMap ? sceneCamera.Get_Position() : focus );
+#endif
 
 	// The frame's own camera, put back: the view, the projection and the viewport all went with the
 	// sun.  Without this everything drawn after the pass is drawn from the sun's seat, which is the
@@ -4469,6 +4688,11 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		Matrix4x4 view;
 		DX8Wrapper::Get_Transform( D3DTS_VIEW, view );
 		const Matrix4x4 deviceView = view.Transpose();
+#if defined(__linux__)
+		// Camera::Apply defers the view in render_state, outside the D3D9 state
+		// queue. Publish this one transform before snapshotting receiver coordinates.
+		DX8Wrapper::_Set_DX8_Transform(D3DTS_VIEW, deviceView);
+#endif
 		Direct3D11_Set_Scene_View( (const float *)&deviceView );
 	}
 
@@ -4497,15 +4721,22 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	if (TheGlobalData->m_lightingStyle == LIGHTING_STYLE_REFORGED && TheGlobalData->m_shadowMapStrength <= 0.0f)
 		strength = SHADOW_MAP_REFORGED_STRENGTH;
 
-	Direct3D11_Set_Shadow_Parameters( depthBias, strength, widest,
-		narrowest, penumbra / worldPerTexel, unitsPerUnitOfDepth, skyFill );
-
 	/* Said last, and only on the way out: everything above can bail, and the volumes have to know
 		 whether this frame's shadows are in the map or still theirs to draw.  The count of casters is
 		 not part of that answer.  It was, and a frame that happened to hold none - a camera over open
 		 ground - handed the frame back to the volumes for that one frame, so the whole scene's
-		 shadows changed style and back again as the camera moved. */
-	theShadowMapHoldsTheFrame = TRUE;
+		 shadows changed style and back again as the camera moved. Backend scene ownership is
+		 installed only after successful parameters. */
+#if defined(__linux__)
+	DX8Wrapper::Flush_Deferred_D3D9_State();	// as at the top: only the SDL device reads it
+	if (captured)
+		SunShadow::Parameters(DX8Wrapper::_Get_D3D_Device(), depthBias, strength, widest,
+			narrowest, penumbra / worldPerTexel, unitsPerUnitOfDepth, skyFill);
+#else
+	// Direct3D 11 takes the parameters whether or not the depth capture bound, as it always has.
+	SunShadow::Parameters(DX8Wrapper::_Get_D3D_Device(), depthBias, strength, widest,
+		narrowest, penumbra / worldPerTexel, unitsPerUnitOfDepth, skyFill);
+#endif
 
 #ifdef DEBUG_LOGGING
 	{
@@ -4515,23 +4746,47 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		if( freq > 0 )
 			TheShadowMapMS += (Real)((double)(tShadowEnd - tShadowStart) * 1000.0 / (double)freq);
 		TheShadowMapCasters += castersCounted;
-		TheShadowMapDraws += DX8Wrapper::Get_Draw_Calls() - shadowDrawsBefore;
+		// the instanced casters' draws went past the wrapper's count
+		TheShadowMapDraws += DX8Wrapper::Get_Draw_Calls() - shadowDrawsBefore + DX8MeshRendererClass::Shadow_Lean_Draws;
 	}
 #endif
 
 	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
 	// frame: what it answers is whether the pass draws the world at all, and that does not change
 	// thirty times a second.
-	if (TheGlobalData->m_shadowMapReport && castersCounted > 0)
+#if defined(__linux__)
+	// Foliage, bridges and smoke do not increment the volume-caster count.
+	// Report any completed capture so those settings remain diagnosable.
+	const bool hasReportableCapture = captured;
+#else
+	const bool hasReportableCapture = castersCounted > 0;
+#endif
+	if (TheGlobalData->m_shadowMapReport && hasReportableCapture)
 	{
 		static UnsignedInt nextReportFrame = 0;
 		const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
 		if (frame >= nextReportFrame)
 		{
 			nextReportFrame = frame + LOGICFRAMES_PER_SECOND;
-			DEBUG_LOG(("SHADOWMAP: %d casters, %d left out as reaching nothing in view, %d light meshes left out, %s\n",
+			// The meshes the lean path left to the old one, by the first reason each failed on.
+			AsciiString oldMeshes;
+			for (Int reason = 0; reason < DX8MeshRendererClass::SHADOW_OLD_REASON_COUNT; ++reason)
+			{
+				if (DX8MeshRendererClass::Shadow_Old_Meshes[reason] != 0)
+				{
+					AsciiString entry;
+					entry.format(" %s %d", DX8MeshRendererClass::Shadow_Old_Reason_Name(reason),
+						DX8MeshRendererClass::Shadow_Old_Meshes[reason]);
+					oldMeshes.concat(entry);
+				}
+			}
+			DEBUG_LOG(("SHADOWMAP: %d casters, %d left out as reaching nothing in view, %d light meshes left out, lean %d draws %d instances (%d alpha tested, %d skinned), old %u draws, old meshes:%s, %s\n",
 				castersCounted, castersOutOfView, MeshClass::Shadow_Pass_Light_Meshes,
-				Direct3D11_Shadow_Map_Report().c_str()));
+				DX8MeshRendererClass::Shadow_Lean_Draws, DX8MeshRendererClass::Shadow_Lean_Instances,
+				DX8MeshRendererClass::Shadow_Lean_Alpha_Tested, DX8MeshRendererClass::Shadow_Lean_Skinned,
+				DX8Wrapper::Get_Draw_Calls() - shadowOldDrawsBefore,
+				oldMeshes.isEmpty() ? " none" : oldMeshes.str(),
+				SunShadow::Report(DX8Wrapper::_Get_D3D_Device()).c_str()));
 		}
 	}
 }
@@ -4546,7 +4801,7 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 		 stay registered either way, which is what keeps them in the map; what stops is the volumes'
 		 own darkening pass.  A machine with no Direct3D 11 device fills no map and keeps the volumes,
 		 so nobody ends up with no shadows at all. */
-	if (TheGlobalData->m_shadowMapOnly && theShadowMapHoldsTheFrame)
+	if (TheGlobalData->m_shadowMapOnly && SunShadow::OwnsSceneShadows(DX8Wrapper::_Get_D3D_Device()))
 		return;
 
  	AABoxClass bbox;

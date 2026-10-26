@@ -120,7 +120,14 @@ public:
 	Real m_maxDistance;			// greater than this distance and the sound behaves as though it is muted
 
 	AudioType m_soundType;	// This should be either Music, Streaming or SoundEffect
-	
+
+	/// Music Follows the Fight (MusicManager) for a mod's own music: a MusicTrack with
+	/// `MusicMood = Calm`, `Tense` or `Battle` and `MusicSide = <playlist>` joins that playlist at that
+	/// mood, over the retail table where it names a retail track.  The playlist is whichever side's
+	/// tracks the skirmish scripts play; an untagged track (0, `None`) is left to the table or to them.
+	Int m_musicMood;
+	AsciiString m_musicSide;
+
   
   // DynamicAudioEventInfo interfacing functions
   virtual Bool isLevelSpecific() const { return false; } ///< If true, this sound is only defined on the current level and can be deleted when that level ends

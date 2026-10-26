@@ -22,6 +22,7 @@
 #include "test_harness.h"
 
 #include "W3DDevice/GameClient/W3DSmoothMotion.h"
+#include "W3DDevice/GameClient/W3DDrawableUpdate.h"
 
 #include <math.h>
 
@@ -131,4 +132,56 @@ TEST(smooth_motion_track_verdicts_per_tick)
 	CHECK_EQ((int)t.Snap, (int)SMOOTH_SNAP_DISTANCE);
 	CHECK_EQ((int)(counts[SMOOTH_BLENDED] - before[SMOOTH_BLENDED]), 1);
 	CHECK_EQ((int)(counts[SMOOTH_SNAP_HIDDEN] - before[SMOOTH_SNAP_HIDDEN]), 2);
+}
+
+TEST(drawable_update_composes_flushed_client_frame_when_pause_stops_animation)
+{
+	W3DDrawableUpdate update;
+	CHECK(update.needsUpdate(42, true, 0));
+	CHECK(!update.needsUpdate(42, false, 0));
+	// The overlapping tick flushes frame 43 after the render, replacing client poses with
+	// raw transforms. Opening the pause menu freezes animation before the next view update.
+	CHECK(update.needsUpdate(43, false, 0));
+	for (int picture = 0; picture < 8; ++picture)
+		CHECK(!update.needsUpdate(43, false, 0));
+	// On resume an advancing animation clock still requests an update within the same frame.
+	CHECK(update.needsUpdate(43, true, 0));
+	CHECK(update.needsUpdate(44, true, 0));
+}
+
+TEST(drawable_update_first_view_and_reset_do_not_require_animation_time)
+{
+	W3DDrawableUpdate update;
+	CHECK(update.needsUpdate(0, false, 0));
+	CHECK(!update.needsUpdate(0, false, 0));
+	// A new map can start at the same frame as the previous view's last picture.
+	update.reset();
+	CHECK(update.needsUpdate(0, false, 0));
+	CHECK(update.needsUpdate(90, false, 0));
+	update.reset();
+	CHECK(update.needsUpdate(0, false, 0));
+	CHECK(!update.needsUpdate(0, false, 0));
+}
+
+TEST(drawable_update_views_consume_client_frames_independently)
+{
+	W3DDrawableUpdate primary, observer;
+	CHECK(primary.needsUpdate(25, false, 0));
+	CHECK(observer.needsUpdate(25, false, 0));
+	CHECK(!primary.needsUpdate(25, false, 0));
+	CHECK(!observer.needsUpdate(25, false, 0));
+	CHECK(primary.needsUpdate(26, false, 0));
+	CHECK(!primary.needsUpdate(26, false, 0));
+	CHECK(observer.needsUpdate(26, false, 0));
+}
+
+TEST(drawable_update_capture_pictures_skip_without_consuming_client_frame)
+{
+	W3DDrawableUpdate update;
+	CHECK(!update.needsUpdate(0, true, 1));
+	CHECK(update.needsUpdate(0, false, 0));
+	CHECK(!update.needsUpdate(1, true, 1));
+	CHECK(!update.needsUpdate(1, false, 2));
+	CHECK(update.needsUpdate(1, false, 0));
+	CHECK(!update.needsUpdate(1, false, 0));
 }

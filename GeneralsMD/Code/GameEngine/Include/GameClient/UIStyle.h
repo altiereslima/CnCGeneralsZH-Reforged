@@ -113,6 +113,8 @@ namespace UIStyle
 	void wordmark( DisplayString *words[ 2 ], Int right, Int y );
 	/// a screen's title in capitals, as the layouts letter theirs
 	UnicodeString capitals( const UnicodeString &words );
+	/// a name in capitals whatever the language, so a map's English name keeps its plain I in Turkish
+	UnicodeString nameCapitals( const UnicodeString &name );
 
 	/// a house colour lifted toward white where it is too dark to read as words on a panel
 	Color readable( Color player );

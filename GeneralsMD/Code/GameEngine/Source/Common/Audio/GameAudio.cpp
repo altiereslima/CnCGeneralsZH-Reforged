@@ -130,6 +130,37 @@ static const FieldParse audioSettingsFieldParseTable[] =
 
 	{ "MinSampleVolume",			INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_minVolume) },
 	{ "RangeVolumeFade",			INI::parseBool,											NULL,							offsetof( AudioSettings, m_rangeVolumeFade) },
+	{ "SpeedOfSound",					INI::parseReal,											NULL,							offsetof( AudioSettings, m_speedOfSound) },
+	{ "MaxSoundDelay",				INI::parseReal,											NULL,							offsetof( AudioSettings, m_maxSoundDelay) },
+	{ "DopplerScale",					INI::parseReal,											NULL,							offsetof( AudioSettings, m_dopplerScale) },
+	{ "DopplerFastSpeed",			INI::parseReal,											NULL,							offsetof( AudioSettings, m_dopplerFastSpeed) },
+	{ "AirAbsorptionDistance",	INI::parseReal,										NULL,							offsetof( AudioSettings, m_airAbsorptionDistance) },
+	{ "ReverbLevel",					INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_reverbLevel) },
+	{ "DuckVolume",						INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_duckVolume) },
+	{ "DuckTime",							INI::parseReal,											NULL,							offsetof( AudioSettings, m_duckTime) },
+	{ "DuckSounds",						INI::parseAsciiStringVector,				NULL,							offsetof( AudioSettings, m_duckSounds) },
+	{ "ReplyUnitCooldown",		INI::parseReal,											NULL,							offsetof( AudioSettings, m_replyUnitCooldown) },
+	{ "ReplyGap",							INI::parseReal,											NULL,							offsetof( AudioSettings, m_replyGap) },
+	{ "ReplyMaxVoices",				INI::parseInt,											NULL,							offsetof( AudioSettings, m_replyMaxVoices) },
+	{ "BattleVoiceBudget",		INI::parseInt,											NULL,							offsetof( AudioSettings, m_battleVoiceBudget) },
+	{ "CoalesceRadius",				INI::parseReal,											NULL,							offsetof( AudioSettings, m_coalesceRadius) },
+	{ "CoalesceFrames",				INI::parseInt,											NULL,							offsetof( AudioSettings, m_coalesceFrames) },
+	{ "CoalesceGainStep",			INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_coalesceGainStep) },
+	{ "CoalesceMaxGain",			INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_coalesceMaxGain) },
+	{ "OcclusionStrength",		INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_occlusionStrength) },
+	{ "OcclusionVolume",			INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_occlusionVolume) },
+	{ "OcclusionDepth",				INI::parseReal,											NULL,							offsetof( AudioSettings, m_occlusionDepth) },
+	{ "OcclusionTime",				INI::parseReal,											NULL,							offsetof( AudioSettings, m_occlusionTime) },
+	{ "OcclusionRaysPerFrame",	INI::parseInt,										NULL,							offsetof( AudioSettings, m_occlusionRays) },
+	{ "ZoomMixNearHeight",		INI::parseReal,											NULL,							offsetof( AudioSettings, m_zoomMixNearHeight) },
+	{ "ZoomMixFarHeight",			INI::parseReal,											NULL,							offsetof( AudioSettings, m_zoomMixFarHeight) },
+	{ "ZoomMixDetailVolume",	INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_zoomMixDetailVolume) },
+	{ "AmbienceBedNearVolume",	INI::parsePercentToReal,					NULL,							offsetof( AudioSettings, m_ambienceBedNearVolume) },
+	{ "AmbienceBedFarVolume",	INI::parsePercentToReal,						NULL,							offsetof( AudioSettings, m_ambienceBedFarVolume) },
+	{ "AmbienceBedSnow",			INI::parseAsciiString,							NULL,							offsetof( AudioSettings, m_ambienceBedSnow) },
+	{ "AmbienceBedTown",			INI::parseAsciiString,							NULL,							offsetof( AudioSettings, m_ambienceBedTown) },
+	{ "AmbienceBedDesert",		INI::parseAsciiString,							NULL,							offsetof( AudioSettings, m_ambienceBedDesert) },
+	{ "AmbienceBedField",			INI::parseAsciiString,							NULL,							offsetof( AudioSettings, m_ambienceBedField) },
 	{ "GlobalMinRange",				INI::parseInt,											NULL,							offsetof( AudioSettings, m_globalMinRange) },
 	{ "GlobalMaxRange",				INI::parseInt,											NULL,							offsetof( AudioSettings, m_globalMaxRange) },
 	{ "TimeBetweenDrawableSounds", INI::parseDurationUnsignedInt, NULL,							offsetof( AudioSettings, m_drawableAmbientFrames) },
@@ -179,7 +210,11 @@ AudioManager::AudioManager() :
 	m_systemSoundVolume   = 0.0f; 
 	m_systemSpeechVolume  = 0.0f;
 	m_systemAmbientVolume = 0.0f;
+	m_systemMasterVolume = 1.0f;
 	m_zoomVolume = 1.0f;
+	m_zoomOut = 0.0f;
+	m_zoomDetailVolume = 1.0f;
+	m_rangeScale = 1.0f;
 	m_volumeHasChanged			= FALSE;
 	//
 
@@ -242,6 +277,9 @@ void AudioManager::init()
 	ini.load( AsciiString( "Data\\INI\\Default\\Voice.ini" ), INI_LOAD_OVERWRITE, NULL );
 	ini.load( AsciiString( "Data\\INI\\Voice.ini" ), INI_LOAD_OVERWRITE, NULL );
 
+	// the original Generals campaigns' briefings and mission dialogue, which Zero Hour's files left out
+	ini.load( AsciiString( "Data\\INI\\SpeechReforged.ini" ), INI_LOAD_OVERWRITE, NULL );
+
 	// -modfactions: each mod's own events under "M<n>~" names; AudioSettings and MiscAudio stay ours
 	INI::loadModPasses( "Data\\INI\\Music.ini", NULL );
 	INI::loadModPasses( "Data\\INI\\SoundEffects.ini", NULL );
@@ -278,16 +316,14 @@ void AudioManager::init()
 	m_systemSound3DVolume = getAudioSettings() ? getAudioSettings()->m_preferred3DSoundVolume: 0.75f;
 	m_systemSpeechVolume = getAudioSettings() ? getAudioSettings()->m_preferredSpeechVolume : 0.55f;
 	m_systemAmbientVolume = TheGlobalData->m_ambientVolume / 100.0f;	// the catalog loaded it from Options.ini
+	m_systemMasterVolume = TheGlobalData->m_masterVolume / 100.0f;
 
 	m_scriptMusicVolume = 1.0f;
 	m_scriptSoundVolume = 1.0f;
 	m_scriptSound3DVolume = 1.0f;
 	m_scriptSpeechVolume = 1.0f;
-	
-	m_musicVolume = m_systemMusicVolume;
-	m_soundVolume = m_systemSoundVolume;
-	m_sound3DVolume = m_systemSound3DVolume;
-	m_speechVolume = m_systemSpeechVolume;
+
+	recomputeVolumes();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -320,11 +356,7 @@ void AudioManager::reset()
 	m_scriptSound3DVolume = 1.0f;
 	m_scriptSpeechVolume = 1.0f;
 
-	// restore the final values to the 
-	m_musicVolume = m_systemMusicVolume;
-	m_soundVolume = m_systemSoundVolume;
-	m_sound3DVolume = m_systemSound3DVolume;
-	m_speechVolume = m_systemSpeechVolume;
+	recomputeVolumes();
 
 	m_disallowSpeech = FALSE;
 	m_handlesQueuedFromTick.clear();
@@ -412,8 +444,26 @@ void AudioManager::update()
 		}
 	}
 
+	// Zoomed out over a battle, every gun at full detail is a wall of noise; the detail steps back and
+	// the ambience, which keeps its level, comes forward (ZoomMix* in AudioSettings.h).
+	const AudioSettings *settings = TheAudio->getAudioSettings();
+	const Real span = settings->m_zoomMixFarHeight - settings->m_zoomMixNearHeight;
+	const Real height = cameraPos.z - groundPos.z;
+	m_zoomOut = span > 0.0f ? (height - settings->m_zoomMixNearHeight) / span : (height > settings->m_zoomMixNearHeight ? 1.0f : 0.0f);
+	m_zoomOut = MIN( 1.0f, MAX( 0.0f, m_zoomOut ) );
+	m_zoomDetailVolume = 1.0f - (1.0f - settings->m_zoomMixDetailVolume) * m_zoomOut;
+
+	// The sounds' ranges were made for EA's zoom, MaxCameraHeight; the wheel goes nearly three times
+	// further out, where the side of the screen stood 700 units from the microphone and its top 1000,
+	// past nearly every sound's MaxRange of 800, so only the middle of the screen was heard.  Past
+	// MaxCameraHeight the ranges grow with the zoom, and the screen falls off from its middle to its
+	// edges as it does at EA's zoom.  Legacy sound keeps retail's ranges.
+	m_rangeScale = TheGlobalData->m_legacySound ? 1.0f
+		: MAX( 1.0f, TheTacticalView->getHeightAboveGround() / TheGlobalData->m_maxCameraHeight );
+
 	set3DVolumeAdjustment( m_zoomVolume );
 
+	m_music->update();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -521,6 +571,9 @@ AudioHandle AudioManager::addAudioEventNow(const AudioEventRTS *eventToAdd, Audi
 		}
 	}
 
+	// the fight the music listens to is heard even with the effects switched off
+	m_music->noteSound(eventToAdd);
+
 	switch (eventToAdd->getAudioEventInfo()->m_soundType)
 	{
 		case AT_Music:
@@ -556,6 +609,19 @@ AudioHandle AudioManager::addAudioEventNow(const AudioEventRTS *eventToAdd, Audi
 	audioEvent->generateFilename();	// which file are we actually going to play?
 	((AudioEventRTS*)eventToAdd)->setPlayingAudioIndex( audioEvent->getPlayingAudioIndex() );
 	audioEvent->generatePlayInfo();	// generate pitch shift and volume shift now as well
+
+	// Sound takes time to arrive: a world sound starts late by its distance to the microphone over
+	// SpeedOfSound, at most MaxSoundDelay, on top of the delay its INI gives it.  Not a unit's voice,
+	// which answers the player, and not a script's sound, which logic waits on in the same frame.  The
+	// request list counts the delay down in logic time (MilesAudioManager::processRequestList).  Such a
+	// sound is marked as travelling, and its stop is held back the same way (stopAudioEvent).
+	const AudioEventInfo *info = eventToAdd->getAudioEventInfo();
+	if (info->m_soundType == AT_SoundEffect && audioEvent->isPositionalAudio() && !eventToAdd->getIsLogicalAudio()
+			&& !BitTest(info->m_type, ST_VOICE) && getAudioSettings()->m_speedOfSound > 0.0f)
+	{
+		audioEvent->setDelay(audioEvent->getDelay() + getTravelMs(audioEvent->getCurrentPosition()));
+		audioEvent->setTravels(TRUE);
+	}
 
 	std::list<std::pair<AsciiString, Real> >::iterator it;
 	for (it = m_adjustedVolumes.begin(); it != m_adjustedVolumes.end(); ++it) {
@@ -830,8 +896,6 @@ void AudioManager::setVolume( Real volume, AudioAffect whichToAffect )
 		} else {
 			m_scriptMusicVolume = volume;
 		}
-
-		m_musicVolume = m_scriptMusicVolume * m_systemMusicVolume;
 	}
 
 	if (whichToAffect & AudioAffect_Sound) {
@@ -840,8 +904,6 @@ void AudioManager::setVolume( Real volume, AudioAffect whichToAffect )
 		} else {
 			m_scriptSoundVolume = volume;
 		}
-
-		m_soundVolume = m_scriptSoundVolume * m_systemSoundVolume;
 	}
 
 	if (whichToAffect & AudioAffect_Sound3D) {
@@ -850,7 +912,6 @@ void AudioManager::setVolume( Real volume, AudioAffect whichToAffect )
 		} else {
 			m_scriptSound3DVolume = volume;
 		}
-		m_sound3DVolume = m_scriptSound3DVolume * m_systemSound3DVolume;
 	}
 
 	if (whichToAffect & AudioAffect_Speech) {
@@ -859,7 +920,6 @@ void AudioManager::setVolume( Real volume, AudioAffect whichToAffect )
 		} else {
 			m_scriptSpeechVolume = volume;
 		}
-		m_speechVolume = m_scriptSpeechVolume * m_systemSpeechVolume;
 	}
 
 	// No script volume of its own: a script that turns the effects down turns ambience down with them,
@@ -868,7 +928,30 @@ void AudioManager::setVolume( Real volume, AudioAffect whichToAffect )
 		m_systemAmbientVolume = volume;
 	}
 
-	m_volumeHasChanged = true;
+	if ((whichToAffect & AudioAffect_Master) && (whichToAffect & AudioAffect_SystemSetting)) {
+		m_systemMasterVolume = volume;
+	}
+
+	recomputeVolumes();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What the device reads: script times slider for each kind, the camera's zoom on 3D sound, and the
+	* Master slider on all of it.  Nothing reaches a sample without passing one of these four or
+	* getAmbientVolume, so a unit's reply, whose boost is taken on top of the louder of the effects and
+	* voice volumes and clamped to full scale, is turned down by Master like the rest. */
+void AudioManager::recomputeVolumes( void )
+{
+	m_musicVolume = m_scriptMusicVolume * m_systemMusicVolume * m_systemMasterVolume;
+	m_soundVolume = m_scriptSoundVolume * m_systemSoundVolume * m_systemMasterVolume;
+	m_sound3DVolume = MIN( 1.0f, MAX( 0.0f, m_zoomVolume * m_zoomDetailVolume * m_scriptSound3DVolume * m_systemSound3DVolume * m_systemMasterVolume ) );
+	m_speechVolume = m_scriptSpeechVolume * m_systemSpeechVolume * m_systemMasterVolume;
+
+	// Flagged every frame, changed or not: MilesAudioManager::getEffectiveVolume folds the listener's
+	// distance into a 3D sound's volume, so a playing sound needs it recomputed as the camera moves.
+	// EA skipped this while any speech stream played, against a hang inside the Miles DLL that the
+	// XAudio2 implementation does not have, and 3D volumes froze for as long as an EVA line lasted.
+	m_volumeHasChanged = TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -904,27 +987,14 @@ Real AudioManager::getAmbientVolume( Bool positional ) const
 {
 	const Real volume = positional ? m_zoomVolume * m_scriptSound3DVolume * m_systemAmbientVolume
 		: m_scriptSoundVolume * m_systemAmbientVolume;
-	return MIN( 1.0f, MAX( 0.0f, volume ) );
+	return MIN( 1.0f, MAX( 0.0f, volume * m_systemMasterVolume ) );
 }
 
 //-------------------------------------------------------------------------------------------------
 void AudioManager::set3DVolumeAdjustment( Real volumeAdjustment )
 {
 	m_zoomVolume = volumeAdjustment;
-	m_sound3DVolume = volumeAdjustment * m_scriptSound3DVolume * m_systemSound3DVolume;
-	
-	// clamp
-	if (m_sound3DVolume < 0.0f) 
-		m_sound3DVolume = 0.0f;
-
-	if (m_sound3DVolume > 1.0f)
-		m_sound3DVolume = 1.0f;
-
-	// Flagged every frame, changed or not: MilesAudioManager::getEffectiveVolume folds the listener's
-	// distance into a 3D sound's volume, so a playing sound needs it recomputed as the camera moves.
-	// EA skipped this while any speech stream played, against a hang inside the Miles DLL that the
-	// XAudio2 implementation does not have, and 3D volumes froze for as long as an EVA line lasted.
-	m_volumeHasChanged = TRUE;
+	recomputeVolumes();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1064,6 +1134,15 @@ void AudioManager::removeLevelSpecificAudioEventInfos(void)
 const AudioSettings *AudioManager::getAudioSettings( void ) const
 {
 	return m_audioSettings;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real AudioManager::getTravelMs( const Coord3D *position ) const
+{
+	Coord3D toMicrophone = *position;
+	toMicrophone.sub(&m_listenerPosition);
+	const Real travelMs = toMicrophone.length() / m_audioSettings->m_speedOfSound * MSEC_PER_SECOND;
+	return travelMs < m_audioSettings->m_maxSoundDelay ? travelMs : m_audioSettings->m_maxSoundDelay;
 }
 
 //-------------------------------------------------------------------------------------------------

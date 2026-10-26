@@ -353,8 +353,7 @@ void LANAPI::OnGameStart( void )
 	{
 		LANPreferences pref;
 		AsciiString option;
-		option.format("%d", m_currentGame->getLANSlot( m_currentGame->getLocalSlotNum() )->getPlayerTemplate());
-		pref["PlayerTemplate"] = option;
+		pref["PlayerTemplate"] = PlayerTemplatePreference(m_currentGame->getLANSlot( m_currentGame->getLocalSlotNum() )->getPlayerTemplate());
 		option.format("%d", m_currentGame->getLANSlot( m_currentGame->getLocalSlotNum() )->getColor());
 		pref["Color"] = option;
 		if (m_currentGame->amIHost())
@@ -547,9 +546,12 @@ void LANAPI::OnGameOptions( UnsignedInt playerIP, Int playerSlot, AsciiString op
 				}
 				else if (key == "PlayerTemplate")
 				{
-					if (val >= PLAYERTEMPLATE_MIN && val < ThePlayerTemplateStore->getPlayerTemplateCount() && val != slot->getPlayerTemplate())
+					if (IsValidPlayerTemplatePick(val) && val != slot->getPlayerTemplate())
 					{
 						slot->setPlayerTemplate(val);
+						// a pool that pushes the options string past the packet would empty it for everyone
+						if (GameInfoToAsciiString(m_currentGame).isEmpty())
+							slot->setPlayerTemplate(PLAYERTEMPLATE_RANDOM);
 						if (val == PLAYERTEMPLATE_OBSERVER)
 						{
 							slot->setColor(-1);
@@ -736,8 +738,7 @@ void LANAPI::OnPlayerLeave( UnicodeString player )
 		{
 			LANPreferences pref;
 			AsciiString option;
-			option.format("%d", m_currentGame->getLANSlot( m_currentGame->getLocalSlotNum() )->getPlayerTemplate());
-			pref["PlayerTemplate"] = option;
+			pref["PlayerTemplate"] = PlayerTemplatePreference(m_currentGame->getLANSlot( m_currentGame->getLocalSlotNum() )->getPlayerTemplate());
 			option.format("%d", m_currentGame->getLANSlot( m_currentGame->getLocalSlotNum() )->getColor());
 			pref["Color"] = option;
 			if (m_currentGame->amIHost())

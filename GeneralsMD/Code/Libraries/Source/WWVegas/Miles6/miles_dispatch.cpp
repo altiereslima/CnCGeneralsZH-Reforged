@@ -10,6 +10,8 @@
  * sound opens its own XAudio2 on Windows and goes through neither.
  */
 
+#include <stdlib.h>
+
 #include "MSS/MSS.h"
 
 #define MSS_API_LIST \
@@ -81,6 +83,11 @@
 	MSS_API(S32, AIL_ex_start_capture, (const char *pathname), (pathname)) \
 	MSS_API(void, AIL_ex_stop_capture, (void), ()) \
 	MSS_API(void, AIL_ex_set_3D_linear_falloff, (S32 linear), (linear)) \
+	MSS_API(void, AIL_ex_set_3D_air, (F32 speed_of_sound, F32 absorption_distance), (speed_of_sound, absorption_distance)) \
+	MSS_API(void, AIL_ex_set_reverb, (F32 wet, F32 decay, F32 damping, F32 echo, F32 slap), (wet, decay, damping, echo, slap)) \
+	MSS_API(void, AIL_ex_duck, (H3DSAMPLE trigger, F32 gain, F32 seconds), (trigger, gain, seconds)) \
+	MSS_API(void, AIL_ex_set_3D_sample_dry, (H3DSAMPLE handle, S32 dry), (handle, dry)) \
+	MSS_API(void, AIL_ex_set_limiter, (S32 on), (on)) \
 	MSS_API(S32, AIL_WAV_info, (const void *data, AILSOUNDINFO *info), (data, info)) \
 	MSS_API(S32, AIL_decompress_ADPCM, (const AILSOUNDINFO *info, void **outdata, U32 *outsize), (info, outdata, outsize)) \
 	MSS_API(void, AIL_mem_free_lock, (void *ptr), (ptr))
@@ -103,6 +110,12 @@ MSS_API_LIST
 
 void AILCALL AIL_ex_offline_mix(void)
 {
+	// ZH_WAV_XAUDIO2 keeps a -wav run on XAudio2, recording through the master's tap what a player
+	// hears.  The mix then runs on the device's clock: it needs an audio device, plays aloud, and the
+	// file is as long as the wall clock the run took, so the run has to go at the speed of play.
+	if (getenv("ZH_WAV_XAUDIO2") != NULL) {
+		return;
+	}
 	g_offline = true;
 	MA_AIL_ex_offline_mix();
 }
@@ -122,6 +135,21 @@ void AILCALL AIL_ex_capture_length(S32 *frames, S32 *rate)
 	}
 	*frames = 0;
 	*rate = 0;
+}
+
+// XAudio2's alone, whatever g_offline says: WinMain names the device before the choice is made, and
+// a -wav run plays on no device at all.
+void AILCALL XA_AIL_ex_set_output_device(const char *id);
+S32 AILCALL XA_AIL_ex_enumerate_output_devices(S32 index, char *id, S32 id_bytes, U16 *name, S32 name_chars);
+
+void AILCALL AIL_ex_set_output_device(const char *id)
+{
+	XA_AIL_ex_set_output_device(id);
+}
+
+S32 AILCALL AIL_ex_enumerate_output_devices(S32 index, char *id, S32 id_bytes, U16 *name, S32 name_chars)
+{
+	return XA_AIL_ex_enumerate_output_devices(index, id, id_bytes, name, name_chars);
 }
 
 } // extern "C"

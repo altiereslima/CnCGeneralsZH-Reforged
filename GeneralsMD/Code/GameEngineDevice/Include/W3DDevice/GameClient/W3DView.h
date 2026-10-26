@@ -48,6 +48,7 @@
 #include "GameClient/ParabolicEase.h"
 #include "GameClient/View.h"
 #include "GameClient/CameraScrollClock.h"
+#include "W3DDevice/GameClient/W3DDrawableUpdate.h"
 #include "WW3D2/camera.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
@@ -264,6 +265,8 @@ public:
 
 
 private:
+	W3DDrawableUpdate m_drawableUpdate;
+	Bool drawsDrawables( void );
 
 	Bool m_freeCamera;															///< the console's freecam has the view
 	Vector3 m_freeCameraEye;

@@ -822,7 +822,10 @@ void ModelConditionInfo::validateWeaponBarrelInfo() const
 					snprintf(buffer, ARRAY_SIZE(buffer), "%s%02d",plbName.str(), i);
 					const Matrix3D* mtx = findPristineBone(NAMEKEY(buffer), &plbBoneIndex);
 					if (mtx != NULL)
+					{
 						info.m_projectileOffsetMtx = *mtx;
+						info.m_hasProjectileLaunchBone = true;
+					}
 				}
 
 				if (info.m_fxBone == 0 && info.m_recoilBone == 0 && info.m_muzzleFlashBone == 0 && plbBoneIndex == 0)
@@ -857,7 +860,10 @@ void ModelConditionInfo::validateWeaponBarrelInfo() const
 
 				const Matrix3D* plbMtx = plbName.isEmpty() ? NULL : findPristineBone(NAMEKEY(plbName), NULL);
 				if (plbMtx != NULL)
+				{
 					info.m_projectileOffsetMtx = *plbMtx;
+					info.m_hasProjectileLaunchBone = true;
+				}
 				else
 					info.m_projectileOffsetMtx.Make_Identity();
 
@@ -3663,7 +3669,10 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 		//BONEPOS_LOG(("validateStuff() from within W3DModelDraw::setModelState()\n"));
 		//BONEPOS_DUMPREAL(draw->getScale());
 
-		newState->validateStuff(m_renderObject, draw->getScale(), getW3DModelDrawModuleData()->m_extraPublicBones);
+		// inside a tick never the live model, as getPristineBonePositionsForConditionState asks: the render
+		// may be posing it beside the tick, and its captured turret bones would go into the shared cache
+		newState->validateStuff(TheGameLogic->isInGameLogicUpdate() ? NULL : m_renderObject, draw->getScale(),
+			getW3DModelDrawModuleData()->m_extraPublicBones);
 		// ensure that any muzzle flashes from the *new* state, start out hidden...
 //		hideAllMuzzleFlashes(newState, m_renderObject);//moved to above
 		rebuildWeaponRecoilInfo(newState);
@@ -3795,7 +3804,8 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 		//BONEPOS_LOG(("validateStuff() from within W3DModelDraw::setModelState()\n"));
 		//BONEPOS_DUMPREAL(getDrawable()->getScale());
 
-		newState->validateStuff(m_renderObject, getDrawable()->getScale(), getW3DModelDrawModuleData()->m_extraPublicBones);
+		newState->validateStuff(TheGameLogic->isInGameLogicUpdate() ? NULL : m_renderObject, getDrawable()->getScale(),
+			getW3DModelDrawModuleData()->m_extraPublicBones);	// the live model only outside a tick, as above
 		rebuildWeaponRecoilInfo(newState);
 
 		// ensure that any muzzle flashes from the *previous* state, are hidden...
@@ -3972,10 +3982,23 @@ Bool W3DModelDraw::getProjectileLaunchOffset(
 			CRCDEBUG_LOG(("specificBarrelToUse = %d\n", specificBarrelToUse));
 			*launchPos = wbvec[specificBarrelToUse].m_projectileOffsetMtx;
 
-			if (tur != TURRET_INVALID)
+			// The art angle turns a launch bone, posed the way the turret's art faces, to the front. With
+			// no launch bone the matrix is the object's own, facing the front already, and turned by the
+			// art it faced backward, so the turret's pitch tipped it down: the battleship's front guns
+			// fired 12 degrees under barrels drawn 12 degrees up. The bone turns about the turret's pivot,
+			// as the drawn turret does; turned about the model's origin, a turret off the centre threw it
+			// across: a technical's cannon shell left 17 in front of its gun.
+			if (tur != TURRET_INVALID && wbvec[specificBarrelToUse].m_hasProjectileLaunchBone)
 			{
-				launchPos->Pre_Rotate_Z(stateToUse->m_turrets[tur].m_turretArtAngle);
-				launchPos->Pre_Rotate_Y(-stateToUse->m_turrets[tur].m_turretArtPitch);
+				const ModelConditionInfo::TurretInfo& artTurret = stateToUse->m_turrets[tur];
+				Coord3D artPivot;
+				artPivot.zero();
+				if (artTurret.m_turretAngleNameKey != NAMEKEY_INVALID)
+					stateToUse->findPristineBonePos(artTurret.m_turretAngleNameKey, artPivot);
+				launchPos->Adjust_Translation(Vector3(-artPivot.x, -artPivot.y, 0.0f));
+				launchPos->Pre_Rotate_Z(artTurret.m_turretArtAngle);
+				launchPos->Adjust_Translation(Vector3(artPivot.x, artPivot.y, 0.0f));
+				launchPos->Pre_Rotate_Y(-artTurret.m_turretArtPitch);
 			}
 #ifdef CACHE_ATTACH_BONE
 #else

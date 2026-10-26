@@ -23,10 +23,13 @@
 #include <d3d9.h>
 #include <d3d11.h>
 #include <algorithm>
+#include <atomic>
 #include <map>
+#include <mutex>
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -552,8 +555,8 @@ static ID3D11ShaderResourceView * mirror(ID3D11Device * device, ID3D11DeviceCont
 // the d3d9.dll time under TextureClass::Apply in the profile (an unnamed export, Ordinal23, is the
 // nearest label the sampler has for that code).  An entry stands while its texture is alive, has
 // not been written by the CPU since (DX11Texture_Mark_Dirty marks it stale) and answers the same
-// level of detail; the view itself is still owned by the texture.  Main thread only, like every
-// other call here.
+// level of detail; the view itself is still owned by the texture.  Read and written on the thread
+// that binds textures only; see Forget_Answer for the two calls that can come from another.
 struct MirrorAnswer
 {
 	ID3D11ShaderResourceView * View;
@@ -564,6 +567,58 @@ typedef std::unordered_map<IDirect3DBaseTexture9 *, MirrorAnswer> MirrorAnswerMa
 // Never destroyed: a texture still alive when the statics are torn down at exit releases its watch
 // after that, and the watch erases from this.
 static MirrorAnswerMap & MirrorAnswers = *new MirrorAnswerMap;
+
+// A texture's last reference does not always go on the thread that binds: the logic thread runs a
+// tick beside the render, whatever drops a texture there releases its watch there, and a CPU write
+// made there marks it dirty from there.  Erasing from MirrorAnswers then raced the render's insert into
+// it and broke the table's links, which v3.2.0 players met as a crash inside this insert.  Such a
+// call is queued instead, in order, and the binding thread applies the queue before its next
+// lookup.  A texture made at a dead one's address can only be bound after its death was queued, so
+// the stale answer is gone first.  Never destroyed, for the reason MirrorAnswers is not.
+struct PendingAnswer
+{
+	IDirect3DBaseTexture9 * Texture;
+	bool Erase;		///< the texture died; otherwise it was written and its answer is stale
+};
+static std::atomic<std::thread::id> BindingThread;
+static std::atomic<bool> AnswersPending(false);
+static std::mutex & PendingLock = *new std::mutex;
+static std::vector<PendingAnswer> & PendingAnswers = *new std::vector<PendingAnswer>;
+
+static void Apply_Answer(IDirect3DBaseTexture9 * texture, bool erase)
+{
+	MirrorAnswerMap::iterator answer = MirrorAnswers.find(texture);
+	if (answer == MirrorAnswers.end()) {
+		return;
+	}
+	if (erase) {
+		MirrorAnswers.erase(answer);
+	} else {
+		answer->second.Stale = true;
+	}
+}
+
+static void Apply_Pending_Answers()
+{
+	std::lock_guard<std::mutex> lock(PendingLock);
+	for (size_t i = 0; i < PendingAnswers.size(); ++i) {
+		Apply_Answer(PendingAnswers[i].Texture, PendingAnswers[i].Erase);
+	}
+	PendingAnswers.clear();
+	AnswersPending = false;
+}
+
+static void Forget_Answer(IDirect3DBaseTexture9 * texture, bool erase)
+{
+	if (std::this_thread::get_id() == BindingThread.load(std::memory_order_relaxed)) {
+		Apply_Answer(texture, erase);
+		return;
+	}
+	std::lock_guard<std::mutex> lock(PendingLock);
+	PendingAnswer pending = { texture, erase };
+	PendingAnswers.push_back(pending);
+	AnswersPending = true;
+}
 
 // Hung on a texture as private data the first time it is answered for, so that D3D9 releasing its
 // private data when the texture goes takes the answer with it before another texture can be made
@@ -592,7 +647,7 @@ public:
 	{
 		const ULONG left = --References;
 		if (left == 0) {
-			MirrorAnswers.erase(Texture);
+			Forget_Answer(Texture, true);
 			delete this;
 		}
 		return left;
@@ -606,6 +661,11 @@ private:
 ID3D11ShaderResourceView * DX11Texture_Mirror(ID3D11Device * device, ID3D11DeviceContext * context,
 	IDirect3DBaseTexture9 * texture)
 {
+	// relaxed: every bind comes through here, and no watch exists before the first one has set it
+	BindingThread.store(std::this_thread::get_id(), std::memory_order_relaxed);
+	if (AnswersPending) {
+		Apply_Pending_Answers();
+	}
 	MirrorAnswerMap::iterator answer = MirrorAnswers.find(texture);
 	if (answer != MirrorAnswers.end() && !answer->second.Stale
 			&& answer->second.Lod == texture->GetLOD()) {
@@ -647,10 +707,7 @@ void DX11Texture_Mark_Dirty(IDirect3DSurface9 * surface)
 
 	const unsigned char dirty = 1;
 	texture->SetPrivateData(DX11_TEXTURE_DIRTY, &dirty, sizeof(dirty), 0);
-	MirrorAnswerMap::iterator answer = MirrorAnswers.find(texture);
-	if (answer != MirrorAnswers.end()) {
-		answer->second.Stale = true;
-	}
+	Forget_Answer(texture, false);
 	texture->Release();
 }
 

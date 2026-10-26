@@ -186,8 +186,9 @@ public:
 	/// A replay's rewind checkpoint: the whole world into a file at this path, and back out of it.
 	/// Nothing on screen says so, and the load calls afterReset once the engine is empty and before
 	/// the world goes back in, which is where the recorder picks its file up again.
-	void saveCheckpoint( AsciiString filepath );
-	void loadCheckpoint( AsciiString filepath, const std::function< void( void ) > &afterReset );
+	/// Each says FALSE when it failed: no file from a save, and from a load a match already cleared.
+	Bool saveCheckpoint( AsciiString filepath );
+	Bool loadCheckpoint( AsciiString filepath, const std::function< void( void ) > &afterReset );
 	SaveGameInfo *getSaveGameInfo( void ) { return &m_gameInfo; }
 
 	// snapshot interaction

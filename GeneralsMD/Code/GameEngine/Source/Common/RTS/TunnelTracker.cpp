@@ -32,6 +32,7 @@
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
 #include "Common/KindOf.h"
+#include "Common/Player.h"
 #include "Common/TunnelTracker.h"
 #include "Common/Xfer.h"
 
@@ -363,14 +364,19 @@ Int TunnelTracker::getResidentCount() const
 		(AIUpdateInterface::update asks findQuietTunnelNear the same question).
 		ponytail: straight lines, not path lengths; a tunnel across a river the walk has to go round
 		looks no better than one across open ground.  A path search when that matters.  The walker is
-		one member of a group, so a mixed group is judged by that member's feet. */
-Object *TunnelTracker::findTunnelShortcut( const Object *walker, const Coord3D *from, const Coord3D *to, Real walk ) const
+		one member of a group, so a mixed group is judged by that member's feet.
+		The network is the walker's controlling player's.  The neutral player has none
+		(Player::initFromDict makes it, and the neutral player never goes through that), and a vehicle
+		whose driver was sniped, or a map's civilian, belongs to it: a sniped dozer picking up its
+		job read a NULL network here (crash report 1367). */
+Object *TunnelTracker::findTunnelShortcut( const Object *walker, const Coord3D *from, const Coord3D *to, Real walk )
 {
-	if( (Int)getContainCount() >= getContainMax() )
+	const TunnelTracker *tunnels = walker->getControllingPlayer()->getTunnelSystem();
+	if( tunnels == NULL || (Int)tunnels->getContainCount() >= tunnels->getContainMax() )
 		return NULL;
 
-	Object *entrance = findQuietTunnelNear( from, walker, walker->getPosition() );
-	Object *exit = findQuietTunnelNear( to, walker );
+	Object *entrance = tunnels->findQuietTunnelNear( from, walker, walker->getPosition() );
+	Object *exit = tunnels->findQuietTunnelNear( to, walker );
 	if( entrance == NULL || exit == NULL || exit == entrance )
 		return NULL;
 

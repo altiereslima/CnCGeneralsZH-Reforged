@@ -48,6 +48,7 @@
 #include "Common/LatchRestore.h"
 #include "Common/MapObject.h"
 #include "Common/MatchHistory.h"
+#include "Common/MiscAudio.h"
 #include "Common/MultiplayerSettings.h"
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
@@ -71,6 +72,7 @@
 
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
+#include "GameClient/Eva.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/GameText.h"
 #include "GameClient/GUICallbacks.h"
@@ -454,6 +456,11 @@ void GameLogic::init( void )
 static WaterSetting s_waterSettingsBeforeMapINI[ TIME_OF_DAY_COUNT ];
 static Bool s_waterSettingsSaved = FALSE;
 
+/* Whether this match's startNewGame found the map's map.ini and read it.  The mismatch dump writes
+	 it down: a map transfer that left the receiver without the file plays a different rule set on one
+	 machine (DESYNC-AUDIT.md), and both dumps agreeing on this line rules that out. */
+static Bool s_mapINILoaded = FALSE;
+
 //-------------------------------------------------------------------------------------------------
 /** Reset the game logic systems */
 //-------------------------------------------------------------------------------------------------
@@ -484,8 +491,13 @@ void GameLogic::reset( void )
 	m_mouseVisibleMemory = TRUE;
 	setFPMode();
 
-	// destroy all objects
-	destroyAllObjectsImmediate();
+	// destroy all objects.  This is a clear-out the way clearGameData's is, and a Load from the in-game
+	// menu comes here without passing clearGameData: a paratrooper whose chute went first "landed" off
+	// the map, fired his death weapon, and its debris was built for a player list already emptied.
+	{
+		LatchRestore<Bool> clearing( m_clearingGameData, TRUE );
+		destroyAllObjectsImmediate();
+	}
 
 	m_nextObjID = (ObjectID)1;
 	m_pendingTechBuildings.clear();
@@ -778,31 +790,6 @@ static void populateRandomSideAndColor( GameInfo *game )
 		return;
 	Int i;
 
-#define MORE_RANDOM
-#ifdef MORE_RANDOM
-	std::vector<Int> startSlots;
-	for (i = 0; i < ThePlayerTemplateStore->getPlayerTemplateCount(); ++i)
-	{
-		const PlayerTemplate* ptTest = ThePlayerTemplateStore->getNthPlayerTemplate(i);
-		if (!ptTest || ptTest->getStartingBuilding().isEmpty())
-			continue;
-
-		if ( game->oldFactionsOnly() && !ptTest->isOldFaction() )
-		  continue;
-
-		// Prevent from selecting the disabled Generals.
-		// This is also enforced at GUI setup (GUIUtil.cpp).
-		// @todo: unlock these when something rad happens
-		Bool disallowLockedGenerals = TRUE;
-		const GeneralPersona *general = TheChallengeGenerals->getGeneralByTemplateName(ptTest->getName());
-		Bool startsLocked = general ? !general->isStartingEnabled() : FALSE;
-		if (disallowLockedGenerals && startsLocked)
-			continue;
-
-		startSlots.push_back(i);
-	}
-#endif
-
 	for (i=0; i<MAX_SLOTS; ++i)
 	{
 		GameSlot *slot = game->getSlot(i);
@@ -810,40 +797,29 @@ static void populateRandomSideAndColor( GameInfo *game )
 		if (!slot || !slot->isOccupied())
 			continue;
 
-		// clean up random factions
+		// clean up random factions: plain Random draws from every playable template the data does not
+		// keep out (RandomExcluded), a pool from the templates the player ticked; both lists come from
+		// the INI and the slot string, the same on every machine
 		Int playerTemplateIdx = slot->getPlayerTemplate();
 		DEBUG_LOG(("Player %d has playerTemplate index %d\n", i, playerTemplateIdx));
-		while (playerTemplateIdx != PLAYERTEMPLATE_OBSERVER && (playerTemplateIdx < 0 || playerTemplateIdx >= ThePlayerTemplateStore->getPlayerTemplateCount()))
+		if (IsRandomPlayerTemplate(playerTemplateIdx))
 		{
-			DEBUG_ASSERTCRASH(playerTemplateIdx == PLAYERTEMPLATE_RANDOM, ("Non-random bad playerTemplate %d in slot %d\n", playerTemplateIdx, i));
-#ifdef MORE_RANDOM
+			std::vector<Int> draw;
+			GetRandomDraw(playerTemplateIdx, game->oldFactionsOnly(), draw);
 			// our RNG is basically shit -- horribly nonrandom at the start of the sequence.
 			// get a few values at random to get rid of the dreck.
 			// there's no mathematical basis for this, but empirically, it helps a lot.
 			UnsignedInt silly = GetGameLogicRandomSeed() % 7;
-			for (Int poo = 0; poo < silly; ++poo) 
+			for (Int poo = 0; poo < silly; ++poo)
 			{
 				GameLogicRandomValue(0, 1);	// ignore result
 			}
-			Int idxIdx = GameLogicRandomValue(0, 1000) % startSlots.size();
-			playerTemplateIdx = startSlots[idxIdx];
-#else
-			playerTemplateIdx = GameLogicRandomValue(0, ThePlayerTemplateStore->getPlayerTemplateCount()-1);
-#endif
-			const PlayerTemplate* pt = ThePlayerTemplateStore->getNthPlayerTemplate(playerTemplateIdx);
-			if (!pt || pt->getStartingBuilding().isEmpty())
-			{
-#ifdef MORE_RANDOM
-				DEBUG_CRASH(("should not be possible"));
-#endif
-				playerTemplateIdx = -1; // only pick playable factions
-			}
-			else
-			{
-				DEBUG_LOG(("Setting playerTemplateIdx %d to %d\n", i, playerTemplateIdx));
-				slot->setPlayerTemplate(playerTemplateIdx);
-			}
+			playerTemplateIdx = draw[GameLogicRandomValue(0, 1000) % draw.size()];
+			DEBUG_LOG(("Setting playerTemplateIdx %d to %d\n", i, playerTemplateIdx));
+			slot->setPlayerTemplate(playerTemplateIdx);
 		}
+		DEBUG_ASSERTCRASH(playerTemplateIdx == PLAYERTEMPLATE_OBSERVER || ThePlayerTemplateStore->getNthPlayerTemplate(playerTemplateIdx),
+			("Non-random bad playerTemplate %d in slot %d\n", playerTemplateIdx, i));
 
 		Int colorIdx = slot->getColor();
 		if (colorIdx < 0 || colorIdx >= TheMultiplayerSettings->getNumColors())
@@ -872,8 +848,18 @@ static void populateRandomStartPosition( GameInfo *game )
 	Int numPlayers = MAX_SLOTS;
 	const MapMetaData *md = TheMapCache->findMap( game->getMap() );
   DEBUG_ASSERTCRASH( md , ("Could not find map %s in the mapcache", game->getMap().str()));
+	/* The map cache is this machine's own.  Without the map it deals over all MAX_SLOTS spots where a
+		 machine that has it deals over the map's, so a network game or a replay refuses the start (the
+		 corrupt-map path in update) instead of splitting into two games on the first draw. */
+	if (md == NULL && (TheGameLogic->isInMultiplayerGame() || TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK))
+	{
+		DEBUG_LOG(("populateRandomStartPosition: no map %s in the cache, a network game or replay is refused\n", game->getMap().str()));
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	}
 	if (md)
 		numPlayers = md->m_numPlayers;
+	else
+		DEBUG_LOG(("populateRandomStartPosition: no map %s, start spots are dealt without distances\n", game->getMap().str()));
 
 	// generate a map of start spot distances
 	Real startSpotDistance[MAX_SLOTS][MAX_SLOTS];
@@ -881,7 +867,7 @@ static void populateRandomStartPosition( GameInfo *game )
 	{
 		for (Int j=0; j<MAX_SLOTS; ++j)
 		{
-			if (i != j && (i<numPlayers && j<numPlayers))
+			if (md && i != j && (i<numPlayers && j<numPlayers))
 			{
 				AsciiString w1, w2;
 				w1.format("Player_%d_Start", i+1);
@@ -1726,7 +1712,14 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 				Int count = ScriptList::getReadScripts(scripts);
 				if (count)
 				{
+					// a map can be saved with no script list for a side, the first one these go to included
+					// (a player's custom map, a crash at the start of a skirmish): it gets an empty one
 					ScriptList *pSL = TheSidesList->getSideInfo(0)->getScriptList();
+					if (pSL == NULL)
+					{
+						pSL = newInstance(ScriptList);
+						TheSidesList->getSideInfo(0)->setScriptList(pSL);
+					}
 					Script *next = scripts[0]->getScript();
 					while (next)
 					{
@@ -1915,9 +1908,19 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	// update the loadscreen 
 	updateLoadProgress(LOAD_PROGRESS_POST_PATHFINDER_NEW_MAP);
 
-	// reveal the map for the permanent observer
-	ThePartitionManager->revealMapForPlayerPermanently( ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerIndex() );
-	DEBUG_LOG(("Reveal shroud for %s whose index is %d\n", WideCharAsUtf8( ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerDisplayName().str() ).str(),ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerIndex()));
+	// reveal the map for the permanent observer.  The observer side goes in after the map's own, and a
+	// map whose sides already fill all MAX_PLAYER_COUNT seats leaves it no room (SidesList::addSide
+	// drops it), so such a match simply has no observer to reveal for.
+	Player *replayObserver = ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"));
+	if (replayObserver)
+	{
+		ThePartitionManager->revealMapForPlayerPermanently( replayObserver->getPlayerIndex() );
+		DEBUG_LOG(("Reveal shroud for %s whose index is %d\n", WideCharAsUtf8( replayObserver->getPlayerDisplayName().str() ).str(), replayObserver->getPlayerIndex()));
+	}
+	else
+	{
+		DEBUG_LOG(("No ReplayObserver: the map's %d sides leave no seat for one\n", TheSidesList->getNumSides()));
+	}
 	
 	if (game)
 	{
@@ -2464,7 +2467,11 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 		if(m_gameMode == GAME_REPLAY )
 		{
 			
-			ThePlayerList->setLocalPlayer(ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver")));
+			// a map that filled every seat has no observer (see the reveal above); the replay then
+			// watches from the seat it was recorded in
+			Player *observer = ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"));
+			if (observer)
+				ThePlayerList->setLocalPlayer(observer);
 			TheRadar->forceOn(TRUE);
 			ThePartitionManager->refreshShroudForLocalPlayer();
 			TheControlBar->setControlBarSchemeByPlayer( ThePlayerList->getLocalPlayer());
@@ -2590,6 +2597,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 // ------------------------------------------------------------------------------------------------
 void GameLogic::loadMapINI( AsciiString mapName )
 {
+	s_mapINILoaded = FALSE;
 
 	if (!TheMapCache) {
 		// Need the map cache to get the map and user map directories.
@@ -2652,7 +2660,8 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	}
 
 	snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
-	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
+	s_mapINILoaded = TheFileSystem->doesFileExist(fullFledgeFilename);
+	if (s_mapINILoaded) {
 		DEBUG_LOG(("Loading map.ini\n"));
 		INI ini;
 		ini.setSkipUnknownFields( TRUE );
@@ -2778,6 +2787,41 @@ void GameLogic::processDestroyList( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** One executed network command into the digest the next CRC snapshot carries.  Reads the message
+	* and nothing else, so logic state and the CRC are untouched.  MSG_LOGIC_CRC is left out: it orders
+	* nothing, and its argument is the very number the digest is there to explain. */
+//-------------------------------------------------------------------------------------------------
+static void digestCommand( CRCSnapshotRing &ring, UnsignedInt frame, const GameMessage *msg )
+{
+	const GameMessage::Type type = msg->getType();
+	if( type <= GameMessage::MSG_BEGIN_NETWORK_MESSAGES || type >= GameMessage::MSG_END_NETWORK_MESSAGES
+			|| type == GameMessage::MSG_LOGIC_CRC )
+		return;
+
+	// FNV-1a over each argument's own bytes, never the whole union, whose unused tail is whatever was there
+	UnsignedInt hash = 2166136261u;
+	for( Int i = 0; i < msg->getArgumentCount(); ++i )
+	{
+		const GameMessageArgumentType *arg = msg->getArgument( i );
+		size_t size = sizeof( arg->integer );
+		switch( msg->getArgumentDataType( i ) )
+		{
+			case ARGUMENTDATATYPE_BOOLEAN:			size = sizeof( arg->boolean ); break;
+			case ARGUMENTDATATYPE_LOCATION:			size = sizeof( arg->location ); break;
+			case ARGUMENTDATATYPE_PIXEL:				size = sizeof( arg->pixel ); break;
+			case ARGUMENTDATATYPE_PIXELREGION:	size = sizeof( arg->pixelRegion ); break;
+			case ARGUMENTDATATYPE_WIDECHAR:			size = sizeof( arg->wChar ); break;
+			default: break;
+		}
+		const UnsignedByte *bytes = (const UnsignedByte *)arg;
+		for( size_t b = 0; b < size; ++b )
+			hash = ( hash ^ bytes[b] ) * 16777619u;
+	}
+
+	ring.addCommand( frame, msg->getPlayerIndex(), (Int)type, hash );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Process the command list passed to the logic from the network */
 //-------------------------------------------------------------------------------------------------
 void GameLogic::processCommandList( CommandList *list )
@@ -2787,11 +2831,16 @@ void GameLogic::processCommandList( CommandList *list )
 
 	GameMessage* msg;
 
+	// the inputs beside the CRC snapshots (CRCSnapshotRing.h); only read by writeMismatchDump
+	const Bool digestCommands = TheRecorder->isMultiplayer() && getGameMode() != GAME_SHELL && getGameMode() != GAME_NONE;
+
 	for( msg = list->getFirstMessage(); msg; msg = msg->next() )
 	{
 #ifdef _DEBUG
 		DEBUG_ASSERTCRASH(msg != NULL && msg != (GameMessage*)0xdeadbeef, ("bad msg"));
 #endif
+		if( digestCommands )
+			digestCommand( m_crcSnapshots, m_frame, msg );
 		logicMessageDispatcher( msg, NULL );
 	}
 
@@ -2802,6 +2851,7 @@ void GameLogic::processCommandList( CommandList *list )
 	if (m_shouldValidateCRCs && !TheNetwork->sawCRCMismatch())
 	{
 		Bool sawCRCMismatch = FALSE;
+		UnsignedInt mismatchFrame = 0;
 		Int numPlayers = 0;
 		DEBUG_ASSERTCRASH(TheNetwork, ("No Network!"));
 		if (TheNetwork)
@@ -2822,48 +2872,61 @@ void GameLogic::processCommandList( CommandList *list )
 				 EA handed the player index straight to isPlayerConnected().  A player index with no slot
 				 behind it (no GameInfo at all, for instance) counts as present rather than as gone: the
 				 point of this is to stop blaming people who left, not to switch the check off. */
-			Bool reported[MAX_PLAYER_COUNT];
 			Bool connected[MAX_PLAYER_COUNT];
-			UnsignedInt crcs[MAX_PLAYER_COUNT];
 			for (Int p = 0; p < MAX_PLAYER_COUNT; ++p)
 			{
-				reported[p] = FALSE;
-				crcs[p] = 0;
 				const Int slot = ThePlayerList->getSlotIndex(p);
 				connected[p] = (slot < 0) ? TRUE : TheNetwork->isPlayerConnected(slot);
 			}
-			for (std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
-					 crcIt != m_cachedCRCs.end(); ++crcIt)
+
+			/* Only CRCs of one logic frame are held against each other.  A frame some connected player
+				 sent no CRC for on this execution frame is too few, and skipped: its CRCs landed on
+				 different execution frames (MSG_LOGIC_CRC in update()), and nobody disagreed. */
+			for (std::map<UnsignedInt, std::map<Int, UnsignedInt> >::const_iterator frameIt = m_cachedCRCs.begin();
+					 frameIt != m_cachedCRCs.end() && !sawCRCMismatch; ++frameIt)
 			{
-				if (crcIt->first >= 0 && crcIt->first < MAX_PLAYER_COUNT)
+				Bool reported[MAX_PLAYER_COUNT];
+				UnsignedInt crcs[MAX_PLAYER_COUNT];
+				for (Int p = 0; p < MAX_PLAYER_COUNT; ++p)
 				{
-					reported[crcIt->first] = TRUE;
-					crcs[crcIt->first] = crcIt->second;
+					reported[p] = FALSE;
+					crcs[p] = 0;
 				}
-			}
+				for (std::map<Int, UnsignedInt>::const_iterator crcIt = frameIt->second.begin();
+						 crcIt != frameIt->second.end(); ++crcIt)
+				{
+					if (crcIt->first >= 0 && crcIt->first < MAX_PLAYER_COUNT)
+					{
+						reported[crcIt->first] = TRUE;
+						crcs[crcIt->first] = crcIt->second;
+					}
+				}
 
-			switch (crcAgreement( reported, crcs, connected, MAX_PLAYER_COUNT, numPlayers ))
-			{
-				case CRC_AGREEMENT_TOO_FEW:
-					DEBUG_LOG(("Only %d CRCs from %d connected players on frame %d - not comparing\n",
-						m_cachedCRCs.size(), numPlayers, m_frame));
-					break;
+				switch (crcAgreement( reported, crcs, connected, MAX_PLAYER_COUNT, numPlayers ))
+				{
+					case CRC_AGREEMENT_TOO_FEW:
+						DEBUG_LOG(("Only %d CRCs of frame %d from %d connected players on frame %d - not comparing\n",
+							frameIt->second.size(), frameIt->first, numPlayers, m_frame));
+						break;
 
-				case CRC_AGREEMENT_MISMATCH:
-					DEBUG_CRASH(("CRC mismatch!"));
-					sawCRCMismatch = TRUE;
-					break;
+					case CRC_AGREEMENT_MISMATCH:
+						DEBUG_CRASH(("CRC mismatch!"));
+						sawCRCMismatch = TRUE;
+						mismatchFrame = frameIt->first;
+						break;
 
-				case CRC_AGREEMENT_AGREE:
-					break;
+					case CRC_AGREEMENT_AGREE:
+						break;
+				}
 			}
 		}
 
 		if (sawCRCMismatch)
 		{
 #ifdef DEBUG_LOGGING
-			DEBUG_LOG(("CRC Mismatch - saw %d CRCs from %d players\n", m_cachedCRCs.size(), numPlayers));
-			for (std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin(); crcIt != m_cachedCRCs.end(); ++crcIt)
+			const std::map<Int, UnsignedInt> &mismatched = m_cachedCRCs[mismatchFrame];
+			DEBUG_LOG(("CRC Mismatch - saw %d CRCs of frame %d from %d players\n", mismatched.size(), mismatchFrame, numPlayers));
+			for (std::map<Int, UnsignedInt>::const_iterator crcIt = mismatched.begin(); crcIt != mismatched.end(); ++crcIt)
 			{
 				Player *player = ThePlayerList->getNthPlayer(crcIt->first);
 				DEBUG_LOG(("CRC from player %d (%s) = %X\n", crcIt->first,
@@ -2873,7 +2936,7 @@ void GameLogic::processCommandList( CommandList *list )
 			TheNetwork->setSawCRCMismatch();
 
 			// write down what the world looked like on the frame that diverged, while we still have it
-			writeMismatchDump( numPlayers );
+			writeMismatchDump( numPlayers, mismatchFrame );
 
 			/* Playing on is the worst of the options: two worlds that already disagree keep diverging
 				 for the rest of the match, every order after this point lands somewhere different on
@@ -2886,21 +2949,67 @@ void GameLogic::processCommandList( CommandList *list )
 }  // end processCommandList
 
 // ------------------------------------------------------------------------------------------------
+/** The lobby options string with every human slot's address taken out: the dump is uploaded with
+	* crash reports.  A human slot is "H<name>,<ip>,<port>,<eight more fields>:", and the name may hold
+	* a comma, so the two fields go by their place from the end. */
+// ------------------------------------------------------------------------------------------------
+static AsciiString lobbyOptionsWithoutAddresses( const AsciiString &options )
+{
+	std::string in( options.str() );
+	std::string out;
+	size_t tokenStart = 0;
+	while( tokenStart < in.size() )
+	{
+		size_t tokenEnd = in.find_first_of( ":;=", tokenStart );
+		if( tokenEnd == std::string::npos )
+			tokenEnd = in.size();
+		std::string token = in.substr( tokenStart, tokenEnd - tokenStart );
+
+		std::vector<size_t> commas;
+		for( size_t c = token.find( ',' ); c != std::string::npos; c = token.find( ',', c + 1 ) )
+			commas.push_back( c );
+		// fields n-8 and n-7 are the address and the port, so drop from the 8th comma from the end to the 6th
+		if( !token.empty() && token[0] == 'H' && commas.size() >= 8 )
+			token.erase( commas[ commas.size() - 8 ], commas[ commas.size() - 6 ] - commas[ commas.size() - 8 ] );
+
+		out += token;
+		if( tokenEnd < in.size() )
+			out += in[ tokenEnd ];
+		tokenStart = tokenEnd + 1;
+	}
+	return AsciiString( out.c_str() );
+}
+
+// ------------------------------------------------------------------------------------------------
+/** One number for a snapshot's command digest, so a line per frame says whether two dumps were
+	* given the same orders on it. */
+// ------------------------------------------------------------------------------------------------
+static UnsignedInt commandDigest( const CRCSnapshot *snap )
+{
+	UnsignedInt hash = 2166136261u;
+	for( size_t i = 0; i < snap->m_commands.size(); ++i )
+	{
+		const CRCCommandEntry &c = snap->m_commands[i];
+		const UnsignedInt fields[] = { c.m_frame, (UnsignedInt)c.m_player, (UnsignedInt)c.m_type, c.m_count, c.m_argHash };
+		for( size_t f = 0; f < sizeof( fields ) / sizeof( fields[0] ); ++f )
+			hash = ( hash ^ fields[f] ) * 16777619u;
+	}
+	return hash;
+}
+
+// ------------------------------------------------------------------------------------------------
 /** A mismatch says the worlds diverged; it does not say where.  This writes down everything we
 	* kept about the frame that diverged, so that two players' dumps can be diffed: the first object
 	* whose running CRC differs is the object whose state differs, and the fields printed next to it
 	* usually say how.  Every machine writes its own file at the same frame. */
 // ------------------------------------------------------------------------------------------------
-void GameLogic::writeMismatchDump( Int numPlayers )
+void GameLogic::writeMismatchDump( Int numPlayers, UnsignedInt crcFrame )
 {
-	/* The CRCs just compared were computed the run-ahead's worth of frames ago.  Ours is one of
-		 them, so whichever retained snapshot carries one of these values names that frame exactly. */
-	Int slot = -1;
-	for( std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
-			 crcIt != m_cachedCRCs.end() && slot < 0; ++crcIt )
-	{
-		slot = m_crcSnapshots.findSlotByCRC( crcIt->second );
-	}
+	// the CRCs just compared were computed the run-ahead's worth of frames ago, on crcFrame
+	const std::map<Int, UnsignedInt> &compared = m_cachedCRCs[ crcFrame ];
+	Int slot = m_crcSnapshots.findSlotByFrame( crcFrame );
+	// a run-ahead longer than the ring (a high ping at the start of a match) leaves that frame out of it
+	const Bool slotFromCRC = slot >= 0;
 	if( slot < 0 )
 		slot = m_crcSnapshots.getNewestSlot();
 
@@ -2917,9 +3026,13 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 
 	fprintf( fp, "Mismatch detected on frame %d\n", m_frame );
 	fprintf( fp, "Local player is slot %d of %d connected players; %d CRCs were compared\n",
-		TheNetwork ? TheNetwork->getLocalPlayerID() : 0, numPlayers, m_cachedCRCs.size() );
+		TheNetwork ? TheNetwork->getLocalPlayerID() : 0, numPlayers, compared.size() );
 	// every player's dump carries the same two, which is how the reports from one match are paired up
-	fprintf( fp, "Map %s, seed %d\n\n", TheGameInfo->getMap().str(), TheGameInfo->getSeed() );
+	fprintf( fp, "Map %s, seed %d\n", TheGameInfo->getMap().str(), TheGameInfo->getSeed() );
+	// what both ends agreed in the lobby and whether this machine read the map's rules file: two dumps
+	// that differ here never started the same game
+	fprintf( fp, "Lobby options %s\n", lobbyOptionsWithoutAddresses( GameInfoToAsciiString( TheGameInfo ) ).str() );
+	fprintf( fp, "map.ini %s\n\n", s_mapINILoaded ? "loaded" : "not present" );
 
 	/* Two machines that never agreed about arithmetic produce a mismatch that looks exactly like a
 		 logic bug.  This number depends on the machine's math and nothing else, so the first thing to
@@ -2935,8 +3048,9 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 	fprintf( fp, "Simulation trig fingerprint 0x%8.8X\n\n",
 		SimulationMathCrc::calculateSimulationTrig() );
 
-	for( std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
-			 crcIt != m_cachedCRCs.end(); ++crcIt )
+	fprintf( fp, "CRCs of frame %d:\n", crcFrame );
+	for( std::map<Int, UnsignedInt>::const_iterator crcIt = compared.begin();
+			 crcIt != compared.end(); ++crcIt )
 	{
 		Player *player = ThePlayerList->getNthPlayer( crcIt->first );
 		AsciiString name;
@@ -2957,6 +3071,48 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 
 	fprintf( fp, "\nDiverging frame is %d (world CRC 0x%8.8X, logic random seed CRC 0x%8.8X, %d objects)\n",
 		snap->m_frame, snap->m_totalCRC, snap->m_randomSeed, snap->m_objects.size() );
+	if( !slotFromCRC )
+		fprintf( fp, "Frame %d is no longer retained, so this is the newest one; compare it with the same frame in the other dump.\n", crcFrame );
+
+	// the parts getCRC folds in, in its order (CRCSection): the first line that differs between two
+	// dumps is the part that diverged, and when it is not the objects the table below will agree
+	static const char *const sectionNames[ CRC_SECTION_COUNT ] =
+	{
+		"objects",
+		"partition (logic random seed, shroud)",
+		"players (battle plans, skill points, science points, money)",
+		"AI (pathfinder, AI data, AI groups)",
+		"scripts",
+	};
+	fprintf( fp, "World CRC at the end of each part:\n" );
+	for( Int s = 0; s < CRC_SECTION_COUNT; ++s )
+		fprintf( fp, "  0x%8.8X after %s\n", snap->m_sectionCRC[s], sectionNames[s] );
+
+	fprintf( fp, "\nPlayers on that frame:\n%7s %12s %12s %15s  %s\n", "player", "money", "skillPoints", "sciencePoints", "name" );
+	for( size_t i = 0; i < snap->m_players.size(); ++i )
+	{
+		const CRCPlayerEntry &p = snap->m_players[i];
+		Player *player = ThePlayerList->getNthPlayer( (Int)i );
+		AsciiString name;
+		if( player )
+			name.translate( player->getPlayerDisplayName() );
+		fprintf( fp, "%7d %12u %12d %15d  %s\n", (Int)i, p.m_money, p.m_skillPoints, p.m_sciencePurchasePoints, name.str() );
+	}
+	fprintf( fp, "\n" );
+
+	/* What the machine was told to do between the frame before and this one (CRCSnapshot::m_commands).
+		 Same lines in both dumps and a different world: the same orders ran differently.  A line that
+		 differs: the machines were given different orders. */
+	fprintf( fp, "Commands executed since the frame before (digest 0x%8.8X):\n%7s %7s %6s %10s  %s\n",
+		commandDigest( snap ), "frame", "player", "count", "argHash", "command" );
+	for( size_t i = 0; i < snap->m_commands.size(); ++i )
+	{
+		const CRCCommandEntry &c = snap->m_commands[i];
+		fprintf( fp, "%7u %7d %6u 0x%8.8X  %s\n", c.m_frame, c.m_player, c.m_count, c.m_argHash,
+			GameMessage::getCommandTypeAsAsciiString( (GameMessage::Type)c.m_type ).str() );
+	}
+	fprintf( fp, "\n" );
+
 	fprintf( fp, "Diff this section against another player's file; the first differing running CRC is the object that diverged.\n\n" );
 	fprintf( fp, "%6s %8s %10s %12s %12s %12s %10s  %s\n",
 		"index", "objectID", "runningCRC", "x", "y", "z", "health", "template" );
@@ -2976,8 +3132,8 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 		const CRCSnapshot *other = m_crcSnapshots.getSlot( m_crcSnapshots.getNthNewestSlot( n ) );
 		if( other == NULL || other == snap )
 			continue;
-		fprintf( fp, "  frame %d: world CRC 0x%8.8X, %d objects\n",
-			other->m_frame, other->m_totalCRC, other->m_objects.size() );
+		fprintf( fp, "  frame %d: world CRC 0x%8.8X, %d objects, %d command runs before it, digest 0x%8.8X\n",
+			other->m_frame, other->m_totalCRC, other->m_objects.size(), other->m_commands.size(), commandDigest( other ) );
 	}
 
 	fclose( fp );
@@ -3906,6 +4062,104 @@ static void unitTimings(void)
 }
 #endif
 
+//-------------------------------------------------------------------------------------------------
+/** The rank auras, once a second (docs/plans/RANK-LADDER.md in the wrapper).  Every unit's slots are
+	* cleared, then each leader writes its strength into the slots of the friendly units within its
+	* radius, keeping the larger, so three leaders of one kind give the strongest one's and the walk's
+	* order does not matter.  A leader never reaches itself, and buildings take nothing.  The DETECT
+	* perk works here too: a stealthed enemy within its radius stays detected until the next pass.
+	* A unit whose sight moved looks again. */
+//-------------------------------------------------------------------------------------------------
+static void updateRankAuras( Object *objList )
+{
+	struct Before { Real sight; Real aura[ RANK_AURA_PASSED ]; };
+	static std::vector<Before> before;
+	before.clear();
+	for( Object *obj = objList; obj; obj = obj->getNextObject() )
+	{
+		Before was;
+		was.sight = obj->getRankSightScalar();
+		for( Int aura = 0; aura < RANK_AURA_PASSED; ++aura )
+			was.aura[ aura ] = obj->getRankAura( (RankAura)aura );
+		before.push_back( was );
+		obj->clearRankAuras();
+	}
+
+	for( Object *leader = objList; leader; leader = leader->getNextObject() )
+	{
+		const RankLadder *ladder = TheGlobalData->getRankLadder( leader->getTemplate() );
+		// a leader inside a building, a bunker or a transport leads nobody and spots nothing
+		if( ladder == NULL || leader->isEffectivelyDead() || leader->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION )
+				|| leader->getContainedBy() )
+			continue;
+		const Int grade = leader->getRankGrade();
+		Real strength[ RANK_AURA_PASSED ];
+		Bool gives = FALSE;
+		for( Int aura = 0; aura < RANK_AURA_PASSED; ++aura )
+		{
+			strength[ aura ] = ladder->aura( grade, (RankAura)aura );
+			gives = gives || strength[ aura ] > 0.0f;
+		}
+		const Real detect = ladder->perk( grade, RANK_PERK_DETECT );
+		if( !gives && detect <= 0.0f )
+			continue;
+
+		const Real radius = ladder->auraRadius( grade );
+		const Coord3D *at = leader->getPosition();
+		for( Object *other = objList; other; other = other->getNextObject() )
+		{
+			if( other == leader || other->isEffectivelyDead() || other->getContainedBy() )
+				continue;
+			const Real dx = other->getPosition()->x - at->x, dy = other->getPosition()->y - at->y;
+			const Real distSqr = dx * dx + dy * dy;
+			if( detect > 0.0f && distSqr <= detect * detect && other->getStealth()
+					&& other->testStatus( OBJECT_STATUS_STEALTHED ) && leader->getRelationship( other ) == ENEMIES )
+			{
+				// a fresh find pings the leader's owner the way StealthDetectorUpdate does, after the tick
+				if( !other->testStatus( OBJECT_STATUS_DETECTED ) && ThePlayerList->getLocalPlayer() == leader->getControllingPlayer() )
+				{
+					const Coord3D found = *other->getPosition();
+					const Int playerIndex = leader->getControllingPlayer()->getPlayerIndex();
+					const EvaMessage message = other->getStealth()->getEnemyDetectionEvaEvent();
+					LogicThread::callAfterTick( [found, playerIndex, message]()
+					{
+						if( !TheRadar->tryEvent( RADAR_EVENT_STEALTH_DISCOVERED, &found ) )
+							return;
+						static AudioEventRTS discoveredSound = TheAudio->getMiscAudio()->m_stealthDiscoveredSound;
+						discoveredSound.setPlayerIndex( playerIndex );
+						TheAudio->addAudioEvent( &discoveredSound );
+						TheInGameUI->message( TheGameText->fetch( "MESSAGE:StealthDiscovered" ) );
+						if( message != EVA_Invalid && TheEva != NULL )
+							TheEva->setShouldPlay( message );
+					} );
+				}
+				other->getStealth()->markAsDetected( LOGICFRAMES_PER_SECOND + 1 );
+			}
+			if( !gives || distSqr > radius * radius || other->isKindOf( KINDOF_STRUCTURE )
+					|| leader->getRelationship( other ) != ALLIES )
+				continue;
+			for( Int aura = 0; aura < RANK_AURA_PASSED; ++aura )
+				if( strength[ aura ] > 0.0f )
+					other->raiseRankAura( (RankAura)aura, strength[ aura ] );
+		}
+	}
+
+	// a unit that came into or left a leader's reach logs what it holds now
+	size_t index = 0;
+	for( Object *obj = objList; obj; obj = obj->getNextObject(), ++index )
+	{
+		Bool moved = FALSE;
+		for( Int aura = 0; aura < RANK_AURA_PASSED; ++aura )
+			moved = moved || obj->getRankAura( (RankAura)aura ) != before[ index ].aura[ aura ];
+		if( moved )
+			DEBUG_LOG(("RANK AURA frame=%d id=%d template=%s grade=%d rof=%.2f sight=%.2f guard=%.2f range=%.2f\n",
+				TheGameLogic->getFrame(), obj->getID(), obj->getTemplate()->getName().str(), obj->getRankGrade(),
+				obj->getRankAura( RANK_AURA_RATE_OF_FIRE ), obj->getRankAura( RANK_AURA_SIGHT ),
+				obj->getRankAura( RANK_AURA_GUARD ), obj->getRankAura( RANK_AURA_RANGE )));
+		obj->onRankSightChanged( before[ index ].sight );
+	}
+}
+
 DECLARE_PERF_TIMER(GameLogic_update)
 DECLARE_PERF_TIMER(GameLogic_update_normal)
 DECLARE_PERF_TIMER(GameLogic_update_sleepy)
@@ -4798,6 +5052,13 @@ void GameLogic::update( void )
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_LOGIC_CRC );
 			msg->appendIntegerArgument( m_CRC );
 			msg->appendBooleanArgument( (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK) ); // playback CRC
+			/* The frame this CRC is of.  The message executes a run-ahead later, and the run-ahead can
+				 shrink: the network never stamps an order below its last execution frame, so after the
+				 opening second's run-ahead of 60 drops, every CRC from frame 61 to about 112 lands on one
+				 execution frame, each machine's pile ending somewhere else.  Keeping the last per player
+				 then held one machine's frame 107 against another's frame 112 (report 1845).  Last, so
+				 the playback check's arguments 0 and 1 stay where old replays have them. */
+			msg->appendIntegerArgument( m_frame );
 			//DEBUG_LOG(("Appended CRC of %8.8X on frame %d\n", m_CRC, m_frame));
 		}
 		else
@@ -5027,6 +5288,28 @@ void GameLogic::update( void )
 			{
 				obj->checkDisabledStatus();
 			}
+		}
+	}
+
+	// Faction veterancy's self-repair (GLA): once a second a ranked unit that has gone unhurt for
+	// the Veterancy block's SelfRepairDelay heals its side's share of its max health.  Healing itself earns it
+	// nothing (Object::scoreTheHeal).
+	// A grade's MEND perk is the same heal at its own rate.
+	if( m_frame % LOGICFRAMES_PER_SECOND == 0 )
+	{
+		updateRankAuras( m_objList );
+		for( Object *obj = m_objList; obj; obj = obj->getNextObject() )
+		{
+			const Real share = MAX( TheGlobalData->getRankStat( obj->getTemplate(), obj->getRankGrade(), RANK_STAT_SELF_REPAIR ),
+															obj->getRankPerk( RANK_PERK_MEND ) );
+			if( share <= 0.0f || obj->isEffectivelyDead() )
+				continue;
+			const BodyModuleInterface *body = obj->getBodyModule();
+			const UnsignedInt lastHurt = body->getLastDamageTimestamp();
+			if( body->getHealth() >= body->getMaxHealth()
+					|| ( lastHurt <= m_frame && m_frame - lastHurt < TheGlobalData->m_veterancySelfRepairDelay ) )
+				continue;
+			obj->attemptHealing( body->getMaxHealth() * share, obj );
 		}
 	}
 
@@ -5323,6 +5606,9 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 																pos->x, pos->y, pos->z, body->getHealth() );
 		}
 	}
+	// the rest only observe the running CRC: each section's end goes in the ring as well (CRCSection)
+	if (recordSnapshot)
+		m_crcSnapshots.setSectionCRC( CRC_SECTION_OBJECTS, xferCRC->getCRC() );
 	UnsignedInt seed = GetGameLogicRandomSeedCRC();
 	if (isInGameLogicUpdate())
 	{
@@ -5340,6 +5626,8 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 	marker = "MARKER:ThePartitionManager";
 	xferCRC->xferAsciiString(&marker);
 	xferCRC->xferSnapshot( ThePartitionManager );
+	if (recordSnapshot)
+		m_crcSnapshots.setSectionCRC( CRC_SECTION_PARTITION, xferCRC->getCRC() );
 	if (isInGameLogicUpdate())
 	{
 		CRCGEN_LOG(("CRC after partition manager for frame %d is 0x%8.8X\n", m_frame, xferCRC->getCRC()));
@@ -5362,6 +5650,16 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 	marker = "MARKER:ThePlayerList";
 	xferCRC->xferAsciiString(&marker);
 	xferCRC->xferSnapshot( ThePlayerList );
+	if (recordSnapshot)
+	{
+		m_crcSnapshots.setSectionCRC( CRC_SECTION_PLAYERS, xferCRC->getCRC() );
+		for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
+		{
+			const Player *player = ThePlayerList->getNthPlayer( i );
+			m_crcSnapshots.addPlayer( player->getMoney()->countMoney(), player->getSkillPoints(),
+																player->getSciencePurchasePoints() );
+		}
+	}
 	if (isInGameLogicUpdate())
 	{
 		CRCGEN_LOG(("CRC after PlayerList for frame %d is 0x%8.8X\n", m_frame, xferCRC->getCRC()));
@@ -5370,6 +5668,8 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 	marker = "MARKER:TheAI";
 	xferCRC->xferAsciiString(&marker);
 	xferCRC->xferSnapshot( TheAI );
+	if (recordSnapshot)
+		m_crcSnapshots.setSectionCRC( CRC_SECTION_AI, xferCRC->getCRC() );
 	if (isInGameLogicUpdate())
 	{
 		CRCGEN_LOG(("CRC after AI for frame %d is 0x%8.8X\n", m_frame, xferCRC->getCRC()));
@@ -5378,6 +5678,8 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 	marker = "MARKER:TheScriptEngine";
 	xferCRC->xferAsciiString(&marker);
 	xferCRC->xferSnapshot( TheScriptEngine );
+	if (recordSnapshot)
+		m_crcSnapshots.setSectionCRC( CRC_SECTION_SCRIPTS, xferCRC->getCRC() );
 	if (isInGameLogicUpdate())
 	{
 		CRCGEN_LOG(("CRC after ScriptEngine for frame %d is 0x%8.8X\n", m_frame, xferCRC->getCRC()));

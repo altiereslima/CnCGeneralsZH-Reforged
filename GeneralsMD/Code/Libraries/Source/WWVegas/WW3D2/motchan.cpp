@@ -624,31 +624,34 @@ uint32 TimeCodedMotionChannelClass::binary_search_index(uint32 timecode)
  *   01/27/2000 JGA  : Created.                                                                * 
  *=============================================================================================*/
 uint32 TimeCodedMotionChannelClass::get_index(uint32 timecode)
-{	
-	assert(CachedIdx <= LastTimeCodeIdx);
+{
+	uint32 idx = CachedIdx.load( std::memory_order_relaxed );
+	assert(idx <= LastTimeCodeIdx);
 
 	uint32	time;
 
-	time = Data[CachedIdx] & ~W3D_TIMECODED_BINARY_MOVEMENT_FLAG;
+	time = Data[idx] & ~W3D_TIMECODED_BINARY_MOVEMENT_FLAG;
 
 	if (timecode >= time) {
 		// possibly in the current packet
 
 		// special case for end packets
-		if (CachedIdx == LastTimeCodeIdx) return(CachedIdx);
-		time = Data[CachedIdx + PacketSize]	& ~W3D_TIMECODED_BINARY_MOVEMENT_FLAG;
-		if (timecode < time) return(CachedIdx);
+		if (idx == LastTimeCodeIdx) return(idx);
+		time = Data[idx + PacketSize]	& ~W3D_TIMECODED_BINARY_MOVEMENT_FLAG;
+		if (timecode < time) return(idx);
 
 		// Do one time look-ahead before reverting to a search
-		CachedIdx+=PacketSize;
-		if (CachedIdx == LastTimeCodeIdx) return(CachedIdx);
-		time = Data[CachedIdx + PacketSize]	& ~W3D_TIMECODED_BINARY_MOVEMENT_FLAG;
-		if (timecode < time) return(CachedIdx);
+		idx+=PacketSize;
+		CachedIdx.store( idx, std::memory_order_relaxed );
+		if (idx == LastTimeCodeIdx) return(idx);
+		time = Data[idx + PacketSize]	& ~W3D_TIMECODED_BINARY_MOVEMENT_FLAG;
+		if (timecode < time) return(idx);
 	}
 
-	CachedIdx = binary_search_index( timecode );
+	idx = binary_search_index( timecode );
+	CachedIdx.store( idx, std::memory_order_relaxed );
 
-	return(CachedIdx);
+	return(idx);
 
 }	// get_index
    
@@ -804,19 +807,20 @@ bool TimeCodedBitChannelClass::Load_W3D(ChunkLoadClass & cload)
  *=============================================================================================*/
 int TimeCodedBitChannelClass::Get_Bit(int frame)
 {		
-	assert(frame >= 0);	 
-	assert(CachedIdx < NumTimeCodes);
+	assert(frame >= 0);
+	const uint32 cached = CachedIdx.load( std::memory_order_relaxed );
+	assert(cached < NumTimeCodes);
 
 	int time;
 	int idx=0;
 
-	time = Bits[CachedIdx] & ~W3D_TIMECODED_BIT_MASK;
+	time = Bits[cached] & ~W3D_TIMECODED_BIT_MASK;
 
-	
+
 	if (frame >= time) {
-		
+
 		// start from here
-		idx = CachedIdx+1;
+		idx = cached+1;
 
 	}
 
@@ -832,7 +836,7 @@ int TimeCodedBitChannelClass::Get_Bit(int frame)
   
 	if (idx < 0) idx = 0;
   
-	CachedIdx = idx;
+	CachedIdx.store( (uint32)idx, std::memory_order_relaxed );
 
 	return (((Bits[idx] & W3D_TIMECODED_BIT_MASK) == W3D_TIMECODED_BIT_MASK));
   
@@ -988,9 +992,11 @@ void AdaptiveDeltaMotionChannelClass::decompress(uint32 frame_idx, float *outdat
 	// Start Over from the beginning
 	float *base	= (float *) &Data[0];	// pointer to our true know beginning values
 
-	bool done = false;
-
 	for(int vi=0; vi<VectorLen; vi++) {
+		// Per component: set once for the whole vector, it stopped every component after the first at
+		// the end of its first packet, so a quaternion past frame 16 came out of whichever way the
+		// shared cache last reached it
+		bool done = false;
 		// Decompress all the vector indices, since they will probably all be needed
 		unsigned char *pPacket = (unsigned char *) Data;	// pointer to current packet
 		pPacket+= (sizeof(float) * VectorLen);					// skip non-compressed header information 
@@ -1065,9 +1071,8 @@ void AdaptiveDeltaMotionChannelClass::decompress(uint32 src_idx, float *srcdata,
 	float *base	= (float *) &Data[0];	// pointer to our true know beginning values
    base += VectorLen;						// skip header information
 
-	bool done = false;
-
 	for(int vi=0; vi<VectorLen; vi++) {
+		bool done = false;	// per component, as in the decompress above
 		// Decompress all the vector indices, since they will probably all be needed
 		unsigned char *pPacket = (unsigned char *) base;	// pointer to current packet
 		pPacket+= PACKET_SIZE * vi;								// skip to the appropriate packet start
@@ -1201,8 +1206,10 @@ float AdaptiveDeltaMotionChannelClass::getframe(uint32 frame_idx, uint32 vector_
    float temp[4];
    
    memcpy(&temp[0], &CacheData[VectorLen], VectorLen * sizeof(float));
-   
-   decompress(CacheFrame, &temp[0], frame_idx, &CacheData[0]);
+
+   // temp holds CacheFrame+1, so the deltas start after it: from CacheFrame they added that frame's
+   // twice, and the answer depended on where the shared cache last stood
+   decompress(CacheFrame + 1, &temp[0], frame_idx, &CacheData[0]);
    CacheFrame = frame_idx;																	  
    
    if (frame_idx != (NumFrames - 1))  {
@@ -1229,9 +1236,10 @@ void	AdaptiveDeltaMotionChannelClass::Get_Vector(float32 frame,float * setvec)
 {		
 
 	uint32 frame1 = frame;
-	
+
 	float ratio = frame - frame1;
 
+	FastCriticalSectionClass::LockClass lock( CacheLock );
 	float value1 = getframe(frame1);
 	float value2 = getframe(frame1 + 1);
 
@@ -1251,6 +1259,7 @@ Quaternion AdaptiveDeltaMotionChannelClass::Get_QuatVector(float32 frame)
 	uint32 frame2 = frame1+1;
 	float ratio = frame - frame1;
 
+	FastCriticalSectionClass::LockClass lock( CacheLock );
 	Quaternion q1(1);
 	q1.Set( getframe(frame1, 0),
 			  getframe(frame1, 1),

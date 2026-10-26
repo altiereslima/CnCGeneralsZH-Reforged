@@ -34,6 +34,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
+#include "Platform/SunShadow.h"
 #include <stdlib.h>
 #include "Lib/Clock.h"
 
@@ -1158,6 +1159,11 @@ void RTS3DScene::updatePlayerColorPasses(void)
 DECLARE_PERF_TIMER(NonTerrainRender)
 void RTS3DScene::Render(RenderInfoClass & rinfo)
 {
+	// Covers both submission and Flush, including sorted draws. Nested reflections and
+	// custom passes cannot borrow the main view's map or its stencil ownership.
+	SunShadow::SceneScope sunScene(DX8Wrapper::_Get_D3D_Device(),
+		m_customPassMode == SCENE_PASS_DEFAULT && !ShaderClass::Is_Backface_Culling_Inverted()
+		&& Get_Extra_Pass_Polygon_Mode() == EXTRA_PASS_DISABLE);
 	USE_PERF_TIMER(NonTerrainRender)
 	DX8Wrapper::Set_Fog(FogEnabled, FogColor, FogStart, FogEnd);
 

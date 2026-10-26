@@ -126,6 +126,7 @@ public:
 
 	// Force multiply blend on all objects inserted from now on. (Doesn't affect the objects that are already in the lists)
 	static void						SetForceMultiply(bool multiply) { m_gForceMultiply=multiply; }
+	static bool						Is_Force_Multiply() { return m_gForceMultiply; }
 
 };
 
@@ -212,7 +213,8 @@ public:
 	virtual bool Check_If_Mesh_Fits(MeshModelClass* mmc)=0;
 
 	inline unsigned Get_FVF() const { return FVF; }
-	
+	IndexBufferClass * Peek_Index_Buffer() const { return index_buffer; }
+
 	inline void Add_Visible_Texture_Category(DX8TextureCategoryClass * tex_category,int pass) 
 	{
 		WWASSERT(pass<MAX_PASSES);
@@ -257,6 +259,8 @@ public:
 	*/
 	virtual void Add_Delayed_Visible_Material_Pass(MaterialPassClass * pass, MeshClass * mesh);
 	virtual void Render_Delayed_Procedural_Material_Passes(void);
+
+	VertexBufferClass * Peek_Vertex_Buffer() const { return vertex_buffer; }
 
 protected:
 
@@ -340,6 +344,41 @@ public:
 
 	// This should be called at the beginning of a game or menu or after a major modifications to the scene...
 	void						Invalidate(bool shutdown=false);	// Added flag so it doesn't allocate more mem when shutting down. -MW
+
+	/* The sun's depth pass on Direct3D 11 (MeshClass::Shadow_Lean_Casters).  Add_Shadow_Caster takes
+		 an opaque mesh's base pass (rigid, alpha tested or a skin, which is skinned on the GPU) for an
+		 instanced depth-only draw and answers true, or answers false having taken nothing, and the
+		 mesh goes to its texture categories as before; a skin with material passes to draw stays
+		 there.  Flush_Shadow_Casters draws what was taken, sorted so each piece of each model is one
+		 draw however many of it stand in the sun's box; it runs before Flush.  The counts are the
+		 pass's, zeroed by Reset_Shadow_Caster_Counts: draws and instances of each kind, and the
+		 meshes left to the old way by the first reason each failed on. */
+	enum ShadowOldReason
+	{
+		SHADOW_OLD_SORTED,
+		SHADOW_OLD_CAMERA_FACING,
+		SHADOW_OLD_DRAW_EFFECT,
+		SHADOW_OLD_FADING,
+		SHADOW_OLD_DEBUG,
+		SHADOW_OLD_STREAMING,
+		SHADOW_OLD_SKIN_PASSES,
+		SHADOW_OLD_BLENDED,
+		SHADOW_OLD_ALPHA_TEST,
+		SHADOW_OLD_SKIN_ALPHA_TEST,
+		SHADOW_OLD_FORMAT,
+		SHADOW_OLD_NO_BASE_PASS,
+		SHADOW_OLD_REFUSED,
+		SHADOW_OLD_REASON_COUNT
+	};
+	bool						Add_Shadow_Caster(MeshClass * mesh, bool has_material_passes);
+	void						Flush_Shadow_Casters();
+	static void				Reset_Shadow_Caster_Counts();
+	static const char *	Shadow_Old_Reason_Name(int reason);
+	static int				Shadow_Lean_Draws;
+	static int				Shadow_Lean_Instances;
+	static int				Shadow_Lean_Alpha_Tested;
+	static int				Shadow_Lean_Skinned;
+	static int				Shadow_Old_Meshes[SHADOW_OLD_REASON_COUNT];
 
 protected:
 

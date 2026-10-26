@@ -143,6 +143,12 @@ struct VertexPipelineDescription
 	// Copy_Batch_Vertices), and the program hands it on in the specular colour's alpha, which the
 	// pixel half's fade reads (SOFT_PARTICLE_SAMPLING).  Refused on a format with one set or none.
 	bool SoftParticle = false;
+
+	// A fire or explosion billboard (CombinerDescription::FireLook): the second coordinate set
+	// carries the particle's age and seed in v, and the program hands the whole set on in
+	// TexCoord1, which a one-stage draw leaves empty.  Refused on a format with one set or none, a
+	// pretransformed one, or a draw with a second stage, whose coordinates that output is.
+	bool FireLook = false;
 };
 
 // Which profile the generated text is for.  The two differ in the output semantic and in how the

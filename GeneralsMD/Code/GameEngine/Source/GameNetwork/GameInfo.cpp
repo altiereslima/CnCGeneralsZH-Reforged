@@ -38,6 +38,8 @@
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameState.h"
+#include "Common/RandomMapGenerator.h"
+#include "GameClient/ChallengeGenerals.h"
 #include "GameClient/GameText.h"
 #include "GameClient/MapUtil.h"
 #include "GameLogic/AI.h"
@@ -61,6 +63,151 @@
 
 
 GameInfo *TheGameInfo = NULL;
+
+// Random pools ------------------------------------
+
+static const UnsignedInt RANDOM_POOL_MASK = ( 1u << RANDOM_POOL_BITS ) - 1;
+
+Bool IsValidPlayerTemplatePick( Int pick )
+{
+	if( pick < PLAYERTEMPLATE_RANDOM_POOL )
+		return pick >= PLAYERTEMPLATE_RANDOM_POOL - (Int)RANDOM_POOL_MASK;
+	return pick >= PLAYERTEMPLATE_MIN && pick < ThePlayerTemplateStore->getPlayerTemplateCount();
+}
+
+Int EncodeRandomPool( UnsignedInt mask )
+{
+	mask &= RANDOM_POOL_MASK;
+	if( mask == 0 || mask == GetDefaultRandomPool() )
+		return PLAYERTEMPLATE_RANDOM;
+	return PLAYERTEMPLATE_RANDOM_POOL - (Int)mask;
+}
+
+UnsignedInt DecodeRandomPool( Int pick )
+{
+	if( pick < PLAYERTEMPLATE_RANDOM_POOL )
+		return (UnsignedInt)( PLAYERTEMPLATE_RANDOM_POOL - pick );
+	return GetDefaultRandomPool();
+}
+
+void GetRandomPoolCandidates( std::vector<Int> &candidates )
+{
+	candidates.clear();
+	for( Int i = 0; i < ThePlayerTemplateStore->getPlayerTemplateCount(); ++i )
+	{
+		const PlayerTemplate *pt = ThePlayerTemplateStore->getNthPlayerTemplate( i );
+		if( pt->getStartingBuilding().isEmpty() )
+			continue;
+		// the generals the shell keeps locked; PopulatePlayerTemplateComboBox leaves them out too
+		const GeneralPersona *general = TheChallengeGenerals->getGeneralByTemplateName( pt->getName() );
+		if( general && !general->isStartingEnabled() )
+			continue;
+		candidates.push_back( i );
+	}
+}
+
+UnsignedInt GetDefaultRandomPool( void )
+{
+	std::vector<Int> candidates;
+	GetRandomPoolCandidates( candidates );
+	UnsignedInt mask = 0;
+	for( size_t n = 0; n < candidates.size() && n < RANDOM_POOL_BITS; ++n )
+	{
+		if( !ThePlayerTemplateStore->getNthPlayerTemplate( candidates[ n ] )->isRandomExcluded() )
+			mask |= 1u << n;
+	}
+	return mask;
+}
+
+void GetRandomDraw( Int pick, Bool oldFactionsOnly, std::vector<Int> &draw )
+{
+	std::vector<Int> candidates;
+	GetRandomPoolCandidates( candidates );
+	const UnsignedInt mask = pick < PLAYERTEMPLATE_RANDOM_POOL ? DecodeRandomPool( pick ) : 0;
+	draw.clear();
+	for( Int pass = mask ? 0 : 1; pass < 2 && draw.empty(); ++pass )
+	{
+		for( size_t n = 0; n < candidates.size(); ++n )
+		{
+			const PlayerTemplate *pt = ThePlayerTemplateStore->getNthPlayerTemplate( candidates[ n ] );
+			if( oldFactionsOnly && !pt->isOldFaction() )
+				continue;
+			// pass 0 is the player's pool, pass 1 plain Random: every candidate the data does not exclude
+			const Bool inPool = pass == 0 ? ( n < RANDOM_POOL_BITS && ( mask & ( 1u << n ) ) != 0 ) : !pt->isRandomExcluded();
+			if( inPool )
+				draw.push_back( candidates[ n ] );
+		}
+	}
+}
+
+static const char *const POOL_PREFERENCE_PREFIX = "Random:";
+static const char POOL_SLOT_FIELD_PREFIX = 'P';
+
+AsciiString PlayerTemplatePreference( Int pick )
+{
+	AsciiString text;
+	if( pick >= PLAYERTEMPLATE_RANDOM_POOL )
+	{
+		text.format( "%d", pick );
+		return text;
+	}
+	std::vector<Int> candidates;
+	GetRandomPoolCandidates( candidates );
+	const UnsignedInt mask = DecodeRandomPool( pick );
+	text = POOL_PREFERENCE_PREFIX;
+	for( size_t n = 0; n < candidates.size() && n < RANDOM_POOL_BITS; ++n )
+	{
+		if( ( mask & ( 1u << n ) ) == 0 )
+			continue;
+		if( text.getLength() > (Int)strlen( POOL_PREFERENCE_PREFIX ) )
+			text.concat( ',' );
+		text.concat( ThePlayerTemplateStore->getNthPlayerTemplate( candidates[ n ] )->getName() );
+	}
+	return text;
+}
+
+Int PlayerTemplateFromPreference( const AsciiString &text )
+{
+	if( !text.startsWith( POOL_PREFERENCE_PREFIX ) )
+	{
+		// a pool written by number came from a build before the names, and its bits may be other armies now
+		const Int pick = atoi( text.str() );
+		return pick < PLAYERTEMPLATE_RANDOM_POOL ? (Int)PLAYERTEMPLATE_RANDOM : pick;
+	}
+	std::vector<Int> candidates;
+	GetRandomPoolCandidates( candidates );
+	AsciiString names( text.str() + strlen( POOL_PREFERENCE_PREFIX ) );
+	AsciiString name;
+	UnsignedInt mask = 0;
+	while( names.nextToken( &name, "," ) )
+	{
+		for( size_t n = 0; n < candidates.size() && n < RANDOM_POOL_BITS; ++n )
+		{
+			if( ThePlayerTemplateStore->getNthPlayerTemplate( candidates[ n ] )->getName() == name )
+				mask |= 1u << n;
+		}
+	}
+	return EncodeRandomPool( mask );
+}
+
+AsciiString PlayerTemplateSlotField( Int pick )
+{
+	AsciiString field;
+	if( pick < PLAYERTEMPLATE_RANDOM_POOL )
+		field.format( "%c%X", POOL_SLOT_FIELD_PREFIX, DecodeRandomPool( pick ) );
+	else
+		field.format( "%d", pick );
+	return field;
+}
+
+Int PlayerTemplateFromSlotField( const AsciiString &field )
+{
+	if( field.getCharAt( 0 ) != POOL_SLOT_FIELD_PREFIX )
+		return atoi( field.str() );
+	const UnsignedInt mask = (UnsignedInt)strtoul( field.str() + 1, NULL, 16 );
+	// a mask too wide to be a pool reads as a pick IsValidPlayerTemplatePick refuses
+	return mask <= RANDOM_POOL_MASK ? PLAYERTEMPLATE_RANDOM_POOL - (Int)mask : PLAYERTEMPLATE_MIN - 1;
+}
 
 // GameSlot ----------------------------------------
 
@@ -143,7 +290,7 @@ static Bool isSlotLocalAlly(const GameSlot *slot)
 UnicodeString GameSlot::getApparentPlayerTemplateDisplayName( void ) const
 {
 	if (TheMultiplayerSettings && TheMultiplayerSettings->showRandomPlayerTemplate() &&
-		m_origPlayerTemplate == PLAYERTEMPLATE_RANDOM && !isSlotLocalAlly(this))
+		IsRandomPlayerTemplate(m_origPlayerTemplate) && !isSlotLocalAlly(this))
 	{
 		return TheGameText->fetch("GUI:Random");
 	}
@@ -479,7 +626,8 @@ Int GameInfo::getMaxPlayers( void ) const
 	if (it == TheMapCache->end())
 		return -1;
 	MapMetaData data = it->second;
-	return data.m_numPlayers;
+	// a generated map is made again for however many sit down, so the room is never full of it
+	return isGeneratedMapPath(m_mapName) ? MAX_SLOTS : data.m_numPlayers;
 }
 
 void GameInfo::enterGame( void )
@@ -720,6 +868,8 @@ void GameInfo::setMapCRC( UnsignedInt mapCRC )
 		AsciiString lowerMap = m_mapName;
 		lowerMap.toLower();
 		//DEBUG_LOG(("GameInfo::setMapCRC - looking for map file \"%s\" in the map cache\n", lowerMap.str()));
+		// a generated map the host picked is in no cache here until findMap builds it from its name
+		TheMapCache->findMap(lowerMap);
 		std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->find(lowerMap);
 		if (it == TheMapCache->end())
 		{
@@ -759,6 +909,7 @@ void GameInfo::setMapSize( UnsignedInt mapSize )
 		//TheMapCache->updateCache();
 		AsciiString lowerMap = m_mapName;
 		lowerMap.toLower();
+		TheMapCache->findMap(lowerMap);	// builds a generated map from its name, as setMapCRC does
 		std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->find(lowerMap);
 		if (it == TheMapCache->end())
 		{
@@ -916,8 +1067,8 @@ void GameInfo::adjustSlotsForMap()
 	const MapMetaData *md = TheMapCache->findMap(m_mapName);
 	if (md != NULL)
 	{
-		// get the number of players allowed from the map.
-		Int numPlayers = md->m_numPlayers;
+		// get the number of players allowed from the map; a generated one follows the room
+		Int numPlayers = isGeneratedMapPath(m_mapName) ? MAX_SLOTS : md->m_numPlayers;
 		Int numPlayerSlots = 0;
 
 		// first get the number of occupied slots.
@@ -1129,58 +1280,14 @@ static Bool truncatePlayerNames( const GameInfo *game, AsciiString playerNames[M
 	return TRUE;
 }
 
-static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiString playerNames[MAX_SLOTS] );
+static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiString& mapField, const AsciiString playerNames[MAX_SLOTS] );
 
-//
-// The LAN packet has room for m_lanMaxOptionsLength bytes of this.  EA shortened each name while it
-// appended the slots, sharing what was left between the slots still to come; once the fixed fields
-// had used it all the share went negative, the name emptied, and removeLastChar on an empty string
-// looped forever - the host of a room with long names hung.  The string is built with whole names
-// first and only rebuilt with shortened ones when it does not fit.
-//
-AsciiString GameInfoToAsciiString( const GameInfo *game )
+// What a user map's folder is prefixed with in the portable path, as the map field writes it.
+static const char *const USER_MAPS_FIELD_PREFIX = "userdata/maps/";
+
+AsciiString GameInfoMapField( const AsciiString& portableMapPath )
 {
-	if (!game)
-		return AsciiString::TheEmptyString;
-
-	AsciiString playerNames[MAX_SLOTS];
-	Int playerNamesLength = 0;
-	for (Int i = 0; i < MAX_SLOTS; ++i)
-	{
-		const GameSlot *slot = game->getConstSlot(i);
-		if (slot && slot->isHuman())
-		{
-			playerNames[i] = WideCharStringToMultiByte(slot->getName().str()).c_str();
-			playerNamesLength += playerNames[i].getLength();
-		}
-	}
-
-	AsciiString optionsString = buildGameInfoAsciiString(game, playerNames);
-	Bool optionsFit = TheLAN == NULL || optionsString.getLength() <= m_lanMaxOptionsLength;
-	if (!optionsFit)
-	{
-		const Int fixedLength = optionsString.getLength() - playerNamesLength;
-		if (truncatePlayerNames(game, playerNames, m_lanMaxOptionsLength - fixedLength))
-		{
-			optionsString = buildGameInfoAsciiString(game, playerNames);
-			optionsFit = optionsString.getLength() <= m_lanMaxOptionsLength;
-		}
-	}
-
-	if (!optionsFit)
-	{
-		DEBUG_CRASH(("WARNING: options string cannot fit within the expected length!  Length is %d, but max is %d!\n",
-			optionsString.getLength(), m_lanMaxOptionsLength));
-		return AsciiString::TheEmptyString;
-	}
-
-	return optionsString;
-}
-
-static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiString playerNames[MAX_SLOTS] )
-{
-	AsciiString mapName = game->getMap();
-	mapName = TheGameState->realMapPathToPortableMapPath(mapName);
+	AsciiString mapName = portableMapPath;
 	AsciiString newMapName;
 	if (mapName.getLength() > 0)
 	{
@@ -1200,18 +1307,129 @@ static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiSt
 			newMapName.concat(token);
 			mapName.nextToken(&token, "\\/");
 		}
-		DEBUG_LOG(("Map name is %s\n", mapName.str()));
 	}
 
+	return newMapName;
+}
+
+AsciiString GameInfoLobbyMapField( const AsciiString& portableMapPath )
+{
+	const AsciiString field = GameInfoMapField(portableMapPath);
+	if (!field.startsWithNoCase(USER_MAPS_FIELD_PREFIX))
+		return field;
+	const AsciiString folder(field.str() + strlen(USER_MAPS_FIELD_PREFIX));
+	AsciiString wire;
+	return generatedMapWireName(folder, wire) ? wire : folder;
+}
+
+AsciiString GameInfoMapPathFromField( const AsciiString& field )
+{
+	AsciiString mapName;
+	AsciiString tempstr = field;
+	if (strpbrk(field.str(), "\\/") == NULL)
+	{
+		mapName = "userdata\\maps\\";
+		generatedMapFromWireName(field, tempstr);
+	}
+	AsciiString token;
+	tempstr.nextToken(&token, "\\/");
+	while (tempstr.getLength() > 0)
+	{
+		mapName.concat(token);
+		mapName.concat('\\');
+		tempstr.nextToken(&token, "\\/");
+	}
+	mapName.concat(token);
+	mapName.concat('\\');
+	mapName.concat(token);
+	mapName.concat(".map");
+	return mapName;
+}
+
+AsciiString GameInfoToAsciiString( const GameInfo *game )
+{
+	if (!game)
+		return AsciiString::TheEmptyString;
+
+	return GameInfoOptionsString(game, TheGameState->realMapPathToPortableMapPath(game->getMap()),
+		TheLAN == NULL ? 0 : m_lanMaxOptionsLength);
+}
+
+AsciiString GameInfoToReplayString( const GameInfo *game )
+{
+	return GameInfoOptionsString(game, TheGameState->realMapPathToPortableMapPath(game->getMap()), 0);
+}
+
+//
+// The LAN packet has room for m_lanMaxOptionsLength bytes of this.  EA shortened each name while it
+// appended the slots, sharing what was left between the slots still to come; once the fixed fields
+// had used it all the share went negative, the name emptied, and removeLastChar on an empty string
+// looped forever - the host of a room with long names hung.  The string is built with whole names
+// first and only rebuilt with shortened ones when it does not fit.
+//
+AsciiString GameInfoOptionsString( const GameInfo *game, const AsciiString& portableMapPath, Int maxLength )
+{
+	// the lobby's short field only where the string has a length to fit; a replay, a log or an
+	// online room names the map in full, which is what the launcher reads back
+	const AsciiString mapField = maxLength == 0 ? GameInfoMapField(portableMapPath) : GameInfoLobbyMapField(portableMapPath);
+	AsciiString playerNames[MAX_SLOTS];
+	Int playerNamesLength = 0;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		const GameSlot *slot = game->getConstSlot(i);
+		if (slot && slot->isHuman())
+		{
+			playerNames[i] = WideCharStringToMultiByte(slot->getName().str()).c_str();
+			playerNamesLength += playerNames[i].getLength();
+		}
+	}
+
+	AsciiString optionsString = buildGameInfoAsciiString(game, mapField, playerNames);
+	Bool optionsFit = maxLength == 0 || optionsString.getLength() <= maxLength;
+	if (!optionsFit)
+	{
+		const Int fixedLength = optionsString.getLength() - playerNamesLength;
+		if (truncatePlayerNames(game, playerNames, maxLength - fixedLength))
+		{
+			optionsString = buildGameInfoAsciiString(game, mapField, playerNames);
+			optionsFit = optionsString.getLength() <= maxLength;
+		}
+	}
+
+	if (!optionsFit)
+	{
+		DEBUG_CRASH(("WARNING: options string cannot fit within the expected length!  Length is %d, but max is %d!\n",
+			optionsString.getLength(), maxLength));
+		return AsciiString::TheEmptyString;
+	}
+
+	return optionsString;
+}
+
+// "PT=30;" when the value is not 0; the parser reads an absent field as 0, so an option left off
+// costs the eight player names nothing.
+static void concatOptionUnlessZero( AsciiString& optionsString, const char *key, Int value )
+{
+	if (value == 0)
+		return;
+	AsciiString field;
+	field.format("%s=%d;", key, value);
+	optionsString.concat(field);
+}
+
+static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiString& mapField, const AsciiString playerNames[MAX_SLOTS] )
+{
 	AsciiString optionsString;
-	optionsString.format("US=%d;M=%2.2x%s;MC=%X;MS=%d;SD=%d;C=%d;SR=%u;SC=%u;O=%c;PT=%d;UL=%d;PR=%d;IS=%d;TR=%d;PL=%d;", game->getUseStats(), game->getMapContentsMask(), newMapName.str(),
+	optionsString.format("US=%d;M=%2.2x%s;MC=%X;MS=%d;SD=%d;C=%d;SR=%u;SC=%u;O=%c;", game->getUseStats(), game->getMapContentsMask(), mapField.str(),
 		game->getMapCRC(), game->getMapSize(), game->getSeed(), game->getCRCInterval(), game->getSuperweaponRestriction(),
-		game->getStartingCash().countMoney(), game->oldFactionsOnly() ? 'Y' : 'N', game->getPeaceTime(),
-		game->getUnitLimit() ? 1 : 0, game->getProRules() ? 1 : 0, game->getIncomeSharing(), game->getTechRespawn(),
-		game->getSupplyPileLimit() );
-	// written only when on, so a normal-speed game's string is the one it always was
-	if (game->getTurbo())
-		optionsString.concat("TB=1;");
+		game->getStartingCash().countMoney(), game->oldFactionsOnly() ? 'Y' : 'N' );
+	concatOptionUnlessZero(optionsString, "PT", game->getPeaceTime());
+	concatOptionUnlessZero(optionsString, "UL", game->getUnitLimit() ? 1 : 0);
+	concatOptionUnlessZero(optionsString, "PR", game->getProRules() ? 1 : 0);
+	concatOptionUnlessZero(optionsString, "IS", game->getIncomeSharing());
+	concatOptionUnlessZero(optionsString, "TR", game->getTechRespawn());
+	concatOptionUnlessZero(optionsString, "PL", game->getSupplyPileLimit());
+	concatOptionUnlessZero(optionsString, "TB", game->getTurbo() ? 1 : 0);
 
 	//add player info for each slot
 	optionsString.concat(slotListID);
@@ -1224,11 +1442,11 @@ static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiSt
 		if (slot && slot->isHuman())
 		{
 			AsciiString tmp;  //all this data goes after name
-			tmp.format( ",%X,%d,%c%c,%d,%d,%d,%d,%d:",
+			tmp.format( ",%X,%d,%c%c,%d,%s,%d,%d,%d:",
 				slot->getIP(), slot->getPort(),
 				(slot->isAccepted()?'T':'F'),
 				(slot->hasMap()?'T':'F'),
-				slot->getColor(), slot->getPlayerTemplate(),
+				slot->getColor(), PlayerTemplateSlotField(slot->getPlayerTemplate()).str(),
 				slot->getStartPos(), slot->getTeamNumber(),
 				slot->getNATBehavior() );
 
@@ -1237,8 +1455,8 @@ static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiSt
 		else if (slot && slot->isAI())
 		{
 			// an older parser stops at the team and never sees the personality after it
-			str.format("C%c,%d,%d,%d,%d%s:", SlotStateToOptionsChar(slot->getState()),
-				slot->getColor(), slot->getPlayerTemplate(),
+			str.format("C%c,%d,%s,%d,%d%s:", SlotStateToOptionsChar(slot->getState()),
+				slot->getColor(), PlayerTemplateSlotField(slot->getPlayerTemplate()).str(),
 				slot->getStartPos(), slot->getTeamNumber(),
 				AIPersonaSlotField(slot->getAIPersonality()).str());
 		}
@@ -1355,22 +1573,7 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 				break;
 			}
 			mapContentsMask = grabHexInt(val.str());
-			AsciiString tempstr;
-			AsciiString token;
-			tempstr = val.str()+2;
-			tempstr.nextToken(&token, "\\/");
-			while (tempstr.getLength() > 0)
-			{
-				mapName.concat(token);
-				mapName.concat('\\');
-				tempstr.nextToken(&token, "\\/");
-			}
-			mapName.concat(token);
-			mapName.concat('\\');
-			mapName.concat(token);
-			mapName.concat('.');
-			mapName.concat(TheMapCache->getMapExtension());
-			mapName = TheGameState->portableMapPathToRealMapPath(mapName);
+			mapName = TheGameState->portableMapPathToRealMapPath(GameInfoMapPathFromField(AsciiString(val.str() + 2)));
 			sawMap = true;
 			DEBUG_LOG(("ParseAsciiStringToGameInfo - map name is %s\n", mapName.str()));
 		}
@@ -1555,8 +1758,8 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 								DEBUG_LOG(("ParseAsciiStringToGameInfo - slotValue player template is empty, quitting\n"));
 								break;
 							}
-							Int playerTemplate = atoi(slotValue.str());
-							if (playerTemplate < PLAYERTEMPLATE_MIN || playerTemplate >= ThePlayerTemplateStore->getPlayerTemplateCount())
+							Int playerTemplate = PlayerTemplateFromSlotField(slotValue);
+							if (!IsValidPlayerTemplatePick(playerTemplate))
 							{
 								optionsOk = false;
 								DEBUG_LOG(("ParseAsciiStringToGameInfo - player template value is invalid, quitting\n"));
@@ -1670,8 +1873,8 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 								DEBUG_LOG(("ParseAsciiStringToGameInfo - slotValue player template is empty, quitting\n"));
 								break;
 							}
-							Int playerTemplate = atoi(slotValue.str());
-							if (playerTemplate < PLAYERTEMPLATE_MIN || playerTemplate >= ThePlayerTemplateStore->getPlayerTemplateCount())
+							Int playerTemplate = PlayerTemplateFromSlotField(slotValue);
+							if (!IsValidPlayerTemplatePick(playerTemplate))
 							{
 								optionsOk = false;
 								DEBUG_LOG(("ParseAsciiStringToGameInfo - player template value is invalid, quitting\n"));

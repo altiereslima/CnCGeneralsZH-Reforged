@@ -31,6 +31,8 @@
 
 #define DEFINE_SHADOW_NAMES
 
+#include "Common/GlobalData.h"
+#include "Common/LogicThread.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Xfer.h"
@@ -54,8 +56,38 @@ RadiusDecalTemplate::RadiusDecalTemplate() :
 	m_opacityThrobTime(LOGICFRAMES_PER_SECOND),
 	m_color(0),
 	m_onlyVisibleToOwningPlayer(true),
+	m_spinTime(0),
+	m_lightReference(0.0f),
+	m_lightScaleMin(1.0f),
+	m_lightScaleMax(1.0f),
 	m_name(AsciiString::TheEmptyString)  // Added By Sadullah Nader for Init purposes
 {
+}
+
+// ------------------------------------------------------------------------------------------------
+/** How bright flat ground is lit at the map's time of day against LightReference, clamped to
+	* LightScaleMin..LightScaleMax.  An additive mark adds the same light whatever lies under it, so on a
+	* night map it reads far louder than by day; scaling by the ground's own light keeps it as quiet.
+	* The light the terrain shades a flat cell with (BaseHeightMap's doTheLight): the first light's
+	* ambient, plus each light's diffuse by how steeply it falls. */
+// ------------------------------------------------------------------------------------------------
+static Real groundLight()
+{
+	RGBColor shade = TheGlobalData->m_terrainAmbient[0];
+	for (Int i = 0; i < TheGlobalData->m_numGlobalLights; ++i)
+	{
+		const Real down = MIN(1.0f, MAX(0.0f, -TheGlobalData->m_terrainLightPos[i].z));
+		shade.red += TheGlobalData->m_terrainDiffuse[i].red * down;
+		shade.green += TheGlobalData->m_terrainDiffuse[i].green * down;
+		shade.blue += TheGlobalData->m_terrainDiffuse[i].blue * down;
+	}
+	// each channel saturates at 1 as the terrain's own vertex shade does
+	return 0.30f * MIN(1.0f, shade.red) + 0.59f * MIN(1.0f, shade.green) + 0.11f * MIN(1.0f, shade.blue);
+}
+
+Real RadiusDecalTemplate::lightScale() const
+{
+	return MIN(m_lightScaleMax, MAX(m_lightScaleMin, groundLight() / m_lightReference));
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -80,26 +112,47 @@ void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, con
 			(!m_onlyVisibleToOwningPlayer ||
 			 owningPlayer->getPlayerIndex() == ThePlayerList->getLocalPlayer()->getPlayerIndex()))
 	{
-		Shadow::ShadowTypeInfo decalInfo;
-		decalInfo.allowUpdates = FALSE;										// shadow texture will never update
-		decalInfo.allowWorldAlign = TRUE;									// shadow image will wrap around world objects
-		decalInfo.m_type = m_shadowType;
-		strcpy(decalInfo.m_ShadowName, m_name.str());		// name of your texture
-		decalInfo.m_sizeX = radius*2;									// world space dimensions
-		decalInfo.m_sizeY = radius*2;									// world space dimensions
+		// Logic modules call this inside the tick, which runs beside the render: addDecal links the decal
+		// into the list the render is walking and loads its texture, so it waits for the tick's end.
+		std::shared_ptr<RadiusDecalCell> cell = std::make_shared<RadiusDecalCell>();
+		cell->setPosition(pos);
+		cell->setAngle(0.0f);
+		result.m_decal = cell;
+		result.m_template = this;
+		// By value, not through this: a template can be a module's own copy (DeliverPayloadAIUpdate's),
+		// gone before the call runs when its object is made and destroyed in the same tick.
+		const AsciiString name = m_name;
+		const ShadowType shadowType = m_shadowType;
+		const Real size = radius*2;
+		const Color color = m_color == 0 ? clientPlayerColor(owningPlayer) : m_color;
+		if (m_lightReference > 0.0f)
+			DEBUG_LOG(("AURA RING LIGHT %s ground=%.3f scale=%.2f\n", m_name.str(), groundLight(), lightScale()));
+		LogicThread::callAfterTick( [cell, name, shadowType, size, color]()
+		{
+			Shadow::ShadowTypeInfo decalInfo;
+			decalInfo.allowUpdates = FALSE;										// shadow texture will never update
+			decalInfo.allowWorldAlign = TRUE;									// shadow image will wrap around world objects
+			decalInfo.m_type = shadowType;
+			strcpy(decalInfo.m_ShadowName, name.str());		// name of your texture
+			decalInfo.m_sizeX = size;											// world space dimensions
+			decalInfo.m_sizeY = size;											// world space dimensions
 
-		result.m_decal = TheProjectedShadowManager->addDecal(&decalInfo);
-		if (result.m_decal)
-		{
-			result.m_decal->setAngle(0.0f);
-			result.m_decal->setColor(m_color == 0 ? clientPlayerColor(owningPlayer) : m_color);
-			result.m_decal->setPosition(pos.x, pos.y, pos.z);	
-			result.m_template = this;
-		}
-		else
-		{
-			DEBUG_CRASH(("Unable to add decal %s\n",decalInfo.m_ShadowName));
-		}
+			Shadow *decal = TheProjectedShadowManager->addDecal(&decalInfo);
+			if (decal == NULL)
+			{
+				DEBUG_CRASH(("Unable to add decal %s\n",decalInfo.m_ShadowName));
+				return;
+			}
+			decal->setColor(color);
+			// what the owner set while the add waited, the creation's own position and angle among it
+			if (cell->hasPosition)
+				decal->setPosition(cell->position.x, cell->position.y, cell->position.z);
+			if (cell->hasAngle)
+				decal->setAngle(cell->angle);
+			if (cell->hasOpacity)
+				decal->setOpacity(cell->opacity);
+			cell->decal = decal;
+		} );
 	}
 }
 
@@ -132,6 +185,10 @@ void RadiusDecalTemplate::xferRadiusDecalTemplate( Xfer *xfer )
 		{ "OpacityThrobTime",						INI::parseDurationUnsignedInt,NULL,							offsetof( RadiusDecalTemplate, m_opacityThrobTime ) },
 		{ "Color",											INI::parseColorInt,						NULL,							offsetof( RadiusDecalTemplate, m_color ) },
 		{ "OnlyVisibleToOwningPlayer",	INI::parseBool,								NULL,							offsetof( RadiusDecalTemplate, m_onlyVisibleToOwningPlayer ) },
+		{ "SpinTime",										INI::parseInt,								NULL,							offsetof( RadiusDecalTemplate, m_spinTime ) },
+		{ "LightReference",							INI::parseReal,								NULL,							offsetof( RadiusDecalTemplate, m_lightReference ) },
+		{ "LightScaleMin",							INI::parseReal,								NULL,							offsetof( RadiusDecalTemplate, m_lightScaleMin ) },
+		{ "LightScaleMax",							INI::parseReal,								NULL,							offsetof( RadiusDecalTemplate, m_lightScaleMax ) },
 		{ 0, 0, 0, 0 }
 	};
 
@@ -139,17 +196,15 @@ void RadiusDecalTemplate::xferRadiusDecalTemplate( Xfer *xfer )
 }
 
 // ------------------------------------------------------------------------------------------------
-RadiusDecal::RadiusDecal() : 
-	m_template(NULL), 
-	m_decal(NULL),
+RadiusDecal::RadiusDecal() :
+	m_template(NULL),
 	m_empty(true)
 {
 }
 
 // ------------------------------------------------------------------------------------------------
-RadiusDecal::RadiusDecal(const RadiusDecal& that) : 
-	m_template(NULL), 
-	m_decal(NULL),
+RadiusDecal::RadiusDecal(const RadiusDecal& that) :
+	m_template(NULL),
 	m_empty(true)
 {
 	DEBUG_CRASH(("not fully implemented"));
@@ -160,11 +215,7 @@ RadiusDecal& RadiusDecal::operator=(const RadiusDecal& that)
 {
 	if (this != &that)
 	{
-		m_template = NULL;
-		if (m_decal)
-			m_decal->release();
-		m_decal = NULL;
-		m_empty = true;
+		clear();
 		DEBUG_CRASH(("not fully implemented"));
 	}
 	return *this;
@@ -186,9 +237,16 @@ void RadiusDecal::clear()
 	m_template = NULL;
 	if (m_decal)
 	{
-		m_decal->release();
+		// after the tick, like the add: the cell outlives this RadiusDecal and its module
+		std::shared_ptr<RadiusDecalCell> cell = m_decal;
+		LogicThread::callAfterTick( [cell]()
+		{
+			if (cell->decal)
+				cell->decal->release();
+			cell->decal = NULL;
+		} );
 	}
-	m_decal = NULL;
+	m_decal.reset();
 	m_empty = true;
 }
 
@@ -201,7 +259,9 @@ RadiusDecal::~RadiusDecal()
 // ------------------------------------------------------------------------------------------------
 void RadiusDecal::update()
 {
-	if (m_decal && m_template)
+	// the decal itself turns up after the tick that created it; until then the cell keeps what is set
+	RadiusDecalCell *decal = m_decal.get();
+	if (decal && m_template)
 	{
 		UnsignedInt now = TheGameLogic->getFrame();
 		Real theta = (2*PI) * (Real)(now % m_template->m_opacityThrobTime) / (Real)m_template->m_opacityThrobTime;
@@ -209,14 +269,25 @@ void RadiusDecal::update()
 		Int opac;
 		if( TheGameLogic->getDrawIconUI() && !CinemaDirector_hidesHud() )
 		{
-			opac = REAL_TO_INT((m_template->m_minOpacity + percent * (m_template->m_maxOpacity - m_template->m_minOpacity)) * 255.0f);
+			Real opacity = m_template->m_minOpacity + percent * (m_template->m_maxOpacity - m_template->m_minOpacity);
+			if (m_template->m_lightReference > 0.0f)
+				opacity *= m_template->lightScale();
+			opac = REAL_TO_INT(opacity * 255.0f);
 		}
 		else
 		{
 			//Scripts turned this off, or -cinema did, so don't show them!
 			opac = 0;
 		}
-		m_decal->setOpacity(opac);
+		decal->setOpacity(opac);
+
+		// a turn every SpinTime, on the logic clock like the throb, so a paused game holds it still
+		if (m_template->m_spinTime != 0)
+		{
+			const UnsignedInt period = MAX(1, abs(m_template->m_spinTime) * LOGICFRAMES_PER_SECOND / 1000);
+			const Real angle = (2*PI) * (Real)(now % period) / (Real)period;
+			decal->setAngle(m_template->m_spinTime > 0 ? angle : -angle);
+		}
 	}
 }
 
@@ -235,6 +306,42 @@ void RadiusDecal::setPosition(const Coord3D& pos)
 {
 	if (m_decal)
 	{
-		m_decal->setPosition(pos.x, pos.y, pos.z);	//world space position of center of decal
+		m_decal->setPosition(pos);	//world space position of center of decal
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+// Straight to the decal once the add has run, into the cell until then.  The two never overlap: the
+// add runs after the tick, on the main thread, while no tick is writing.
+void RadiusDecalCell::setPosition(const Coord3D& pos)
+{
+	if (decal)
+		decal->setPosition(pos.x, pos.y, pos.z);
+	else
+	{
+		position = pos;
+		hasPosition = TRUE;
+	}
+}
+
+void RadiusDecalCell::setOpacity(Int o)
+{
+	if (decal)
+		decal->setOpacity(o);
+	else
+	{
+		opacity = o;
+		hasOpacity = TRUE;
+	}
+}
+
+void RadiusDecalCell::setAngle(Real a)
+{
+	if (decal)
+		decal->setAngle(a);
+	else
+	{
+		angle = a;
+		hasAngle = TRUE;
 	}
 }

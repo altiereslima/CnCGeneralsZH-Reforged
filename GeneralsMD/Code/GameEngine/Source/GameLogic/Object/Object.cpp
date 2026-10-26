@@ -71,6 +71,7 @@
 #include "GameLogic/Module/AutoHealBehavior.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/BodyModule.h"
+#include "Common/LogicThread.h"
 #include "GameLogic/Module/CollideModule.h"
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/CountermeasuresBehavior.h"
@@ -305,7 +306,12 @@ Object::Object( const ThingTemplate *tt, const ObjectStatusMaskType &objectStatu
 	if( m_shroudClearingRange == -1.0f )
 		m_shroudClearingRange = m_visionRange;// Backwards compatible, and perfectly logical default to assign
 	m_shroudRange = 0.0f;
-	
+	m_sightJammerCount = 0;
+	for( Int aura = 0; aura < RANK_AURA_COUNT; ++aura )
+		m_rankAura[ aura ] = 0.0f;
+	m_rankRallyUntil = 0;
+	m_forgoRankRally = FALSE;
+
 	m_singleUseCommandUsed = false;
 
 	// assign unique object id
@@ -3282,7 +3288,14 @@ void Object::scoreTheKill( const Object *victim )
 //-------------------------------------------------------------------------------------------------
 VeterancyLevel Object::getVeterancyLevel() const 
 { 
-	return m_experienceTracker ? m_experienceTracker->getVeterancyLevel() : LEVEL_REGULAR; 
+	return m_experienceTracker ? m_experienceTracker->getVeterancyLevel() : LEVEL_REGULAR;
+}
+
+//-------------------------------------------------------------------------------------------------
+// the AI module picks its locomotors, and reads the speed bonus, before the tracker exists
+Int Object::getRankGrade() const
+{
+	return m_experienceTracker ? m_experienceTracker->getGrade() : 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3473,6 +3486,72 @@ Bool Object::hasAnySpecialPower() const
 }
 
 //-------------------------------------------------------------------------------------------------
+void Object::onRankChanged( VeterancyLevel oldLevel, VeterancyLevel newLevel, Int oldGrade, Int newGrade, Bool provideFeedback )
+{
+	if( isEffectivelyDead() )
+		return;
+
+	// max health carries the grade's bonus on a ladder and the level's anywhere else
+	BodyModuleInterface* body = getBodyModule();
+	const Real oldBonus = TheGlobalData->getRankHealthBonus( getTemplate(), oldLevel, oldGrade );
+	const Real newBonus = TheGlobalData->getRankHealthBonus( getTemplate(), newLevel, newGrade );
+	if( body && oldBonus != newBonus )
+		body->setMaxHealth( body->getMaxHealth() * newBonus / oldBonus, PRESERVE_RATIO );
+
+	if( oldLevel != newLevel )
+		onVeterancyLevelChanged( oldLevel, newLevel, provideFeedback );
+	else if( m_ai )
+		m_ai->refreshVeterancySpeed();
+
+	const RankLadder *ladder = TheGlobalData->getRankLadder( getTemplate() );
+	if( ladder == NULL || newGrade == oldGrade )
+		return;
+
+	DEBUG_LOG(("RANK frame=%d template=%s grade %d to %d xp=%d\n", TheGameLogic->getFrame(), getTemplate()->getName().str(),
+		oldGrade, newGrade, getExperienceTracker()->getCurrentExperience()));
+
+	// the sight and spotter perks change how far it looks; one born on a pin has not looked yet
+	if( !m_partitionLastLook->isInvalid()
+			&& ( ladder->perk( oldGrade, RANK_PERK_SIGHT ) != ladder->perk( newGrade, RANK_PERK_SIGHT )
+				|| ladder->perk( oldGrade, RANK_PERK_SPOTTER ) != ladder->perk( newGrade, RANK_PERK_SPOTTER ) ) )
+		handleShroud();
+
+	if( newGrade > oldGrade && provideFeedback && TheGameLogic->getDrawIconUI() && isLogicallyVisible() && !isKindOf( KINDOF_IGNORED_IN_GUI )
+			&& Drawable::getRankInsignia( this ) != NULL )
+		floatRankGain( ladder->insigniaIndex( newGrade, isKindOf( KINDOF_HERO ) ) );
+
+	// the portrait shows the grade, so a selected unit's bar redraws; the selection is the client's,
+	// so the client asks after the tick
+	const ObjectID objID = getID();
+	LogicThread::callAfterTick( [objID]()
+	{
+		Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
+		if( draw && draw->getObject() && draw->getObject()->getID() == objID )
+			TheControlBar->markUIDirty();
+	} );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The promotion floating up over the unit: a rank ladder's insignia, or EA's chevron animation for
+	* insignia -1. */
+//-------------------------------------------------------------------------------------------------
+void Object::floatRankGain( Int insignia )
+{
+	if( TheAnim2DCollection == NULL || TheGlobalData->m_levelGainAnimationName.isEmpty() )
+		return;
+
+	Anim2DTemplate *animTemplate = TheAnim2DCollection->findTemplate( TheGlobalData->m_levelGainAnimationName );
+	Coord3D pos = *getPosition();
+	pos.add(&m_healthBoxOffset);
+	TheInGameUI->addWorldAnimation( animTemplate,
+																	&pos,
+																	WORLD_ANIM_FADE_ON_EXPIRE,
+																	TheGlobalData->m_levelGainAnimationDisplayTimeInSeconds,
+																	TheGlobalData->m_levelGainAnimationZRisePerSecond,
+																	insignia < 0 ? NULL : getTemplate(), insignia );
+}
+
+//-------------------------------------------------------------------------------------------------
 void Object::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel newLevel, Bool provideFeedback )
 {
 	// a kill scored by a unit that is already dying used to promote the corpse: upgrades, weapon
@@ -3493,7 +3572,10 @@ void Object::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel ne
 	BodyModuleInterface* body = getBodyModule();
 	if (body)
 		body->onVeterancyLevelChanged( oldLevel, newLevel, provideFeedback );
-	
+
+	if (m_ai)
+		m_ai->refreshVeterancySpeed();
+
 	// Whether the promotion shows is simply whether this watcher can see the unit.  The rule used
 	// to be spelled out here as "mine, or not stealthed, or detected, or disguised", which reads
 	// the same for a player but is wrong for everyone else at the table: an ally who shares your
@@ -3547,19 +3629,9 @@ void Object::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel ne
 
 	if( doAnimation && TheGameLogic->getDrawIconUI() && provideFeedback )
 	{
-		if( TheAnim2DCollection && TheGlobalData->m_levelGainAnimationName.isEmpty() == FALSE )
-		{
-			Anim2DTemplate *animTemplate = TheAnim2DCollection->findTemplate( TheGlobalData->m_levelGainAnimationName );
-
-			Coord3D pos = *getPosition(); 
-			pos.add(&m_healthBoxOffset);
-
-			TheInGameUI->addWorldAnimation( animTemplate,
-																			&pos,
-																			WORLD_ANIM_FADE_ON_EXPIRE,
-																			TheGlobalData->m_levelGainAnimationDisplayTimeInSeconds,
-																			TheGlobalData->m_levelGainAnimationZRisePerSecond);
-		}
+		// a unit on a rank ladder floats each grade's insignia from onRankChanged instead
+		if( TheGlobalData->getRankLadder( getTemplate() ) == NULL )
+			floatRankGain( -1 );
 
 		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_unitPromoted;	
 		soundToPlay.setObjectID( getID() );
@@ -4425,6 +4497,26 @@ void Object::crc( Xfer *xfer )
 }  // end crc
 
 //-------------------------------------------------------------------------------------------------
+/** One module's xfer, which names the module when it throws.  A release build compiles the
+	* DEBUG_CRASH of GameState::xferSaveData out, so without this a save, a load or a replay
+	* checkpoint that died in a mod's module said only the last "Xfer Object" line (report 1858). */
+//-------------------------------------------------------------------------------------------------
+static void xferModule( Xfer *xfer, BehaviorModule *module, const Object *obj )
+{
+	try
+	{
+		xfer->xferSnapshot( module );
+	}
+	catch( ... )
+	{
+		DEBUG_LOG(( "Object::xfer - module %s (%s) of %s id=%d failed to xfer\n",
+			KEYNAME( module->getModuleNameKey() ).str(), KEYNAME( module->getModuleTagNameKey() ).str(),
+			obj->getTemplate()->getName().str(), obj->getID() ));
+		throw;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Object xfer implemtation
 	* Version Info:
 	* 1: Initial version 
@@ -4439,13 +4531,15 @@ void Object::crc( Xfer *xfer )
 	* 10: each player's memory of it while it is out of their sight
 	* 11: the cached angle, which the matrix does not give back bit for bit
 	* 12: the last threat and value sightings
+	* 13: how many enemy jammers are cutting its sight
+	* 14: the rank auras on it and when its death rally ends
 	*/
 //-------------------------------------------------------------------------------------------------
 void Object::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 12;
+	const XferVersion currentVersion = 14;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -4765,7 +4859,7 @@ void Object::xfer( Xfer *xfer )
 			xfer->beginBlock();
 
 			// xfer data
-			xfer->xferSnapshot( module );
+			xferModule( xfer, module, this );
 
 			// end data block
 			xfer->endBlock();
@@ -4821,7 +4915,7 @@ void Object::xfer( Xfer *xfer )
 			{
 
 				// xfer the data into this module
-				xfer->xferSnapshot( module );
+				xferModule( xfer, module, this );
 
 			}  // end else
 			
@@ -4904,6 +4998,16 @@ void Object::xfer( Xfer *xfer )
 				ThePartitionManager->doValueAffect( m_partitionLastValue->m_where.x, m_partitionLastValue->m_where.y,
 					m_partitionLastValue->m_howFar, m_partitionLastValue->m_data, m_partitionLastValue->m_forWhom );
 		}
+	}
+
+	if( version >= 13 )
+		xfer->xferInt( &m_sightJammerCount );
+
+	if( version >= 14 )
+	{
+		for( Int aura = 0; aura < RANK_AURA_COUNT; ++aura )
+			xfer->xferReal( &m_rankAura[ aura ] );
+		xfer->xferUnsignedInt( &m_rankRallyUntil );
 	}
 
 }  // end xfer
@@ -5063,6 +5167,8 @@ void Object::onDie( DamageInfo *damageInfo )
 	
 	Bool selfInflicted = (damageInfo->in.m_sourceID == getID());
 
+	giveRankRally();
+
 	//
 	// FIRST, call our die modules - unless nothing has been built here yet, in which case they are
 	// exactly what must not run: the die modules are the explosion, the collapse and the rubble of a
@@ -5117,7 +5223,9 @@ void Object::onDie( DamageInfo *damageInfo )
 		{
 			TheEva->setShouldPlay(EVA_BuldingLost);
 		} 
-		else if (isKindOf(KINDOF_INFANTRY) || isKindOf(KINDOF_VEHICLE)) 
+		// a plane a general's power or a Supply Drop Zone sends over is IGNORED_IN_GUI: not yours to
+		// command, not counted as lost in the score (scoreTheKill), so not announced as lost either
+		else if ((isKindOf(KINDOF_INFANTRY) || isKindOf(KINDOF_VEHICLE)) && !isKindOf(KINDOF_IGNORED_IN_GUI))
 		{
 			TheEva->setShouldPlay(EVA_UnitLost);
 			//Create a fake radar event so the user can use the spacebar to quickly jump to this!
@@ -5422,7 +5530,120 @@ void Object::removeThreat()
 	m_partitionLastThreat->reset();
 }
 
+//-------------------------------------------------------------------------------------------------
+/** A jammed drone or spotter still sees what is under its feet, and nothing a battery could use. */
+//-------------------------------------------------------------------------------------------------
+static const Real JAMMED_SHROUD_CLEARING_RANGE = 30.0f;
 
+void Object::addSightJammer()
+{
+	++m_sightJammerCount;
+	if( m_sightJammerCount == 1 )
+		handleShroud();
+}
+
+//-------------------------------------------------------------------------------------------------
+void Object::removeSightJammer()
+{
+	DEBUG_ASSERTCRASH( m_sightJammerCount > 0, ("removeSightJammer on '%s' with no jammer on it", getTemplate()->getName().str()) );
+	--m_sightJammerCount;
+	if( m_sightJammerCount == 0 )
+		handleShroud();
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Object::getRankPerk( RankPerk perk ) const
+{
+	const RankLadder *ladder = TheGlobalData->getRankLadder( getTemplate() );
+	return ladder ? ladder->perk( getRankGrade(), perk ) : 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Object::getRankAura( RankAura aura ) const
+{
+	// nothing reaches a man inside a building, a bunker or a transport, a rally already on him included
+	if( m_containedBy || ( aura == RANK_AURA_RALLY && TheGameLogic->getFrame() >= m_rankRallyUntil ) )
+		return 0.0f;
+	return m_rankAura[ aura ];
+}
+
+//-------------------------------------------------------------------------------------------------
+void Object::clearRankAuras()
+{
+	for( Int aura = 0; aura < RANK_AURA_PASSED; ++aura )
+		m_rankAura[ aura ] = 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+void Object::raiseRankAura( RankAura aura, Real strength )
+{
+	m_rankAura[ aura ] = MAX( m_rankAura[ aura ], strength );
+}
+
+//-------------------------------------------------------------------------------------------------
+void Object::raiseRankRally( Real strength, UnsignedInt until )
+{
+	m_rankAura[ RANK_AURA_RALLY ] = MAX( getRankAura( RANK_AURA_RALLY ), strength );
+	m_rankRallyUntil = MAX( m_rankRallyUntil, until );
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Object::getRankSightScalar() const
+{
+	return MAX( 1.0f, getRankPerk( RANK_PERK_SIGHT ) ) * ( 1.0f + m_rankAura[ RANK_AURA_SIGHT ] );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Standing still is not walking a path: a tank turning its turret on the spot holds its guard. */
+//-------------------------------------------------------------------------------------------------
+Real Object::getRankDamageTakenScalar() const
+{
+	Real scalar = ( 1.0f - m_rankAura[ RANK_AURA_GUARD ] ) * ( 1.0f - getRankAura( RANK_AURA_RALLY ) );
+	const Real still = getRankPerk( RANK_PERK_STILL_GUARD );
+	if( still > 0.0f && !( m_ai && m_ai->isMoving() ) )
+		scalar *= 1.0f - still;
+	return scalar;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool Object::isSpotter() const
+{
+	return getTemplate()->hasSpotterSight() || getRankPerk( RANK_PERK_SPOTTER ) > 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+void Object::onRankSightChanged( Real oldScalar )
+{
+	if( getRankSightScalar() != oldScalar && !m_partitionLastLook->isInvalid() )
+		handleShroud();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A fallen leader's last order: the allies within its aura radius take less damage for RallyTime.
+	* The list walk is the object list's own order; the strongest rally stays, so order is moot. */
+//-------------------------------------------------------------------------------------------------
+void Object::giveRankRally()
+{
+	const RankLadder *ladder = TheGlobalData->getRankLadder( getTemplate() );
+	if( ladder == NULL || m_containedBy || m_forgoRankRally )	// one who falls inside a building or a transport rallies nobody
+		return;
+	const Int grade = getRankGrade();
+	const Real strength = ladder->aura( grade, RANK_AURA_RALLY );
+	if( strength <= 0.0f )
+		return;
+	const Real radius = ladder->auraRadius( grade );
+	const UnsignedInt until = TheGameLogic->getFrame() + TheGlobalData->m_rankRallyTime;
+	for( Object *other = TheGameLogic->getFirstObject(); other; other = other->getNextObject() )
+	{
+		if( other == this || other->isEffectivelyDead() || other->isKindOf( KINDOF_STRUCTURE ) || other->getContainedBy()
+				|| getRelationship( other ) != ALLIES
+				|| ThePartitionManager->getDistanceSquared( this, other, FROM_CENTER_2D ) > radius * radius )
+			continue;
+		other->raiseRankRally( strength, until );
+	}
+	DEBUG_LOG(("RANK RALLY frame=%d template=%s strength=%.2f radius=%.0f\n", TheGameLogic->getFrame(),
+		getTemplate()->getName().str(), strength, radius));
+}
 
 //-------------------------------------------------------------------------------------------------
 void Object::look()
@@ -5457,10 +5678,15 @@ void Object::look()
 			// applied here and not in getShroudClearingRange, so the sight bonuses that multiply the
 			// stored range and later divide it back out never bake the weapon cap into it.  A dozer or
 			// a worker carries a mine-clearing weapon a few feet long, and capped by it the builder
-			// was blind: it keeps its template's sight
+			// was blind: it keeps its template's sight.  So does a spotter, whose sight is its job and
+			// whose carbine is for show
 			Real shroudClearingRange = getShroudClearingRange();
-			if( !isKindOf( KINDOF_STRUCTURE ) && !isKindOf( KINDOF_DOZER ) )
+			if( !isKindOf( KINDOF_STRUCTURE ) && !isKindOf( KINDOF_DOZER ) && !isSpotter() )
 				shroudClearingRange = Object_armedShroudClearingRange( shroudClearingRange, getLargestWeaponRange() );
+			// a rank's eyes and a leader's sight aura reach past the weapon cap; onRankSightChanged looks again
+			shroudClearingRange *= getRankSightScalar();
+			if( isSightJammed() )
+				shroudClearingRange = min( shroudClearingRange, JAMMED_SHROUD_CLEARING_RANGE );
 
 			if( shroudClearingRange > 0.0f )
 			{

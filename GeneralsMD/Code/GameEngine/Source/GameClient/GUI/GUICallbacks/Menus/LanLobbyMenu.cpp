@@ -132,8 +132,8 @@ Int LANPreferences::getPreferredFaction(void)
 		return PLAYERTEMPLATE_RANDOM;
 	}
 
-	ret = atoi(it->second.str());
-	if (ret == PLAYERTEMPLATE_OBSERVER || ret < PLAYERTEMPLATE_MIN || ret >= ThePlayerTemplateStore->getPlayerTemplateCount())
+	ret = PlayerTemplateFromPreference(it->second);
+	if (ret == PLAYERTEMPLATE_OBSERVER || !IsValidPlayerTemplatePick(ret))
 		ret = PLAYERTEMPLATE_RANDOM;
 
 	if (ret >= 0)

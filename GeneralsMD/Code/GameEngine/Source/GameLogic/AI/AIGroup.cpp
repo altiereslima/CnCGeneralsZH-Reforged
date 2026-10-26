@@ -2449,7 +2449,7 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 	{
 		const Real walkX = goalPos.x - groupCenter.x;
 		const Real walkY = goalPos.y - groupCenter.y;
-		tunnelEntrance = walker->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( walker, &groupCenter, &goalPos,
+		tunnelEntrance = TunnelTracker::findTunnelShortcut( walker, &groupCenter, &goalPos,
 			(Real)sqrt( walkX * walkX + walkY * walkY ) );
 	}
 
@@ -3143,7 +3143,7 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 	{
 		const Real walkX = pos->x - center.x;
 		const Real walkY = pos->y - center.y;
-		tunnelEntrance = walker->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( walker, &center, pos,
+		tunnelEntrance = TunnelTracker::findTunnelShortcut( walker, &center, pos,
 			(Real)sqrt( walkX * walkX + walkY * walkY ) );
 	}
 

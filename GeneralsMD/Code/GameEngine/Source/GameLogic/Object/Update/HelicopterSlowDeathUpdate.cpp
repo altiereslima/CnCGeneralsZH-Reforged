@@ -234,9 +234,14 @@ void HelicopterSlowDeathBehavior::beginSlowDeath( const DamageInfo *damageInfo )
 	{
 		return;
 	}
+	// a mod helicopter can die with no locomotor chosen (its set names none for the current
+	// condition); nothing holds it up then, so it drops on plain gravity and the spiral still runs
 	Locomotor *locomotor = getObject()->getAIUpdateInterface()->getCurLocomotor();
-	locomotor->setMaxLift( -TheGlobalData->m_gravity * (1.0f - modData->m_fallHowFast) );
-	locomotor->setMaxBraking( modData->m_maxBraking );
+	if( locomotor )
+	{
+		locomotor->setMaxLift( -TheGlobalData->m_gravity * (1.0f - modData->m_fallHowFast) );
+		locomotor->setMaxBraking( modData->m_maxBraking );
+	}
 
 	// attach particle system to bone if present
 	if( modData->m_attachParticleSystem )

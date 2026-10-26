@@ -104,9 +104,11 @@ public:
 		return dataFieldParse;
 	}
 	Bool requiresAllActivationUpgrades() const;
-	void getUpgradeActivationMasks(UpgradeMaskType& activation, UpgradeMaskType& conflicting) const;	///< The first time someone looks at my mask, I'll figure it out.
+	/// The first time someone looks at my mask, I'll figure it out.  'module' only names the culprit
+	/// in the log when a line names an upgrade that does not exist.
+	void getUpgradeActivationMasks(UpgradeMaskType& activation, UpgradeMaskType& conflicting, const ObjectModule* module) const;
 	void performUpgradeFX(Object* obj) const;
-	void muxDataProcessUpgradeRemoval(Object* obj) const;
+	void muxDataProcessUpgradeRemoval(ObjectModule* module) const;
 	Bool isTriggeredBy(const std::string &upgrade) const;
 };
 
@@ -192,7 +194,7 @@ protected:
 	virtual void processUpgradeRemoval()
 	{
 		// I can't take it any more.  Let the record show that I think the UpgradeMux multiple inheritence is CRAP.
-		getUpgradeModuleData()->m_upgradeMuxData.muxDataProcessUpgradeRemoval(getObject());
+		getUpgradeModuleData()->m_upgradeMuxData.muxDataProcessUpgradeRemoval(this);
 	}
 
 	virtual Bool requiresAllActivationUpgrades() const
@@ -202,7 +204,7 @@ protected:
 
 	virtual void getUpgradeActivationMasks(UpgradeMaskType& activation, UpgradeMaskType& conflicting) const
 	{
-		getUpgradeModuleData()->m_upgradeMuxData.getUpgradeActivationMasks(activation, conflicting);
+		getUpgradeModuleData()->m_upgradeMuxData.getUpgradeActivationMasks(activation, conflicting, this);
 	}
 
 	virtual void performUpgradeFX()

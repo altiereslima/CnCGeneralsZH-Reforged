@@ -63,6 +63,7 @@ public:
 	Bool m_usePendingEvent;
 	Bool m_requiresCheckForSample;
 	Bool m_requestStop;		///< stopped while still waiting: play the sound once, without its loops
+	Bool m_nextLoop;			///< a later pass startNextLoop handed back, of a sound that already started
 
 	//
 	// The pool hands out raw memory, and allocateAudioRequest only ever set m_usePendingEvent.
@@ -75,7 +76,8 @@ public:
 			m_handleToInteractOn(0),
 			m_usePendingEvent(FALSE),
 			m_requiresCheckForSample(FALSE),
-			m_requestStop(FALSE)
+			m_requestStop(FALSE),
+			m_nextLoop(FALSE)
 	{ }
 
 	/** A play request owns the event it is carrying until something takes it - the destructor frees

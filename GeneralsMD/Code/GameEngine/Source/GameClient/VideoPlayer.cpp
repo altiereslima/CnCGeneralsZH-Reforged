@@ -184,6 +184,8 @@ void	VideoPlayer::init( void )
 	INI ini;
 	ini.load( AsciiString( "Data\\INI\\Default\\Video.ini" ), INI_LOAD_OVERWRITE, NULL );
 	ini.load( AsciiString( "Data\\INI\\Video.ini" ), INI_LOAD_OVERWRITE, NULL );
+	// the original Generals campaign movies, which Zero Hour's Video.ini left out
+	ini.load( AsciiString( "Data\\INI\\VideoReforged.ini" ), INI_LOAD_OVERWRITE, NULL );
 }
 
 //============================================================================

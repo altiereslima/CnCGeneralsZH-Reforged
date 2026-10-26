@@ -24,6 +24,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "GameClient/UIStyle.h"
+#include "Common/GlobalData.h"
 #include "GameClient/Display.h"
 #include "GameClient/DisplayString.h"
 #include "GameClient/GameFont.h"
@@ -143,12 +144,47 @@ void wordmark( DisplayString *words[ 2 ], Int right, Int y )
 	words[ 1 ]->draw( right - second, y, WORDMARK_BLUE, SHADOW );
 }
 
-UnicodeString capitals( const UnicodeString &words )
+/** towupper in the C locale leaves every letter past ASCII as it is ("ORDU SEç"), so Latin-1's,
+	* Latin Extended-A's and Cyrillic's case pairs are mapped here, and Turkish's two i's by the language. */
+static WideChar capital( WideChar letter, Bool turkish )
+{
+	const WideChar DOTTED_CAPITAL_I = 0x0130;
+	const WideChar DOTLESS_SMALL_I = 0x0131;
+	if( letter == u'i' && turkish )
+		return DOTTED_CAPITAL_I;
+	if( letter == DOTLESS_SMALL_I )
+		return u'I';
+	if( letter >= 0x00E0 && letter <= 0x00FE && letter != 0x00F7 )	// a with grave to thorn, not the division sign
+		return (WideChar)( letter - 0x20 );
+	if( letter >= 0x0430 && letter <= 0x044F )	// Russian's a to ya
+		return (WideChar)( letter - 0x20 );
+	if( letter >= 0x0450 && letter <= 0x045F )	// ie with grave to dzhe, Ukrainian's ie, i and yi among them
+		return (WideChar)( letter - 0x50 );
+	// pairs that start on an even code: A with macron to K with cedilla, eng to y with circumflex (g and s
+	// with breve and cedilla among them), and Cyrillic's omega to ha with descender (Ukrainian's ghe with upturn)
+	const Bool evenPair = ( letter >= 0x0100 && letter <= 0x0137 ) || ( letter >= 0x014A && letter <= 0x0177 )
+		|| ( letter >= 0x0460 && letter <= 0x0481 ) || ( letter >= 0x048A && letter <= 0x04BF );
+	if( evenPair && ( letter & 1 ) )
+		return (WideChar)( letter - 1 );
+	return (WideChar)WideCharToUpper( letter );
+}
+
+static UnicodeString capitalsOf( const UnicodeString &words, Bool turkish )
 {
 	UnicodeString result;
 	for( Int each = 0; each < words.getLength(); each++ )
-		result.concat( (WideChar)WideCharToUpper( words.getCharAt( each ) ) );
+		result.concat( capital( words.getCharAt( each ), turkish ) );
 	return result;
+}
+
+UnicodeString capitals( const UnicodeString &words )
+{
+	return capitalsOf( words, TheGlobalData->m_textLanguage == TEXT_LANGUAGE_TURKISH );
+}
+
+UnicodeString nameCapitals( const UnicodeString &name )
+{
+	return capitalsOf( name, FALSE );
 }
 
 /** Blue and purple house colours are too dark for words on a panel; they are lifted part of the way

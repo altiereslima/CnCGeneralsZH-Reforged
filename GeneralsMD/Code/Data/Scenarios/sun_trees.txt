@@ -1,0 +1,6 @@
+# Both object-model palms and batched foliage, on flat ground in Flash Effect.
+# The same actual leaves must cast in the map and remain coloured in the scene.
+30 spawn 0 TreePalm1 1 1600 1520
+30 spawn 0 TreePalm2short 1 1780 1520
+30 spawn 0 TreeDogwood1 1 1600 1680
+30 spawn 0 TreeFir01B 1 1780 1680

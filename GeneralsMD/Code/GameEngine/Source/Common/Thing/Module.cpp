@@ -248,24 +248,41 @@ void UpgradeMuxData::performUpgradeFX(Object* obj) const
 }
 
 //-------------------------------------------------------------------------------------------------
-void UpgradeMuxData::muxDataProcessUpgradeRemoval(Object* obj) const
+/** The upgrade a TriggeredBy, ConflictsWith or RemovesUpgrades line names, or NULL when there is no
+	* such upgrade.  EA threw INI_INVALID_DATA here, lazily, on the first object of the template, so a
+	* mod naming an upgrade it never defines killed the map load with nothing in the crash report
+	* (reports 1893-1899).  The name is said in the log and skipped instead, and looked up again the
+	* next time: a map.ini can define the upgrade for one match, so a miss is never kept in the shared
+	* module data, or a machine that played a match without that map would go on without the upgrade
+	* that a fresh machine has. */
+//-------------------------------------------------------------------------------------------------
+static const UpgradeTemplate *findMuxUpgrade( const AsciiString &name, const char *field, const Module *module, const Object *obj )
 {
-	if( !m_removalUpgradeNames.empty() )
+	const UpgradeTemplate *upgrade = TheUpgradeCenter->findUpgrade( name );
+	if( !upgrade && !name.isEmpty() && !name.isNone() )
 	{
-		std::vector<AsciiString>::const_iterator it;
-		for( it = m_removalUpgradeNames.begin();
-					it != m_removalUpgradeNames.end();
-					it++)
-		{
-			const UpgradeTemplate* theTemplate = TheUpgradeCenter->findUpgrade( *it );
-			if( !theTemplate && !it->isEmpty() && !it->isNone())
-			{
-				DEBUG_CRASH(("An upgrade module references %s, which is not an Upgrade", it->str()));
-				throw INI_INVALID_DATA;
-			}
+		// said once per object, module and name; the set only quiets the log and decides nothing
+		static std::set< std::string > said;
+		AsciiString key;
+		key.format( "%s %s %s %s", obj->getTemplate()->getName().str(),
+			KEYNAME( module->getModuleTagNameKey() ).str(), field, name.str() );
+		if( said.insert( key.str() ).second )
+			DEBUG_LOG(( "%s %s of %s: %s names %s, which is not an Upgrade; ignored\n",
+				KEYNAME( module->getModuleNameKey() ).str(), KEYNAME( module->getModuleTagNameKey() ).str(),
+				obj->getTemplate()->getName().str(), field, name.str() ));
+	}
+	return upgrade;
+}
 
-			obj->removeUpgrade(theTemplate);
-		}
+//-------------------------------------------------------------------------------------------------
+void UpgradeMuxData::muxDataProcessUpgradeRemoval(ObjectModule* module) const
+{
+	std::vector<AsciiString>::const_iterator it;
+	for( it = m_removalUpgradeNames.begin(); it != m_removalUpgradeNames.end(); ++it )
+	{
+		const UpgradeTemplate* theTemplate = findMuxUpgrade( *it, "RemovesUpgrades", module, module->getObject() );
+		if( theTemplate )
+			module->getObject()->removeUpgrade(theTemplate);
 	}
 }
 
@@ -286,40 +303,38 @@ Bool UpgradeMuxData::isTriggeredBy(const std::string &upgrade) const
 }
 
 //-------------------------------------------------------------------------------------------------
-void UpgradeMuxData::getUpgradeActivationMasks(UpgradeMaskType& activation, UpgradeMaskType& conflicting) const
+void UpgradeMuxData::getUpgradeActivationMasks(UpgradeMaskType& activation, UpgradeMaskType& conflicting, const ObjectModule* module) const
 {
 	// already computed.
 	if (!m_activationUpgradeNames.empty() || !m_conflictingUpgradeNames.empty())
 	{
 		m_activationMask.clear();
 		m_conflictingMask.clear();
-		
+
+		// An upgrade that does not exist adds nothing to either mask.  The masks are only cached once
+		// every name was found: a miss is looked up again on the next call (see findMuxUpgrade).
+		Bool allFound = TRUE;
 		std::vector<AsciiString>::const_iterator it;
 		for( it = m_activationUpgradeNames.begin();
 					it != m_activationUpgradeNames.end();
 					it++)
 		{
-			const UpgradeTemplate* theTemplate = TheUpgradeCenter->findUpgrade( *it );
-			if( !theTemplate && !it->isEmpty() && !it->isNone())
-			{
-				DEBUG_CRASH(("An upgrade module references %s, which is not an Upgrade", it->str()));
-				throw INI_INVALID_DATA;
-			}
-
-			m_activationMask.set( theTemplate->getUpgradeMask() );
+			const UpgradeTemplate* theTemplate = findMuxUpgrade( *it, "TriggeredBy", module, module->getObject() );
+			if( theTemplate )
+				m_activationMask.set( theTemplate->getUpgradeMask() );
+			else if( !it->isEmpty() && !it->isNone() )
+				allFound = FALSE;
 		}
 
 		for( it = m_conflictingUpgradeNames.begin();
 					it != m_conflictingUpgradeNames.end();
 					it++)
 		{
-			const UpgradeTemplate* theTemplate = TheUpgradeCenter->findUpgrade( *it );
-			if( !theTemplate && !it->isEmpty() && !it->isNone())
-			{
-				DEBUG_CRASH(("An upgrade module references %s, which is not an Upgrade", it->str()));
-				throw INI_INVALID_DATA;
-			}
-			m_conflictingMask.set( theTemplate->getUpgradeMask() );
+			const UpgradeTemplate* theTemplate = findMuxUpgrade( *it, "ConflictsWith", module, module->getObject() );
+			if( theTemplate )
+				m_conflictingMask.set( theTemplate->getUpgradeMask() );
+			else if( !it->isEmpty() && !it->isNone() )
+				allFound = FALSE;
 		}
 
 		// We set the trigger upgrade names with the activationUpgradeNames entries to be used later.
@@ -327,8 +342,11 @@ void UpgradeMuxData::getUpgradeActivationMasks(UpgradeMaskType& activation, Upgr
 		m_triggerUpgradeNames = m_activationUpgradeNames;
 
 		//Clear the names now that we've cached the values!
-		m_activationUpgradeNames.clear();
-		m_conflictingUpgradeNames.clear();
+		if( allFound )
+		{
+			m_activationUpgradeNames.clear();
+			m_conflictingUpgradeNames.clear();
+		}
 	}
 	activation = m_activationMask;
 	conflicting = m_conflictingMask;

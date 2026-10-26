@@ -43,6 +43,7 @@
 #include "Common/UserPreferences.h"
 #include "Common/version.h"
 #include "Common/GameLOD.h"
+#include "Common/FileSystem.h"
 #include "GameClient/AnimateWindowManager.h"
 #include "GameClient/ExtendedMessageBox.h"
 #include "GameClient/MessageBox.h"
@@ -100,6 +101,7 @@ enum
 	DROPDOWN_LOADREPLAY,
 	DROPDOWN_DIFFICULTY,
 	DROPDOWN_MISSION,
+	DROPDOWN_CAMPAIGN,
 
 	DROPDOWN_COUNT // keep last
 };
@@ -188,12 +190,21 @@ static GameWindow *dropDownWindows[DROPDOWN_COUNT];
 
 // The campaign mission panel (MapBorder5, Tools/mainmenu_layout.py): one button for each mission of
 // the campaign picked, every one open.  A campaign with more missions than buttons shows its first
-// MISSION_BUTTONS; the three shipped ones have five each.
-enum { MISSION_BUTTONS = 5 };
+// MISSION_BUTTONS; Zero Hour's have five each, the original Generals campaigns seven.
+enum { MISSION_BUTTONS = 7 };
 static NameKeyType buttonMissionID[MISSION_BUTTONS];
 static NameKeyType buttonMissionBackID = NAMEKEY_INVALID;
 static GameWindow *buttonMission[MISSION_BUTTONS];
+static GameWindow *buttonMissionBack = NULL;
 static AsciiString missionNames[MISSION_BUTTONS];
+static GameWindow *missionFrame[2];		// MapBorder5, EarthMap5
+
+// The campaign pick panel (MapBorder6): Zero Hour's campaign or the original Generals one, shown
+// between the side and the mission panel only when that side's Generals campaign is installed.
+static NameKeyType buttonCampaignZHID = NAMEKEY_INVALID;
+static NameKeyType buttonCampaignGeneralsID = NAMEKEY_INVALID;
+static NameKeyType buttonCampaignBackID = NAMEKEY_INVALID;
+static Bool campaignPickShown = FALSE;
 
 static Bool buttonPushed = FALSE;
 static Bool isShuttingDown = FALSE;
@@ -265,28 +276,97 @@ static void showSelectiveButtons( Int show )
 	buttonChinaLoadGame->winHide(!(show == SHOW_CHINA ));
 }
 
-// Label the mission panel's buttons for the campaign just picked and flash the panel in.  A button
-// past the campaign's last mission is greyed and blank rather than hidden, since the transition
-// that flashes the panel in would show it again.
+// Label the mission panel's buttons for the campaign just picked and flash the panel in.  Back moves
+// up under the campaign's last mission and the frame shrinks with it.  A button past the last
+// mission is greyed, blank and moved off the screen sideways rather than hidden, since the
+// transition that flashes the panel in would show it again; the transitions read every position as
+// they start, so all of this happens before the group is set.  Everything is worked out from where
+// the windows are now, because MainMenuInit runs again on this same layout when a screen pushed
+// over the menu pops: no mission button ever moves up or down, and Back's x is theirs.
 static void showMissionMenu( const char *group )
 {
+	// a mod's Campaign.ini can leave a side's campaign out (End of Days has only the challenge ones);
+	// setCampaign found none, and that side's panel comes up with Back alone
 	Campaign *campaign = TheCampaignManager->getCurrentCampaign();
-	Mission *mission = campaign->getNextMission( NULL );
+	Mission *mission = campaign ? campaign->getNextMission( NULL ) : NULL;
+	Int backX, backY;
+	buttonMissionBack->winGetPosition( &backX, &backY );
+	Int x, y[MISSION_BUTTONS + 1];
+	Int count = 0;
 	for( Int i = 0; i < MISSION_BUTTONS; ++i )
 	{
+		buttonMission[i]->winGetPosition( &x, &y[i] );
 		UnicodeString label;
 		if( mission )
 		{
 			label.format( TheGameText->fetch( "GUI:CampaignMission" ), i + 1 );
 			missionNames[i] = mission->m_name;
 			mission = campaign->getNextMission( mission );
+			++count;
 		}
 		else
 			missionNames[i].clear();
+		buttonMission[i]->winSetPosition( missionNames[i].isEmpty() ? TheDisplay->getWidth() * 2 : backX, y[i] );
 		GadgetButtonSetText( buttonMission[i], label );
 		buttonMission[i]->winEnable( !missionNames[i].isEmpty() );
 	}
+	// Back's slot under the last button is one step below it, the step the layout spaced them by
+	y[MISSION_BUTTONS] = 2 * y[MISSION_BUTTONS - 1] - y[MISSION_BUTTONS - 2];
+	buttonMissionBack->winSetPosition( backX, y[count] );
+	for( Int f = 0; f < 2; ++f )
+	{
+		Int w, h;
+		missionFrame[f]->winGetSize( &w, &h );
+		missionFrame[f]->winSetSize( w, h + y[count] - backY );
+	}
 	TheTransitionHandler->setGroup( group );
+}
+
+// The side's original Generals campaign is offered when Campaign.ini names one and its first
+// mission's map is installed.  Leaves the campaign manager on it, or on none, so the side's own
+// campaign is set after this.
+static Bool generalsCampaignInstalled( const char *campaign )
+{
+	TheCampaignManager->setCampaign( campaign );
+	Mission *first = TheCampaignManager->getCurrentMission();
+	return first && TheFileSystem->doesFileExist( first->m_mapName.str() );
+}
+
+// A side button's next panel: the pick panel when the side has both campaigns, else the mission
+// panel for Zero Hour's as before.
+static void showCampaignOrMissionMenu( const char *pickGroup, const char *missionGroup )
+{
+	if( campaignPickShown )
+		TheTransitionHandler->setGroup( pickGroup );
+	else
+		showMissionMenu( missionGroup );
+}
+
+// The pick panel's Back: the side's way back to the single player menu, as the mission panel's.
+static void campaignReverseSide( void )
+{
+	switch (showSide) {
+	case SHOW_USA:
+		TheTransitionHandler->reverse("MainMenuCampaignMenuUSBack");
+		TheTransitionHandler->setGroup("MainMenuSinglePlayerUSAMenuFromDiff");
+		break;
+	case SHOW_GLA:
+		TheTransitionHandler->reverse("MainMenuCampaignMenuGLABack");
+		TheTransitionHandler->setGroup("MainMenuSinglePlayerGLAMenuFromDiff");
+		break;
+	case SHOW_CHINA:
+		TheTransitionHandler->reverse("MainMenuCampaignMenuChinaBack");
+		TheTransitionHandler->setGroup("MainMenuSinglePlayerChinaMenuFromDiff");
+		break;
+	}
+}
+
+static Int missionButtonIndex( Int controlID )
+{
+	for( Int m = 0; m < MISSION_BUTTONS; ++m )
+		if( controlID == buttonMissionID[m] )
+			return m;
+	return -1;
 }
 
 // The mission panel's Back: what EA's difficulty Back did, from the mission panel.
@@ -582,6 +662,9 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 		buttonMissionID[m] = TheNameKeyGenerator->nameToKey( name );
 	}
 	buttonMissionBackID = TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:ButtonMissionBack") );
+	buttonCampaignZHID = TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:ButtonCampaignZH") );
+	buttonCampaignGeneralsID = TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:ButtonCampaignGenerals") );
+	buttonCampaignBackID = TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:ButtonCampaignBack") );
 
 	// get pointers to the window buttons
 	parentMainMenu = TheWindowManager->winGetWindowFromId( NULL, mainMenuID );
@@ -606,6 +689,9 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 	buttonDiffBack = TheWindowManager->winGetWindowFromId( parentMainMenu, buttonDiffBackID );
 	for( Int m = 0; m < MISSION_BUTTONS; ++m )
 		buttonMission[m] = TheWindowManager->winGetWindowFromId( parentMainMenu, buttonMissionID[m] );
+	buttonMissionBack = TheWindowManager->winGetWindowFromId( parentMainMenu, buttonMissionBackID );
+	missionFrame[0] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:MapBorder5") ) );
+	missionFrame[1] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:EarthMap5") ) );
 
 
 //	GameWindow *labelVersion = TheWindowManager->winGetWindowFromId( parentMainMenu, versionID );
@@ -628,7 +714,8 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 	dropDownWindows[DROPDOWN_MAIN] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:MapBorder2") ) );
 	dropDownWindows[DROPDOWN_LOADREPLAY] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:MapBorder3") ) );
 	dropDownWindows[DROPDOWN_DIFFICULTY] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:MapBorder4") ) );
-	dropDownWindows[DROPDOWN_MISSION] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:MapBorder5") ) );
+	dropDownWindows[DROPDOWN_MISSION] = missionFrame[0];
+	dropDownWindows[DROPDOWN_CAMPAIGN] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( AsciiString("MainMenu.wnd:MapBorder6") ) );
 	// i is used after the loop; VC6 for-scope let it escape.
 	Int i;
 	for(i = 1; i < DROPDOWN_COUNT; ++i)
@@ -1657,6 +1744,7 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 			{
 				if(campaignSelected || dontAllowTransitions)
 					break;
+				campaignPickShown = generalsCampaignInstalled( "GEN_USA" );
 				TheCampaignManager->setCampaign( "USA" );
 #ifdef _CAMPEA_DEMO
 				TheCampaignManager->setCampaign( "MD_USA_1_DEMO" );
@@ -1667,7 +1755,7 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 				if(win)
 					win->winHide(TRUE);
 				TheTransitionHandler->reverse("MainMenuSinglePlayerMenuBackUS");
-				showMissionMenu("MainMenuMissionMenuUS");
+				showCampaignOrMissionMenu("MainMenuCampaignMenuUS", "MainMenuMissionMenuUS");
 				campaignSelected = TRUE;
 				logoIsShown = FALSE;
 				showLogo = FALSE;
@@ -1685,6 +1773,7 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 			{
 				if(campaignSelected || dontAllowTransitions)
 					break;
+				campaignPickShown = generalsCampaignInstalled( "GEN_GLA" );
 				TheCampaignManager->setCampaign( "GLA" );
 #ifdef _CAMPEA_DEMO
 				TheCampaignManager->setCampaign( "MD_USA_2_DEMO" );
@@ -1695,7 +1784,7 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 				if(win)
 					win->winHide(TRUE);				
 				TheTransitionHandler->reverse("MainMenuSinglePlayerMenuBackGLA");
-				showMissionMenu("MainMenuMissionMenuGLA");
+				showCampaignOrMissionMenu("MainMenuCampaignMenuGLA", "MainMenuMissionMenuGLA");
 				campaignSelected = TRUE;
 				logoIsShown = FALSE;
 				showLogo = FALSE;
@@ -1713,6 +1802,7 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 			{
 				if(campaignSelected || dontAllowTransitions)
 					break;
+				campaignPickShown = generalsCampaignInstalled( "GEN_CHINA" );
 				TheCampaignManager->setCampaign( "China" );
 #ifdef _CAMPEA_DEMO
 				TheCampaignManager->setCampaign( "MD_GLA_3_DEMO" );
@@ -1723,7 +1813,7 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 				if(win)
 					win->winHide(TRUE);				
 				TheTransitionHandler->reverse("MainMenuSinglePlayerMenuBackChina");
-				showMissionMenu("MainMenuMissionMenuChina");
+				showCampaignOrMissionMenu("MainMenuCampaignMenuChina", "MainMenuMissionMenuChina");
 				campaignSelected = TRUE;
 				logoIsShown = FALSE;
 				showLogo = FALSE;
@@ -1776,23 +1866,44 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 				diffReverseSide();
 				campaignSelected = FALSE;
 			}
-			else if(controlID == buttonMissionBackID)
+			else if(controlID == buttonMissionBackID && campaignPickShown)
+			{
+				// the mission panel came from the pick panel, so Back goes there
+				if(dontAllowTransitions)
+					break;
+				dontAllowTransitions = TRUE;
+				TheTransitionHandler->reverse("MainMenuMissionPanelOut");
+				TheTransitionHandler->setGroup("MainMenuCampaignPanel");
+			}
+			else if(controlID == buttonMissionBackID || controlID == buttonCampaignBackID)
 			{
 				if(dontAllowTransitions)
 					break;
 				dontAllowTransitions = TRUE;
 				TheCampaignManager->setCampaign( AsciiString::TheEmptyString );
-				missionReverseSide();
+				if(controlID == buttonCampaignBackID)
+					campaignReverseSide();
+				else
+					missionReverseSide();
 				campaignSelected = FALSE;
 			}
-			else if(controlID == buttonMissionID[0] || controlID == buttonMissionID[1] || controlID == buttonMissionID[2]
-				|| controlID == buttonMissionID[3] || controlID == buttonMissionID[4])
+			else if(controlID == buttonCampaignZHID || controlID == buttonCampaignGeneralsID)
 			{
 				if(dontAllowTransitions)
 					break;
-				Int m = 0;
-				while(controlID != buttonMissionID[m])
-					++m;
+				static const char *const zeroHour[] = { "USA", "GLA", "China" };
+				static const char *const generals[] = { "GEN_USA", "GEN_GLA", "GEN_CHINA" };
+				const Int side = showSide - SHOW_USA;
+				TheCampaignManager->setCampaign( controlID == buttonCampaignZHID ? zeroHour[side] : generals[side] );
+				dontAllowTransitions = TRUE;
+				TheTransitionHandler->reverse("MainMenuCampaignPanelOut");
+				showMissionMenu("MainMenuMissionPanel");
+			}
+			else if(missionButtonIndex(controlID) >= 0)
+			{
+				if(dontAllowTransitions)
+					break;
+				Int m = missionButtonIndex(controlID);
 				// the campaign starts here and carries on from it as it would have; every campaign
 				// mission starts at rank 0 whatever came before (CampaignManager::getRankPoints)
 				TheCampaignManager->setCampaignAndMission( TheCampaignManager->getCurrentCampaign()->m_name, missionNames[m] );

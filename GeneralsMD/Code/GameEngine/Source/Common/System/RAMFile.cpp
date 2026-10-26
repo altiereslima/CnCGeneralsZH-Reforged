@@ -88,7 +88,7 @@
 
 
 //----------------------------------------------------------------------------
-//         Public Data                                                      
+//         Public Data
 //----------------------------------------------------------------------------
 
 
@@ -211,7 +211,7 @@ Bool RAMFile::open( File *file )
 //============================================================================
 // RAMFile::openFromArchive
 //============================================================================
-Bool RAMFile::openFromArchive(File *archiveFile, const AsciiString& filename, Int offset, Int size) 
+Bool RAMFile::openFromArchive(File *archiveFile, std::mutex &archiveLock, const AsciiString& filename, Int offset, Int size)
 {
 	//USE_PERF_TIMER(RAMFile)
 	if (archiveFile == NULL) {
@@ -229,11 +229,14 @@ Bool RAMFile::openFromArchive(File *archiveFile, const AsciiString& filename, In
 	m_data = MSGNEW("RAMFILE") Char [size];	// pool[]ify
 	m_size = size;
 
-	if (archiveFile->seek(offset, File::START) != offset) {
-		return FALSE;
-	}
-	if (archiveFile->read(m_data, size) != size) {
-		return FALSE;
+	{
+		std::lock_guard<std::mutex> lock( archiveLock );
+		if (archiveFile->seek(offset, File::START) != offset) {
+			return FALSE;
+		}
+		if (archiveFile->read(m_data, size) != size) {
+			return FALSE;
+		}
 	}
 	m_nameStr = filename;
 

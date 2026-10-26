@@ -305,6 +305,15 @@ const Int MAX_ENABLED_MODULES								= 16;
 /*static*/ Int							Drawable::s_modelLockCount = 0;
 #endif
 
+/// Each ladder grade's insignia, Rank<Side>_<n> in ReforgedRanks<Side>.ini; NULL for a grade drawn bare
+/// (America's E-1)
+static const Image* s_rankInsignia[VETERANCY_SIDE_COUNT][RANK_GRADES_MAX + 1];
+
+/// An insignia drawn beside a health bar holds its DisplayHeight (12 unless its cell says otherwise)
+/// and lets its width follow, up to half again that height: wider marks made the bar look heavy
+static const Int RANK_INSIGNIA_DEFAULT_HEIGHT = 12;
+static const Real RANK_INSIGNIA_MAX_ASPECT = 1.5f;
+
 // ------------------------------------------------------------------------------------------------
 /*static*/ void Drawable::initStaticImages()
 {
@@ -315,6 +324,15 @@ const Int MAX_ENABLED_MODULES								= 16;
  	s_veterancyImage[1] = TheMappedImageCollection->findImageByName("SCVeter1");
 	s_veterancyImage[2] = TheMappedImageCollection->findImageByName("SCVeter2");
 	s_veterancyImage[3] = TheMappedImageCollection->findImageByName("SCVeter3");
+	for( Int side = 0; side < VETERANCY_SIDE_COUNT; ++side )
+	{
+		for( Int insignia = 0; insignia <= RANK_GRADES_MAX; ++insignia )
+		{
+			AsciiString name;
+			name.format( "Rank%s_%d", TheVeterancySideNames[ side ], insignia );
+			s_rankInsignia[ side ][ insignia ] = TheMappedImageCollection->findImageByName( name );
+		}
+	}
 
 	s_fullAmmo	= TheMappedImageCollection->findImageByName("SCPAmmoFull");
 	s_emptyAmmo	= TheMappedImageCollection->findImageByName("SCPAmmoEmpty");
@@ -1115,6 +1133,7 @@ Int Drawable::getCurrentClientBonePositions(const char* boneNamePrefix, Int star
 	Int count = 0;
 	// the bones as drawn; asked after the tick (the uplink cannon's raised antenna, FX at bones), where
 	// what the tick deferred on this drawable is applied first
+	LogicThread::TickReachesLiveModels liveModels;	// a tick beside the render waits out the shadow pass's poses
 	for (DrawModule** dm = const_cast<Drawable*>(this)->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		if (maxBones <= 0)
@@ -1146,6 +1165,7 @@ Int Drawable::getCurrentClientBonePositions(const char* boneNamePrefix, Int star
 Bool Drawable::getCurrentWorldspaceClientBonePositions(const char* boneName, Matrix3D& transform) const
 {
 	// a laser's client update and the attached models ask; the bones have to be where the tick left the drawable
+	LogicThread::TickReachesLiveModels liveModels;
 	for (DrawModule** dm = const_cast<Drawable*>(this)->getDrawModulesFlushed(); *dm; ++dm)
 	{
 		if (skipsForLogic(*dm))
@@ -3596,7 +3616,12 @@ void Drawable::drawEmoticon( const IRegion2D *healthBarRegion )
 // ------------------------------------------------------------------------------------------------
 void Drawable::drawAmmo( const IRegion2D *healthBarRegion )
 {
-	const Object *obj = getObject();			
+	// the pips are left-justified on the health bar, as drawContained's are.  EA only drew them for a
+	// selected or moused-over unit, which has a bar; an aircraft that shows them always may have none.
+	if (!healthBarRegion)
+		return;
+
+	const Object *obj = getObject();
 
 	//
 	// Our own aircraft show their load all the time, not just while selected or under the cursor:
@@ -3684,6 +3709,15 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 	//
 	if (obj->getControllingPlayer() != ThePlayerList->getLocalPlayer() &&
 			!(obj->isKindOf( KINDOF_STRUCTURE ) && container->isGarrisonable()))
+		return;
+
+	//
+	// a unit nobody can select carries a load nobody can unload: the plane a Supply Drop Zone or a
+	// paradrop sends over is a 100 slot transport, and it drew a row of 100 empty boxes across the
+	// screen whenever the data left it out of IGNORED_IN_GUI (drawIconUI's bail). Buildings are
+	// exempt, since a civilian house holds a garrison without being selectable.
+	//
+	if (!obj->isKindOf( KINDOF_STRUCTURE ) && !obj->isKindOf( KINDOF_SELECTABLE ))
 		return;
 
 	Int numTotal;
@@ -4633,8 +4667,12 @@ void Drawable::drawVeterancy( const IRegion2D *healthBarRegion )
 		return;
 	}
 
+	// a unit on a rank ladder wears its grade's insignia, a grade with no insignia nothing; anyone else
+	// EA's chevron for the level
+	const RankLadder *ladder = TheGlobalData->getRankLadder( obj->getTemplate() );
+	const Int insignia = ladder ? ladder->insigniaIndex( obj->getRankGrade(), obj->isKindOf( KINDOF_HERO ) ) : 0;
 	VeterancyLevel level = obj->getVeterancyLevel();
-	const Image* image = s_veterancyImage[level];
+	const Image* image = ladder ? getRankInsignia( obj ) : s_veterancyImage[level];
 	if (!image)
 		return;
 
@@ -4666,10 +4704,83 @@ void Drawable::drawVeterancy( const IRegion2D *healthBarRegion )
 
 	screenCenter.x += healthBoxWidth * scale * 0.5f;
 
+	// the insignia in line with the bar, just past its right end and centred on it: the ammo and
+	// passenger pips start from the left end, and hanging under the bar it read as part of the unit
+	if( ladder )
+	{
+		Int left = screenCenter.x + 2;
+		Int middle = screenCenter.y;
+		if( healthBarRegion )
+		{
+			left = healthBarRegion->hi.x + 2;
+			middle = ( healthBarRegion->lo.y + healthBarRegion->hi.y ) / 2;
+		}
+		Int width, height;
+		rankInsigniaSize( image, 1.0f, &width, &height );
+		drawRankInsignia( obj->getTemplate(), insignia, left, middle - height / 2, FALSE, 1.0f, GameMakeColor( 255, 255, 255, 255 ) );
+		return;
+	}
+
 	// draw the image
 	TheDisplay->drawImage(image, screenCenter.x + 1, screenCenter.y + 1, screenCenter.x + 1 + vetBoxWidth, screenCenter.y + 1 + vetBoxHeight);
 
 }  // end drawVeterancy
+
+// ------------------------------------------------------------------------------------------------
+/*static*/ const Image *Drawable::getRankInsignia( const ThingTemplate *thing, Int insignia )
+{
+	const VeterancySide side = GlobalData::veterancySideOf( thing );
+	if( side == VETERANCY_SIDE_NONE || insignia < 0 || insignia > RANK_GRADES_MAX )
+		return NULL;
+	return s_rankInsignia[ side ][ insignia ];
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The insignia an object wears now, NULL for none: every unit starts unranked and bare, so grade 0
+	* draws nothing on any side, and neither does anything that cannot climb (a structure, or an object
+	* without a trainable tracker). The bar, the portrait and the promotion float all ask here. */
+// ------------------------------------------------------------------------------------------------
+/*static*/ const Image *Drawable::getRankInsignia( const Object *obj )
+{
+	const RankLadder *ladder = TheGlobalData->getRankLadder( obj->getTemplate() );
+	const ExperienceTracker *tracker = obj->getExperienceTracker();
+	if( ladder == NULL || tracker == NULL || !tracker->isTrainable() || obj->isKindOf( KINDOF_STRUCTURE ) || obj->getRankGrade() <= 0 )
+		return NULL;
+	return getRankInsignia( obj->getTemplate(), ladder->insigniaIndex( obj->getRankGrade(), obj->isKindOf( KINDOF_HERO ) ) );
+}
+
+// ------------------------------------------------------------------------------------------------
+/*static*/ void Drawable::rankInsigniaSize( const Image *image, Real scale, Int *width, Int *height )
+{
+	const Real high = ( image->getDisplayHeight() > 0 ? image->getDisplayHeight() : RANK_INSIGNIA_DEFAULT_HEIGHT ) * scale;
+	Real wide = high * image->getImageWidth() / image->getImageHeight();
+	Real tall = high;
+	if( wide > high * RANK_INSIGNIA_MAX_ASPECT )
+	{
+		tall = high * high * RANK_INSIGNIA_MAX_ASPECT / wide;
+		wide = high * RANK_INSIGNIA_MAX_ASPECT;
+	}
+	*width = REAL_TO_INT( wide );
+	*height = REAL_TO_INT( tall );
+}
+
+// ------------------------------------------------------------------------------------------------
+/** One grade's insignia, cropped to its ink in the atlas: drawn beside the health bar and floating up
+	* over a unit the moment it gains the grade. */
+// ------------------------------------------------------------------------------------------------
+/*static*/ Bool Drawable::drawRankInsignia( const ThingTemplate *thing, Int insignia, Int x, Int top, Bool centred, Real scale, Color color )
+{
+	const Image *image = getRankInsignia( thing, insignia );
+	if( image == NULL )
+		return FALSE;
+
+	Int width, height;
+	rankInsigniaSize( image, scale, &width, &height );
+	if( centred )
+		x -= width / 2;
+	TheDisplay->drawImage( image, x, top, x + width, top + height, color );
+	return TRUE;
+}
 
 // ------------------------------------------------------------------------------------------------
 /** The capture clock, drawn under the health bar of the building being taken.
@@ -5443,10 +5554,16 @@ void Drawable::flushPendingTransform( Bool onDemand )
 //-------------------------------------------------------------------------------------------------
 /** The draw modules with whatever the tick has deferred applied now.  For the callers inside a tick
 	that act on the render object as it stands (animation timing, weapon fire FX, live bones, ghost
-	snapshots): the census counts these on their own channel, the list phase 3 has to resolve. */
+	snapshots): the census counts these on their own channel, the list phase 3 has to resolve.
+	Inside the overlap window the render asks too (a rider's model on its container's bone, an
+	attach-to-bone model, both from doDrawModule), and the tick beside it may be adding steps to this
+	same drawable: flushing there swapped m_pendingSteps out from under the logic thread's push_back,
+	and flushAfterTick then ran a step whose work had been freed.  As getDrawModules does, the window
+	reads the render objects as the sync point left them; flushAfterTick applies the rest. */
 DrawModule** Drawable::getDrawModulesFlushed()
 {
-	doPendingClientWork( TRUE );
+	if (!LogicThread::isInsideWindow())
+		doPendingClientWork( TRUE );
 	return getDrawModulesNonDirty();
 }
 

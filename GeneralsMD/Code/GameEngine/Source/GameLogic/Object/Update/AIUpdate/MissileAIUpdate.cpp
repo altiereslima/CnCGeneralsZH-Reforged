@@ -333,7 +333,7 @@ void MissileAIUpdate::projectileFireAtObjectOrPosition( const Object *victim, co
 void MissileAIUpdate::projectileLeadVictim( const Object *victim )
 {
 	const PhysicsBehavior *victimPhysics = victim->getPhysics();
-	if (m_isTrackingTarget || victimPhysics == NULL || victim->isAboveTerrain())
+	if (m_isTrackingTarget || victimPhysics == NULL || victim->isAboveTerrain() || getCurLocomotor() == NULL)
 		return;
 
 	const Coord3D *from = getObject()->getPosition();
@@ -688,7 +688,8 @@ void MissileAIUpdate::doKillState(void)
 	{
 		Coord3D aim;
 		Weapon::pointFromBodyOffset(getGoalObject(), m_aimOffset, aim);
-		Real closeEnough = curLoco->getMaxSpeedForCondition(BODY_PRISTINE);
+		// a missile with no locomotor (an immobile hazard a mod fires as one) gets the 1.0 the idle check below uses
+		Real closeEnough = curLoco ? curLoco->getMaxSpeedForCondition(BODY_PRISTINE) : 1.0f;
 		const Coord3D* pos = obj->getPosition();
 		// over the point and on the body: the height the locomotor holds over a goal is its own
 		if (sqr(aim.x - pos->x) + sqr(aim.y - pos->y) < sqr(closeEnough)
@@ -756,6 +757,11 @@ void MissileAIUpdate::updateChaseOffset()
 	const Real SWAY_FADE_FAR = 150.0f;
 	const Real SWAY_FADE_NEAR = 60.0f;
 
+	// a mod missile can come without a locomotor and fly on its launch force alone; nothing to steer
+	Locomotor* curLoco = getCurLocomotor();
+	if (curLoco == NULL)
+		return;
+
 	Coord3D offset;
 	offset.zero();
 	Object* victim = m_isTrackingTarget ? getGoalObject() : NULL;
@@ -788,7 +794,7 @@ void MissileAIUpdate::updateChaseOffset()
 		}
 	}
 
-	getCurLocomotor()->setChaseOffset(offset);
+	curLoco->setChaseOffset(offset);
 }
 
 //-------------------------------------------------------------------------------------------------

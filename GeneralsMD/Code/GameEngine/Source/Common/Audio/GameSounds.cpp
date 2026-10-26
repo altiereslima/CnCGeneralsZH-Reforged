@@ -227,7 +227,7 @@ Bool SoundManager::canPlayNow( AudioEventRTS *event )
 		if (pos) 
 		{
 			distance.sub(pos);
-			if (distance.length() >= event->getAudioEventInfo()->m_maxDistance) 
+			if (distance.length() >= event->getAudioEventInfo()->m_maxDistance * TheAudio->getRangeScale())
 			{
 #ifdef INTENSIVE_AUDIO_DEBUG
 				DEBUG_LOG(("- culled due to distance (%.2f).\n", distance.length()));

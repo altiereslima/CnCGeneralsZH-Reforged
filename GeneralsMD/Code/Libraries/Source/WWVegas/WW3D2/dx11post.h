@@ -122,6 +122,55 @@ float DX11Post_Additive_Gain();
 // does not start with bloom keeps its scene in eight bits and is never graded.
 void DX11Post_Set_Grade(float amount);
 
+// The Warm Light option's ground haze (MapLight): a pale layer lying in the low ground,
+// laid over the opaque world before the particles out of the frame's depth taken back to world
+// height.  Top is the world height the haze thins out to nothing at, thickness how far below that
+// it reaches full strength, strength the most of the haze colour a pixel takes (zero, the default,
+// is no pass at all) and reach the eye distance at which it stops thickening.  Nothing below water,
+// the world height of the water surface the haze lies over, takes any.  Set every frame.
+void DX11Post_Set_Haze(const float colour[3], float top, float thickness, float strength, float reach,
+	float water);
+
+// The haze's movement.  Field_rect is the world rectangle the disturbance field covers, as its
+// origin and one over its size on each axis; drift is how far the wind has carried the haze's
+// patches so far, in world units; noise_scale is one over a patch's size; stir is how much of the
+// haze a full field takes away; toward_sun points at the sun and warmth is how much warmer the
+// haze looks toward it.  Set every frame with the haze.
+void DX11Post_Set_Haze_Motion(const float field_rect[4], float drift_x, float drift_y,
+	float noise_scale, float stir, const float toward_sun[3], float warmth);
+
+// The disturbance field: what passed through the haze lately, size by size bytes, row by row from
+// the field's origin, 255 where it is most stirred.  Uploaded at the next haze pass.
+const unsigned DX11_POST_HAZE_FIELD_SIZE = 256;
+#define DX11_POST_HAZE_FIELD_SIZE_TEXT "256"
+void DX11Post_Set_Haze_Field(const unsigned char * texels);
+
+// The view of the shroud texture the terrain draws its fog with (Direct3D11_Set_Haze_Shroud finds
+// it), and the terrain's own world to texture mapping (rect: world origin x, y, then one over the
+// world size of the texture x, y).  The haze reads its green, 1 in plain sight, lower in the fog,
+// 0 under the shroud, and fades with it, so it lies over exactly the fog the ground shows.  Set
+// every frame; null reads everything as in sight.  The view is borrowed, not held.
+void DX11Post_Set_Haze_Shroud(ID3D11ShaderResourceView * view, const float rect[4]);
+
+// The wakes aircraft leave in the haze, as segments of their recent paths.  A segment is eight
+// numbers: its far end x, y and its near end x, y (the end toward the aircraft), then how far
+// behind the aircraft along the path its near end lies, the tangent of the wake's half-angle, the
+// wake's strength (0 to 1) and one over the path length the wake lasts.  Behind the aircraft the
+// haze is pushed apart in a wedge whose edges stand off the path by distance behind times that
+// tangent: along each edge a vortex arm_width world units across stirs and rolls the haze, and
+// the inside clears, easing open over open_soft.  A segment with a negative tangent is a ring
+// instead: both ends the centre, its first number the radius and its last how far through its
+// life it is (0 to 1).  seconds is the picture's clock, which turns the vortices.  Set every
+// frame; a count past the limit keeps the first ones.
+const unsigned DX11_POST_HAZE_WAKE_LIMIT = 64;
+#define DX11_POST_HAZE_WAKE_LIMIT_TEXT "64"
+// Where the segments' second halves start in the haze program's constants: c24 plus the limit,
+// and the clock after them.
+#define DX11_POST_HAZE_WAKE_SHAPE_REGISTER_TEXT "c88"
+#define DX11_POST_HAZE_CLOCK_REGISTER_TEXT "c152"
+void DX11Post_Set_Haze_Wakes(const float (*segments)[8], unsigned count, float arm_width, float open_soft,
+	float seconds);
+
 // A blast warping the picture around it: the frame drawn toward a point and then pushed out by a
 // ring that travels away from it.  Not an effect in the chain and not a switch: whatever chain is
 // set, one more pass goes on its end for every frame that has a warp in it, and a frame with none
@@ -197,6 +246,21 @@ public:
 	// depth and viewport again afterwards.  False when it drew nothing.
 	bool Occlude_Scene(ID3D11ShaderResourceView * depth);
 
+	// The ground haze (DX11Post_Set_Haze) blended into the scene target as it stands, at the same
+	// moment as Occlude_Scene and under the same terms, once a frame.  World_from_clip takes the
+	// depth back to the world.  False when it drew nothing; the caller rebinds as for the other.
+	bool Haze_Scene(ID3D11ShaderResourceView * depth, const float world_from_clip[16]);
+
+	// The haze's program comes from the backend's cache of compiled programs (dx11shaders.cache), so
+	// only the first run that meets it compiles it.  Wants_Haze_Program is true while the haze is on
+	// and no program is loaded or refused; Load_Haze_Program takes the bytecode for the source
+	// Haze_Program_Source gives, or null when the compiler refused it, which leaves the haze off.
+	bool Wants_Haze_Program() const;
+	const char * Haze_Program_Source() const;
+	void Load_Haze_Program(const void * bytecode, SIZE_T size);
+	// The same program compiled here, past any cache, for a caller without the backend (the tests).
+	void Compile_Haze_Program();
+
 	// Call once at the very top of a frame, before any scene of it (a mirror's included) begins.
 	// Arms Occlude_Scene again.
 	void Open_Frame();
@@ -238,6 +302,8 @@ private:
 		bool Ungraded;
 		// The pass's colour multiplies what the destination holds instead of replacing it.
 		bool Multiply;
+		// The pass's colour goes over what the destination holds by its alpha.
+		bool Blend;
 	};
 
 	bool Create_Shaders();
@@ -261,9 +327,11 @@ private:
 	ID3D11PixelShader * BloomCompositeShader;
 	ID3D11PixelShader * WarpShader;
 	ID3D11PixelShader * SceneOcclusionShader;
+	ID3D11PixelShader * HazeShader;
 	ID3D11SamplerState * Sampler;
 	ID3D11BlendState * BlendState;
 	ID3D11BlendState * MultiplyBlendState;
+	ID3D11BlendState * AlphaBlendState;
 	ID3D11DepthStencilState * DepthState;
 	ID3D11RasterizerState * RasterizerState;
 	ID3D11Buffer * ConstantBuffer;
@@ -292,6 +360,16 @@ private:
 	bool Resolved;
 	// Occlude_Scene ran this frame, so Finish leaves the occlusion pass out.
 	bool Occluded;
+	// Haze_Scene ran this frame, and the matrix it handed the pass.
+	bool Hazed;
+	float HazeWorldFromClip[16];
+	// The haze program, compiled on first use, failed to compile; not tried again.
+	bool HazeRefused;
+	// The haze's disturbance field on the device, made at its first upload.
+	ID3D11Texture2D * HazeFieldTexture;
+	ID3D11ShaderResourceView * HazeFieldView;
+	// The terrain's shroud texture under the haze, borrowed from its D3D9 texture each pass.
+	ID3D11ShaderResourceView * HazeShroudView;
 	char Diagnostic[192];
 };
 

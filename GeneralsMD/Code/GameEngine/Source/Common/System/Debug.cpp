@@ -611,6 +611,11 @@ void DebugInit(int flags)
 #if !defined(_WIN32)
 		// The crash handler writes its report into the log too, and may only use the descriptor.
 		setCrashLogDescriptor(theLogFile != NULL ? fileno(theLogFile) : -1);
+#else
+		// The exception dump's first record goes straight into the file, past the queue (StackDump.cpp).
+		// _get_osfhandle fails with -1 (INVALID_HANDLE_VALUE), not NULL; StackDump takes NULL for none.
+		const intptr_t logHandle = theLogFile != NULL ? _get_osfhandle(fileno(theLogFile)) : -1;
+		SetCrashRecordHandle(logHandle != -1 ? (void *)logHandle : NULL);
 #endif
 		if (theLogFile != NULL)
 		{
@@ -764,6 +769,8 @@ void DebugShutdown()
 		stopLogWriter();
 #if !defined(_WIN32)
 		setCrashLogDescriptor(-1);
+#else
+		SetCrashRecordHandle(NULL);
 #endif
 		fclose(theLogFile);
 	}

@@ -35,14 +35,40 @@
 #include "engineshader.h"
 #include "ffshader.h"
 #include "ffvertex.h"
+#include "Platform/WaterFftSampling.h"
+#include "Platform/WaterFoamHistory.h"
 
 #include <SDL3/SDL.h>
 
 #include <math.h>
+#include <cmath>
 #include <set>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+void PosixDevice9::Shore_Begin(bool enabled)
+{
+	Shore_End();
+	ShoreActive=enabled;
+}
+void PosixDevice9::Shore_End()
+{
+	ShoreActive=ShoreHasPatch=ShoreHasTrack=false;ShoreRegions.clear();
+}
+void PosixDevice9::Shore_Patch(const WaterShoreOverlay::Quad *patch)
+{
+	ShoreHasPatch=ShoreActive && patch && WaterShoreOverlay::Convex(*patch);
+	if(ShoreHasPatch) ShorePatch=*patch;
+}
+void PosixDevice9::Shore_Track(const WaterShoreOverlay::Quad *track)
+{
+	ShoreHasTrack=ShoreActive && track && WaterShoreOverlay::Convex(*track);
+	if(ShoreHasTrack) ShoreTrack=*track;
+}
+void PosixWaterShoreBegin(IDirect3DDevice9 *d,bool e) {if(d) static_cast<PosixDevice9*>(d)->Shore_Begin(e);}
+void PosixWaterShoreEnd(IDirect3DDevice9 *d) {if(d) static_cast<PosixDevice9*>(d)->Shore_End();}
+void PosixWaterShorePatch(IDirect3DDevice9 *d,const WaterShoreOverlay::Quad *q) {if(d) static_cast<PosixDevice9*>(d)->Shore_Patch(q);}
+void PosixWaterShoreTrack(IDirect3DDevice9 *d,const WaterShoreOverlay::Quad *q) {if(d) static_cast<PosixDevice9*>(d)->Shore_Track(q);}
 
 //-------------------------------------------------------------------------------------------------
 // D3D9's initial state, from its documentation of each state.  A float state holds its float's bits.
@@ -179,6 +205,11 @@ void PosixDevice9::Build_Combiner_Description(CombinerDescription &description) 
 	// The alpha test and the fog are pipeline state under D3D9 and instructions in the program here.
 	description.PixelPipeline.AlphaTestEnabled = RenderStates[D3DRS_ALPHATESTENABLE] != 0;
 	description.PixelPipeline.AlphaFunction = RenderStates[D3DRS_ALPHAFUNC];
+	if (SunActive && RenderStates[D3DRS_ALPHABLENDENABLE]) {
+		description.PixelPipeline.AlphaTestEnabled = true;
+		const bool addsLight = RenderStates[D3DRS_DESTBLEND] == D3DBLEND_ONE || RenderStates[D3DRS_SRCBLEND] == D3DBLEND_ONE;
+		description.PixelPipeline.AlphaFunction = addsLight ? D3DCMP_NEVER : D3DCMP_GREATEREQUAL;
+	}
 	description.PixelPipeline.FogEnabled = RenderStates[D3DRS_FOGENABLE] != 0;
 	description.SpecularAdd = RenderStates[D3DRS_SPECULARENABLE] != 0;
 
@@ -328,6 +359,35 @@ static void transform_point(const float source[3], const float matrix[16], float
 	}
 }
 
+// Visual-only inverse for reconstructing the water surface from depth. Double intermediates keep
+// distant camera translations stable; this does not reach simulation or replay arithmetic.
+static bool water_inverse(const float source[16], float result[16])
+{
+	double rows[4][8];
+	for (unsigned r = 0; r < 4; ++r)
+		for (unsigned c = 0; c < 8; ++c)
+			rows[r][c] = c < 4 ? source[r * 4 + c] : (c - 4 == r ? 1.0 : 0.0);
+	for (unsigned c = 0; c < 4; ++c) {
+		unsigned pivot = c;
+		for (unsigned r = c + 1; r < 4; ++r)
+			if (fabs(rows[r][c]) > fabs(rows[pivot][c])) pivot = r;
+		if (!isfinite(rows[pivot][c]) || fabs(rows[pivot][c]) < 1e-15) return false;
+		for (unsigned k = 0; k < 8; ++k) {
+			const double saved = rows[c][k]; rows[c][k] = rows[pivot][k]; rows[pivot][k] = saved;
+		}
+		const double scale = rows[c][c];
+		for (unsigned k = 0; k < 8; ++k) rows[c][k] /= scale;
+		for (unsigned r = 0; r < 4; ++r) {
+			if (r == c) continue;
+			const double factor = rows[r][c];
+			for (unsigned k = 0; k < 8; ++k) rows[r][k] -= factor * rows[c][k];
+		}
+	}
+	for (unsigned r = 0; r < 4; ++r)
+		for (unsigned c = 0; c < 4; ++c) result[r * 4 + c] = (float)rows[r][c + 4];
+	return true;
+}
+
 static void transform_direction(const float source[3], const float matrix[16], float result[4])
 {
 	for (unsigned column = 0; column < 4; ++column) {
@@ -438,7 +498,84 @@ void PosixDevice9::Build_Constants(SdlVertexConstants &vertex, SdlPixelConstants
 	colour_of(RenderStates[D3DRS_TEXTUREFACTOR], pixel.TextureFactor);
 	colour_of(RenderStates[D3DRS_FOGCOLOR], pixel.FogColour);
 	// A whole level, as D3D9 compares it: the program rounds the pixel's alpha to a level first.
-	pixel.AlphaReference[0] = (float)(RenderStates[D3DRS_ALPHAREF] & 0xFF);
+	pixel.AlphaReference[0] = SunActive && RenderStates[D3DRS_ALPHABLENDENABLE] ? 8.0f : (float)(RenderStates[D3DRS_ALPHAREF] & 0xFF);
+}
+
+bool PosixDevice9::Water_Foam_History_Available() const
+{
+	// History is an optional CPU-authored image. Never turn a stale stage binding, attachment,
+	// invalid mapping or preceding ocean's atlas into a required input of another water draw.
+	if (PixelShaderConstants[1][1] > 0.5f || PixelShaderConstants[89][0] <= 0.5f
+		|| Textures[14] == NULL || Textures[14]->GetType() != D3DRTYPE_TEXTURE) return false;
+	for (unsigned int c = 0; c < 4; ++c)
+		if (!std::isfinite(PixelShaderConstants[88][c]) || !std::isfinite(PixelShaderConstants[89][c])) return false;
+	if (PixelShaderConstants[88][2] <= 0 || PixelShaderConstants[88][3] <= 0 || PixelShaderConstants[89][2] <= 0) return false;
+	const float flags=PixelShaderConstants[89][0];
+	if(flags>7 || std::floor(flags)!=flags || (static_cast<unsigned>(flags)&3u)==0u) return false;
+	D3DSURFACE_DESC desc;
+	if(static_cast<IDirect3DTexture9 *>(Textures[14])->GetLevelDesc(0,&desc)!=D3D_OK
+		|| desc.Width==0 || desc.Height==0 || (desc.Usage&D3DUSAGE_RENDERTARGET)!=0) return false;
+	// The packed format has two equal logical tiles; malformed/stale bindings must not
+	// reinterpret a middle row as a history/direction boundary. Legacy atlases remain valid.
+	return (static_cast<unsigned>(flags)&4u)==0u || (desc.Height%2==0
+		&& desc.Width<=WaterFoamHistory::MaxAtlasSide && desc.Height<=2*WaterFoamHistory::MaxAtlasSide);
+}
+
+void PosixDevice9::Build_Water_Constants(const SdlPixelConstants &pixel_constants, SdlWaterPixelConstants &water) const
+{
+	memset(&water, 0, sizeof(water));
+	water.Combiner = pixel_constants;
+	float view_projection[16], inverse_view[16];
+	multiply(&Transforms[D3DTS_VIEW]._11, &Transforms[D3DTS_PROJECTION]._11, view_projection);
+	if (!water_inverse(view_projection, water.WorldFromClip)
+		|| !water_inverse(&Transforms[D3DTS_VIEW]._11, inverse_view)) {
+		memset(water.WorldFromClip, 0, sizeof(water.WorldFromClip));
+		memset(inverse_view, 0, sizeof(inverse_view));
+		for (unsigned i = 0; i < 4; ++i) water.WorldFromClip[i * 5] = inverse_view[i * 5] = 1.0f;
+	}
+	water.CameraPosition[0] = inverse_view[12];
+	water.CameraPosition[1] = inverse_view[13];
+	water.CameraPosition[2] = inverse_view[14];
+	// Both SV_Position.z and sampled scene depth include the viewport's depth range. Compose its
+	// inverse into the unprojection so custom MinZ/MaxZ use the same shader path as the normal range.
+	const float depth_range = Viewport.MaxZ - Viewport.MinZ;
+	if (depth_range > 1.0e-8f) {
+		for (unsigned int column = 0; column < 4; ++column) {
+			const float z_row = water.WorldFromClip[8 + column] / depth_range;
+			water.WorldFromClip[12 + column] -= Viewport.MinZ * z_row;
+			water.WorldFromClip[8 + column] = z_row;
+		}
+	}
+	water.Viewport[0] = (float)Viewport.X + 0.5f;
+	water.Viewport[1] = (float)Viewport.Y + 0.5f;
+	water.Viewport[2] = (float)Viewport.Width;
+	water.Viewport[3] = (float)Viewport.Height;
+	memcpy(water.WaterParameters, PixelShaderConstants[1], sizeof(water.WaterParameters));
+	memcpy(water.ReflectionArea, PixelShaderConstants[2], sizeof(water.ReflectionArea));
+	memcpy(water.SunDirection, PixelShaderConstants[3], sizeof(water.SunDirection));
+	memcpy(water.SunColour, PixelShaderConstants[4], sizeof(water.SunColour));
+	memcpy(water.TerrainParameters, PixelShaderConstants[5], sizeof(water.TerrainParameters));
+	memcpy(water.OpticalParameters, PixelShaderConstants[6], sizeof(water.OpticalParameters));
+	memcpy(water.HullParameters, PixelShaderConstants[7], sizeof(water.HullParameters));
+	memcpy(water.HullData, PixelShaderConstants[8], sizeof(water.HullData));
+	memcpy(water.ContactHullData, PixelShaderConstants[96], sizeof(water.ContactHullData));
+	memcpy(water.FoamFillLights, PixelShaderConstants[90], sizeof(water.FoamFillLights));
+	memcpy(water.MaterialColor, PixelShaderConstants[ModernWaterMaterial::RegisterColor], sizeof(water.MaterialColor));
+	memcpy(water.MaterialParameters, PixelShaderConstants[ModernWaterMaterial::RegisterParameters], sizeof(water.MaterialParameters));
+	if (Water_Foam_History_Available()) {
+		memcpy(water.FoamHistoryArea, PixelShaderConstants[88], sizeof(water.FoamHistoryArea));
+		memcpy(water.FoamHistoryParameters, PixelShaderConstants[89], sizeof(water.FoamHistoryParameters));
+	}
+	// River draws must never inherit a preceding ocean draw's hull field.
+	if (water.WaterParameters[1] > 0.5f) water.HullParameters[0] = 0;
+}
+
+void PosixDevice9::Build_Water_Visual_Constants(const SdlWaterPixelConstants &water, SdlWaterVisualPixelConstants &visual) const
+{
+	visual.Water=water;
+	memcpy(visual.VisualHullMeta,PixelShaderConstants[WaterHullVisualLayout::MetadataRegister],sizeof(visual.VisualHullMeta));
+	// River and empty hull draws must not activate a preceding ocean's packet metadata.
+	if(water.HullParameters[0]<=0) memset(visual.VisualHullMeta,0,sizeof(visual.VisualHullMeta));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -484,6 +621,7 @@ static bool is_dynamic(IDirect3DIndexBuffer9 *buffer)
 
 void PosixDevice9::Refuse_Draw(const std::string &reason)
 {
+	if (SunActive) SunFailed = true;
 	unsigned int &count = DrawRefusals[reason];
 	if (count++ == 0) {
 		fprintf(stderr, "PosixDevice9: a draw refused: %s\n", reason.c_str());
@@ -608,6 +746,7 @@ SDL_GPUTexture *PosixDevice9::Gpu_Texture_Of(IDirect3DSurface9 *surface, std::st
 
 bool PosixDevice9::Resolve_Target(SdlTarget &target, std::string &refusal)
 {
+	if (Sun_Target(target)) return true;
 	if (RenderTargets[1] != NULL || RenderTargets[2] != NULL || RenderTargets[3] != NULL) {
 		refusal = "more than one render target";
 		return false;
@@ -691,6 +830,7 @@ RenderResult PosixDevice9::DrawPrimitiveUP(D3DPRIMITIVETYPE type, unsigned int p
 	unsigned int stride)
 {
 	if (vertices == NULL) {
+		if (SunActive) SunFailed = true;
 		return D3DERR_INVALIDCALL;
 	}
 	DrawCall call;
@@ -757,6 +897,7 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 
 	const unsigned int reads = vertices_of(call.Type, call.PrimitiveCount);
 	if (reads == 0 && call.PrimitiveCount != 0) {
+		if (SunActive) SunFailed = true;
 		return D3DERR_INVALIDCALL;
 	}
 	if (Gpu == NULL || call.PrimitiveCount == 0) {
@@ -792,7 +933,7 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 
 	Mirrors->Collect_Dead();
 	if (Gpu->Batch_Is_Full()) {
-		Gpu->Flush();
+		if (!Gpu->Flush()) { Refuse_Draw("batch submission failed"); return D3D_OK; }
 	}
 	phases.Mark("dead+full");
 
@@ -814,43 +955,142 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 	CombinerDescription combiner;
 	VertexPipelineDescription vertex;
 	Build_Combiner_Description(combiner);
+	combiner.ShadowReceiving = Sun_Receiving(vertex_engine, pixel_engine, target);
+	combiner.DrawEffect = SunActive ? SunCasterEffect : DRAW_EFFECT_NONE;
+	combiner.SmokeGlow = SmokeGlow && vertex_engine == ENGINE_SHADER_NONE && pixel_engine == ENGINE_SHADER_NONE
+		&& !RenderStates[D3DRS_LIGHTING] && (FVF & D3DFVF_NORMAL) && !(FVF & D3DFVF_XYZRHW);
 	if (vertex_engine == ENGINE_SHADER_NONE && !Build_Vertex_Description(vertex, &refusal)) {
 		Refuse_Draw(refusal);
 		return D3D_OK;
 	}
+	if (vertex_engine == ENGINE_SHADER_NONE) vertex.SmokeGlow = combiner.SmokeGlow;
+	// The dedicated generated water vertex path deliberately avoids arbitrary engine-program
+	// pairing. Only this path may bind native FFT textures to the vertex stage. A sun caster
+	// pass keeps the ordinary vertex program its depth-only pixel variant was made against.
+	const bool fft_requested = !SunActive && pixel_engine == ENGINE_SHADER_WATER_TRAPEZOID
+		&& vertex_engine == ENGINE_SHADER_NONE && !vertex.LightingEnabled
+		&& PixelShaderConstants[6][2] > 0.5f && PixelShaderConstants[6][3] > 0.5f;
+	bool fft_water = fft_requested && Gpu->Prepare_Ocean(PixelShaderConstants[1][0]*WaterFftSampling::TimeScale);
+	const SdlProgram *fft_vertex = fft_water ? &Programs->Water_Vertex_Program(vertex) : NULL;
+	if (fft_vertex && fft_vertex->Shader == NULL) fft_water = false;
 	const SdlProgram &vertex_program = vertex_engine != ENGINE_SHADER_NONE
-		? Programs->Engine_Vertex_Program(vertex_engine) : Programs->Vertex_Program(vertex);
-	const SdlProgram &pixel_program = pixel_engine != ENGINE_SHADER_NONE
-		? Programs->Engine_Pixel_Program(pixel_engine, combiner.PixelPipeline) : Programs->Pixel_Program(combiner);
-	if (vertex_program.Shader == NULL || pixel_program.Shader == NULL) {
+		? Programs->Engine_Vertex_Program(vertex_engine)
+		: fft_water ? *fft_vertex : Programs->Vertex_Program(vertex);
+	const SdlProgram *pixel_program = SunActive
+		? &Programs->Sun_Pixel_Program(combiner, pixel_engine)
+		: pixel_engine != ENGINE_SHADER_NONE
+			? &Programs->Engine_Pixel_Program(pixel_engine, combiner.PixelPipeline)
+			: &Programs->Pixel_Program(combiner);
+	const auto retry_without_sun = [&](const char *reason) {
+		// Generated receivers add an optional program variant. Ground programs share the
+		// established engine path; their existing source keeps its own failure handling.
+		if (!combiner.ShadowReceiving || pixel_engine != ENGINE_SHADER_NONE || !vertex_program.Shader)
+			return false;
+		Fail_Sun_Receiver(reason);
+		combiner.ShadowReceiving = false;
+		pixel_program = &Programs->Pixel_Program(combiner);
+		return pixel_program->Shader != NULL;
+	};
+	if (!pixel_program->Shader) retry_without_sun("pixel program refused");
+	const SdlProgram *legacy_pixel_program=pixel_program;
+	const ShoreRegion *shore_region=NULL;
+	SDL_GPUTexture *shore_depth=NULL;
+	bool shore_overlay=false;
+	if(!SunActive && ShoreActive && ShoreHasTrack && pixel_engine==ENGINE_SHADER_NONE && vertex_engine==ENGINE_SHADER_NONE
+		&& RenderStates[D3DRS_FILLMODE]==D3DFILL_SOLID && !RenderStates[D3DRS_ZWRITEENABLE] && RenderStates[D3DRS_ALPHABLENDENABLE]
+		&& RenderStates[D3DRS_SRCBLEND]==D3DBLEND_SRCALPHA && RenderStates[D3DRS_DESTBLEND]==D3DBLEND_INVSRCALPHA
+		&& !combiner.ShadowReceiving && !combiner.SoftParticle && !combiner.DrawEffect && !combiner.SmokeGlow
+		&& combiner.StageCount<=2) {
+		WaterShoreOverlay::View view;
+		view.colour=reinterpret_cast<std::uintptr_t>(target.Colour);view.depth=reinterpret_cast<std::uintptr_t>(target.Depth);
+		view.width=target.Width;view.height=target.Height;
+		shore_depth=Gpu->Ready_Scene_Depth(target,view.capture);
+		SdlPixelConstants unused={};SdlWaterPixelConstants water;Build_Water_Constants(unused,water);
+		memcpy(view.worldFromClip,water.WorldFromClip,sizeof(view.worldFromClip));
+		memcpy(view.viewport,water.Viewport,sizeof(view.viewport));
+		if(shore_depth) for(const ShoreRegion &region:ShoreRegions) {
+			if(WaterShoreOverlay::SameView(view,region.view) && WaterShoreOverlay::Contains(region.patch,ShoreTrack)) {
+				// Upload failures are optional-feature failures. Keep the original .wak draw intact.
+				SDL_GPUTexture *height=Mirrors->Texture(region.height.get(),refusal);
+				SDL_GPUTexture *optical=Mirrors->Texture(region.optical.get(),refusal);
+				if(height && optical && height!=target.Colour && height!=target.Depth && optical!=target.Colour && optical!=target.Depth) {
+					const SdlProgram &candidate=Programs->Shore_Pixel_Program(combiner);
+					if(candidate.Shader) {pixel_program=&candidate;shore_region=&region;shore_overlay=true;}
+				}
+				break;
+			}
+		}
+	}
+	if (vertex_program.Shader == NULL || pixel_program->Shader == NULL) {
 		Refuse_Draw(vertex_program.Shader == NULL ? "a vertex program refused" : "a pixel program refused");
 		return D3D_OK;
 	}
-	if (pixel_program.SamplerSlots > SdlRecordedDraw::MAXIMUM_SAMPLERS || vertex_program.SamplerSlots != 0) {
+	if (pixel_program->SamplerSlots > SdlRecordedDraw::MAXIMUM_SAMPLERS)
+		retry_without_sun("receiver sampler count");
+	if (pixel_program->SamplerSlots > SdlRecordedDraw::MAXIMUM_SAMPLERS
+		|| vertex_program.SamplerSlots > (fft_water ? 4u : 0u)) {
 		Refuse_Draw("more sampler slots than a draw binds");
+		return D3D_OK;
+	}
+	const bool modern_water_pixel=pixel_engine==ENGINE_SHADER_WATER_TRAPEZOID || pixel_engine==ENGINE_SHADER_WATER_RIVER;
+	if(!Sdl_Draw_Uniform_Buffers_Supported(fft_water,modern_water_pixel,
+		vertex_program.UniformBuffers,pixel_program->UniformBuffers))
+		retry_without_sun("receiver uniform layout");
+	if(!pixel_program->Shader || !Sdl_Draw_Uniform_Buffers_Supported(fft_water,modern_water_pixel,
+		vertex_program.UniformBuffers,pixel_program->UniformBuffers)) {
+		Refuse_Draw("uniform blocks without an explicit draw binding");
 		return D3D_OK;
 	}
 	// Every pass has the frame's depth-stencil, so every pipeline has its format; a draw with no depth
 	// surface bound has D3D9's answer instead, depth and stencil off.
 	const RenderUInt32 *states = RenderStates;
 	RenderUInt32 without_depth[RENDER_STATE_COUNT];
-	if (DepthStencil == NULL) {
+	if (DepthStencil == NULL && !SunActive) {
 		memcpy(without_depth, RenderStates, sizeof(without_depth));
 		without_depth[D3DRS_ZENABLE] = D3DZB_FALSE;
 		without_depth[D3DRS_ZWRITEENABLE] = 0;
 		without_depth[D3DRS_STENCILENABLE] = 0;
 		states = without_depth;
 	}
+	RenderUInt32 caster_states[RENDER_STATE_COUNT];
+	if (SunActive) {
+		memcpy(caster_states, states, sizeof(caster_states));
+		caster_states[D3DRS_ZENABLE] = D3DZB_TRUE;
+		caster_states[D3DRS_ZWRITEENABLE] = 1;
+		caster_states[D3DRS_STENCILENABLE] = 0;
+		states = caster_states;
+	}
+	// The modern flat-water shader already refracts and attenuates the scene. The legacy
+	// destination-alpha mask would blend the unattenuated riverbed into it a second time.
+	RenderUInt32 water_states[RENDER_STATE_COUNT];
+	if (pixel_engine == ENGINE_SHADER_WATER_TRAPEZOID && states[D3DRS_SRCBLEND] == D3DBLEND_DESTALPHA
+		&& states[D3DRS_DESTBLEND] == D3DBLEND_INVDESTALPHA) {
+		memcpy(water_states, states, sizeof(water_states));
+		water_states[D3DRS_SRCBLEND] = D3DBLEND_SRCALPHA;
+		water_states[D3DRS_DESTBLEND] = D3DBLEND_INVSRCALPHA;
+		states = water_states;
+	}
 	SdlPipelineKey key;
-	if (!Sdl_Pipeline_Key(states, call.Type, vertex_program.Shader, pixel_program.Shader, FVF,
-		SdlGpuFrame::Target_Format(), Gpu->Depth_Format(), key, refusal)) {
+	if (!Sdl_Pipeline_Key(states, call.Type, vertex_program.Shader, pixel_program->Shader, FVF,
+		target.Colour ? SdlGpuFrame::Target_Format() : 0, Gpu->Target_Depth_Format(target), key, refusal)) {
 		Refuse_Draw("the pipeline: " + refusal);
 		return D3D_OK;
 	}
 	phases.Mark("target+programs");
 	SdlRecordedDraw draw;
 	memset(&draw, 0, sizeof(draw));
-	draw.Pipeline = Pipelines->Pipeline(key);
+	draw.Pipeline = Pipelines->Pipeline(key, combiner.ShadowReceiving && pixel_engine == ENGINE_SHADER_NONE);
+	if (!draw.Pipeline && retry_without_sun("pipeline refused")) {
+		if (Sdl_Pipeline_Key(states, call.Type, vertex_program.Shader, pixel_program->Shader, FVF,
+			target.Colour ? SdlGpuFrame::Target_Format() : 0, Gpu->Target_Depth_Format(target), key, refusal))
+			draw.Pipeline = Pipelines->Pipeline(key);
+	}
+	if(!draw.Pipeline && shore_overlay) {
+		shore_overlay=false;pixel_program=legacy_pixel_program;
+		if(Sdl_Pipeline_Key(states,call.Type,vertex_program.Shader,pixel_program->Shader,FVF,
+			target.Colour ? SdlGpuFrame::Target_Format() : 0,Gpu->Target_Depth_Format(target),key,refusal))
+			draw.Pipeline=Pipelines->Pipeline(key);
+	}
 	phases.Mark("pipeline");
 	if (draw.Pipeline == NULL) {
 		Refuse_Draw("the GPU refused a pipeline");
@@ -863,6 +1103,7 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 	PosixVertexBuffer9 *vertex_buffer = user ? NULL : static_cast<PosixVertexBuffer9 *>(Streams[0]);
 	PosixIndexBuffer9 *index_buffer = call.Indexed ? static_cast<PosixIndexBuffer9 *>(Indices) : NULL;
 	if ((!user && vertex_buffer == NULL) || (call.Indexed && index_buffer == NULL)) {
+		if (SunActive) SunFailed = true;
 		return D3DERR_INVALIDCALL;
 	}
 	if (stride != layout.Stride) {
@@ -873,25 +1114,84 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 	const bool stage_vertices = user || is_dynamic(vertex_buffer);
 	const bool stage_indices = call.Indexed && (fan || is_dynamic(index_buffer));
 	const unsigned int index_size = (call.Indexed && index_buffer->format() == D3DFMT_INDEX32) ? 4 : 2;
+	const bool water_draw = pixel_engine == ENGINE_SHADER_WATER_TRAPEZOID || pixel_engine == ENGINE_SHADER_WATER_RIVER;
+	SDL_GPUTexture *water_background = water_draw ? Gpu->Water_Background(target) : NULL;
+	SDL_GPUTexture *water_depth = water_draw ? Gpu->Scene_Depth(target) : NULL;
+	bool water_history = water_draw && Water_Foam_History_Available();
+	draw.VertexSamplerCount = vertex_program.SamplerSlots;
+	for (unsigned int slot = 0; slot < draw.VertexSamplerCount && slot < 3; ++slot) {
+		draw.VertexTextures[slot] = Gpu->Ocean_Map(slot * 2);
+		draw.VertexSamplers[slot] = Gpu->Ocean_Sampler();
+	}
 
 	// The GPU copies.  Bringing one up to date can flush the batch, which leaves the ones already asked
 	// for marked as used by the batch before: so ask again until a round flushes nothing.
 	for (int round = 0; round < 3; ++round) {
 		const uint64_t batch = Gpu->Batch();
 		++phases.Rounds;
-		draw.SamplerCount = pixel_program.SamplerSlots;
-		for (unsigned int slot = 0; slot < pixel_program.SamplerSlots; ++slot) {
-			const int texture_stage = pixel_program.SlotTexture[slot];
-			const int sampler_stage = pixel_program.SlotSampler[slot];
+		draw.SamplerCount = pixel_program->SamplerSlots;
+		for (unsigned int slot = 0; slot < pixel_program->SamplerSlots; ++slot) {
+			const int texture_stage = pixel_program->SlotTexture[slot];
+			const int sampler_stage = pixel_program->SlotSampler[slot];
+			// Ground programs declare these slots even when their receiving strength is zero.
+			// Bind neutral textures then, never material textures or the active attachment.
+			const bool ground = EngineShader_Paints_Ground(static_cast<EngineShaderProgram>(pixel_engine));
+			if (texture_stage == 5 && (combiner.ShadowReceiving || ground)) {
+				draw.Textures[slot] = combiner.ShadowReceiving ? Sun_Texture() : Mirrors->White();
+				draw.Samplers[slot] = combiner.ShadowReceiving ? Sun_Sampler() : Samplers->Sampler(SamplerStates[0]);
+				if (!draw.Textures[slot] || !draw.Samplers[slot]) {
+					if (combiner.ShadowReceiving) {
+						Fail_Sun_Receiver("depth texture or sampler unavailable");
+						return Gpu_Draw(call); // the failure latch bounds this retry
+					}
+					Refuse_Draw("sun receiver binding");
+					return D3D_OK;
+				}
+				continue;
+			}
+			if (texture_stage == 6 && (combiner.ShadowReceiving || ground)) {
+				const bool smoke = combiner.ShadowReceiving && Gpu->Sun_Smoke_Texture();
+				draw.Textures[slot] = smoke ? Gpu->Sun_Smoke_Texture() : Mirrors->White();
+				draw.Samplers[slot] = smoke ? Gpu->Sun_Smoke_Sampler() : Samplers->Sampler(SamplerStates[0]);
+				if (!draw.Textures[slot] || !draw.Samplers[slot]) {
+					Refuse_Draw("smoke receiver binding");
+					return D3D_OK;
+				}
+				continue;
+			}
+			if (water_draw && texture_stage >= 8 && texture_stage < 14) {
+				draw.Textures[slot] = fft_water ? Gpu->Ocean_Map(texture_stage - 8) : Mirrors->White();
+				draw.Samplers[slot] = fft_water ? Gpu->Ocean_Sampler() : Samplers->Sampler(SamplerStates[0]);
+				if (!draw.Textures[slot] || !draw.Samplers[slot]) return D3D_OK;
+				continue;
+			}
 			if (texture_stage < 0 || texture_stage >= SAMPLER_COUNT || sampler_stage < 0 || sampler_stage >= SAMPLER_COUNT) {
 				Refuse_Draw("a program slot past the device's stages");
 				return D3D_OK;
 			}
-			IDirect3DBaseTexture9 *texture = Textures[texture_stage];
+			IDirect3DBaseTexture9 *texture = water_draw && texture_stage == 14 && !water_history ? NULL : Textures[texture_stage];
+			if(shore_region && pixel_program!=legacy_pixel_program && texture_stage==2) texture=shore_region->height.get();
+			if(shore_region && pixel_program!=legacy_pixel_program && texture_stage==4) texture=shore_region->optical.get();
 			double since = phases.Now();
-			draw.Textures[slot] = texture != NULL ? Mirrors->Texture(texture, refusal) : Mirrors->White();
+			draw.Textures[slot] = shore_region && pixel_program!=legacy_pixel_program && texture_stage==6
+				? (shore_depth ? shore_depth : Mirrors->White())
+				: water_draw && texture_stage == 5
+				? (water_background ? water_background : Mirrors->White())
+				: water_draw && texture_stage == 6
+				? (water_depth ? water_depth : Mirrors->White())
+				: (texture != NULL ? Mirrors->Texture(texture, refusal) : Mirrors->White());
 			phases.Part(0, since);
-			if (draw.Textures[slot] != NULL && draw.Textures[slot] == target.Colour) {
+			if (water_draw && texture_stage == 14 && (draw.Textures[slot] == NULL
+				|| draw.Textures[slot] == target.Colour || draw.Textures[slot] == target.Depth)) {
+				// Failure of an optional history upload must retain the working water fallback.
+				water_history = false;
+				draw.Textures[slot] = Mirrors->White();
+			}
+			if(shore_region && pixel_program!=legacy_pixel_program && (texture_stage==2||texture_stage==4||texture_stage==6)
+				&& (!draw.Textures[slot]||draw.Textures[slot]==target.Colour||draw.Textures[slot]==target.Depth)) {
+				shore_overlay=false;draw.Textures[slot]=Mirrors->White();
+			}
+			if (draw.Textures[slot] != NULL && (draw.Textures[slot] == target.Colour || draw.Textures[slot] == target.Depth)) {
 				// Undefined in D3D9, and an error on SDL3 GPU: the pass would read what it writes.
 				Refuse_Draw("sampling the render target it draws into");
 				return D3D_OK;
@@ -901,12 +1201,44 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 				return D3D_OK;
 			}
 			since = phases.Now();
-			draw.Samplers[slot] = Samplers->Sampler(SamplerStates[sampler_stage]);
+			RenderUInt32 water_sampler[SAMPLER_STATE_COUNT];
+			const RenderUInt32 *sampler_states = SamplerStates[sampler_stage];
+			if ((water_draw && (texture_stage == 2 || texture_stage == 4 || texture_stage == 5 || texture_stage == 6 || texture_stage == 7 || texture_stage == 14))
+				|| (shore_region && pixel_program!=legacy_pixel_program && (texture_stage==2||texture_stage==4||texture_stage==6))) {
+				memcpy(water_sampler, sampler_states, sizeof(water_sampler));
+				sampler_states = water_sampler;
+				water_sampler[D3DSAMP_ADDRESSU] = water_sampler[D3DSAMP_ADDRESSV]
+					= texture_stage == 7 ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
+				water_sampler[D3DSAMP_MINFILTER] = water_sampler[D3DSAMP_MAGFILTER]
+					= texture_stage == 6 ? D3DTEXF_POINT : D3DTEXF_LINEAR;
+				water_sampler[D3DSAMP_MIPFILTER] = texture_stage == 7 ? D3DTEXF_LINEAR : D3DTEXF_NONE;
+			}
+			draw.Samplers[slot] = Samplers->Sampler(sampler_states);
 			phases.Part(1, since);
 			if (draw.Samplers[slot] == NULL) {
 				Refuse_Draw("the sampler: " + Samplers->Refusal());
 				return D3D_OK;
 			}
+		}
+		if (draw.VertexSamplerCount > 3) {
+			// The cage reads the same terrain resource as pixel stage 2. Resolve it
+			// inside this retry loop: updating a mirror can flush the current batch.
+			const double texture_since=phases.Now();
+			draw.VertexTextures[3]=Textures[2] ? Mirrors->Texture(Textures[2],refusal) : Mirrors->White();
+			phases.Part(0,texture_since);
+			if (!draw.VertexTextures[3]) { Refuse_Draw("the vertex terrain texture: "+refusal);return D3D_OK; }
+			if (draw.VertexTextures[3]==target.Colour || draw.VertexTextures[3]==target.Depth) {
+				Refuse_Draw("sampling the render target as vertex terrain");return D3D_OK;
+			}
+			RenderUInt32 terrain_sampler[SAMPLER_STATE_COUNT];
+			memcpy(terrain_sampler,SamplerStates[2],sizeof(terrain_sampler));
+			terrain_sampler[D3DSAMP_ADDRESSU]=terrain_sampler[D3DSAMP_ADDRESSV]=D3DTADDRESS_CLAMP;
+			terrain_sampler[D3DSAMP_MINFILTER]=terrain_sampler[D3DSAMP_MAGFILTER]=D3DTEXF_LINEAR;
+			terrain_sampler[D3DSAMP_MIPFILTER]=D3DTEXF_NONE;
+			const double sampler_since=phases.Now();
+			draw.VertexSamplers[3]=Samplers->Sampler(terrain_sampler);
+			phases.Part(1,sampler_since);
+			if (!draw.VertexSamplers[3]) { Refuse_Draw("the vertex terrain sampler: "+Samplers->Refusal());return D3D_OK; }
 		}
 		const double buffers_since = phases.Now();
 		if (!stage_vertices) {
@@ -960,7 +1292,7 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 					if (index < call.MinVertex || index >= call.MinVertex + call.VertexCount) {
 						fprintf(stderr, "PosixDevice9: a draw reads index %u outside MinVertex %u + VertexCount %u (start index %u, "
 							"%u primitives, base vertex %d, programs %s | %s)\n", index, call.MinVertex, call.VertexCount,
-							call.StartIndex, call.PrimitiveCount, call.BaseVertex, vertex_program.Key.c_str(), pixel_program.Key.c_str());
+							call.StartIndex, call.PrimitiveCount, call.BaseVertex, vertex_program.Key.c_str(), pixel_program->Key.c_str());
 						abort();
 					}
 				}
@@ -970,6 +1302,7 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 		const size_t start = user ? 0 : (size_t)StreamOffsets[0] + (size_t)first * stride;
 		const size_t size = (size_t)count * stride;
 		if (!user && start + size > vertex_buffer->storage().length()) {
+			if (SunActive) SunFailed = true;
 			return D3DERR_INVALIDCALL;
 		}
 		const uint8_t *source = user ? (const uint8_t *)call.UserVertices : vertex_buffer->storage().bytes() + start;
@@ -996,6 +1329,7 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 	if (call.Indexed) {
 		const size_t start = (size_t)call.StartIndex * index_size;
 		if (start + (size_t)reads * index_size > index_buffer->storage().length()) {
+			if (SunActive) SunFailed = true;
 			return D3DERR_INVALIDCALL;
 		}
 		const uint8_t *source = index_buffer->storage().bytes() + start;
@@ -1040,7 +1374,7 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 		draw.Count = reads;
 	}
 
-	Trace_Draw_If_Asked(call, vertex_program.Key + " | " + pixel_program.Key,
+	Trace_Draw_If_Asked(call, vertex_program.Key + " | " + pixel_program->Key,
 		vertex_buffer, stride);
 	if (Capture_Is_Asked()) {
 		// The signature: both programs' keys, and the pipeline key's bytes (the pipeline's states, formats
@@ -1057,10 +1391,10 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 		char pipeline[40];
 		snprintf(pipeline, sizeof(pipeline), " | pipeline %016llx", (unsigned long long)hash);
 		unsigned int sampled = 0;
-		for (unsigned int slot = 0; slot < pixel_program.SamplerSlots; ++slot) {
-			sampled |= 1u << pixel_program.SlotTexture[slot];
+		for (unsigned int slot = 0; slot < pixel_program->SamplerSlots; ++slot) {
+			sampled |= 1u << pixel_program->SlotTexture[slot];
 		}
-		Capture_Draw(call, vertex_program.Key + " | " + pixel_program.Key + pipeline, stride, reads, sampled,
+		Capture_Draw(call, vertex_program.Key + " | " + pixel_program->Key + pipeline, stride, reads, sampled,
 			target.Width, target.Height);
 	}
 
@@ -1079,14 +1413,60 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 		draw.VertexConstants = Gpu->Constants(0, &vertex_constants, sizeof(vertex_constants));
 		draw.VertexConstantsSize = sizeof(vertex_constants);
 	}
-	if (pixel_program.UniformBuffers != 0 && pixel_engine != ENGINE_SHADER_NONE) {
+	if (pixel_program->UniformBuffers != 0 &&
+		(pixel_engine == ENGINE_SHADER_WATER_TRAPEZOID || pixel_engine == ENGINE_SHADER_WATER_RIVER)) {
+		SdlWaterPixelConstants water;
+		Build_Water_Constants(pixel_constants, water);
+		if (fft_water && !Textures[2]) water.TerrainParameters[3]=0.0f;
+		water.SceneParameters[0] = water_background ? 1.0f : 0.0f;
+		water.SceneParameters[1] = 1.0f / (float)target.Width;
+		water.SceneParameters[2] = 1.0f / (float)target.Height;
+		water.SceneParameters[3] = water_depth ? 1.0f : 0.0f;
+		water.FftParameters[0] = fft_water ? 1.0f : 0.0f;
+		if (!water_history) water.FoamHistoryParameters[0] = 0.0f;
+		if(pixel_program->UniformBuffers==4) {
+			SdlWaterVisualPixelConstants visual;
+			Build_Water_Visual_Constants(water,visual);
+			draw.PixelConstants=Gpu->Constants(1,&visual,sizeof(visual));
+			draw.PixelConstantsSize=sizeof(visual);
+			for(unsigned block=0;block<WaterHullVisualLayout::BlockCount;++block) {
+				const unsigned first=WaterHullVisualLayout::PacketRegister+WaterHullVisualLayout::BlockOffset(block);
+				const unsigned bytes=WaterHullVisualLayout::BlockRegisters(block)*16;
+				draw.PixelWaterConstants[block]=Gpu->Constants(1,PixelShaderConstants[first],bytes,block+1);
+				draw.PixelWaterConstantsSize[block]=bytes;
+			}
+		} else {
+			draw.PixelConstants = Gpu->Constants(1, &water, sizeof(water));
+			draw.PixelConstantsSize = sizeof(water);
+		}
+		if (fft_water) {
+			// The generated water vertex program reads precisely the same per-draw hulls and
+			// water time as its pixel program. Alias the recorded bytes so a later object's
+			// constants cannot change already queued displacement or its matching normals.
+			draw.VertexWaterConstants = draw.PixelConstants;
+			draw.VertexWaterConstantsSize = sizeof(SdlWaterPixelConstants);
+		}
+	}
+	else if(pixel_program->UniformBuffers!=0 && shore_region && pixel_program!=legacy_pixel_program) {
+		SdlShorePixelConstants shore={};shore.Combiner=pixel_constants;
+		memcpy(shore.WorldFromClip,shore_region->view.worldFromClip,sizeof(shore.WorldFromClip));
+		memcpy(shore.Viewport,shore_region->view.viewport,sizeof(shore.Viewport));
+		memcpy(shore.Terrain,shore_region->terrain,sizeof(shore.Terrain));
+		shore.Scene[1]=1.0f/target.Width;shore.Scene[2]=1.0f/target.Height;shore.Scene[3]=shore_overlay?1.0f:0.0f;
+		shore.Surface[0]=ShoreTrack.level;shore.Surface[1]=ShoreTrack.level+1.5f;shore.Surface[2]=1;
+		draw.PixelConstants=Gpu->Constants(1,&shore,sizeof(shore));draw.PixelConstantsSize=sizeof(shore);
+	}
+	else if (pixel_program->UniformBuffers != 0
+		&& (pixel_engine != ENGINE_SHADER_NONE || combiner.ShadowReceiving || combiner.DrawEffect)) {
 		SdlEnginePixelConstants engine_constants;
 		memset(&engine_constants, 0, sizeof(engine_constants));
 		engine_constants.Combiner = pixel_constants;
+		if (combiner.ShadowReceiving) Build_Sun_Constants(engine_constants);
+		if (combiner.DrawEffect) engine_constants.DrawEffectParameters[3] = SunCasterOpacity;
 		draw.PixelConstants = Gpu->Constants(1, &engine_constants, sizeof(engine_constants));
 		draw.PixelConstantsSize = sizeof(engine_constants);
 	}
-	else if (pixel_program.UniformBuffers != 0) {
+	else if (pixel_program->UniformBuffers != 0) {
 		draw.PixelConstants = Gpu->Constants(1, &pixel_constants, sizeof(pixel_constants));
 		draw.PixelConstantsSize = sizeof(pixel_constants);
 	}
@@ -1118,6 +1498,37 @@ RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
 	draw.StencilReference = RenderStates[D3DRS_STENCILREF] & 0xFF;
 	draw.BlendFactor = RenderStates[D3DRS_BLENDFACTOR];
 	Gpu->Record_Draw(draw);
+	if (combiner.ShadowReceiving) {
+		if (pixel_engine == ENGINE_SHADER_NONE) ++SunSolidReceivers;
+		else ++SunGroundReceivers;
+		if (Sun_Camera_Space()) ++SunCameraReceivers;
+		if (RenderStates[D3DRS_ALPHABLENDENABLE]) ++SunAlphaReceivers;
+	}
+	if (SunActive && combiner.DrawEffect == DRAW_EFFECT_CLOAK_SHADOW) ++SunCloakCasters;
+	// Latch only a genuinely accepted modern flat-water draw with the actual scene snapshot.
+	// The ledger lasts one WaterRender call, includes actual targets, and owns texture references.
+	if(ShoreActive && ShoreHasPatch && pixel_engine==ENGINE_SHADER_WATER_TRAPEZOID && water_depth
+		&& PixelShaderConstants[6][2]>.5f && PixelShaderConstants[6][3]>.5f && PixelShaderConstants[5][3]>.5f
+		&& PixelShaderConstants[1][1]<.5f && RenderStates[D3DRS_FILLMODE]==D3DFILL_SOLID && Textures[2] && Textures[4]) {
+		ShoreRegion region;region.patch=ShorePatch;
+		region.view.colour=reinterpret_cast<std::uintptr_t>(target.Colour);region.view.depth=reinterpret_cast<std::uintptr_t>(target.Depth);
+		region.view.width=target.Width;region.view.height=target.Height;
+		if(Gpu->Ready_Scene_Depth(target,region.view.capture)==water_depth) {
+			SdlWaterPixelConstants water;Build_Water_Constants(pixel_constants,water);
+			memcpy(region.view.worldFromClip,water.WorldFromClip,sizeof(region.view.worldFromClip));
+			memcpy(region.view.viewport,water.Viewport,sizeof(region.view.viewport));
+			memcpy(region.terrain,water.TerrainParameters,sizeof(region.terrain));
+			bool found=false;
+			for(const ShoreRegion &old:ShoreRegions) if(WaterShoreOverlay::SameView(old.view,region.view)
+				&& old.patch.level==region.patch.level && memcmp(old.patch.xy,region.patch.xy,sizeof(old.patch.xy))==0) {found=true;break;}
+			if(!found && ShoreRegions.size()<WaterShoreOverlay::MaxRegions) {
+				Textures[2]->AddRef();Textures[4]->AddRef();
+				region.height=std::shared_ptr<IDirect3DBaseTexture9>(Textures[2],[](IDirect3DBaseTexture9 *t){t->Release();});
+				region.optical=std::shared_ptr<IDirect3DBaseTexture9>(Textures[4],[](IDirect3DBaseTexture9 *t){t->Release();});
+				ShoreRegions.push_back(region);
+			}
+		}
+	}
 	++DrawsRecorded;
 	if (vertex_engine != ENGINE_SHADER_NONE || pixel_engine != ENGINE_SHADER_NONE) {
 		++EngineProgramDraws[EngineShader_Name((EngineShaderProgram)(vertex_engine != ENGINE_SHADER_NONE

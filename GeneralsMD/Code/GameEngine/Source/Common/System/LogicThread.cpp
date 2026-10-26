@@ -33,6 +33,7 @@
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/ParticleSys.h"
 #include "GameClient/View.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/FPUControl.h"
@@ -52,6 +53,7 @@
 
 thread_local Bool LogicThread::t_isLogicThread = FALSE;
 std::atomic<Int> LogicThread::g_windowOpen( 0 );
+std::recursive_mutex LogicThread::g_liveModelLock;
 
 namespace
 {
@@ -185,10 +187,13 @@ namespace
 		TheGameClient->linkDrawablesOfTick();
 		Drawable::flushPendingClientWork();
 		runViewCalls();
-		// an effect queues nothing more: none of them runs inside a tick
-		for( size_t i = 0; i < s_effects.size(); ++i )
-			s_effects[ i ]();
-		s_effects.clear();
+		// an effect queues nothing more: none of them runs inside a tick.  Swapped out first, as the view
+		// calls are: an effect that pumps a frame (a modal message box) or throws ran the effects before it
+		// a second time, and an appended message twice was a double delete in the message stream
+		std::vector< std::function<void()> > effects;
+		effects.swap( s_effects );
+		for( size_t i = 0; i < effects.size(); ++i )
+			effects[ i ]();
 		AudioEventRTS::forgetHeldCallers();
 		TheGameClient->flushDestroyedDrawables();
 		ControlBar::flushLogicCalls();
@@ -298,6 +303,8 @@ static void startOverlap( void )
 	TheGameClient->setFrame( TheGameLogic->getFrame() );
 	jitter();
 	s_overlapStart = LogicClock::now();
+	// open before the tick wakes, so nothing the main thread does beside it reads as outside the window
+	LogicThread::g_windowOpen.store( 1, std::memory_order_relaxed );
 	{
 		std::lock_guard<std::mutex> lock( s_lock );
 		s_tickPending = TRUE;
@@ -380,6 +387,8 @@ void LogicThread::OverlapWindow::close( void )
 	g_windowOpen.store( 0, std::memory_order_relaxed );
 	if( s_overlapRunning )
 		waitOverlap();
+	// the tick no longer reads the manager's list and lookup
+	TheParticleSystemManager->friend_fileWindowSystems();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -425,8 +434,9 @@ void LogicThread::takeOverlapTimes( Real &tickMS, Real &waitMS )
 //-------------------------------------------------------------------------------------------------
 void LogicThread::init( void )
 {
-	// 1 unless the command line asks otherwise; -logicthread 0 keeps the tick on the main thread
-	char value[ 32 ] = "1";
+	// 0 unless the command line asks otherwise, since v3.3.0's crash reports showed the heap corrupted
+	// by the tick beside the render; -logicthread 1 hands it to its own thread
+	char value[ 32 ] = "0";
 	findEarlyCommandLineValue( L"-logicthread", value, sizeof(value) );
 	if( atoi( value ) == 0 )
 		return;

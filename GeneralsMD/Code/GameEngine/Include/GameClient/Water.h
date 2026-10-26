@@ -126,5 +126,9 @@ extern WaterSetting WaterSettings[ TIME_OF_DAY_COUNT ];
 
 extern OVERRIDE<WaterTransparencySetting> TheWaterTransparency;
 
+// Render-only material rules. The map's legacy settings remain owned by Classic water.
+void loadModernWaterSettings();
+void getModernWaterMaterial(Real color[4], Real parameters[4]);
+
 #endif // __WATER_H_
 

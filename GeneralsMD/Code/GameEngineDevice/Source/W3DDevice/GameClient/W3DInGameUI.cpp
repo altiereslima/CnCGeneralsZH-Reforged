@@ -417,7 +417,7 @@ void W3DInGameUI::reset( void )
 
 static void drawGroundRing( const Coord3D& center, Real radius, UnsignedInt color, Real width );
 
-/// -directorrecord's lines between panes and the radar's frame: the brand's gold (zerohour.gg's
+/// -directorrecord's lines between panes: the brand's gold (zerohour.gg's
 /// --gold, #f2c230) between two edges of its ground (--bg, #0c1220), so they read on snow and on
 /// night maps alike
 static const Color PANE_GOLD = GameMakeColor( 0xf2, 0xc2, 0x30, 255 );
@@ -428,8 +428,6 @@ static const UnsignedByte PANE_BAND_RGB[ 3 ] = { 0x80, 0x95, 0xea };
 static const Real PANE_BAND_OUTER_ALPHA = 0.3f;
 static const Real PANE_BAND_INNER_ALPHA = 0.55f;
 static const Real PANE_BAND_FAR_SHARE = 0.35f;
-/// the corner radar's dark edge is a pixel this many rows of the picture
-static const Real CORNER_EDGE_ROWS_A_PIXEL = 720.0f;
 /// the light that runs along the gold: --gold most of the way to white, as wide as the edged line and
 /// this share of its length, fading out to both ends.  At --gold half way to white and the gold's
 /// own width nobody saw it at 720p
@@ -512,13 +510,6 @@ static void drawPaneRays( void )
 	}
 }
 
-/// a rectangle the given pixels larger than window on every side, filled
-static void fillAround( const IRegion2D &window, Int outside, Color color )
-{
-	TheDisplay->drawFillRect( window.lo.x - outside, window.lo.y - outside,
-		window.hi.x - window.lo.x + 2 * outside, window.hi.y - window.lo.y + 2 * outside, color );
-}
-
 //-------------------------------------------------------------------------------------------------
 /** LOGIC-THREAD.md phase 3.  The parts of draw that ask logic what to show (the superweapon clocks,
 	* the guard markers, the world animations' fog, the production list) run here, at the sync point
@@ -594,10 +585,8 @@ void W3DInGameUI::draw( void )
 			drawPaneRays();
 
 		// the console's 'hidehud showmap=true': the bar is hidden, so its radar window is put in the
-		// corner by hand, where the radar's own pixel maths find it too, and painted.  Under
-		// -directorrecord it sits in the middle of the bottom edge, slides down off the screen before
-		// panes come and back up after them, and is not drawn while they are up: framed where the rays
-		// met, its box for every pane was one more thing on a split screen the owner found too busy
+		// corner by hand, where the radar's own pixel maths find it too, and painted.  -directorrecord
+		// never asks for it: a map on the film was one more thing on the screen
 		if( CinemaDirector_showsMap() && !framed && !TheObserverCamera.isDrawingSecond() )
 		{
 			GameWindow *radarWindow = TheWindowManager->winGetWindowFromId( NULL, TheNameKeyGenerator->nameToKey( "ControlBar.wnd:LeftHUD" ) );
@@ -613,30 +602,6 @@ void W3DInGameUI::draw( void )
 			corner.hi.x = corner.lo.x + ( lr.x - ul.x ) + 2 * RADAR_BEZEL;
 			corner.hi.y = TheDisplay->getHeight() + RADAR_BEZEL;
 			corner.lo.y = corner.hi.y - ( lr.y - ul.y ) - 2 * RADAR_BEZEL;
-			const Int mapWidth = corner.hi.x - corner.lo.x;
-			const Int mapHeight = corner.hi.y - corner.lo.y;
-			// -directorrecord frames it, half the rays' gold on a pixel of edge a 720 rows with the lines'
-			// band as a halo, flush with the bottom so only the top and the sides show; the console's
-			// showmap alone keeps it bare and flush with the corner
-			if( TheGlobalData->m_directorRecord )
-			{
-				const Int frameGold = ObserverCamera_paneLineWidth( TheDisplay->getHeight() );
-				const Int halo = max( ( ObserverCamera_paneBandWidth( TheDisplay->getHeight() ) - frameGold ) / 2 - OBSERVER_PANE_LINE_EDGE, 0 ) / 2;
-				const Int gold = max( frameGold / 2, 1 );
-				const Int outside = gold + max( REAL_TO_INT( TheDisplay->getHeight() / CORNER_EDGE_ROWS_A_PIXEL ), 1 );
-				// slid down far enough to take the frame and its halo off the screen too
-				const Int slide = REAL_TO_INT( TheObserverCamera.getCornerRadarSlide() * ( mapHeight + outside + halo ) );
-				corner.lo.x = ( TheDisplay->getWidth() - mapWidth ) / 2;
-				corner.hi.x = corner.lo.x + mapWidth;
-				corner.lo.y += slide;
-				corner.hi.y += slide;
-				// filled rectangles under the radar, square at the corners: the halo, the edge, then the gold
-				// up to the window, so the map sits on the gold with no gap
-				fillAround( corner, outside + halo, paneBand( PANE_BAND_OUTER_ALPHA ) );
-				fillAround( corner, outside + halo / 2, paneBand( PANE_BAND_INNER_ALPHA ) );
-				fillAround( corner, outside, PANE_EDGE );
-				fillAround( corner, gold, PANE_GOLD );
-			}
 			TheControlBar->placeWindowAt( radarWindow, corner );
 			W3DLeftHUDDraw( radarWindow, NULL );
 		}
@@ -1043,7 +1008,10 @@ void W3DInGameUI::takeBuildGrid( void )
 
 			if( blocked && cell->getType() == PathfindCell::CELL_OBSTACLE )
 			{
-				blocked = !BuildAssistant_isHiddenFromLocalPlayer( TheGameLogic->findObjectByID( cell->getObstacleID() ) );
+				// the cell can still name an object the tick has already destroyed; nothing is left to
+				// hide, and the pathfinder still refuses the cell, so it draws red
+				const Object *obstacle = TheGameLogic->findObjectByID( cell->getObstacleID() );
+				blocked = obstacle == NULL || !BuildAssistant_isHiddenFromLocalPlayer( obstacle );
 			}
 			else if( blocked && cell->getType() == PathfindCell::CELL_RUBBLE )
 			{

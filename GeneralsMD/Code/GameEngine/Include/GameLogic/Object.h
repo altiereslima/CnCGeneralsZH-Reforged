@@ -39,6 +39,7 @@
 #include "Common/Snapshot.h"
 #include "Common/SpecialPowerMaskType.h"
 #include "Common/DisabledTypes.h"
+#include "Common/GlobalData.h"	// RankPerk, RankAura
 #include "Common/Thing.h"
 #include "Common/ObjectStatusTypes.h"
 #include "Common/Upgrade.h"
@@ -288,10 +289,27 @@ public:
 
 	void scoreTheKill( const Object *victim );						///< I just killed this object.
 	void scoreTheHeal( const Object *patient, Real restored, Real maxHealth );	///< I just put restored health back on this object
+	/// my experience moved my grade or my level: max health follows the grade, then the level's own work
+	void onRankChanged( VeterancyLevel oldLevel, VeterancyLevel newLevel, Int oldGrade, Int newGrade, Bool provideFeedback );
+	void floatRankGain( Int insignia );		///< the promotion floating up: the ladder's insignia, or EA's chevrons for -1
 	void onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel newLevel, Bool provideFeedback = TRUE );	///< I just achieved this level right this moment
 	ExperienceTracker* getExperienceTracker() {return m_experienceTracker;}
 	const ExperienceTracker* getExperienceTracker() const {return m_experienceTracker;}
 	VeterancyLevel getVeterancyLevel() const;
+	Int getRankGrade() const;																///< my grade on my side's rank ladder; 0 without one
+
+	// the ladder's perks and the auras leaders give (RankPerk, RankAura in GlobalData.h)
+	Real getRankPerk( RankPerk perk ) const;								///< what my grade carries, 0 without a ladder
+	Real getRankAura( RankAura aura ) const;								///< the strongest leader's on me now
+	void clearRankAuras();																	///< the once-a-second pass starts over; RALLY runs on
+	void raiseRankAura( RankAura aura, Real strength );		///< a leader has me in range; the stronger stays
+	void raiseRankRally( Real strength, UnsignedInt until );	///< a fallen leader's rally; the stronger stays, the later end
+	Real getRankSightScalar() const;												///< my own sight perk times the sight aura on me
+	Real getRankDamageTakenScalar() const;									///< guard, rally and the still guard perk, multiplied
+	Bool isSpotter() const;																	///< SpotterSight on the template, or the SPOTTER perk
+	void onRankSightChanged( Real oldScalar );							///< look again if the rank sight moved
+	void giveRankRally();																		///< I fell: my death rally reaches the allies around me
+	void forgoRankRally() { m_forgoRankRally = TRUE; }			///< about to be killed inside a container that let go of me first
 
 	inline const AsciiString& getName() const { return m_name; }
 	inline void setName( const AsciiString& newName ) { m_name = newName; }
@@ -486,6 +504,9 @@ public:
 	Real getOwnShroudClearingRange() const { return m_shroudClearingRange; }	///< the range set on us, before a scaffold's zero; what a scalar multiplies
 	void setShroudClearingRange( Real newShroudClearingRange );	///< Access to setting someone's clear shroud distance
 	void setVisionSpied(Bool setting, Int byWhom);///< Change who is looking through our eyes
+	void addSightJammer();		///< an enemy jammer's field took it in: its sight shrinks until the last one lets go
+	void removeSightJammer();	///< a jammer's field let go of it
+	Bool isSightJammed() const { return m_sightJammerCount > 0; }
 
 	// Both of these calls are intended to only be used by TerrainLogic, specifically setActiveBoundary()
 	void friend_prepareForMapBoundaryAdjust(void);
@@ -789,6 +810,10 @@ private:
 	Real					m_visionRange;										///< looking range
 	Real					m_shroudClearingRange;						///< looking range for shroud ONLY
 	Real					m_shroudRange;										///< like looking range, this is how far I shroud others' looks
+	Int						m_sightJammerCount;								///< enemy jammers in whose field this stands; above zero its sight shrinks to a few feet
+	Real					m_rankAura[ RANK_AURA_COUNT ];		///< the strongest leader's of each kind, refilled once a second
+	UnsignedInt		m_rankRallyUntil;									///< the frame the death rally on me ends
+	Bool					m_forgoRankRally;									///< set and read within one kill, so not saved
 
 	DisabledMaskType	m_disabledMask;
 	UnsignedInt				m_disabledTillFrame[ DISABLED_COUNT ];

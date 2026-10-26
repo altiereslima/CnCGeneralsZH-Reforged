@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -46,6 +47,7 @@
 #include "always.h"
 #include "hanim.h"
 #include "simplevec.h"
+#include <atomic>
 
 class TimeCodedMorphKeysClass;
 class ChunkLoadClass;
@@ -175,7 +177,7 @@ private:
 	};
 	
 	SimpleDynVecClass<MorphKeyStruct>	Keys;	// morph key data
-	uint32				CachedIdx;					// last accessed index
+	std::atomic<uint32>	CachedIdx;				// last accessed index: a hint shared across threads, as in motchan.h
 
 	void 					Free(void);
 

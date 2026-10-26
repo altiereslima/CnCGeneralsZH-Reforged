@@ -443,3 +443,117 @@ These do not belong to one change.
 | **The first Windows build after A1 will fail on `make -k`-shaped grounds, not on flags.** | **Windows, 2026-09-27: it happened and is fixed.** W2: 63 errors, then 19 more once ATL was in (W2). A1's macOS branch is additive, but A1 also proved that `wwdebug`, `wwutil` and `compression` do not compile under clang at all. Nothing about that touches Windows — and it does mean that the next person to diff the two platforms is comparing a working build against a build that stops in its first library. Do not read that as a regression. |
 | **A `Debug` or `_INTERNAL` build of this tree does not compile on x64, and did not before this port started.** | **Windows, 2026-09-29: done for x64 Debug; `_INTERNAL` not built.** The build and what it then found are fixed: a Debug CI run on the Windows CI VM (`windows-ci.ps1 -Config Debug`): the build, ctest 50 of 50 with order_cameos_selfcheck skipped (no numpy there), the GPU tests, and E1 0@1200 playing back to 0xE5C34BF3, Release's pin. Before that, as found on 2026-09-27: `windows-ci.ps1 -Config Debug` on 2026-09-27 stops in `wwdebug` at `Debug.h:244`. A port change spelled `SimpleProfiler`'s four counters `Int64`, which wwdebug's files do not declare; `__int64` was the compiler's own. Only wwdebug compiles `DEBUG_PROFILE`, because only it lacks `RELEASE_DEBUG_LOGGING`. Three Debug-only test links fail too: `GameEngineDebug.lib` (gametext_csf, test_premain_strings, test_premain_unicode), `debugdebug.lib` (test_debug), and `DebugLog` (test_wwdownload). The fix is in this tree now. `GameCommon.h:59` defines `DUMP_PERF_STATS` in every `_DEBUG` or `_INTERNAL` build. `PerfTimer.h` compiled `GetPrecisionTimer` under that define, and its body was an `__asm RDTSC` block — `USE_QPF` was never defined, so the assembly was the live branch, not the dead one. This project is x64 only (`CMakeLists.txt:48-52` refuses anything else) and **MSVC does not accept `__asm` on x64 at all**. `-DPERF_TIMERS=ON` reaches the same code in a Release build. Found by B2, which has replaced the block with the clock shim, so the configurations should build again — but nobody has confirmed either the breakage or the fix on a Windows machine, and the conclusion rests on reading the preprocessor rather than on a compiler's answer. **It also means an early claim that "every remaining `__asm` block is inside `#if 0`" was wrong**; it has been corrected. The only other `__asm` in the tree, `WWMath/vp.cpp`, is expanded solely inside `#if defined(__ICL)` and is genuinely dead. |
 | **`#pragma pack` layout is assumed, not measured, on MSVC.** | **Windows, 2026-09-27: checked.** The B4 and L1 `sizeof`/`offsetof` asserts compile under MSVC (rows 208, 248, 267). B4 adds `sizeof`/`offsetof` asserts. They will be checked by a clang build only. If MSVC disagrees on any packed struct, the asserts fire there and the build fails loudly — which is the good outcome, but it happens on someone else's machine, later. |
+
+
+## Independent Linux shadow parity contribution
+
+This feature starts directly from reference/3.1.0. Sun capture, tree capture,
+shadow-option admission and queued cloak coverage are enabled on Linux. The
+Windows Direct3D 11 backend sources remain unchanged; the shared adapter forwards
+existing calls and returns empty queued coverage. Windows retains its original
+water programs, caster selection and constant-cache comparisons. Tree capture is
+on under Direct3D 11 too since the Windows follow-up: the batched trees and the
+object palms draw into the sun's map, and their silhouettes, blob decals and
+flattened palm copies stand down while `SunShadow::OwnsSceneShadows` holds; under
+`-d3d9` no map takes the frame and the silhouettes stay. macOS refuses the new scene capture and retains its existing shadows. Shared API,
+shader and queue metadata still compile on these platforms; native builds and
+runtime validation remain required. Linux tests do not establish that evidence.
+
+The generic SDL additions are depth-only targets, target-specific depth formats,
+smoke moments and diagnostic depth readback. The original emulated pixel register
+count, sampler limit, single-uniform bindings and legacy water source stay intact.
+No Modern water, cloud-volume feature, preview or workflow change is included.
+
+## Linux Modern water proposal (2026-10-18)
+
+New water surfaces, material loading and native particle replacements are admitted
+only on Linux. Shared water declarations, portable sampling helpers and inert
+option metadata still compile elsewhere. Windows retains its original shader
+names and shader programs; macOS binds the legacy SDL programs. The Linux style
+widget is hidden on both platforms. Windows/macOS builds and runtime checks remain
+open; Linux compilation and GPU tests do not establish their runtime compatibility.
+The Windows half of this paragraph no longer holds: the last section below brings the
+Modern water to Direct3D 11.
+
+## Volumetric hazard clouds (2026-10-22, Direct3D 11 2026-10-23)
+
+Windows compiles the neutral cloud core (`Platform/HazardCloud.h`, `HazardCloudPolicy.h`,
+`HazardCloudFlow`, `HazardCloud.cpp`) and, since 2026-10-23, the device-free half of a layer
+(`Platform/HazardCloudCore.h`, `HazardCloudCore.cpp`, `HazardCloudShader.cpp`) that the SDL backend
+shares. `gameenginedevice` links `DX11HazardCloud.cpp` in place of `HazardCloudUnsupported.cpp`,
+which only the device-less tests still link. `HazardCloud::Supported()` is true while the Direct3D
+11 frame presents on a feature level 11 device, so the Cloud style selector shows on the default
+renderer and stays hidden under `-d3d9` and `-headless`.
+
+The extended field rules in `W3DParticleSys.cpp` (keys, owner choice, grace period, initial delay)
+now need the Volumetric style as well as the capability, and the Classic graphics setting turns
+them off, so a Classic player on any platform tracks the fields as upstream did. The cloud programs
+are compiled by the backend's `Compile_Program` at shader model 5 and kept in
+`Run/dx11shaders.cache`; the shipped cache (`dx11shaders.shipped`) holds none of them until it is
+recorded again, so a player's first Volumetric hazard pays their compile once.
+
+The Direct3D 11 path was built and run on Windows: `test_dx11backend` compiles all eight programs
+with d3dcompiler_47, and a Twilight Flame Scud Storm field drew on the default renderer with no
+refusal in the log. The SDL backend was moved onto the shared core in the same change and has not
+been compiled since; Linux and macOS builds are owed.
+
+## Modern water on Direct3D 11 (2026-10-23)
+
+The Modern water now builds on Windows as well as Linux. `Platform/ModernWaterBuild.h` defines
+`ZH_MODERN_WATER` for both, and the `__linux__` gates in `W3DWater.cpp`/`.h`, the vessel-foam gates
+in `W3DParticleSys.cpp`/`.h`, `W3DDisplay.cpp`'s read of the water at the sync point and
+`GameEngine.cpp`'s `ModernWater.ini` load take it instead. `ModernWater::Supported()` decides at run
+time: true on Linux, and on Windows while Direct3D 11 is active and presenting, so `-d3d9` and
+`-headless` stay Classic and the options menu hides the Water Style box for them. macOS compiles
+none of it, as before. The wave tracks keep their `__linux__` gates, so Windows still updates them in
+their own flush.
+
+One consequence for Classic on Windows: `W3DWater` now draws from the polygon copy taken at the
+sync point (`takeReadsForRender`) and reads the pause from it, as Linux always did, instead of
+walking the live `PolygonTrigger` list during the draw. The data is the same. A Classic shot of
+the Bombardment Beach shore at 1000,2350, frame 600, differs from the previous build's on 0.01% of
+the sampled pixels by more than 40, the clouds' wall-clock drift.
+
+`engineshader.cpp` now writes the Modern text for the plain `trapezoid water ps.1.1` and `river
+water ps.1.1` names on the Direct3D 11 target too; the `classic ...` names keep EA's transcription,
+and `W3DWater::registerWaterStyleShaders` registers those under Classic on Windows. The Classic
+programs' text, and so their keys in `dx11shaders.cache` and `dx11shaders.shipped`, are unchanged.
+
+The draw is the backend's (`WW3D2/dx11water.cpp`). A Modern draw binds fifteen stages: the
+backend's four, the shore's optical field at t4, copies of the target's colour and depth taken at
+the frame's first water draw into that target at t5 and t6, the bed at t7, the ocean's six maps at
+t8 to t13 and the vessels' foam atlas at t14, white where nothing is bound. Its four constant
+blocks come from W3DWater's 896 registers, which on Windows go to the backend through
+`Direct3D11_Set_Water_Constants` instead of the Direct3D 9 device (`WaterConstants.h` builds the
+block; it mirrors `PosixDevice9::Build_Water_Constants`, which the SDL device keeps until Linux can
+be built against the shared one). Over open sea the GPU ocean runs on the context first (spectrum,
+sixteen butterflies, the sign pass, then `GenerateMips` on six RGBA32F maps) and the draw's vertex
+half is swapped for the displaced one. Stages past 7 now reach the backend too:
+`DX8Wrapper::Set_DX8_Texture` mirrors them, where it used to hand them to the Direct3D 9 device alone.
+The shore overlay's second pass and its foam on the wave tracks are not drawn on Windows yet. The
+backend keeps one scene copy where the SDL device keeps one per target, so a frame drawing water
+into one target, then another, then the first again refracts the first water in its third draw.
+`W3DWater::Render` now saves stages 0, 1, 4 and 7 from the wrapper's record (`Get_DX8_Texture`,
+`Get_DX8_Texture_Stage_State`) rather than the Direct3D 9 device, which `Defer_D3D9_State` leaves
+behind the wrapper under Direct3D 11.
+
+The two Modern pixel programs need shader model 5 (FXC refuses the dynamically indexed write that
+`waterRefractionHit`'s neighbour mask used to make, and that line is now a multiply both compilers
+take). At d3dcompiler_47's default optimisation each took 34 s (trapezoid 33.6, river 34.2), and
+`/O0` is no faster: the cost is the optimiser working through about 11 thousand instructions, most
+of them inlined copies of `oceanHash` (217) and `oceanNoise` (53). No loop attribute, table or
+precision flag moves it. They now compile with `D3DCOMPILE_SKIP_OPTIMIZATION`
+(`DX11_MODERN_WATER_COMPILE_FLAGS`), 6.0 and 5.5 s, and the flags join the cache key only when set,
+so no other program's key changed. `test_dx11backend` went from 89 s to 20 s. The driver optimises
+the bytecode again: over six interleaved warm runs of the shore view below the frame was 0.8 ms
+slower on average, inside the ±3 ms the same exe moved between runs, and the frame-600 picture
+against the optimised build's has 23 pixels past a difference of 24, against 162 between two runs
+of the optimised one. The water vertex program (0.6 s) and the FFT passes (32 ms at most) keep the
+default. The Modern programs are not in `dx11shaders.shipped`; recording them is open.
+
+Measured on 2026-10-23, Release, 1280x720 windowed, `-noFPSLimit -msaa 0`, the same Bombardment
+Beach skirmish: with the shore in view the frame is 4.44 ms mean (p99 10.25) on Classic and 17.63
+ms (p99 25.75) on Modern; with the camera inland at 1000,1850, 5.28 against 12.49 ms. The log's
+`-dx11 water:` line counted 1400 Modern draws, all displaced by the GPU ocean, and no refused draw.
+The Linux side of the shared changes (`engineshader.cpp`, `WaterShoreOverlay.h`, `test_shader_sdl.cpp`,
+the gate swap) has not been compiled.

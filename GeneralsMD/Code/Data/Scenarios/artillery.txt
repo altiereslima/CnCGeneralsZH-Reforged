@@ -1,0 +1,55 @@
+# Artillery on a fixed flight time: each gun shoots near, mid and far in its range, so the log shows
+# the same flight time and a different barrel pitch at each distance. A Fire Base takes no attack
+# order from a scenario and shoots the nearest enemy, so three of them each get a car at their own
+# distance: the Air Force one near, the plain one at a car and then something of the enemy's further
+# west, the Superweapon one far. The Inferno Cannon (range 50 to 300) shoots at 60, 140 and 235; the
+# Nuke Cannon (150 to 350) near, at 245 and 330; the demo battleship and the USS Bender each at a
+# far car and then a near one, both turrets at once. A Crusader keeps its straight shot. The numbers
+# are only in the log with a temporary trace at launch and at detonation in DumbProjectileBehavior.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 2600
+#     -scenario artillery -logPrefix artillery_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  AmericaFireBase                1   500 1500
+30    spawn      1  CarCompact                     1   630 1500
+30    spawn      0  AmericaPowerPlant              1   650 1400
+30    spawn      0  AirF_AmericaFireBase           1   1050 1400
+30    spawn      1  CarLimo1                       1   1050 1495
+30    spawn      0  SupW_AmericaFireBase           1   250 1400
+30    spawn      1  CarLimo2                       1   250 1150
+30    spawn      0  ChinaVehicleInfernoCannon      1   560 650
+30    spawn      1  CarTaxiCab01                   1   630 650
+30    spawn      1  CarTaxiCab02                   1   720 650
+30    spawn      1  CarTaxiCab04                   1   810 650
+30    spawn      0  ChinaVehicleNukeLauncher       1   500 800
+30    spawn      1  CarBug1                        1   690 770
+30    spawn      1  CarBug3                        1   700 740
+30    spawn      1  CarCamaro                      1   750 800
+30    spawn      1  CarSport01                     1   840 800
+30    spawn      0  AmericaVehicleBattleShipDemo   1   1400 1550
+30    spawn      1  CarLuxury01                    1   1000 1250
+30    spawn      1  CarLuxury02                    1   1200 1350
+30    spawn      0  AmericaVehicleBattleShipUSSBender 1 1400 1100
+30    spawn      1  CarBug2                        1   1000 1000
+30    spawn      1  CarSport02                     1   1150 950
+30    spawn      0  AmericaTankCrusader            1   500 500
+30    spawn      1  AmericaVehicleDozer            1   630 500
+
+60    attack     0  ChinaVehicleInfernoCannon      1  CarTaxiCab01
+60    attack     0  ChinaVehicleNukeLauncher       1  CarBug1
+60    attack     0  AmericaVehicleBattleShipDemo   1  CarLuxury01
+60    attack     0  AmericaVehicleBattleShipUSSBender 1 CarBug2
+60    attack     0  AmericaTankCrusader            1  AmericaVehicleDozer
+260   attack     0  ChinaVehicleNukeLauncher       1  CarBug3
+460   attack     0  ChinaVehicleInfernoCannon      1  CarTaxiCab02
+470   move       1  CarTaxiCab02                   760 520
+500   move       1  CarLimo2                       400 1150
+460   attack     0  ChinaVehicleNukeLauncher       1  CarCamaro
+460   attack     0  AmericaVehicleBattleShipDemo   1  CarLuxury02
+460   attack     0  AmericaVehicleBattleShipUSSBender 1 CarSport02
+860   attack     0  ChinaVehicleInfernoCannon      1  CarTaxiCab04
+860   attack     0  ChinaVehicleNukeLauncher       1  CarSport01

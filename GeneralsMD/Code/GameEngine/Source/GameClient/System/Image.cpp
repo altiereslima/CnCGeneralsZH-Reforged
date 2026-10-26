@@ -54,6 +54,7 @@ const FieldParse Image::m_imageFieldParseTable[] =
 	{ "TextureHeight",	INI::parseInt,											NULL, 		offsetof( Image, m_textureSize.y ) },
 	{ "Coords",					Image::parseImageCoords,						NULL, 		offsetof( Image, m_UVCoords ) },
 	{ "Status",					Image::parseImageStatus,						NULL, 		offsetof( Image, m_status ) },
+	{ "DisplayHeight",	INI::parseInt,											NULL, 		offsetof( Image, m_displayHeight ) },
 
 	{ NULL,							NULL,																NULL, 		0 }
 
@@ -158,6 +159,7 @@ Image::Image( void )
 	m_imageSize.y = 0;
 	m_rawTextureData = NULL;
 	m_status = IMAGE_STATUS_NONE;
+	m_displayHeight = 0;
 
 }  // end Image
 

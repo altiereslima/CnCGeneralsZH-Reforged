@@ -19,6 +19,7 @@
 // Pipelines and samplers on SDL3 GPU (decision 7, phase A3c).  See SdlPipelineCache.h.
 
 #include "SdlPipelineCache.h"
+#include "SdlSunShadowDebug.h"
 #include "SdlCreationLog.h"
 
 #include <SDL3/SDL.h>
@@ -312,7 +313,7 @@ SdlPipelineCache::~SdlPipelineCache()
 	}
 }
 
-SDL_GPUGraphicsPipeline *SdlPipelineCache::Pipeline(const SdlPipelineKey &key)
+SDL_GPUGraphicsPipeline *SdlPipelineCache::Pipeline(const SdlPipelineKey &key, bool sunReceiver)
 {
 	if (LastPipeline != NULL && memcmp(&key, &LastKey, sizeof(key)) == 0) {
 		return LastPipeline;
@@ -388,12 +389,14 @@ SDL_GPUGraphicsPipeline *SdlPipelineCache::Pipeline(const SdlPipelineKey &key)
 			info.depth_stencil_state.compare_mask = key.StencilRead;
 			info.depth_stencil_state.write_mask = key.StencilWrite;
 		}
-		info.target_info.color_target_descriptions = &target;
-		info.target_info.num_color_targets = 1;
+		info.target_info.color_target_descriptions = key.ColourFormat ? &target : NULL;
+		info.target_info.num_color_targets = key.ColourFormat ? 1 : 0;
 		info.target_info.has_depth_stencil_target = key.DepthFormat != 0;
 		info.target_info.depth_stencil_format = (SDL_GPUTextureFormat)key.DepthFormat;
 		const double started = Sdl_Creation_Log_Asked() ? Sdl_Now_Ms() : 0.0;
-		pipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		if (sunReceiver && Sdl_Sun_Shadow_Fault("receiver-pipeline"))
+			SDL_SetError("injected sun receiver pipeline failure");
+		else pipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
 		if (Sdl_Creation_Log_Asked()) {
 			char detail[96];
 			snprintf(detail, sizeof(detail), "#%u, %u attributes, blend %u, depth %u/%u", Built + 1, layout.AttributeCount,

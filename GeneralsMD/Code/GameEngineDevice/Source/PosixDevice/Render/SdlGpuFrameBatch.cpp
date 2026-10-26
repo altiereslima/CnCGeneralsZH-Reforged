@@ -96,15 +96,16 @@ void SdlGpuFrame::Queue_Texture_Upload(SDL_GPUTexture * texture, unsigned int le
 	Uploads.push_back(upload);
 }
 
-uint32_t SdlGpuFrame::Constants(unsigned int stage, const void * bytes, uint32_t size)
+uint32_t SdlGpuFrame::Constants(unsigned int stage, const void * bytes, uint32_t size, unsigned int slot)
 {
-	if (LastConstantsSize[stage] == size && memcmp(&ConstantBytes[LastConstants[stage]], bytes, size) == 0) {
-		return LastConstants[stage];
+	SDL_assert(stage<2 && slot<SdlRecordedDraw::MAXIMUM_UNIFORM_SLOTS && bytes!=NULL && size>0);
+	if (LastConstantsSize[stage][slot] == size && memcmp(&ConstantBytes[LastConstants[stage][slot]], bytes, size) == 0) {
+		return LastConstants[stage][slot];
 	}
 	uint32_t offset = 0;
 	memcpy(grow(ConstantBytes, size, offset), bytes, size);
-	LastConstants[stage] = offset;
-	LastConstantsSize[stage] = size;
+	LastConstants[stage][slot] = offset;
+	LastConstantsSize[stage][slot] = size;
 	return offset;
 }
 
@@ -114,6 +115,8 @@ void SdlGpuFrame::Clear_Rect(int x, int y, int width, int height, bool colour, b
 	if ((!colour && !depth && !stencil) || width <= 0 || height <= 0) {
 		return;
 	}
+	const SdlTarget target = TargetSet ? CurrentTarget : Back_Buffer_Target();
+	Invalidate_Water_Snapshots(colour ? target.Colour : NULL, depth ? target.Depth : NULL);
 	Command command;
 	memset(&command, 0, sizeof(command));
 	command.IsRect = true;
@@ -204,13 +207,25 @@ void SdlGpuFrame::Record_Draw(const SdlRecordedDraw & draw)
 
 void SdlGpuFrame::Release_After_Batch(SDL_GPUTexture * texture, SDL_GPUBuffer * buffer)
 {
-	if (texture != NULL) DeadTextures.push_back(texture);
+	if (texture != NULL) {
+		// Forget source identities before SDL can recycle their handles. A queued snapshot/draw keeps
+		// its textures alive through the same submission; SDL retires them after GPU completion.
+		for (size_t i = WaterSnapshots.size(); i-- > 0; ) {
+			const WaterSnapshot &snapshot = WaterSnapshots[i];
+			if (snapshot.Source.Colour == texture || snapshot.Source.Depth == texture) {
+				if (snapshot.Colour) DeadTextures.push_back(snapshot.Colour);
+				if (snapshot.Depth) DeadTextures.push_back(snapshot.Depth);
+				WaterSnapshots.erase(WaterSnapshots.begin() + i);
+			}
+		}
+		DeadTextures.push_back(texture);
+	}
 	if (buffer != NULL) DeadBuffers.push_back(buffer);
 }
 
 bool SdlGpuFrame::Batch_Is_Full()
 {
-	if (StreamBytes.size() + UploadBytes.size() > BATCH_LIMIT) {
+	if (StreamBytes.size() + UploadBytes.size() + ConstantBytes.size() > BATCH_LIMIT) {
 		return true;
 	}
 	if (BatchDrawLimit > 0 && Draws.size() >= BatchDrawLimit) {
@@ -228,7 +243,7 @@ void SdlGpuFrame::End_Batch()
 	StreamBytes.clear();
 	UploadBytes.clear();
 	ConstantBytes.clear();
-	LastConstants[0] = LastConstants[1] = LastConstantsSize[0] = LastConstantsSize[1] = 0;
+	memset(LastConstants,0,sizeof(LastConstants));memset(LastConstantsSize,0,sizeof(LastConstantsSize));
 	Uploads.clear();
 	// The batch that could use these has been submitted: SDL keeps each until the GPU is done with it.
 	for (size_t i = 0; i < DeadTextures.size(); ++i) SDL_ReleaseGPUTexture(GpuDevice, DeadTextures[i]);
@@ -341,16 +356,26 @@ bool SdlGpuFrame::Begin_Pass(SDL_GPUCommandBuffer * commands, const SdlTarget & 
 	depth.clear_stencil = (Uint8)stencil_value;
 	depth.load_op = clear_depth ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 	depth.store_op = SDL_GPU_STOREOP_STORE;
-	depth.stencil_load_op = clear_stencil ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
-	depth.stencil_store_op = SDL_GPU_STOREOP_STORE;
-	*pass = SDL_BeginGPURenderPass(commands, &colour, 1, &depth);
+	const unsigned format = Target_Depth_Format(target);
+	const bool has_stencil = format == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT
+		|| format == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+	depth.stencil_load_op = !has_stencil ? SDL_GPU_LOADOP_DONT_CARE
+		: clear_stencil ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+	depth.stencil_store_op = has_stencil ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
+	*pass = SDL_BeginGPURenderPass(commands, target.Colour ? &colour : NULL, target.Colour ? 1 : 0,
+		target.Depth ? &depth : NULL);
 	return *pass != NULL;
 }
 
 SdlTarget SdlGpuFrame::Back_Buffer_Target() const
 {
-	SdlTarget target = { BackBuffer, DepthStencil, BackWidth, BackHeight };
+	SdlTarget target = { BackBuffer, DepthStencil, BackWidth, BackHeight, DepthFormat };
 	return target;
+}
+
+unsigned int SdlGpuFrame::Target_Depth_Format(const SdlTarget &target) const
+{
+	return target.Depth ? (target.DepthFormat ? target.DepthFormat : DepthFormat) : 0;
 }
 
 void SdlGpuFrame::Set_Target(const SdlTarget & target)
@@ -363,7 +388,8 @@ uint32_t SdlGpuFrame::Target_Index()
 {
 	const SdlTarget target = TargetSet ? CurrentTarget : Back_Buffer_Target();
 	for (size_t i = Targets.size(); i-- > 0; ) {
-		if (Targets[i].Colour == target.Colour && Targets[i].Depth == target.Depth) {
+		if (Targets[i].Colour == target.Colour && Targets[i].Depth == target.Depth
+			&& Targets[i].DepthFormat == target.DepthFormat && Targets[i].Width == target.Width && Targets[i].Height == target.Height) {
 			return (uint32_t)i;
 		}
 	}
@@ -385,7 +411,7 @@ SDL_GPUTexture * SdlGpuFrame::Depth_For(unsigned int width, unsigned int height)
 	SDL_zero(info);
 	info.type = SDL_GPU_TEXTURETYPE_2D;
 	info.format = (SDL_GPUTextureFormat)DepthFormat;
-	info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+	info.usage = Depth_Usage();
 	info.width = width;
 	info.height = height;
 	info.layer_count_or_depth = 1;
@@ -401,6 +427,7 @@ SDL_GPUTexture * SdlGpuFrame::Depth_For(unsigned int width, unsigned int height)
 void SdlGpuFrame::Record_Blit(SDL_GPUTexture * source, const int32_t source_rect[4], SDL_GPUTexture * destination,
 	const int32_t destination_rect[4], bool linear)
 {
+	Invalidate_Water_Snapshots(destination, NULL);
 	Command command;
 	memset(&command, 0, sizeof(command));
 	command.IsBlit = true;
@@ -429,20 +456,23 @@ bool SdlGpuFrame::Record_Passes(SDL_GPUCommandBuffer * commands, SDL_GPUBuffer *
 	// What the pass has bound, to bind only a change.  Pushed uniforms outlive a pass (SDL3 keeps them for
 	// the rest of the command buffer), so those are tracked for the whole batch.
 	const SdlRecordedDraw * last = NULL;
-	uint32_t pushed_vertex = 0xFFFFFFFFu, pushed_pixel = 0xFFFFFFFFu;
+	uint32_t pushed_vertex = 0xFFFFFFFFu, pushed_water_vertex = 0xFFFFFFFFu, pushed_pixel = 0xFFFFFFFFu;
+	uint32_t pushed_water_pixel[SdlRecordedDraw::WATER_PIXEL_BLOCKS];
+	memset(pushed_water_pixel,0xFF,sizeof(pushed_water_pixel));
 
 	for (size_t i = 0; i <= Commands.size(); ++i) {
 		const bool end = i == Commands.size();
 		const Command * command = end ? NULL : &Commands[i];
-		const bool whole_clear = !end && !command->IsDraw && !command->IsRect && !command->IsBlit;
+		const bool transfer = !end && (command->IsBlit || command->IsDepthSnapshot);
+		const bool whole_clear = !end && !command->IsDraw && !command->IsRect && !transfer;
 
 		// A pass ends at a blit, at a whole-target clear, at a change of target, and at the end.
-		if (pass != NULL && (end || command->IsBlit || whole_clear || command->Target != pass_target)) {
+		if (pass != NULL && (end || transfer || whole_clear || command->Target != pass_target)) {
 			SDL_EndGPURenderPass(pass);
 			pass = NULL;
 		}
 		// A waiting clear whose target is not the next thing drawn into gets a pass of its own.
-		if (pending && (end || command->IsBlit || command->Target != pending_target)) {
+		if (pending && (end || transfer || command->Target != pending_target)) {
 			if (!Begin_Pass(commands, Targets[pending_target], clear_colour, clear_depth, clear_stencil, argb, z,
 				stencil_value, &pass)) {
 				return false;
@@ -453,6 +483,11 @@ bool SdlGpuFrame::Record_Passes(SDL_GPUCommandBuffer * commands, SDL_GPUBuffer *
 		}
 		if (end) {
 			break;
+		}
+		if (command->IsDepthSnapshot) {
+			if (!Resolve_Scene_Depth(commands, command->BlitSource, command->BlitDestination,
+				(unsigned int)command->Rect[2], (unsigned int)command->Rect[3])) return false;
+			continue;
 		}
 		if (command->IsBlit) {
 			SDL_GPUBlitInfo blit;
@@ -512,7 +547,8 @@ bool SdlGpuFrame::Record_Passes(SDL_GPUCommandBuffer * commands, SDL_GPUBuffer *
 			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 			// Everything the draws set is the clear's now: the next draw binds it all again.
 			last = NULL;
-			pushed_vertex = pushed_pixel = 0xFFFFFFFFu;
+			pushed_vertex = pushed_water_vertex = pushed_pixel = 0xFFFFFFFFu;
+			memset(pushed_water_pixel,0xFF,sizeof(pushed_water_pixel));
 			continue;
 		}
 		const SdlRecordedDraw & draw = Draws[Commands[i].Draw];
@@ -558,13 +594,33 @@ bool SdlGpuFrame::Record_Passes(SDL_GPUCommandBuffer * commands, SDL_GPUBuffer *
 			}
 			SDL_BindGPUFragmentSamplers(pass, 0, bindings, draw.SamplerCount);
 		}
+		if (draw.VertexSamplerCount > 0 && (last == NULL || last->VertexSamplerCount != draw.VertexSamplerCount
+			|| memcmp(last->VertexTextures, draw.VertexTextures, sizeof(draw.VertexTextures[0]) * draw.VertexSamplerCount) != 0
+			|| memcmp(last->VertexSamplers, draw.VertexSamplers, sizeof(draw.VertexSamplers[0]) * draw.VertexSamplerCount) != 0)) {
+			SDL_GPUTextureSamplerBinding bindings[SdlRecordedDraw::MAXIMUM_SAMPLERS];
+			for (uint32_t slot = 0; slot < draw.VertexSamplerCount; ++slot) {
+				bindings[slot].texture = draw.VertexTextures[slot];
+				bindings[slot].sampler = draw.VertexSamplers[slot];
+			}
+			SDL_BindGPUVertexSamplers(pass, 0, bindings, draw.VertexSamplerCount);
+		}
 		if (draw.VertexConstantsSize != 0 && draw.VertexConstants != pushed_vertex) {
 			SDL_PushGPUVertexUniformData(commands, 0, &ConstantBytes[draw.VertexConstants], draw.VertexConstantsSize);
 			pushed_vertex = draw.VertexConstants;
 		}
+		if (draw.VertexWaterConstantsSize != 0 && draw.VertexWaterConstants != pushed_water_vertex) {
+			SDL_PushGPUVertexUniformData(commands, 1, &ConstantBytes[draw.VertexWaterConstants], draw.VertexWaterConstantsSize);
+			pushed_water_vertex = draw.VertexWaterConstants;
+		}
 		if (draw.PixelConstantsSize != 0 && draw.PixelConstants != pushed_pixel) {
 			SDL_PushGPUFragmentUniformData(commands, 0, &ConstantBytes[draw.PixelConstants], draw.PixelConstantsSize);
 			pushed_pixel = draw.PixelConstants;
+		}
+		for(unsigned block=0;block<SdlRecordedDraw::WATER_PIXEL_BLOCKS;++block) {
+			if(draw.PixelWaterConstantsSize[block]!=0 && draw.PixelWaterConstants[block]!=pushed_water_pixel[block]) {
+				SDL_PushGPUFragmentUniformData(commands,block+1,&ConstantBytes[draw.PixelWaterConstants[block]],draw.PixelWaterConstantsSize[block]);
+				pushed_water_pixel[block]=draw.PixelWaterConstants[block];
+			}
 		}
 		if (draw.IndexSize != 0) {
 			SDL_DrawGPUIndexedPrimitives(pass, draw.Count, 1, draw.First, draw.BaseVertex, 0);

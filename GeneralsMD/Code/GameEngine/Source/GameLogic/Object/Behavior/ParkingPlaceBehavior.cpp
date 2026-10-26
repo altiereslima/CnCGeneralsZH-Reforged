@@ -31,7 +31,9 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 #include "Common/CRCDebug.h"
+#include "Common/Player.h"
 #include "Common/Xfer.h"
+#include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
 #include "GameClient/Drawable.h"
 #include "GameLogic/AI.h"
@@ -43,7 +45,8 @@
 #include "GameLogic/Module/JetAIUpdate.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/TerrainLogic.h"
-#include "Common/Team.h" 
+#include "GameLogic/Weapon.h"
+#include "Common/Team.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -66,6 +69,7 @@ ParkingPlaceBehavior::ParkingPlaceBehavior( Thing *thing, const ModuleData* modu
 	//
 
 	m_heliRallyPointExists = FALSE;
+	m_nextScrambleFrame = 0;
 	m_nextHealFrame = FOREVER;
 	setWakeFrame(getObject(), UPDATE_SLEEP_NONE);
 }
@@ -691,7 +695,124 @@ void ParkingPlaceBehavior::killAllParkedUnits()
 //-------------------------------------------------------------------------------------------------
 void ParkingPlaceBehavior::onDie( const DamageInfo *damageInfo )
 {
+	m_scrambles.clear();
 	killAllParkedUnits();
+}
+
+//-------------------------------------------------------------------------------------------------
+// the old owner's scramble was aimed at the old owner's enemies
+void ParkingPlaceBehavior::onCapture( Player *oldOwner, Player *newOwner )
+{
+	if( !m_scrambles.empty() )
+		holdHangarDoorsOpen( false );
+	m_scrambles.clear();
+}
+
+//-------------------------------------------------------------------------------------------------
+// one scrambled jet every this many frames, the runways in turn, so each runway sends one every
+// half second and a jet is 15 down its runway, about a drone's length, when the next one starts
+const UnsignedInt SCRAMBLE_INTERVAL_FRAMES = LOGICFRAMES_PER_SECOND / 4;
+// the model's hangars: the first rows of spaces, one hangar to a runway in each row
+const Int HANGAR_ROWS = 2;
+// a hangar turned more than 60 degrees off its runway is a side shed with no door (the second
+// hangar of the Chinese field's runway 2): a jet would appear in its open bay and pivot onto the
+// runway, so that runway's jets all come out of its other hangar
+const Real HANGAR_FACING_MIN_COS = 0.5f;
+// the hangar doors take two seconds to open; the first jet rolls when they are half way
+const UnsignedInt HANGAR_DOOR_LEAD_FRAMES = LOGICFRAMES_PER_SECOND;
+
+//-------------------------------------------------------------------------------------------------
+/// hold every hangar door open, or let go of those no jet holds a space behind
+void ParkingPlaceBehavior::holdHangarDoorsOpen( Bool hold )
+{
+	ProductionUpdateInterface* pu = getObject()->getProductionUpdateInterface();
+	const Int hangars = HANGAR_ROWS * (Int)m_runways.size();
+	for( Int i = 0; i < hangars; ++i )
+	{
+		if( hold || m_spaces[ i ].m_objectInSpace == INVALID_ID )
+			pu->setHoldDoorOpen( m_spaces[ i ].m_door, hold );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+void ParkingPlaceBehavior::scramble( const ThingTemplate *jet, ObjectID target, const Coord3D *pos )
+{
+	if( m_scrambles.empty() )
+	{
+		holdHangarDoorsOpen( true );
+		m_nextScrambleFrame = TheGameLogic->getFrame() + HANGAR_DOOR_LEAD_FRAMES;
+	}
+	ScrambleInfo info;
+	info.m_jet = jet;
+	info.m_target = target;
+	info.m_pos = *pos;
+	m_scrambles.push_back( info );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The next scrambled jet, when its turn has come: it comes out of one of its runway's two hangars,
+	* whose doors the swarm holds open, and starts its takeoff roll at once (JetAIUpdate::
+	* friend_takeOffNow), straight out of the door onto the runway, with no taxi or queue for the
+	* runway, so a swarm is in the air within seconds rather than four at a time out of the hangars.
+	* The runways take turns by the count left, and a runway's hangars by the count after that, a side
+	* shed that does not face down its runway left out; a jet
+	* holds one of the spaces, the runway's, until it is airborne; the field has a space for every jet
+	* of a swarm. */
+//-------------------------------------------------------------------------------------------------
+void ParkingPlaceBehavior::launchScramble()
+{
+	UnsignedInt now = TheGameLogic->getFrame();
+	if( m_scrambles.empty() || now < m_nextScrambleFrame )
+		return;
+
+	const Int runway = (Int)m_scrambles.size() % (Int)m_runways.size();
+	ParkingPlaceInfo* space = NULL;
+	for( std::vector<ParkingPlaceInfo>::iterator it = m_spaces.begin(); it != m_spaces.end(); ++it )
+	{
+		if( it->m_runway == runway && it->m_objectInSpace == INVALID_ID && !it->m_reservedForExit )
+		{
+			space = &(*it);
+			break;
+		}
+	}
+	if( space == NULL )
+		return;
+
+	const ScrambleInfo& next = m_scrambles.front();
+	Object *jet = TheThingFactory->newObject( next.m_jet, getObject()->getControllingPlayer()->getDefaultTeam() );
+	jet->setProducer( getObject() );
+	space->m_objectInSpace = jet->getID();
+	Int hangarRow = ( (Int)m_scrambles.size() / (Int)m_runways.size() ) % HANGAR_ROWS;
+	const RunwayInfo& strip = m_runways[ runway ];
+	Coord3D along;
+	along.set( strip.m_end.x - strip.m_start.x, strip.m_end.y - strip.m_start.y, 0.0f );
+	const Real hangarOrient = m_spaces[ hangarRow * (Int)m_runways.size() + runway ].m_hangarStartOrient;
+	if( Cos( hangarOrient ) * along.x + Sin( hangarOrient ) * along.y < HANGAR_FACING_MIN_COS * along.length() )
+		hangarRow = ( hangarRow + 1 ) % HANGAR_ROWS;
+	const ParkingPlaceInfo& hangar = m_spaces[ hangarRow * (Int)m_runways.size() + runway ];
+	jet->setPosition( &hangar.m_hangarStart );
+	jet->setOrientation( hangar.m_hangarStartOrient );
+	TheAI->pathfinder()->addObjectToPathfindMap( jet );
+
+	JetAIUpdate *jetAI = jet->getAIUpdateInterface()->getJetAIUpdate();
+	jetAI->friend_setKamikazeArea( &next.m_pos );
+	// a script's order: a human player's unit given CMD_FROM_AI will not fly out of its sight to chase
+	// (AIAttackApproachTargetState), and this target is a map away. On the ground the jet keeps it as
+	// its pending command and flies it once airborne.
+	Object *target = TheGameLogic->findObjectByID( next.m_target );
+	if( target && !target->isEffectivelyDead() )
+		jetAI->aiAttackObject( target, NO_MAX_SHOTS_LIMIT, CMD_FROM_SCRIPT );
+	else
+		jetAI->aiAttackPosition( &next.m_pos, NO_MAX_SHOTS_LIMIT, CMD_FROM_SCRIPT );
+	jetAI->friend_takeOffNow();
+	DEBUG_LOG(( "SCRAMBLE frame %d '%s' %d from hangar %d down runway %d at %d (%.0f,%.0f), %d to go\n", now,
+		next.m_jet->getName().str(), jet->getID(), hangarRow, runway, next.m_target, next.m_pos.x, next.m_pos.y,
+		(Int)m_scrambles.size() - 1 ));
+
+	m_scrambles.pop_front();
+	m_nextScrambleFrame = now + SCRAMBLE_INTERVAL_FRAMES;
+	if( m_scrambles.empty() )
+		holdHangarDoorsOpen( false );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -703,6 +824,7 @@ UpdateSleepTime ParkingPlaceBehavior::update()
 	// there are generally at most only a few airfields at any given time.
 	buildInfo();
 	purgeDead();
+	launchScramble();
 
 	UnsignedInt now = TheGameLogic->getFrame();
 	if (now >= m_nextHealFrame)
@@ -932,14 +1054,15 @@ void ParkingPlaceBehavior::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 4: the scramble queue */
 // ------------------------------------------------------------------------------------------------
 void ParkingPlaceBehavior::xfer( Xfer *xfer )
 {
 	Int i;
 
 	// version
-	const XferVersion currentVersion = 3;
+	const XferVersion currentVersion = 4;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1105,6 +1228,37 @@ void ParkingPlaceBehavior::xfer( Xfer *xfer )
 		if (xfer->getXferMode() == XFER_LOAD)
 		{
 			m_nextHealFrame = 0;
+		}
+	}
+
+	if (version >= 4)
+	{
+		xfer->xferUnsignedInt(&m_nextScrambleFrame);
+		Int scrambleCount = (Int)m_scrambles.size();
+		xfer->xferInt(&scrambleCount);
+		if (xfer->getXferMode() == XFER_SAVE)
+		{
+			for (std::list<ScrambleInfo>::iterator it = m_scrambles.begin(); it != m_scrambles.end(); ++it)
+			{
+				AsciiString name = it->m_jet->getName();
+				xfer->xferAsciiString(&name);
+				xfer->xferObjectID(&it->m_target);
+				xfer->xferCoord3D(&it->m_pos);
+			}
+		}
+		else if (xfer->getXferMode() == XFER_LOAD)
+		{
+			m_scrambles.clear();
+			for (i = 0; i < scrambleCount; ++i)
+			{
+				AsciiString name;
+				ScrambleInfo info;
+				xfer->xferAsciiString(&name);
+				xfer->xferObjectID(&info.m_target);
+				xfer->xferCoord3D(&info.m_pos);
+				info.m_jet = TheThingFactory->findTemplate(name);
+				m_scrambles.push_back(info);
+			}
 		}
 	}
 

@@ -1071,7 +1071,7 @@ void PointGroupClass::Reserve_Sorted_Billboards(int quads, SortingBillboardRange
  * the same Insert_Quads, from a range the jobs have already written.      *
  *========================================================================*/
 void PointGroupClass::Insert_Sorted_Billboards(SortingBillboardRange *range, int quads,
-	TextureClass *texture, const ShaderClass &shader, bool glow)
+	TextureClass *texture, const ShaderClass &shader, bool glow, bool fire, bool emissive)
 {
 	if (quads > 0)
 	{
@@ -1095,7 +1095,7 @@ void PointGroupClass::Insert_Sorted_Billboards(SortingBillboardRange *range, int
 		const unsigned short vertices=(unsigned short)(quads*4);
 		DX8Wrapper::Set_Index_Buffer(SortingQuads, 0);
 		DX8Wrapper::Set_Sorting_Vertex_Range(range->Array, range->Offset, vertices);
-		SortingRendererClass::Insert_Quads((unsigned short)quads, 0, vertices, glow);
+		SortingRendererClass::Insert_Quads((unsigned short)quads, 0, vertices, glow, fire, emissive);
 
 		DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
 	}

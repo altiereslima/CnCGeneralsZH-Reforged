@@ -1,0 +1,25 @@
+# Big alpha smoke puffs filling the screen, the fill-bound load for the GPU particle path.
+#
+# 1000 copies of BurningBridgeBeam in a 32 by 32 block, 25 apart. It is a billboard ALPHA system
+# with no wind, no ground collision and no attached system, so it is GPU eligible, and its puffs
+# start 4 to 7 units across and grow to about 38 over a 100 retail frame (3.3 s) life, rising 10
+# units. Two a retail frame make about 200 live a copy and 200,000 in the block. The columns are
+# wider than the spacing, so the block is one overlapping sheet of smoke at 0.1 to 0.2 alpha.
+# A million puffs this size is far past any card's fill rate, so the count is lower than the
+# additive scene's on purpose; change the 1000 to move it.
+#
+# The copies start 3 to 60 retail frames apart (InitialDelay) and the count holds from about
+# frame 400. 200 is under the CPU renderer's 512 a system.
+#
+#   generals.exe -win -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -msaa 0 -noDynamicLOD -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2
+#     -takeover -seed 1 -maxframes 2400 -gpuparticles
+#     -scenario particles1m_smoke -camera 760 850 -logPrefix p1ms_
+#
+# With -gpuparticles the CPU keeps its usual cap and every eligible puff past it goes to the GPU
+# ring. The CPU baseline drops -gpuparticles and adds -particlecap 1100000 to hold the same count.
+# Grep the log for HEADLESS FRAMETIME, PARTICLECOST, the DX11 GPU line and GPUPARTICLES.
+#
+#   <frame> particles <slot> <particle system> <count> <x> <y> [spacing]
+
+30    particles  0  BurningBridgeBeam  1000  760 850  25

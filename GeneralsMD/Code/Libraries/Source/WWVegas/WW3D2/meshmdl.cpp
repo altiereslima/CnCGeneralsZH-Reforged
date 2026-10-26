@@ -74,7 +74,11 @@ MeshModelClass::MeshModelClass(void) :
 	AlternateMatDesc(NULL),
 	CurMatDesc(NULL),
 	MatInfo(NULL),
-	GapFiller(NULL)
+	GapFiller(NULL),
+	ShadowSkinSourceOffset(-1),
+	ShadowSkinSourceGeneration(0),
+	ShadowCasterPass(0),
+	ShadowCasterGroup(-1)
 {
 	Set_Flag(DIRTY_BOUNDS,true);
 
@@ -93,7 +97,11 @@ MeshModelClass::MeshModelClass(const MeshModelClass & that) :
 	CurMatDesc(NULL),
 	MatInfo(NULL),
 	GapFiller(NULL),
-	HasBeenInUse(false)
+	HasBeenInUse(false),
+	ShadowSkinSourceOffset(-1),
+	ShadowSkinSourceGeneration(0),
+	ShadowCasterPass(0),
+	ShadowCasterGroup(-1)
 {
 	DefMatDesc = W3DNEW MeshMatDescClass(*(that.DefMatDesc));
 	if (that.AlternateMatDesc != NULL) {
@@ -151,6 +159,7 @@ MeshModelClass & MeshModelClass::operator = (const MeshModelClass & that)
 			GapFiller=NULL;
 		}
 		if (that.GapFiller) GapFiller=W3DNEW GapFillerClass(*that.GapFiller);
+		ShadowSkinSourceOffset=-1;
 	}
 	return * this;
 }
@@ -167,6 +176,7 @@ void MeshModelClass::Reset(int polycount,int vertcount,int passcount)
 	// Release everything we have and reset to initial state
 
 	TheDX8MeshRenderer.Unregister_Mesh_Type(this);
+	ShadowSkinSourceOffset=-1;
 
 	MatInfo->Reset();
 	DefMatDesc->Reset(polycount,vertcount,passcount);

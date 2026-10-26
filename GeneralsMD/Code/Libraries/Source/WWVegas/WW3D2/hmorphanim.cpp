@@ -121,33 +121,37 @@ void TimeCodedMorphKeysClass::Get_Morph_Info(float morph_frame,int * pose_frame0
 
 uint32 TimeCodedMorphKeysClass::get_index(float frame)
 {
-	assert(CachedIdx <= (uint32)Keys.Count ()-1);
+	// the hint is read once and written whole: any index it holds finds the same interval
+	uint32 idx = CachedIdx.load(std::memory_order_relaxed);
+	assert(idx <= (uint32)Keys.Count ()-1);
 
-	float	cached_frame = Keys[CachedIdx].MorphFrame;
+	float	cached_frame = Keys[idx].MorphFrame;
 
 	// check if the requested time is in the cached interval or the following one
 	if (frame >= cached_frame) {
 
 		// special case for end packets
-		if (CachedIdx == (uint32)Keys.Count ()-1) return(CachedIdx);
-		
+		if (idx == (uint32)Keys.Count ()-1) return(idx);
+
 		// check if the requested time is still in the cached interval
-		if (frame < Keys[CachedIdx + 1].MorphFrame) return(CachedIdx);
+		if (frame < Keys[idx + 1].MorphFrame) return(idx);
 
 		// do one time look-ahead before reverting to a search
-		CachedIdx++;
-	
+		idx++;
+		CachedIdx.store(idx, std::memory_order_relaxed);
+
 		// again, special case the end interval
-		if (CachedIdx == (uint32)Keys.Count ()-1) return(CachedIdx);
+		if (idx == (uint32)Keys.Count ()-1) return(idx);
 
 		// check if requested time is in this interval
-		if (frame < Keys[CachedIdx + 1].MorphFrame) return(CachedIdx);
+		if (frame < Keys[idx + 1].MorphFrame) return(idx);
 	}
 
 	// nope, fall back to a binary search for the requested interval
-	CachedIdx = binary_search_index(frame);
+	idx = binary_search_index(frame);
+	CachedIdx.store(idx, std::memory_order_relaxed);
 
-	return(CachedIdx);
+	return(idx);
 }
 
 uint32 TimeCodedMorphKeysClass::binary_search_index(float req_frame)

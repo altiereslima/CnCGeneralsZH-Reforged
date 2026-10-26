@@ -69,11 +69,13 @@ static const char *const BASE_GAME_ARCHIVE = "Textures.big";
 // over; a copied-over install puts the same bigs in ZH_Generals next to the exe.  The First Decade
 // does the same with its own folder name, and registers the collection's root folder as the base
 // game's InstallPath, so a player on v2.0.1 got "no base game archives" with Generals one folder
-// over.
+// over.  The EA app and Origin spell it with "and", under one folder holding both games, and register
+// no InstallPath for it: three v3.2.0 reports from such installs stopped at "no base game archives".
 static const char *const BASE_GAME_DIRECTORIES[] = {
 	"ZH_Generals\\",
 	"..\\Command & Conquer Generals\\",
 	"..\\Command & Conquer(tm) Generals\\",
+	"..\\Command and Conquer Generals\\",
 };
 
 // The folder inside the First Decade's registered root that holds the base game.
@@ -210,6 +212,7 @@ void Win32BIGFileSystem::init() {
         // Zero Hour bigs already in the tree win over the base game's copies.
         DEBUG_LOG(("Win32BIGFileSystem::init - loading the base game's archives from '%s'\n", installPath.str()));
         loadBigFilesFromDirectory(installPath, "*.big");
+        m_baseGameDirectory = installPath;
       }
     }
 

@@ -132,12 +132,13 @@ static const Int CAMERA_STEP_MSEC = 1000/RETAIL_LOGICFRAMES_PER_SECOND;
 static const Int MAX_REQUEST_CACHE_SIZE = 40;	// Any size larger than 10, or examine code below for changes. jkmcd.
 static const Real DRAWABLE_OVERSCAN = 75.0f;  ///< 3D world coords of how much to overscan in the 3D screen region
 
-/* The drawables are drawn when W3D's clock has moved, which is once a logic frame: the clock stands still
-	 between ticks.  -recordfps moves it on every picture of a recorded frame, and a picture after the
-	 first has nothing new to draw them with; smooth motion moves the models for it. */
-static Bool drawsDrawables( void )
+/* A tick flushed after rendering can replace model poses with raw logic transforms. Recompose that
+	 new client state even when pause has frozen W3D's animation clock, retaining instance rocking and
+	 aircraft physics. Later -recordfps pictures still leave the models to smooth motion. */
+Bool W3DView::drawsDrawables( void )
 {
-	return WW3D::Get_Frame_Time() != 0 && GameEngine_videoPicture() == 0;
+	return m_drawableUpdate.needsUpdate(TheGameClient->getFrame(), WW3D::Get_Frame_Time() != 0,
+		GameEngine_videoPicture());
 }
 
 /* The camera's own clock: the wall clock, and while a -video range records the time of the picture
@@ -1262,6 +1263,7 @@ const Coord3D& W3DView::get3DCameraPosition() const
 void W3DView::reset( void )
 {
 	View::reset();
+	m_drawableUpdate.reset();
 	// the recording outlives its replays now (Display::replay); its strings go with Display::reset
 	m_postDraw.clear();
 
@@ -2179,7 +2181,7 @@ void W3DView::update(void)
 
 	// render all of the visible Drawables
 	/// @todo this needs to use a real region partition or something
-	if (drawsDrawables())	//make sure some time actually elapsed
+	if (drawsDrawables())
 		TheGameClient->iterateDrawablesInRegion( &axisAlignedRegion, drawDrawable, this );
 }
 

@@ -1,0 +1,27 @@
+# The GPU particle overflow footage: Scenarios/gpu1m_battle.txt on Twilight Flame (command line
+# there). HUD on from the start, because the info strip at the top right (hz, fps, Direct3D 11,
+# frame) is the point of the film; the edit crops the control bar off the bottom. One take from
+# 14 s to 54 s of the match, built on the verified views of the trailer_chaos fight (UI-MAP), each
+# with a move inside it:
+#   14.0  over the American column crossing the burning ground, pushing in and turning
+#   22.0  low from the north-east on the fight, swinging round (carpet bomb, Spectre)
+#   29.0  tr_chaos's view, pushing in as the beam (about 31 s), the nuke (about 33 s) and the Scuds
+#         (about 35 s) come down
+#   36.0  close on the impacts
+#   41.0  pulling back and orbiting the burning field to the end
+
+0.0   hud     on
+14.0  cut     1010 3590 0.9 -45 -10
+14.1  move    1075 3700 8
+14.1  zoom    0.75 8
+14.1  orbit   15 8
+22.0  cut     1075 3775 0.75 45 12
+22.1  orbit   -25 7
+29.0  cut     1075 3775 0.85 -45 0
+29.1  zoom    0.7 7
+29.1  orbit   20 7
+36.0  cut     1150 3760 0.6 -45 8
+36.1  zoom    0.5 5
+41.0  cut     1075 3775 0.8 135 -8
+41.1  orbit   40 13
+41.1  zoom    0.95 13

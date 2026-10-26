@@ -57,6 +57,8 @@ param(
 	# and skinning load has to be the same on both sides of the comparison or the number means
 	# nothing. The seed still varies the match.
 	[string] $Map = "",
+	# generate the maps in a shipped map's style, e.g. "twilight" (-randommap's last argument)
+	[string] $Style = "",
 	# first seed of the batch. A change tuned against seeds 0..23 has to be confirmed on seeds it
 	# was not tuned on, or the number is a fit to twenty-four maps rather than a result
 	[int] $SeedStart = 0,
@@ -131,6 +133,7 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	} else {
 		# a generated map is built in memory and written nowhere, so there is nothing to tidy up
 		$args += @("-randommap", $seed, $Players, $cells)
+		if ($Style) { $args += $Style }
 	}
 	$args += @(
 		"-autoskirmish", $Players,
@@ -217,8 +220,18 @@ foreach ($run in $started) {
 	$loss = @{}
 	$engage = @{}
 	$econ = [pscustomobject]@{ Reattach = 0; Waves = 0; Counter = 0 }
+	# production buildings each player put up, by kind (an arms dealer is GLA's war factory); a lost
+	# one put back counts again, so this is at least the most that ever stood at once
+	$factories = @{}
 
 	foreach ($line in Get-Content $log) {
+		if ($line -match "^AI BUILT frame \d+ player (\d+) '.*?(WarFactory|ArmsDealer|Barracks|Airfield)'") {
+			$p = [int]$Matches[1]
+			if (-not $factories.ContainsKey($p)) { $factories[$p] = @{ WarFactory = 0; Barracks = 0; Airfield = 0 } }
+			$kind = if ($Matches[2] -eq "ArmsDealer") { "WarFactory" } else { $Matches[2] }
+			$factories[$p][$kind]++
+			continue
+		}
 		if ($line -match "^AI LOSS frame \d+ player (\d+) .* (straggling|grouped|last), ") {
 			$p = [int]$Matches[1]
 			if (-not $loss.ContainsKey($p)) { $loss[$p] = @{ straggling = 0; grouped = 0; last = 0 } }
@@ -303,7 +316,7 @@ foreach ($run in $started) {
 	Write-Host ("{0}, {1}, frame {2}, {3:n0}s" -f $why, $winnerText, $frames, $wall)
 
 	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $wall; Slots = $slots; Pf = $pf; Perf = $perf; Jobs = $jobs; Ft = $ft; Spikes = $spikes
-		Value = $value; Loss = $loss; Engage = $engage; Econ = $econ; Winner = $winner }
+		Value = $value; Loss = $loss; Engage = $engage; Econ = $econ; Factories = $factories; Winner = $winner }
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -342,6 +355,23 @@ $summary = foreach ($p in $slotIds) {
 }
 if ($summary) { $summary | Format-Table -AutoSize | Out-String | Write-Host }
 
+# How many of each production building a player put up, the most in any one match of the batch:
+# a computer that stands one of each all match is short of factories (AIPlayer::addProductionForQueues).
+$factoryIds = $rows | ForEach-Object { if ($_.Factories) { $_.Factories.Keys } } | Sort-Object -Unique
+$factoryRows = foreach ($p in $factoryIds) {
+	$mine = @($rows | Where-Object { $_.Factories -and $_.Factories.ContainsKey($p) } | ForEach-Object { $_.Factories[$p] })
+	[pscustomobject]@{
+		Player        = $p
+		MaxWarFactory = ($mine | ForEach-Object { $_.WarFactory } | Measure-Object -Maximum).Maximum
+		MaxBarracks   = ($mine | ForEach-Object { $_.Barracks } | Measure-Object -Maximum).Maximum
+		MaxAirfield   = ($mine | ForEach-Object { $_.Airfield } | Measure-Object -Maximum).Maximum
+	}
+}
+if ($factoryRows) {
+	Write-Host "production buildings put up (AI BUILT), most in one match:"
+	$factoryRows | Format-Table -AutoSize | Out-String | Write-Host
+}
+
 # The exchange each side made, in money: lost over killed below 1 is a side that trades well. Team
 # deaths by how alone each one died, straggling being the one the AI could have prevented. What it
 # sent out and why, with the two odds it set off on.
@@ -370,7 +400,12 @@ $fights = foreach ($p in $fightIds) {
 if ($fights) {
 	Write-Host "fights (money; Strag% = team deaths with 2+ teammates alive and at most one within 300):"
 	$fights | Format-Table -AutoSize | Out-String -Width 400 | Write-Host
-	Write-Host ("economy per match: {0:n1} supply truck re-attaches, {1:n1} AI WAVE sends, {2:n1} AI COUNTER picks" -f
+	# "Re-attaching supply truck" is written only for a gatherer whose dock is gone or was never set:
+	# GLA workers back from building, a free Chinook, trucks of a lost center. A China against China
+	# match that loses no center writes none while it earns 80,000 a player, so the income is the
+	# number that says the trucks worked; the re-attaches say how many were orphaned.
+	Write-Host ("economy per match: {0:n0} earned a player, {1:n1} orphaned trucks re-docked, {2:n1} AI WAVE sends, {3:n1} AI COUNTER picks" -f
+		(($played | ForEach-Object { $_.Slots.Values } | Measure-Object Earned -Average).Average),
 		(($played | ForEach-Object { $_.Econ.Reattach } | Measure-Object -Average).Average),
 		(($played | ForEach-Object { $_.Econ.Waves } | Measure-Object -Average).Average),
 		(($played | ForEach-Object { $_.Econ.Counter } | Measure-Object -Average).Average))

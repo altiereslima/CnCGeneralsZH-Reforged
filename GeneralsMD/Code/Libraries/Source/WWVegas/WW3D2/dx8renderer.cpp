@@ -42,6 +42,7 @@
 //#define ENABLE_CATEGORY_LOG
 //#define ENABLE_STRIPING
 
+#include "Platform/SunShadow.h"
 #include "dx8renderer.h"
 #include "dx8wrapper.h"
 #include "dx8polygonrenderer.h"
@@ -64,6 +65,11 @@
 #include "stripoptimizer.h"
 #include "meshgeometry.h"
 #include "sortingrenderer.h"
+#include "htree.h"
+
+#include <algorithm>
+#include <tuple>
+#include <vector>
 
 /*
 ** Global Instance of the DX8MeshRender
@@ -1918,10 +1924,17 @@ void DX8TextureCategoryClass::Render(void)
 
 		// The object's look on the Direct3D 11 frame (RTS3DScene::renderOneObject picks it), for this
 		// mesh's draws only.  A sorted mesh draws later, from the sorting pool, which keeps the look
-		// with its triangles (SortingRendererClass::Insert_Triangles).
+		// with its triangles (SortingRendererClass::Insert_Triangles), and on Linux its sun shadow
+		// coverage too.
 		const unsigned draw_effect = mesh->Get_Draw_Effect();
 		if (draw_effect != 0) {
-			Direct3D11_Set_Draw_Effect(draw_effect, mesh->Get_Draw_Effect_Parameters());
+			SunShadow::SetCasterEffect(DX8Wrapper::_Get_D3D_Device(),draw_effect, mesh->Get_Draw_Effect_Parameters());
+		}
+		// A house colour mesh under the Team Glow option.  Immediate draws only: a sorted one draws later,
+		// after this has been put back, and goes without.
+		const bool team_glow = mesh->Peek_Model()->Get_Flag(MeshGeometryClass::TEAM_GLOW) != 0;
+		if (team_glow) {
+			Direct3D11_Set_Team_Glow(true);
 		}
 
 		if ((!!mesh->Peek_Model()->Get_Flag(MeshGeometryClass::SORT)) && WW3D::Is_Sorting_Enabled()) {
@@ -1980,7 +1993,10 @@ void DX8TextureCategoryClass::Render(void)
 		}
 		if (draw_effect != 0) {
 			static const float no_effect[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-			Direct3D11_Set_Draw_Effect(0, no_effect);
+			SunShadow::SetCasterEffect(DX8Wrapper::_Get_D3D_Device(),0, no_effect);
+		}
+		if (team_glow) {
+			Direct3D11_Set_Team_Glow(false);
 		}
 //--------------------------------------------------------------------
 		if (mesh->Get_ObjectScale() != 1.0f)
@@ -2217,6 +2233,532 @@ static void Render_FVF_Category_Container_List_Delayed_Passes(FVFCategoryList& l
 		it.Peek_Obj()->Render_Delayed_Procedural_Material_Passes();
 		it.Next();
 	}
+}
+
+// ---------------------------------------------------------------------------
+//
+// The sun's depth pass, instanced.  A texture category's walk sets a texture, a material, lights,
+// a world matrix and a shader for every piece of every caster, and the backend then builds and
+// compares a constant block and resolves a pipeline for each, all for a draw whose only output is
+// depth.  An opaque rigid caster's depth is its triangles through world, view and projection and
+// nothing else, so those are drawn here, one draw per piece of a model whatever the number of
+// copies in the sun's box.  An alpha tested one adds its texture's alpha test, and a skin is
+// skinned in the vertex program from its bind pose, uploaded once, and the pass's bones, so its
+// vertices are not deformed on the CPU for the pass at all.
+//
+// ---------------------------------------------------------------------------
+
+int DX8MeshRendererClass::Shadow_Lean_Draws = 0;
+int DX8MeshRendererClass::Shadow_Lean_Instances = 0;
+int DX8MeshRendererClass::Shadow_Lean_Alpha_Tested = 0;
+int DX8MeshRendererClass::Shadow_Lean_Skinned = 0;
+int DX8MeshRendererClass::Shadow_Old_Meshes[DX8MeshRendererClass::SHADOW_OLD_REASON_COUNT] = { 0 };
+
+void DX8MeshRendererClass::Reset_Shadow_Caster_Counts()
+{
+	Shadow_Lean_Draws = 0;
+	Shadow_Lean_Instances = 0;
+	Shadow_Lean_Alpha_Tested = 0;
+	Shadow_Lean_Skinned = 0;
+	memset(Shadow_Old_Meshes, 0, sizeof(Shadow_Old_Meshes));
+}
+
+const char * DX8MeshRendererClass::Shadow_Old_Reason_Name(int reason)
+{
+	static const char * const names[SHADOW_OLD_REASON_COUNT] = {
+		"sorted", "camera-facing", "draw-effect", "fading", "debug", "streaming", "skin-passes", "blended",
+		"alpha-test", "skin-alpha-test", "format", "no-base-pass", "refused"
+	};
+	return names[reason];
+}
+
+/* A pass groups the casters by model: the first instance of a model this pass works its pieces
+	 out (Describe_Shadow_Caster_Piece, its base pass pieces as runs) and every instance after it
+	 only joins the model's group.  Each piece of each model is then one run over the group's
+	 instances, which a counting sort by group lays out one after another. */
+struct ShadowCasterPiece
+{
+	TextureClass * Texture;				// stage 0 of an alpha tested piece, NULL otherwise
+	DX11ShadowCasterKind Kind;
+	DX11BufferTwinClass * Vertices;		// NULL for a skin, which reads the skin source
+	unsigned Stride;
+	unsigned TextureOffset;
+	DX11BufferTwinClass * Indices;
+	unsigned StartIndex;
+	unsigned IndexCount;
+	bool Strip;
+	bool Culled;
+	unsigned long DepthFunction;
+	DX8PolygonRendererClass * Renderer;
+};
+
+struct ShadowCasterGroup
+{
+	MeshModelClass * Model;
+	unsigned FirstPiece;
+	unsigned PieceCount;
+	unsigned InstanceCount;
+	unsigned FirstInstance;
+	unsigned BaseVertex;
+};
+
+struct ShadowCasterInstance
+{
+	MeshClass * Mesh;					// a reference each, as a render task holds
+	unsigned Group;
+	const float * World;				// the Matrix3D's rows, NULL for an identity world
+	unsigned FirstBone;
+};
+
+struct ShadowCasterRunEntry
+{
+	TextureClass * Texture;
+	unsigned Piece;
+	DX11ShadowCasterRun Run;
+};
+
+static unsigned _ShadowCasterPass = 1;
+static std::vector<ShadowCasterPiece> _ShadowCasterPieces;
+static std::vector<ShadowCasterGroup> _ShadowCasterGroups;
+static std::vector<ShadowCasterInstance> _ShadowCasterInstances;
+static std::vector<MeshClass *> _ShadowCasterOrdered;
+static std::vector<const float *> _ShadowCasterWorlds;
+static std::vector<unsigned> _ShadowCasterFirstBones;
+static std::vector<const float *> _ShadowCasterBones;
+static std::vector<DX11ShadowCasterRun> _ShadowCasterRuns;
+static std::vector<unsigned> _ShadowCasterRunPieces;
+static std::vector<ShadowCasterRunEntry> _ShadowCasterRunEntries;
+// The skeleton whose bones went in last, which the next skin of the same model reuses.
+static const HTreeClass * _ShadowCasterLastTree = NULL;
+static unsigned _ShadowCasterLastFirstBone = 0;
+static std::vector<DX11ShadowSkinVertex> _ShadowSkinVertices;
+
+static DX11BufferTwinClass * Shadow_Caster_Vertex_Twin(VertexBufferClass * buffer)
+{
+	if (buffer == NULL || buffer->Type() != BUFFER_TYPE_DX8) {
+		return NULL;
+	}
+	DX8VertexBufferClass * vertices = static_cast<DX8VertexBufferClass *>(buffer);
+	return (vertices->Get_DX8_Vertex_Buffer() != NULL) ? vertices->Get_DX11_Twin() : NULL;
+}
+
+static DX11BufferTwinClass * Shadow_Caster_Index_Twin(IndexBufferClass * buffer)
+{
+	if (buffer == NULL || buffer->Type() != BUFFER_TYPE_DX8) {
+		return NULL;
+	}
+	DX8IndexBufferClass * indices = static_cast<DX8IndexBufferClass *>(buffer);
+	return (indices->Get_DX8_Index_Buffer() != NULL) ? indices->Get_DX11_Twin() : NULL;
+}
+
+/* Whether an alpha tested piece's test is stage 0's texel alpha alone, which is all the lean pixel
+	 program reads: a plain texture through the material's own coordinates (no mapper), an alpha the
+	 stages take from the texture and the diffuse colour only, and a diffuse alpha of one, which is
+	 the material's opacity when it is lit from the material and a vertex colour's alpha otherwise,
+	 so a vertex colour has to stay out of it. */
+static bool Shadow_Caster_Alpha_Is_Texture(DX8TextureCategoryClass * category, const ShaderClass & shader,
+	unsigned fvf, unsigned & uv_set)
+{
+	VertexMaterialClass * material = const_cast<VertexMaterialClass *>(category->Peek_Material());
+	const ShaderClass::PriGradientType gradient = shader.Get_Primary_Gradient();
+	if (category->Peek_Texture(0) == NULL || shader.Get_Texturing() != ShaderClass::TEXTURING_ENABLE
+		|| (gradient != ShaderClass::GRADIENT_DISABLE && gradient != ShaderClass::GRADIENT_MODULATE
+			&& gradient != ShaderClass::GRADIENT_ADD && gradient != ShaderClass::GRADIENT_MODULATE2X)
+		|| shader.Get_Post_Detail_Alpha_Func() != ShaderClass::DETAILALPHA_DISABLE
+		|| (material != NULL && material->Peek_Mapper(0) != NULL)) {
+		return false;
+	}
+	// Lit, the diffuse alpha is the material's whenever the vertex has no colour to take it from,
+	// whatever source the material names (ffvertex.cpp falls back to MaterialDiffuse).
+	const bool lit = material != NULL && material->Get_Lighting() && !WW3D::Is_Coloring_Enabled();
+	const bool lit_from_material = lit && material->Get_Diffuse_Color_Source() == VertexMaterialClass::MATERIAL;
+	if ((lit && material->Get_Opacity() != 1.0f)
+		|| ((fvf & D3DFVF_DIFFUSE) != 0 && !lit_from_material)) {
+		return false;
+	}
+	uv_set = (material != NULL) ? (unsigned)material->Get_UV_Source(0) : 0;
+	const unsigned uv_sets = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+	const unsigned uv_format = (fvf >> (16 + uv_set * 2)) & 3;
+	return uv_set < uv_sets && uv_format == D3DFVF_TEXTUREFORMAT2;
+}
+
+/* One base pass piece of a model as a run, or the reason the model goes the old way. */
+static int Describe_Shadow_Caster_Piece(DX8PolygonRendererClass * renderer, bool skin,
+	ShadowCasterPiece & record)
+{
+	DX8TextureCategoryClass * category = renderer->Get_Texture_Category();
+	const ShaderClass shader = category->Get_Shader();
+	DX8FVFCategoryContainer * container = category->Get_Container();
+	if (shader.Get_Src_Blend_Func() != ShaderClass::SRCBLEND_ONE
+		|| shader.Get_Dst_Blend_Func() != ShaderClass::DSTBLEND_ZERO) {
+		return DX8MeshRendererClass::SHADOW_OLD_BLENDED;
+	}
+	const bool alpha_tested = shader.Get_Alpha_Test() != ShaderClass::ALPHATEST_DISABLE;
+	if (alpha_tested && skin) {
+		return DX8MeshRendererClass::SHADOW_OLD_SKIN_ALPHA_TEST;
+	}
+	record.Indices = Shadow_Caster_Index_Twin(container->Peek_Index_Buffer());
+	record.Texture = NULL;
+	record.TextureOffset = 0;
+	if (skin) {
+		// The skin source's vertices, which Flush_Shadow_Casters places; the indices are the
+		// model's own, the container having put every skin at vertex offset 0 (Add_Mesh).
+		record.Kind = DX11_SHADOW_CASTER_SKINNED;
+		record.Vertices = NULL;
+		record.Stride = 0;
+		if (record.Indices == NULL) {
+			return DX8MeshRendererClass::SHADOW_OLD_FORMAT;
+		}
+	} else {
+		VertexBufferClass * buffer = static_cast<DX8RigidFVFCategoryContainer *>(container)->Peek_Vertex_Buffer();
+		record.Kind = DX11_SHADOW_CASTER_RIGID;
+		record.Vertices = Shadow_Caster_Vertex_Twin(buffer);
+		if ((container->Get_FVF() & D3DFVF_POSITION_MASK) != D3DFVF_XYZ || record.Vertices == NULL
+			|| record.Indices == NULL) {
+			return DX8MeshRendererClass::SHADOW_OLD_FORMAT;
+		}
+		record.Stride = buffer->FVF_Info().Get_FVF_Size();
+		if (alpha_tested) {
+			unsigned uv_set = 0;
+			if (!Shadow_Caster_Alpha_Is_Texture(category, shader, container->Get_FVF(), uv_set)) {
+				return DX8MeshRendererClass::SHADOW_OLD_ALPHA_TEST;
+			}
+			record.Kind = DX11_SHADOW_CASTER_ALPHA_TESTED;
+			record.Texture = category->Peek_Texture(0);
+			record.TextureOffset = buffer->FVF_Info().Get_Tex_Offset(uv_set);
+		}
+	}
+
+	record.StartIndex = (unsigned short)renderer->Get_Index_Offset();
+	record.Strip = renderer->Is_Strip();
+	record.IndexCount = record.Strip
+		? (unsigned)(unsigned short)(renderer->Get_Index_Count() - 2) + 2
+		: (unsigned)(unsigned short)(renderer->Get_Index_Count() / 3) * 3;
+	// ShaderClass::Apply's cull and depth test; which way the cull faces is read when the run is made.
+	record.Culled = shader.Get_Cull_Mode() != 0;
+	record.DepthFunction = (unsigned long)(int(shader.Get_Depth_Compare()) + 1);
+	record.Renderer = renderer;
+	return -1;
+}
+
+/* A model's pieces from the given one on, merged where they can be one draw: a model's base pass
+	 pieces sit one after another in the container's index buffer, a texture category each
+	 (Generate_Texture_Categories hands the indices out in order), and the depth pass draws two
+	 opaque pieces in the same buffers with the same cull and test alike.  Only an order-free test
+	 (less or less-equal, so the nearest surface wins whichever is drawn first) is merged, and only
+	 lists. */
+static void Merge_Shadow_Caster_Pieces(size_t first)
+{
+	std::sort(_ShadowCasterPieces.begin() + first, _ShadowCasterPieces.end(),
+		[](const ShadowCasterPiece & left, const ShadowCasterPiece & right) { return left.StartIndex < right.StartIndex; });
+	size_t kept = first;
+	for (size_t index = first + 1; index < _ShadowCasterPieces.size(); ++index) {
+		ShadowCasterPiece & last = _ShadowCasterPieces[kept];
+		const ShadowCasterPiece & next = _ShadowCasterPieces[index];
+		const bool order_free = last.DepthFunction == D3DCMP_LESSEQUAL || last.DepthFunction == D3DCMP_LESS;
+		if (last.Kind != DX11_SHADOW_CASTER_ALPHA_TESTED && next.Kind == last.Kind && !last.Strip && !next.Strip
+			&& next.Vertices == last.Vertices && next.Stride == last.Stride && next.Indices == last.Indices
+			&& next.Culled == last.Culled && next.DepthFunction == last.DepthFunction && order_free
+			&& last.StartIndex + last.IndexCount == next.StartIndex) {
+			last.IndexCount += next.IndexCount;
+		} else {
+			_ShadowCasterPieces[++kept] = next;
+		}
+	}
+	_ShadowCasterPieces.resize(kept + 1);
+}
+
+// The pass's records gone, their storage kept for the next pass, and a new pass begun.
+static void Clear_Shadow_Casters()
+{
+	_ShadowCasterInstances.clear();
+	_ShadowCasterPieces.clear();
+	_ShadowCasterGroups.clear();
+	_ShadowCasterBones.clear();
+	_ShadowCasterLastTree = NULL;
+	++_ShadowCasterPass;
+}
+
+bool DX8MeshRendererClass::Add_Shadow_Caster(MeshClass * mesh, bool has_material_passes)
+{
+	/* What the texture category's walk would do differently for this mesh, each a reason to leave
+		 it there: a sorted or camera facing model, a look (the cloak's shadow), a fading opacity, a
+		 mesh the debugger hides, the forced multiply that blends opaque
+		 materials, a rigid model still waiting for room in a streaming buffer (a skin's offset is the
+		 last fill's and means nothing here), and a skin whose material passes need its vertices
+		 deformed into the container anyway. */
+	MeshModelClass * model = mesh->Peek_Model();
+	const bool skin = model->Get_Flag(MeshGeometryClass::SKIN) != 0;
+	/* A material override (a tread's scrolling coordinates) only moves the coordinates of a stage 0
+		 linear offset mapper, and no piece taken reads those: an opaque piece writes depth alone and an
+		 alpha tested one is taken only without a mapper.  Fading swaps in a blending shader, which the
+		 pass turns into its own alpha test on the faded alpha, and stays the old way. */
+	int reason = -1;
+	if (mesh->Get_Draw_Effect() != 0) {
+		reason = SHADOW_OLD_DRAW_EFFECT;
+	} else if (mesh->Get_Alpha_Override() != 1.0f) {
+		reason = SHADOW_OLD_FADING;
+	} else if (DX8RendererDebugger::Is_Enabled() || DX8TextureCategoryClass::Is_Force_Multiply()) {
+		reason = SHADOW_OLD_DEBUG;
+	} else if (!skin && mesh->Get_Base_Vertex_Offset() != 0) {
+		// A rigid mesh's offset is nought (only a skin's fill sets one) unless it is waiting for room.
+		reason = SHADOW_OLD_STREAMING;
+	} else if (skin && has_material_passes) {
+		reason = SHADOW_OLD_SKIN_PASSES;
+	}
+	if (reason >= 0) {
+		++Shadow_Old_Meshes[reason];
+		return false;
+	}
+
+	if (model->ShadowCasterPass != _ShadowCasterPass) {
+		/* The model's first instance this pass.  Every base pass piece has to be taken, or the model
+			 goes the old way whole.  Only pass 0 is drawn: a later pass is the same triangles again and
+			 adds no depth the first did not write. */
+		model->ShadowCasterPass = _ShadowCasterPass;
+		if (model->Get_Flag(MeshGeometryClass::SORT)) {
+			reason = SHADOW_OLD_SORTED;
+		} else if (model->Get_Flag(MeshModelClass::ALIGNED) || model->Get_Flag(MeshModelClass::ORIENTED)) {
+			reason = SHADOW_OLD_CAMERA_FACING;
+		}
+		const size_t first = _ShadowCasterPieces.size();
+		DX8PolygonRendererListIterator it(&(model->PolygonRendererList));
+		for (; reason < 0 && !it.Is_Done(); it.Next()) {
+			DX8PolygonRendererClass * renderer = it.Peek_Obj();
+			if (renderer->Get_Pass() != 0) {
+				continue;
+			}
+			ShadowCasterPiece piece;
+			reason = Describe_Shadow_Caster_Piece(renderer, skin, piece);
+			if (reason < 0) {
+				_ShadowCasterPieces.push_back(piece);
+			}
+		}
+		if (reason < 0 && _ShadowCasterPieces.size() == first) {
+			reason = SHADOW_OLD_NO_BASE_PASS;
+		}
+		if (reason >= 0) {
+			_ShadowCasterPieces.resize(first);
+			model->ShadowCasterGroup = -1 - reason;
+		} else {
+			Merge_Shadow_Caster_Pieces(first);
+			ShadowCasterGroup group;
+			group.Model = model;
+			group.FirstPiece = (unsigned)first;
+			group.PieceCount = (unsigned)(_ShadowCasterPieces.size() - first);
+			group.InstanceCount = 0;
+			group.FirstInstance = 0;
+			group.BaseVertex = 0;
+			model->ShadowCasterGroup = (int)_ShadowCasterGroups.size();
+			_ShadowCasterGroups.push_back(group);
+		}
+	}
+	if (model->ShadowCasterGroup < 0) {
+		++Shadow_Old_Meshes[-1 - model->ShadowCasterGroup];
+		return false;
+	}
+
+	/* Each instance's world, as the rows of its Matrix3D, NULL where the texture category's walk sets
+		 an identity world (an identity transform, and every skin); each skeleton's bones in the pose
+		 the skin container's fill would read them in (MeshClass::Get_Deformed_Vertices), and each
+		 skin's first bone among them.  A model's skins are rendered one after another, so they share
+		 one copy of the skeleton; a skeleton met again later only costs a second copy. */
+	mesh->Add_Ref();
+	ShadowCasterInstance instance;
+	instance.Mesh = mesh;
+	instance.Group = (unsigned)model->ShadowCasterGroup;
+	instance.World = NULL;
+	instance.FirstBone = 0;
+	if (!skin) {
+		if (!mesh->Is_Transform_Identity()) {
+			instance.World = reinterpret_cast<const float *>(&mesh->Get_Transform());
+		}
+	} else {
+		const HTreeClass * tree = mesh->Get_Container()->Get_HTree();
+		if (tree != _ShadowCasterLastTree) {
+			_ShadowCasterLastTree = tree;
+			_ShadowCasterLastFirstBone = (unsigned)_ShadowCasterBones.size();
+			const int pivots = tree->Num_Pivots();
+			for (int pivot = 0; pivot < pivots; ++pivot) {
+				_ShadowCasterBones.push_back(reinterpret_cast<const float *>(&tree->Get_Transform(pivot)));
+			}
+		}
+		instance.FirstBone = _ShadowCasterLastFirstBone;
+	}
+	_ShadowCasterInstances.push_back(instance);
+	++_ShadowCasterGroups[instance.Group].InstanceCount;
+	return true;
+}
+
+void DX8MeshRendererClass::Flush_Shadow_Casters()
+{
+	if (_ShadowCasterInstances.empty()) {
+		Clear_Shadow_Casters();
+		return;
+	}
+	WWPROFILE("DX8MeshRenderer::Flush_Shadow_Casters");
+
+	// The sun's view is set but waits in the wrapper for the next draw; the backend reads it here.
+	DX8Wrapper::Apply_Render_State_Changes();
+
+	/* The skins' bind poses into the skin source, a model the first time it is seen under the
+		 source's generation.  A model that does not fit starts a new source, which every model uploaded
+		 before it has to go into again, this pass's included, so the walk starts over. */
+	bool uploaded = true;
+	bool placed = false;
+	while (uploaded && !placed) {
+		placed = true;
+		const unsigned generation = Direct3D11_Shadow_Skin_Generation();
+		for (size_t index = 0; index < _ShadowCasterGroups.size() && placed && uploaded; ++index) {
+			ShadowCasterGroup & group = _ShadowCasterGroups[index];
+			if (_ShadowCasterPieces[group.FirstPiece].Kind != DX11_SHADOW_CASTER_SKINNED) {
+				continue;
+			}
+			MeshModelClass * model = group.Model;
+			if (model->ShadowSkinSourceOffset < 0 || model->ShadowSkinSourceGeneration != generation) {
+				const int vertex_count = model->Get_Vertex_Count();
+				const Vector3 * positions = model->Get_Vertex_Array();
+				const uint16 * bones = model->Get_Vertex_Bone_Links();
+				_ShadowSkinVertices.resize(vertex_count);
+				for (int vertex = 0; vertex < vertex_count; ++vertex) {
+					_ShadowSkinVertices[vertex].Position[0] = positions[vertex].X;
+					_ShadowSkinVertices[vertex].Position[1] = positions[vertex].Y;
+					_ShadowSkinVertices[vertex].Position[2] = positions[vertex].Z;
+					_ShadowSkinVertices[vertex].Bone = bones[vertex];
+				}
+				unsigned first_vertex = 0;
+				uploaded = Direct3D11_Upload_Shadow_Skin(&_ShadowSkinVertices[0], (unsigned)vertex_count, first_vertex);
+				model->ShadowSkinSourceOffset = uploaded ? (int)first_vertex : -1;
+				model->ShadowSkinSourceGeneration = Direct3D11_Shadow_Skin_Generation();
+				placed = model->ShadowSkinSourceGeneration == generation;
+			}
+			group.BaseVertex = (unsigned)model->ShadowSkinSourceOffset;
+		}
+	}
+
+	// The instances one group after another, a counting sort by group.
+	const unsigned count = (unsigned)_ShadowCasterInstances.size();
+	unsigned next = 0;
+	for (size_t index = 0; index < _ShadowCasterGroups.size(); ++index) {
+		ShadowCasterGroup & group = _ShadowCasterGroups[index];
+		group.FirstInstance = next;
+		next += group.InstanceCount;
+		group.InstanceCount = 0;
+	}
+	_ShadowCasterOrdered.resize(count);
+	_ShadowCasterWorlds.resize(count);
+	_ShadowCasterFirstBones.resize(count);
+	for (unsigned index = 0; index < count; ++index) {
+		const ShadowCasterInstance & instance = _ShadowCasterInstances[index];
+		ShadowCasterGroup & group = _ShadowCasterGroups[instance.Group];
+		const unsigned slot = group.FirstInstance + group.InstanceCount++;
+		_ShadowCasterOrdered[slot] = instance.Mesh;
+		_ShadowCasterWorlds[slot] = instance.World;
+		_ShadowCasterFirstBones[slot] = instance.FirstBone;
+	}
+
+	/* A run a piece of a model over all its instances, ordered by the texture an alpha tested one
+		 tests against (none first), then by kind, cull, depth test and vertex buffer so the binds and
+		 states change least. */
+	const unsigned long cull = ShaderClass::Is_Backface_Culling_Inverted() ? D3DCULL_CCW : D3DCULL_CW;
+	_ShadowCasterRunEntries.clear();
+	for (size_t index = 0; index < _ShadowCasterGroups.size(); ++index) {
+		const ShadowCasterGroup & group = _ShadowCasterGroups[index];
+		for (unsigned piece_index = group.FirstPiece; piece_index < group.FirstPiece + group.PieceCount; ++piece_index) {
+			const ShadowCasterPiece & piece = _ShadowCasterPieces[piece_index];
+			ShadowCasterRunEntry entry;
+			entry.Texture = piece.Texture;
+			entry.Piece = piece_index;
+			DX11ShadowCasterRun & run = entry.Run;
+			run.Kind = piece.Kind;
+			run.Vertices = piece.Vertices;
+			run.Stride = piece.Stride;
+			run.TextureOffset = piece.TextureOffset;
+			run.Indices = piece.Indices;
+			run.StartIndex = piece.StartIndex;
+			run.IndexCount = piece.IndexCount;
+			run.BaseVertex = group.BaseVertex;
+			run.Strip = piece.Strip;
+			run.CullMode = piece.Culled ? cull : D3DCULL_NONE;
+			run.DepthFunction = piece.DepthFunction;
+			run.FirstInstance = group.FirstInstance;
+			run.InstanceCount = group.InstanceCount;
+			_ShadowCasterRunEntries.push_back(entry);
+		}
+	}
+	std::sort(_ShadowCasterRunEntries.begin(), _ShadowCasterRunEntries.end(),
+		[](const ShadowCasterRunEntry & left, const ShadowCasterRunEntry & right) {
+			return std::make_tuple(left.Texture, (int)left.Run.Kind, left.Run.CullMode, left.Run.DepthFunction, left.Run.Vertices)
+				< std::make_tuple(right.Texture, (int)right.Run.Kind, right.Run.CullMode, right.Run.DepthFunction, right.Run.Vertices);
+		});
+	_ShadowCasterRuns.resize(_ShadowCasterRunEntries.size());
+	_ShadowCasterRunPieces.resize(_ShadowCasterRunEntries.size());
+	for (size_t index = 0; index < _ShadowCasterRunEntries.size(); ++index) {
+		_ShadowCasterRuns[index] = _ShadowCasterRunEntries[index].Run;
+		_ShadowCasterRunPieces[index] = _ShadowCasterRunEntries[index].Piece;
+	}
+
+	if (uploaded && Direct3D11_Upload_Shadow_Casters(&_ShadowCasterWorlds[0], &_ShadowCasterFirstBones[0], count,
+			_ShadowCasterBones.empty() ? NULL : &_ShadowCasterBones[0], (unsigned)_ShadowCasterBones.size())) {
+		// A texture's runs at a time, the opaque and skinned ones (no texture) first: an alpha tested
+		// run's texture goes on stage 0 through the wrapper, as the texture category's walk sets it,
+		// so the backend samples it with the filter and addressing that walk would have given it.
+		size_t begin = 0;
+		while (begin < _ShadowCasterRuns.size()) {
+			TextureClass * texture = _ShadowCasterRunEntries[begin].Texture;
+			size_t end = begin + 1;
+			while (end < _ShadowCasterRuns.size() && _ShadowCasterRunEntries[end].Texture == texture) {
+				++end;
+			}
+			if (texture != NULL) {
+				DX8Wrapper::Set_Texture(0, texture);
+				DX8Wrapper::Apply_Render_State_Changes();
+			}
+			if (Direct3D11_Draw_Shadow_Casters(&_ShadowCasterRuns[begin], (unsigned)(end - begin))) {
+				for (size_t run = begin; run < end; ++run) {
+					const DX11ShadowCasterRun & drawn = _ShadowCasterRuns[run];
+					++Shadow_Lean_Draws;
+					Shadow_Lean_Instances += (int)drawn.InstanceCount;
+					Shadow_Lean_Alpha_Tested += (drawn.Kind == DX11_SHADOW_CASTER_ALPHA_TESTED) ? (int)drawn.InstanceCount : 0;
+					Shadow_Lean_Skinned += (drawn.Kind == DX11_SHADOW_CASTER_SKINNED) ? (int)drawn.InstanceCount : 0;
+				}
+			} else {
+				// No texture to test against on stage 0: those pieces go to their texture category.
+				for (size_t run = begin; run < end; ++run) {
+					const DX11ShadowCasterRun & refused = _ShadowCasterRuns[run];
+					DX8PolygonRendererClass * renderer = _ShadowCasterPieces[_ShadowCasterRunPieces[run]].Renderer;
+					for (unsigned instance = 0; instance < refused.InstanceCount; ++instance) {
+						renderer->Get_Texture_Category()->Add_Render_Task(renderer,
+							_ShadowCasterOrdered[refused.FirstInstance + instance]);
+						++Shadow_Old_Meshes[SHADOW_OLD_REFUSED];
+					}
+				}
+			}
+			begin = end;
+		}
+	} else {
+		// The backend would not draw them (a program or a buffer refused): every piece of every mesh
+		// taken goes to its texture category, and a skin to its container's fill, as it would have
+		// without this.
+		for (size_t index = 0; index < _ShadowCasterInstances.size(); ++index) {
+			MeshClass * mesh = _ShadowCasterInstances[index].Mesh;
+			MeshModelClass * model = mesh->Peek_Model();
+			DX8PolygonRendererListIterator it(&(model->PolygonRendererList));
+			for (; !it.Is_Done(); it.Next()) {
+				it.Peek_Obj()->Get_Texture_Category()->Add_Render_Task(it.Peek_Obj(), mesh);
+			}
+			if (model->Get_Flag(MeshGeometryClass::SKIN)) {
+				DX8FVFCategoryContainer * container = model->PolygonRendererList.Peek_Head()->Get_Texture_Category()->Get_Container();
+				static_cast<DX8SkinFVFCategoryContainer *>(container)->Add_Visible_Skin(mesh);
+			}
+			++Shadow_Old_Meshes[SHADOW_OLD_REFUSED];
+		}
+	}
+
+	for (size_t index = 0; index < _ShadowCasterInstances.size(); ++index) {
+		_ShadowCasterInstances[index].Mesh->Release_Ref();
+	}
+	Clear_Shadow_Casters();
 }
 
 void DX8MeshRendererClass::Flush(void)

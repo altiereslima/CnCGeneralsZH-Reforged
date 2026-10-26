@@ -1046,10 +1046,19 @@ Bool AIUpdateInterface::chooseLocomotorSetExplicit(LocomotorSetType wst)
 			if (lt)
 				m_locomotorSet.addLocomotor(lt);
 		}
+		m_locomotorSet.setSpeedScale(obj->getTemplate()->getSpeedScale());
 		m_curLocomotorSet = wst;
+		refreshVeterancySpeed();
 		return TRUE;
 	}
 	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void AIUpdateInterface::refreshVeterancySpeed()
+{
+	const Object* obj = getObject();
+	m_locomotorSet.setSpeedFactor(TheGlobalData->getRankStat(obj->getTemplate(), obj->getRankGrade(), RANK_STAT_SPEED));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1293,7 +1302,7 @@ UpdateSleepTime AIUpdateInterface::update( void )
 		// a rally point across the map is reached through the tunnels when they are shorter
 		const Real walkX = rallyPoint.x - getObject()->getPosition()->x;
 		const Real walkY = rallyPoint.y - getObject()->getPosition()->y;
-		Object *entrance = getObject()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( getObject(), getObject()->getPosition(),
+		Object *entrance = TunnelTracker::findTunnelShortcut( getObject(), getObject()->getPosition(),
 			&rallyPoint, (Real)sqrt( walkX * walkX + walkY * walkY ) );
 		const Bool tunnelled = entrance != NULL
 			&& takeTunnelTrip( entrance, &rallyPoint, fights ? TUNNEL_TRIP_ATTACK_MOVE : TUNNEL_TRIP_MOVE, CMD_FROM_AI );
@@ -6969,6 +6978,12 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 			rangeToFindWithin = weaponRange * (requireWithinWeaponRange ? 1.0f : ATTACK_MOVE_SEARCH_SCALE);
 	}
 
+	// Turkiye's artillery sees 100 and shoots 600: it takes what a spotter shows its player, out to its
+	// weapon's reach.  The fog filter below is what keeps that to targets the team actually sees.
+	const Bool beyondVision = obj->getTemplate()->acquiresBeyondVision();
+	if (beyondVision)
+		rangeToFindWithin = max(rangeToFindWithin, obj->getLargestWeaponRange());
+
 	if (rangeToFindWithin <= 0.0f)
 		return NULL;
 
@@ -7048,7 +7063,7 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 	// members and base defence turrets all route through here - so the exemption covered every one
 	// of them.  The AI now sees what a player sees, which is also what makes stealth work against it.
 	//
-	if( calledByAI && obj->getControllingPlayer() )
+	if( (calledByAI || beyondVision) && obj->getControllingPlayer() )
 	{
 		flags |= AI::UNFOGGED;
 	}

@@ -271,6 +271,8 @@ class AudioManager : public SubsystemInterface
 
 		const AudioSettings *getAudioSettings( void ) const;
 		const MiscAudio *getMiscAudio( void ) const;
+		/// how long a sound from there takes to reach the microphone, milliseconds, at most MaxSoundDelay
+		Real getTravelMs( const Coord3D *position ) const;
 
 		// This function should only be called by AudioManager, MusicManager and SoundManager
 		virtual void releaseAudioEventRTS( AudioEventRTS *eventToRelease );
@@ -312,6 +314,11 @@ class AudioManager : public SubsystemInterface
     virtual const AudioEventInfoHash & getAllAudioEvents() const { return m_allAudioEventInfo; }
 
 		Real getZoomVolume() const { return m_zoomVolume; }
+		/// how far out the camera is between ZoomMixNearHeight (0) and ZoomMixFarHeight (1)
+		Real getZoomOut() const { return m_zoomOut; }
+		/// what every world sound's MinRange, MaxRange and the air are multiplied by: the camera's zoom past
+		/// MaxCameraHeight, so the screen sounds as far across at any zoom as at the one the ranges were made for
+		Real getRangeScale() const { return m_rangeScale; }
 
 		// Birds, wind, water, a town's murmur: a looping world sound effect at the lowest priority that
 		// is not hidden by the shroud.  These answer to the Ambient slider instead of the effects one.
@@ -348,6 +355,9 @@ class AudioManager : public SubsystemInterface
 		/// a handle a tick minted for a sound still waiting for the end of the tick counts as playing
 		Bool isQueuedFromTick( AudioHandle handle ) const;
 
+		/// m_musicVolume and the other three products from the script, system and Master volumes
+		void recomputeVolumes( void );
+
 	protected:
 		AudioSettings *m_audioSettings;
 		MiscAudio *m_miscAudio;
@@ -379,7 +389,11 @@ class AudioManager : public SubsystemInterface
 		Real m_systemSound3DVolume;
 		Real m_systemSpeechVolume;
 		Real m_systemAmbientVolume;
+		Real m_systemMasterVolume;	///< the Master slider, folded into the four products by recomputeVolumes
 		Real m_zoomVolume;
+		Real m_zoomOut;					///< see getZoomOut
+		Real m_zoomDetailVolume;	///< ZoomMixDetailVolume as far as the camera is out, on every 3D sound but ambience
+		Real m_rangeScale;				///< see getRangeScale
 
 
 		AudioEventRTS *m_silentAudioEvent;

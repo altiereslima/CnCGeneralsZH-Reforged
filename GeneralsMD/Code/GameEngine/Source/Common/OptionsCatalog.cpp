@@ -27,6 +27,7 @@
 #include "Common/AudioAffect.h"
 #include "Common/GameAudio.h"
 #include "Common/GameEngine.h"
+#include "Common/GameLOD.h"
 #include "Common/GlobalData.h"
 #include "Common/UserPreferences.h"
 #include "GameClient/Mouse.h"
@@ -87,6 +88,16 @@ static void set_m_ambientVolume( Int value )
 	if (TheAudio)
 		TheAudio->setVolume( value / 100.0f, (AudioAffect)(AudioAffect_Ambient | AudioAffect_SystemSetting) );
 }
+static Int get_m_masterVolume( void ) { return TheGlobalData->m_masterVolume; }
+static void set_m_masterVolume( Int value )
+{
+	TheWritableGlobalData->m_masterVolume = value;
+	if (TheAudio)
+		TheAudio->setVolume( value / 100.0f, (AudioAffect)(AudioAffect_Master | AudioAffect_SystemSetting) );
+}
+OPTION_BOOL_ACCESSORS( m_dynamicMusic )
+OPTION_BOOL_ACCESSORS( m_legacySound )
+OPTION_BOOL_ACCESSORS( m_muteInBackground )
 // The catalog loads before there is a game; the menu's Accept during a mission changes its speed
 // on the spot, which only the pacing reads.
 static Int get_m_turboMode( void ) { return TheGlobalData->m_turboMode ? 1 : 0; }
@@ -107,6 +118,8 @@ OPTION_INT_ACCESSORS( m_windowMode )
 OPTION_INT_ACCESSORS( m_fullscreenScaling )
 OPTION_INT_ACCESSORS( m_msaaLevel )
 OPTION_BOOL_ACCESSORS( m_vsync )
+OPTION_INT_ACCESSORS( m_waterStyle )
+OPTION_INT_ACCESSORS( m_cloudStyle )
 OPTION_BOOL_ACCESSORS( m_classicGraphics )
 OPTION_INT_ACCESSORS( m_lightingStyle )
 OPTION_INT_ACCESSORS( m_healthBarMode )
@@ -125,7 +138,11 @@ OPTION_BOOL_ACCESSORS( m_volumetricSmokeShadows )
 OPTION_BOOL_ACCESSORS( m_useCloudMap )
 OPTION_BOOL_ACCESSORS( m_smokeFireLighting )
 OPTION_BOOL_ACCESSORS( m_explosionDebrisTrails )
+OPTION_BOOL_ACCESSORS( m_mapLight )
+OPTION_BOOL_ACCESSORS( m_teamGlow )
+OPTION_BOOL_ACCESSORS( m_waterFoam )
 OPTION_INT_ACCESSORS( m_shadowQuality )
+OPTION_INT_ACCESSORS( m_graphicsQuality )
 
 //-----------------------------------------------------------------------------
 static const unsigned TheMsaaSamples[ OPTION_MSAA_LEVEL_COUNT ] = { 0, 2, 4, 8, 16 };
@@ -321,6 +338,33 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_INT, APPLY_LIVE, 0, 100,
 		get_m_ambientVolume, set_m_ambientVolume },
 
+	// One slider over the other four: music, effects, voices and ambience are each multiplied by it,
+	// a unit's reply with its boost included.  Movies follow it through the voice volume.
+	{ "MasterVolume",							OPT_WND( "SliderMasterVolume" ), "GUI:MasterVolume",
+		OPTION_INT, APPLY_LIVE, 0, 100,
+		get_m_masterVolume, set_m_masterVolume },
+
+	// A skirmish or multiplayer match's music answers the fight: a calmer track of the side's own
+	// playlist while nothing happens, a harder one when guns fire near the camera or at your forces
+	// (MusicManager::update).  Off leaves the music to the map's scripts, as retail had it.
+	{ "DynamicMusic",							OPT_WND( "CheckDynamicMusic" ), "GUI:DynamicMusic",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_dynamicMusic, set_m_dynamicMusic },
+
+	// Retail's mix: no sound travel delay, air, doppler, room, occlusion, duck, limiter, battle voice
+	// budget, shot folding, reply limits, zoom mix, ambience bed or music following the fight.  The
+	// audio manager takes it up on its next pass (MilesAudioManager::applyLegacySound), the room and
+	// the bed included.  Master volume, the device and the speakers stay as they are.  On Options > Audio.
+	{ "LegacySound",							OPT_WND( "CheckLegacySound" ), "GUI:LegacySound",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_legacySound, set_m_legacySound },
+
+	// Silent while another window has the focus, as retail always was; off keeps the game heard
+	// behind a browser or a second monitor's window.  Read at the next focus change.  On Options > Audio.
+	{ "MuteInBackground",					OPT_WND( "CheckMuteInBackground" ), "GUI:MuteInBackground",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_muteInBackground, set_m_muteInBackground },
+
 	// With the move, attack move or guard key armed, a left drag over the ground spreads the
 	// selection along the line drawn instead of sending everyone to one point.  On by default, and
 	// here for anyone who would rather that drag did nothing at all.  On Options > Controls.
@@ -413,6 +457,17 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_BOOL, APPLY_DEVICE_RESET, 0, 1,
 		get_m_vsync, set_m_vsync },
 
+	// Water selects a complete surface path, including geometry and reflections. The water
+	// object applies it at the next frame boundary, including while the options menu is paused.
+	{ "WaterStyle", OPT_WND( "ComboBoxWaterStyle" ), "GUI:WaterStyle",
+		OPTION_ENUM, APPLY_LIVE, 0, WATER_STYLE_COUNT - 1,
+		get_m_waterStyle, set_m_waterStyle },
+
+	// Client appearance only; hazard area, lifetime and damage remain unchanged.
+	{ "CloudStyle", OPT_WND( "ComboBoxCloudStyle" ), "GUI:CloudStyle",
+		OPTION_ENUM, APPLY_LIVE, 0, CLOUD_STYLE_COUNT - 1,
+		get_m_cloudStyle, set_m_cloudStyle },
+
 	// Classic or Reforged.  Classic is the picture the game shipped with: its own textures, EA's
 	// ground tile, no normal maps, the stencil shadows and no post effects.  The upscaled archives
 	// are mounted before GlobalData exists, so Win32BIGFileSystem reads this key out of Options.ini
@@ -502,9 +557,10 @@ const OptionDef TheOptionCatalog[] =
 		get_m_volumetricSmokeShadows, set_m_volumetricSmokeShadows },
 
 	// The shadows of passing clouds scrolled over the terrain.  It used to belong to the detail
-	// preset, which turned it off at Low and gave no other way to; now the preset leaves it alone and
-	// GameData.ini's Yes holds until Options.ini says otherwise.  The terrain asks every frame.  Its
-	// control is EA's CheckCloudShadows, which the menu reads by hand with the other detail boxes.
+	// preset, which turned it off at Low and gave no other way to; now applying a preset leaves it
+	// alone and GameData.ini's Yes holds until Options.ini says otherwise.  The terrain asks every
+	// frame.  Its control is EA's CheckCloudShadows: the quality slider sets it like any other box, and
+	// the menu reads it by hand and saves it at every detail level.
 	{ "UseCloudMap",							"", "",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_useCloudMap, set_m_useCloudMap },
@@ -529,6 +585,25 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_explosionDebrisTrails, set_m_explosionDebrisTrails },
 
+	// Three Direct3D 11 looks, all off by default; the menu greys them under -d3d9.  Warm light is a
+	// low late afternoon sun put into each map's lights as the map loads (WorldHeightMap), so it waits
+	// for the next map, and a light haze over low ground that aircraft part, pushed every frame
+	// (W3DShaderManager).  Team glow marks a house colour mesh as it is recoloured for its side,
+	// which happens as a map's models are made.  On Options > Graphics.
+	{ "MapLight",									OPT_WND( "CheckMapLight" ), "GUI:MapLight",
+		OPTION_BOOL, APPLY_NEXT_MAP, 0, 1,
+		get_m_mapLight, set_m_mapLight },
+
+	{ "TeamGlow",									OPT_WND( "CheckTeamGlow" ), "GUI:TeamGlow",
+		OPTION_BOOL, APPLY_NEXT_MAP, 0, 1,
+		get_m_teamGlow, set_m_teamGlow },
+
+	// Foam, a shore band and the sun's shadow on rivers and lakes; the water asks every frame.  Off
+	// under Classic graphics too.  On Options > Effects beside Soft Shorelines.
+	{ "WaterFoam",								OPT_WND( "CheckWaterFoam" ), "GUI:WaterFoam",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_waterFoam, set_m_waterFoam },
+
 	// The size of the sun's depth map.  The shadow pass asks for it every frame and the backend makes
 	// the map again when the size changes, so a new level shows on the next frame.  On Options >
 	// Effects.  Classic graphics and -d3d9 draw no map at all.
@@ -547,10 +622,96 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_BOOL, APPLY_RESTART, 0, 1,
 		get_m_particleGroundBounce, set_m_particleGroundBounce },
 
+	// Where the Performance / Quality slider stands.  The slider fills in the other controls and each
+	// of them saves itself; a detail preset puts it on the preset's step whatever this says.  Under
+	// Custom, GameLODManager takes the Direct3D 11 particle ring, which has no control, from the
+	// preset at or below this step.
+	{ "GraphicsQuality",					OPT_WND( "SliderGraphicsQuality" ), "GUI:GraphicsQuality",
+		OPTION_INT, APPLY_LIVE, 0, GRAPHICS_QUALITY_STEPS - 1,
+		get_m_graphicsQuality, set_m_graphicsQuality },
+
 	{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }
 };
 
 const Int TheOptionCatalogCount = (sizeof( TheOptionCatalog ) / sizeof( TheOptionCatalog[ 0 ] )) - 1;
+
+//-----------------------------------------------------------------------------
+// The Performance / Quality slider, described in OptionsCatalog.h.
+//
+// Rows run from the cheapest setting to the dearest, and a row's values climb from step 0 to step
+// 10: the column a row first rises in is where the slider starts paying for it.  costMs is the one
+// place the price is written down: Direct3D 11 GPU milliseconds a frame saved by turning that one
+// setting from its best to its cheapest with everything else at its best, in a 900 unit four-army
+// fight at 1920x1080 on a GeForce RTX 2060 (2026-10-25).  Anything under the 0.15 ms the baselines
+// wandered by is written 0.  The detail presets sit on steps 0, 4, 7 and 10, so the column under
+// Low, Medium, High or Ultra is that preset.
+//
+// The free rows all come on by step 3, except those that draw into the sun's shadow map: they come
+// on with cast shadows at step 5, since the map is not drawn without them.  Never Lower Detail is
+// free on a card that holds its frame rate and is what saves one that does not, so it waits for
+// Ultra.  Multisampling is read by Direct3D 9 alone and cost nothing measurable there at 8x on this
+// card, which another card may not repeat, so it rises through the middle.  Under Direct3D 9
+// MapLight, TeamGlow and WaterFoam are greyed and the slider leaves them; the shadow map and the
+// volumetric clouds are the other renderers' alone.
+//
+// Trees have no row: GameLogic reads the setting as a map loads, so it stays with the memory test
+// as EA had it and a preset never turns them off.  The behind-buildings marker has none either; it
+// is there to read the battlefield, not to cost frame time.  Water style has none: the fight above
+// had no sea, so Modern water read as free, and v3.4.0 gave it to every preset from Medium up and
+// to every Options.ini without the key.  The main menu's shell map is mostly sea, and there the
+// same card spent 11 to 45 ms a pass against 3.3 to 6 ms with Classic water.  It stays the opt-in
+// GlobalData's constructor makes it.
+//-----------------------------------------------------------------------------
+const Int TheGraphicsQualityAnchors[] = { 0, 4, 7, 10 };
+
+const GraphicsQualityRow TheGraphicsQualityTable[] =
+{
+	// control, cost, step:			 0     1     2     3     4     5     6     7     8     9    10
+	{ "ComboBoxLightingStyle",	0.0f,  {    0,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckGroundLighting",		0.0f,  {    0,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckSmoothWater",				0.0f,  {    0,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckCloudShadows",			0.0f,  {    0,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckExtraAnimations",		0.0f,  {    0,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckHeatEffects",				0.0f,  {    0,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckTreeSway",					0.0f,  {    0,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "Check2DShadows",					0.0f,  {    0,    0,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckProjectileShadows",	0.0f,  {    0,    0,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckDebrisTrails",			0.0f,  {    0,    0,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckSmokeFireLighting",	0.0f,  {    0,    0,    1,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckTeamGlow",					0.0f,  {    0,    0,    0,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckWaterFoam",					0.0f,  {    0,    0,    0,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "ComboBoxCloudStyle",			0.0f,  {    0,    0,    0,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckParticleBounce",		0.0f,  {    0,    0,    0,    1,    1,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckInfantryShadows",		0.0f,  {    0,    0,    0,    0,    0,    1,    1,    1,    1,    1,    1 } },
+	{ "CheckVolumetricSmoke",		0.0f,  {    0,    0,    0,    0,    0,    1,    1,    1,    1,    1,    1 } },
+	{ "ComboBoxMSAA",						0.0f,  {    0,    0,    0,    0,    0,    1,    1,    2,    2,    3,    3 } },
+	{ "CheckNoDynamicLOD",			0.0f,  {    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    1 } },
+	{ "ComboBoxTextureFilter",	0.1f,  {    0,    1,    2,    2,    2,    2,    2,    2,    2,    2,    2 } },
+	{ "ComboBoxBloom",					0.1f,  {    0,    1,    2,    2,    2,    2,    2,    2,    2,    2,    2 } },
+	{ "SliderAnisotropy",				0.1f,  {    2,    4,    8,   16,   16,   16,   16,   16,   16,   16,   16 } },
+	{ "CheckParticleShadows",		0.15f, {    0,    0,    0,    0,    0,    0,    0,    1,    1,    1,    1 } },
+	{ "LowResSlider",						0.2f,  {    1,    2,    2,    2,    2,    2,    2,    2,    2,    2,    2 } },
+	{ "CheckPropShadows",				0.2f,  {    0,    0,    0,    0,    0,    0,    1,    1,    1,    1,    1 } },
+	{ "ComboBoxShadowQuality",	0.25f, {    0,    0,    0,    0,    0,    0,    1,    1,    1,    2,    2 } },
+	{ "CheckMapLight",					0.35f, {    0,    0,    0,    0,    0,    0,    0,    0,    1,    1,    1 } },
+	{ "ComboBoxSmoke",					0.75f, {    0,    0,    0,    0,    0,    0,    0,    0,    0,    1,    1 } },
+	// measured 5000 against the slider's floor of 100 (1.6 ms) and against 1000 (0.5 ms)
+	{ "ParticleCapSlider",			1.6f,  {  500, 1000, 1500, 1500, 1500, 2000, 2500, 3000, 3500, 4000, 5000 } },
+	// the shadow map's whole cost: the scene 4.06 to 2.14 ms and the shadow pass 0.6 to 0
+	{ "Check3DShadows",					2.5f,  {    0,    0,    0,    0,    0,    1,    1,    1,    1,    1,    1 } },
+};
+
+const Int TheGraphicsQualityTableCount = sizeof( TheGraphicsQualityTable ) / sizeof( TheGraphicsQualityTable[ 0 ] );
+
+//-----------------------------------------------------------------------------
+const GraphicsQualityRow *findGraphicsQualityRow( const char *control )
+{
+	for( Int i = 0; i < TheGraphicsQualityTableCount; ++i )
+		if( strcmp( TheGraphicsQualityTable[ i ].control, control ) == 0 )
+			return &TheGraphicsQualityTable[ i ];
+
+	return NULL;
+}
 
 //-----------------------------------------------------------------------------
 const OptionDef *findOptionDef( const char *iniKey )
@@ -634,17 +795,95 @@ AsciiString formatOptionValue( const OptionDef& def, Int value )
 }
 
 //-----------------------------------------------------------------------------
+// A detail preset is its column on the quality slider, catalog rows included.  An Options.ini with
+// no GraphicsQuality never had the slider save its rows, so they start from the preset's column;
+// the keys the file does carry and the switches still win, the keys by being read after it and the
+// switches by being parsed later.
+//-----------------------------------------------------------------------------
+enum { OPTION_CATALOG_ROWS = sizeof( TheOptionCatalog ) / sizeof( TheOptionCatalog[ 0 ] ) };
+
+static Bool TheGraphicsQualityColumnWanted = FALSE;				///< the loaded Options.ini held no GraphicsQuality
+static Bool TheOptionNamedInFile[ OPTION_CATALOG_ROWS ];		///< the row's key was in it
+static Int TheOptionValueAsLoaded[ OPTION_CATALOG_ROWS ];		///< what the load left, before any switch
+
+/** The catalog row a quality table row sets, or -1 for a GameLOD field, which the preset sets itself. */
+static Int graphicsQualityOptionIndex( const GraphicsQualityRow &row )
+{
+	AsciiString widget;
+	widget.format( OPT_WND( "%s" ), row.control );
+	for( Int i = 0; i < TheOptionCatalogCount; ++i )
+	{
+		if( strcmp( TheOptionCatalog[ i ].widgetName, widget.str() ) == 0 )
+			return i;
+
+		// EA's cloud shadow box is read by the menu by hand, so its catalog row names no control
+		if( strcmp( row.control, "CheckCloudShadows" ) == 0 && strcmp( TheOptionCatalog[ i ].iniKey, "UseCloudMap" ) == 0 )
+			return i;
+	}
+
+	return -1;
+}
+
+/** Put a quality table value in a catalog row: the table holds a combo box's entry, the catalog its value. */
+static void setGraphicsQualityOption( Int option, Int value )
+{
+	const OptionDef &def = TheOptionCatalog[ option ];
+	def.set( def.kind == OPTION_ENUM ? def.lo + value : value );
+}
+
+//-----------------------------------------------------------------------------
 void loadOptionsFromPreferences( UserPreferences& pref )
 {
+	TheGraphicsQualityColumnWanted = pref.find( "GraphicsQuality" ) == pref.end();
+	UserPreferences::const_iterator detail = pref.find( "StaticGameLOD" );
+	if( TheGraphicsQualityColumnWanted && detail != pref.end() )
+	{
+		const Int level = GameLODManager::getStaticGameLODIndex( detail->second );
+		if( level >= STATIC_GAME_LOD_LOW && level <= STATIC_GAME_LOD_ULTRA )
+		{
+			for( Int row = 0; row < TheGraphicsQualityTableCount; ++row )
+			{
+				const Int option = graphicsQualityOptionIndex( TheGraphicsQualityTable[ row ] );
+				if( option >= 0 )
+					setGraphicsQualityOption( option, TheGraphicsQualityTable[ row ].values[ TheGraphicsQualityAnchors[ level ] ] );
+			}
+		}
+	}
+
 	for( Int i = 0; i < TheOptionCatalogCount; ++i )
 	{
 		const OptionDef& def = TheOptionCatalog[ i ];
 
 		UserPreferences::const_iterator it = pref.find( AsciiString( def.iniKey ) );
+		TheOptionNamedInFile[ i ] = it != pref.end();
 		if( it == pref.end() )
 			continue;	// no key, so keep whatever GameData.ini's default put in GlobalData
 
 		def.set( parseOptionValue( def, it->second ) );
+	}
+
+	for( Int i = 0; i < TheOptionCatalogCount; ++i )
+		TheOptionValueAsLoaded[ i ] = TheOptionCatalog[ i ].get();
+}
+
+//-----------------------------------------------------------------------------
+void applyGraphicsQualityColumnAtStartup( Int staticGameLODLevel )
+{
+	if( !TheGraphicsQualityColumnWanted )
+		return;
+
+	TheGraphicsQualityColumnWanted = FALSE;
+	if( staticGameLODLevel < STATIC_GAME_LOD_LOW || staticGameLODLevel > STATIC_GAME_LOD_ULTRA )
+		return;
+
+	for( Int row = 0; row < TheGraphicsQualityTableCount; ++row )
+	{
+		const Int option = graphicsQualityOptionIndex( TheGraphicsQualityTable[ row ] );
+		// the file's own key, or a value a switch or ClassicGraphics put there after the load
+		if( option < 0 || TheOptionNamedInFile[ option ] || TheOptionCatalog[ option ].get() != TheOptionValueAsLoaded[ option ] )
+			continue;
+
+		setGraphicsQualityOption( option, TheGraphicsQualityTable[ row ].values[ TheGraphicsQualityAnchors[ staticGameLODLevel ] ] );
 	}
 }
 

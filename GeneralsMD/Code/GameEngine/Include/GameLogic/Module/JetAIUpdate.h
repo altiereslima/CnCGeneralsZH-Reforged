@@ -71,6 +71,7 @@ public:
 	Real										m_lockonAngleSpin;								///< how many times to spin around it
 	Real										m_lockonBlinky;								
 	UnsignedInt							m_returnToBaseIdleTime;						///< if we're idle for this long, return to base
+	Real										m_kamikazeRange;									///< if nonzero, its one shot is itself, and with its target gone it takes the dearest enemy this near where it was sent
 
 	JetAIUpdateModuleData();
 	static void buildFieldParse(MultiIniFieldParse& p);
@@ -137,6 +138,12 @@ public:
 	AICommandType friend_getHeldOrder( ObjectID& targetID, Coord3D& targetPos ) const;
 	Bool friend_isRearming() const;
 	void friend_purgePendingCommand();
+	/// a kamikaze whose target dies on the way looks for another here, and dives here when there is none
+	void friend_setKamikazeArea( const Coord3D *pos ) { m_kamikazeArea = *pos; }
+	/// what a kamikaze was last sent at, held on the runway or flown: its most recent order's target
+	ObjectID friend_getKamikazeTargetID() const { return m_mostRecentCommand.getTargetObjectID(); }
+	/// put on its runway's threshold with its space reserved, it starts the takeoff roll now
+	void friend_takeOffNow();
 
 protected:
 
@@ -180,6 +187,7 @@ private:
 	Int											m_flags;
 	Coord3D									m_landingPosForHelipadStuff;
 	Bool										m_enginesOn;					///<
+	Coord3D									m_kamikazeArea;				///< where a kamikaze was sent (friend_setKamikazeArea)
 
 	void getProducerLocation();
 	void buildLockonDrawableIfNecessary();

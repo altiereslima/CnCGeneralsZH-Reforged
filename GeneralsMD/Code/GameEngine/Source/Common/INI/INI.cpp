@@ -100,6 +100,7 @@ static const BlockParse theTypeTable[] =
 	{ "CommandButton",			INI::parseCommandButtonDefinition },
 	{ "CommandButtonHotKey",	INI::parseCommandButtonHotKeyDefinition },
 	{ "CommandBarGrid",			INI::parseCommandBarGridDefinition },
+	{ "FixedOrderKeys",			INI::parseFixedOrderKeysDefinition },
 	{ "CommandMap",					INI::parseMetaMapDefinition },
 	{ "CommandSet",					INI::parseCommandSetDefinition },
 	{ "ControlBarScheme",		INI::parseControlBarSchemeDefinition },
@@ -138,6 +139,7 @@ static const BlockParse theTypeTable[] =
 	{ "ShellMenuScheme",		INI::parseShellMenuSchemeDefinition },
 	{ "Terrain",						INI::parseTerrainDefinition },
 	{ "Upgrade",						INI::parseUpgradeDefinition },
+	{ "Veterancy",					GlobalData::parseVeterancyDefinition },
 	{ "Video",							INI::parseVideoDefinition },
 	{ "WaterSet",						INI::parseWaterSettingDefinition },
 	{ "WaterTransparency",	INI::parseWaterTransparencyDefinition},
@@ -287,14 +289,13 @@ void INI::prepFile( AsciiString filename, INILoadType loadType )
 	if( m_file == NULL )
 	{
 
-		// These INI_* constants live in an *unnamed* enum, so GameEngine::init's
-		// catch (ErrorCode) never matches them and they all end up in its catch (...),
-		// which reports "Uncaught Exception during initialization." and nothing else.
-		// Leave a trace in g_LastErrorDump so ReleaseCrashInfo.txt names the file --
-		// in a Release build DEBUG_CRASH above compiles to nothing.
-		g_LastErrorDump.format("INI::prepFile could not open '%s'\n", filename.str());
+		// The INI_* codes live in an *unnamed* enum, so GameEngine::init's catch (ErrorCode)
+		// never matched INI_CANT_OPEN_FILE and its catch (...) said only "Uncaught Exception
+		// during initialization.".  An INIException carries the name to the crash report.
 		DEBUG_CRASH(( "INI::load, cannot open file '%s'\n", filename.str() ));
-		throw INI_CANT_OPEN_FILE;
+		char buff[1024];
+		snprintf(buff, ARRAY_SIZE(buff), "Could not open INI file '%s'\n", filename.str());
+		throw INIException(buff);
 
 	}  // end if
 
@@ -472,19 +473,32 @@ void INI::load( AsciiString filename, INILoadType loadType, Xfer *pXfer )
 				{
 					DEBUG_ASSERTCRASH( 0, ("[LINE: %d - FILE: '%s'] Unknown block '%s'\n",
 														 getLineNum(), getFilename().str(), token ) );
-					throw INI_UNKNOWN_TOKEN;
+					// a stray End, a misspelt block name: name it, since the catch below cannot
+					char buff[1024];
+					snprintf(buff, ARRAY_SIZE(buff), "Error parsing INI file '%s' (line %d: unknown block '%s')\n",
+						m_filename.str(), m_lineNum, token);
+					throw INIException(buff);
 				}
-				
-			}  // end if 
-				
+
+			}  // end if
+
 		}  // end while
+	}
+	catch (INIException &)
+	{
+		unPrepFile();
+		throw;
 	}
 	catch (...)
 	{
+		/* Anything else thrown between blocks (a bare INI_* code from readLine, a fault the SEH
+			 translator turned into a throw) used to reach GameEngine::init's catch (...) as
+			 "Uncaught Exception during initialization." with no file named. */
+		char buff[1024];
+		snprintf(buff, ARRAY_SIZE(buff), "Error reading INI file '%s' (reached line %d: '%s')\n",
+			m_filename.str(), m_lineNum, m_buffer);
 		unPrepFile();
-
-		// propagate the exception.
-		throw;
+		throw INIException(buff);
 	}
 
 	unPrepFile();
@@ -574,6 +588,9 @@ void ModNamespace::scanMods( void )
 			char *contents = file->readEntireAndClose();
 			std::string text( contents, size );
 			delete [] contents;
+			// as INI::readLine: a byte order mark would hide the first block's name
+			if (text.compare( 0, 3, "\xEF\xBB\xBF" ) == 0)
+				text.erase( 0, 3 );
 			for (size_t start = 0; start < text.size(); )
 			{
 				size_t end = text.find( '\n', start );
@@ -663,7 +680,7 @@ void ModNamespace::finishScan( Int mod )
 	{
 		Bool reserved = FALSE;
 		for (size_t i = 0; i < ARRAY_SIZE( Reserved ) && !reserved; ++i)
-			reserved = stricmp( it->c_str(), Reserved[ i ] ) == 0;
+			reserved = strcasecmp( it->c_str(), Reserved[ i ] ) == 0;
 		if (reserved)
 			it = names.all.erase( it );
 		else
@@ -739,14 +756,34 @@ Bool ModNamespace::isAssetField( const std::string &field )
 	};
 	for (size_t i = 0; i < ARRAY_SIZE( AssetFields ); ++i)
 	{
-		if (stricmp( field.c_str(), AssetFields[ i ] ) == 0)
+		if (strcasecmp( field.c_str(), AssetFields[ i ] ) == 0)
 			return TRUE;
 	}
 	return FALSE;
 }
 
+/// "0", "6", "-1.5", "25%": digits with at most a sign, points and a closing percent
+static Bool isNumber( const std::string &word )
+{
+	Bool digit = FALSE;
+	for (size_t i = 0; i < word.size(); ++i)
+	{
+		const char c = word[ i ];
+		if (c >= '0' && c <= '9')
+			digit = TRUE;
+		else if (!(c == '.' || ((c == '-' || c == '+') && i == 0) || (c == '%' && i + 1 == word.size())))
+			return FALSE;
+	}
+	return digit;
+}
+
 Bool ModNamespace::isNameOrAsset( const std::string &word, Bool assetField ) const
 {
+	// A number is a number.  An animation's distance and repeat count sit in a file field, and with a
+	// texture called 6.dds in the mod "IdleAnimation = X.X 0 6" read "M2~6", which is no Int: a parse
+	// error at load under -modfactions.
+	if (isNumber( word ))
+		return FALSE;
 	const Names &names = m_mods[ m_active ];
 	return names.all.count( word ) != 0 || (assetField && isAsset( names, word ));
 }
@@ -796,8 +833,9 @@ Bool ModNamespace::prefixWords( char *line, size_t capacity, WordTest test ) con
 			first = FALSE;
 			continue;
 		}
-		// a file field may name a subfolder ("Sub\x.mp3"); the file is its last part
-		const size_t at = assetField ? lastPathPart( word ) : 0;
+		// a file field may name a subfolder ("Sub\x.mp3"); the file is its last part.  "OCL:OCL_X" is a
+		// parser's keyword and a name: only the name may be the mod's
+		const size_t at = assetField ? lastPathPart( word ) : namedAfterKeyword( word );
 		out.append( word, 0, at );
 		if ((this->*test)( word.substr( at ), assetField ))
 			out += prefix;
@@ -813,6 +851,23 @@ size_t ModNamespace::lastPathPart( const std::string &word )
 {
 	const size_t slash = word.find_last_of( "\\/" );
 	return slash == std::string::npos ? 0 : slash + 1;
+}
+
+size_t ModNamespace::namedAfterKeyword( const std::string &word )
+{
+	// the keywords the colon parsers (OCLUpdate, BridgeBehavior, BoneFXUpdate, TransitionDamageFX,
+	// AutoDepositUpdate) read before a name; a CSF label such as "OBJECT:Ranger" is none of them
+	static const char *const Keywords[] = { "Faction", "OCL", "FX", "FXList", "PSys", "UpgradeType" };
+	const size_t colon = word.find( ':' );
+	if (colon == std::string::npos)
+		return 0;
+	const std::string keyword = word.substr( 0, colon );
+	for (size_t i = 0; i < ARRAY_SIZE( Keywords ); ++i)
+	{
+		if (strcasecmp( keyword.c_str(), Keywords[ i ] ) == 0)
+			return colon + 1;
+	}
+	return 0;
 }
 
 Bool ModNamespace::findRetailName( const AsciiString &name, ModNameType type, AsciiString *retailName ) const
@@ -903,6 +958,11 @@ void INI::readLine( void )
 
 		// increase our line count
 		m_lineNum++;
+
+		// A UTF-8 byte order mark, which some editors write, glued itself to the first word and the
+		// block was unknown.  No file that had one ever loaded, so dropping it moves no checksum.
+		if (m_lineNum == 1 && strncmp(m_buffer, "\xEF\xBB\xBF", 3) == 0)
+			memmove(m_buffer, m_buffer + 3, strlen(m_buffer + 3) + 1);
 
 		// check for at the max
 		if ( p == m_buffer+INI_MAX_CHARS_PER_LINE )

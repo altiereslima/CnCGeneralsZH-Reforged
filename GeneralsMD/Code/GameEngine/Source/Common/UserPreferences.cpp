@@ -528,8 +528,8 @@ Int CustomMatchPreferences::getPreferredFaction(void)
 		return PLAYERTEMPLATE_RANDOM;
 	}
 
-	ret = atoi(it->second.str());
-	if (ret == PLAYERTEMPLATE_OBSERVER || ret < PLAYERTEMPLATE_MIN || ret >= ThePlayerTemplateStore->getPlayerTemplateCount())
+	ret = PlayerTemplateFromPreference(it->second);
+	if (ret == PLAYERTEMPLATE_OBSERVER || !IsValidPlayerTemplatePick(ret))
 		ret = PLAYERTEMPLATE_RANDOM;
 
 	if (ret >= 0)
@@ -558,9 +558,7 @@ Int CustomMatchPreferences::getPreferredFaction(void)
 
 void CustomMatchPreferences::setPreferredFaction(Int val)
 {
-	AsciiString s;
-	s.format("%d", val);
-	(*this)["PlayerTemplate"] = s;
+	(*this)["PlayerTemplate"] = PlayerTemplatePreference(val);
 }
 
 Bool CustomMatchPreferences::usesSystemMapDir(void)

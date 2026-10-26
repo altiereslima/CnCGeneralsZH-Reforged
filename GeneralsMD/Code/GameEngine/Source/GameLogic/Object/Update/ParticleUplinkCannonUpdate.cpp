@@ -39,6 +39,7 @@
 #include "Common/ThingFactory.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "Common/SpecialPower.h"
 #include "Common/Xfer.h"
 #include "Common/ClientUpdateModule.h"
 
@@ -269,6 +270,19 @@ void ParticleUplinkCannonUpdate::onObjectCreated()
 	}
 
 	m_specialPowerModule = obj->getSpecialPowerModule( data->m_specialPowerTemplate );
+	if( !m_specialPowerModule )
+	{
+		// FixesReforged.ini replaces the Superweapon General's cannon module naming EA's power, and a
+		// mod that gives that cannon a power of its own name keeps it on the building's special power
+		// module. Drive the building's power of the same kind.
+		m_specialPowerModule = obj->findSpecialPowerModuleInterface( data->m_specialPowerTemplate->getSpecialPowerType() );
+	}
+	if( !m_specialPowerModule )
+	{
+		DEBUG_CRASH( ("%s object's ParticleUplinkCannonUpdate finds no special power module for %s.", obj->getTemplate()->getName().str(), data->m_specialPowerTemplate->getName().str() ) );
+		m_invalidSettings = TRUE;
+		return;
+	}
 	m_connectorNodePosition.set( obj->getPosition() );
 	m_laserOriginPosition.set( obj->getPosition() );
 
@@ -288,7 +302,7 @@ Bool ParticleUplinkCannonUpdate::initiateIntentToDoSpecialPower(const SpecialPow
 {
 	const ParticleUplinkCannonUpdateModuleData *data = getParticleUplinkCannonUpdateModuleData();
 
-	if( m_specialPowerModule->getSpecialPowerTemplate() != specialPowerTemplate )
+	if( !m_specialPowerModule || m_specialPowerModule->getSpecialPowerTemplate() != specialPowerTemplate )
 	{
 		//Check to make sure our modules are connected.
 		return FALSE;

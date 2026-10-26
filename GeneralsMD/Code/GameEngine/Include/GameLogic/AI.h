@@ -116,6 +116,8 @@ public:
 	TSkillSet		m_skillSet4;
 	TSkillSet		m_skillSet5;
 	AsciiString m_baseDefenseStructure1;
+	AsciiString m_spotter;				///< the unit sent along with a gun that fires past its own sight; empty for a side without one
+	std::vector<AsciiString> m_artillery;	///< the side's guns that fire past their own sight, one of them added to a share of its attack teams (AIDifficultyProfile m_artilleryShare)
 	AISideInfo *m_next;
 };
 EMPTY_DTOR(AISideInfo)
@@ -256,8 +258,7 @@ struct AIDifficultyProfile
 	Real	m_upgradeStartSeconds;					///< and not before this far into the match
 	Real	m_upgradeNonCombatWeight;				///< what a building or an unarmed unit counts for next to a fighting unit when an upgrade is weighed
 	Real	m_surplusShare;									///< of the income over aiSurplusBudget's window, how much a bank over target may train as extra units
-	Int		m_maxProduction;								///< war factories, barracks and airfields together, beyond which the spend rule adds none
-	Real	m_factoryBankMultiple;					///< past this many times the bank target a factory is added whatever the bank's trend; 0 = only on the trend
+	Real	m_factoryBacklogSeconds;				///< the window over which every finished factory of a kind has to be full on AI_FACTORY_FULL_PERCENT of the spend passes before another of that kind goes up (aiWantsAnotherFactory)
 
 	// Pushing: when the army first leaves home, and how small a force may go
 	Real	m_firstPushSeconds;							///< no attack before this, nor before the first drop zone or black market stands (AI_PURCHASE_EARLY_FRAMES at most)
@@ -269,6 +270,16 @@ struct AIDifficultyProfile
 	Real	m_strikeEconomyWeight;					///< what a factory, power plant, superweapon, supply centre, black market, hacker or strategy centre is worth to a strike on top of its price, in prices; 0 = price alone
 	Real	m_strikeThreatWeight;						///< what an armed unit or gun is worth to a strike on top of its price, in combat power; 0 = price alone, and his army is a candidate only when none of his buildings is
 	Int		m_superweaponDefenses;					///< finished base defences each superweapon asks for (Player::canBuildMoreOfType); 0 = none
+
+	// Building sites: when a placed building is given up, and whether idle dozers walk ahead to the next one
+	Real	m_siteStallSeconds;							///< a site away from home that has not moved forward this long is cancelled and refunded (aiWatchSite)
+	Int		m_siteBuildersLost;							///< ... and any site whose builders died this many times with nothing built in between
+	Real	m_siteRetrySeconds;							///< how long a cancelled site's spot is left alone before it is placed again
+	Bool	m_stageDozers;									///< an idle dozer walks to the site the base builder waits on money for
+
+	// Artillery that fires past its own sight
+	Int		m_artillerySpotters;						///< the side's spotters (AISideInfo m_spotter) added to a team that brings such a gun and no spotter
+	Real	m_artilleryShare;								///< the share of a side's attack teams with no such gun that are given one of its own (AISideInfo m_artillery)
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -387,19 +398,98 @@ AIFallbackDecision aiRetreatHoldDecision( Bool arrived, UnsignedInt heldFrames, 
 Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
 									 Bool timeExpired, Bool baseUnderAttack );
 
-/** How long every finished factory of a kind has to keep a unit waiting behind the one it is building
-	* before the computer buys another.  A script's team lands in the queue all at once, so a backlog
-	* the moment it appears is a batch, not a factory falling behind. */
-static const Int AI_FACTORY_BACKLOG_SECONDS = 45;
-
 /** Another factory of this kind.  finished are standing and done, constructing are already on the
-	* way, shallowest is the shortest queue among the finished ones, and backedUpFor is how many frames
-	* every one of them has had a unit waiting behind the one it is building.
+	* way, history holds one bit a spend pass, newest lowest, set when every finished one was full on it
+	* (aiQueueKindFull, aiAirfieldsFull; aiSampleFactories), count is how many passes it holds, and
+	* window is the rung's m_factoryBacklogSeconds in passes (aiBacklogSamples).
 	*
-	* Another goes up only when every finished factory has had a unit waiting for
-	* AI_FACTORY_BACKLOG_SECONDS, and a replacement when none are left.  One already on the way is the
-	* building this would ask for. */
-Bool aiWantsAnotherFactory( Int finished, Int constructing, Int shallowest, UnsignedInt backedUpFor );
+	* Another goes up once the last window passes are all in and at least AI_FACTORY_FULL_PERCENT of
+	* them were full, and a replacement when none are left.  One already on the way is the building
+	* this would ask for.  A share, not an unbroken run: a pass that found a factory between two units
+	* reset the clock, and an Easy computer whose units finish inside a pass never got a second one. */
+Bool aiWantsAnotherFactory( Int finished, Int constructing, UnsignedInt history, Int count, Int window );
+
+/** The share of a window's passes, in percent, that have to find the kind full. */
+static const Int AI_FACTORY_FULL_PERCENT = 80;
+
+/** The most passes a window holds: the bits in the history. */
+static const Int AI_FACTORY_HISTORY_PASSES = 32;
+
+/** The rung's backlog in spend passes of passFrames each, rounded up, 1 to AI_FACTORY_HISTORY_PASSES. */
+inline Int aiBacklogSamples( Real seconds, Int passFrames )
+{
+	const Int frames = REAL_TO_INT( seconds * LOGICFRAMES_PER_SECOND );
+	const Int passes = ( frames + passFrames - 1 ) / passFrames;
+	return passes < 1 ? 1 : passes > AI_FACTORY_HISTORY_PASSES ? AI_FACTORY_HISTORY_PASSES : passes;
+}
+
+/** One spend pass of a kind's history: shifts in whether it was full.  One of the kind going up
+	* empties it, so the window starts again once that one stands and has to prove itself full too. */
+inline void aiSampleFactories( UnsignedInt *history, Int *count, Bool full, Int constructing )
+{
+	if( constructing > 0 )
+	{
+		*history = 0;
+		*count = 0;
+		return;
+	}
+	*history = ( *history << 1 ) | ( full ? 1u : 0u );
+	if( *count < AI_FACTORY_HISTORY_PASSES )
+		++*count;
+}
+
+/** Barracks or war factories are full on a pass when every finished one (busy of finished) was busy:
+	* something in its queue, or a unit let out since the last pass.  Busy, not backed up: the scripts
+	* train only into an idle factory and the surplus fills a queue one deep, so a unit waiting behind
+	* the one being built almost never happened.  And busy over the pass, not at its instant: units that
+	* finish inside a pass left an Easy factory idle on most looks. */
+inline Bool aiQueueKindFull( Int finished, Int busy ) { return finished > 0 && busy >= finished; }
+
+/** An airfield is full when its parking is: every finished one (parkingFull of finished) refuses an
+	* aircraft to its queue, and the computer has wanted one lately (wanted, a buy refused for parking).
+	* Its queue says nothing, since a full airfield takes nothing into it. */
+inline Bool aiAirfieldsFull( Int finished, Int parkingFull, Bool wanted ) { return finished > 0 && parkingFull >= finished && wanted; }
+
+/** How long a buy refused for parking keeps the computer wanting another airfield. */
+static const UnsignedInt AI_PARKING_WANT_FRAMES = 15 * LOGICFRAMES_PER_SECOND;
+
+/** One unfinished building the computer placed, as its base builder last saw it. */
+struct AISiteWatch
+{
+	ObjectID		m_site;
+	Real				m_percent;					///< construction percent when it last moved forward
+	UnsignedInt	m_progressFrame;		///< the frame it was first seen or last moved forward
+	ObjectID		m_lostBuilder;			///< the last dead builder counted, so one death counts once
+	Int					m_buildersLost;			///< builders that died since it last moved forward
+};
+
+enum AISiteVerdict
+{
+	AISITE_KEEP = 0,
+	AISITE_STALLED,				///< nothing built on it for the rung's m_siteStallSeconds
+	AISITE_BUILDERS_LOST	///< m_siteBuildersLost builders died on the way with nothing built between
+};
+
+/** One look at a site: progress resets the clock and the death count, a builder that is gone and not
+	* yet counted adds one.  stallFrames 0 never stalls (a site at home, which a busy dozer explains). */
+AISiteVerdict aiWatchSite( AISiteWatch *watch, Real percent, ObjectID builder, Bool builderAlive,
+													 UnsignedInt now, UnsignedInt stallFrames, Int maxLost );
+
+/** A spot a cancelled site stood on, left alone until a frame. */
+struct AICooledSpot
+{
+	Coord3D			m_pos;
+	UnsignedInt	m_until;
+};
+
+/** How near a cancelled site a dock counts as the one it was for, and a new site as the same spot.
+	* The site's is about one building across, so a base site given up under attack does not shut the
+	* base around it. */
+static const Real AI_COOLED_DOCK_RADIUS = 200.0f;
+static const Real AI_COOLED_SITE_RADIUS = 60.0f;
+
+/** True while pos is within radius of a spot whose wait has not run out. */
+Bool aiSpotCooling( const std::vector<AICooledSpot> &spots, const Coord3D *pos, Real radius, UnsignedInt now );
 
 /** How many copies of the faction tech building (strategy center, propaganda center, palace) to
 	* keep up so one of them blowing up does not take the tree with it. */
@@ -720,12 +810,6 @@ const UnsignedInt AI_INCOME_WINDOW_FRAMES = 30 * LOGICFRAMES_PER_SECOND;
 
 /** The bank a computer player keeps: seconds of its income, and never under the floor. */
 Int aiBankTarget( Real incomePerSecond, Real seconds, Int floor );
-
-/** Another factory, measured rather than guessed: fewer than cap stand, and the bank is over its target
-	* and no lower than it was an income window ago, so what stands is not spending what comes in, or it is
-	* past multiple times the target whatever its trend (a busy Hard AI's bank swings, and the trend alone
-	* almost never fired).  multiple 0 leaves only the trend. */
-Bool aiWantsMoreProduction( Int bank, Int bankWindowAgo, Int target, Int standing, Int cap, Real multiple );
 
 /** How much a bank over its target may put into extra units on one spend pass: share of the income of
 	* AI_SURPLUS_INCOME_SECONDS, and never what takes the bank under target.  At share 1 that is three

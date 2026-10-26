@@ -83,6 +83,7 @@ static void NullifyControls(void)
 	{
 		buttonMapStartPosition[i] = NULL;
 	}
+	RandomMapTabShutdown();
 }
 
 static const char *layoutFilename = "GameSpyGameOptionsMenu.wnd";
@@ -207,8 +208,11 @@ void WOLMapSelectMenuInit( WindowLayout *layout, void *userData )
 			TheMapCache->updateCache();
 		populateMapListbox( mapList, usesSystemMapDir, TRUE, TheGameSpyGame->getMap() );
 	}
+	// a generated map is no official map, so a room recording stats keeps to the list
+	RandomMapTabInit( "WOLMapSelectMenu.wnd", parent, winMapPreview, buttonMapStartPosition, TheGameSpyGame,
+		!TheGameSpyInfo->getCurrentStagingRoom()->getUseStats() );
 
-}  // end WOLMapSelectMenuInit  
+}  // end WOLMapSelectMenuInit
 
 //-------------------------------------------------------------------------------------------------
 /** MapSelect menu shutdown method */
@@ -301,8 +305,10 @@ void WOLPositionStartSpots( void );
 WindowMsgHandledType WOLMapSelectMenuSystem( GameWindow *window, UnsignedInt msg, 
 																				  WindowMsgData mData1, WindowMsgData mData2 )
 {
+	if( RandomMapTabHandle( msg, mData1, mData2 ) )
+		return MSG_HANDLED;
 
-	switch( msg ) 
+	switch( msg )
 	{
 
 		// --------------------------------------------------------------------------------------------
@@ -437,23 +443,28 @@ WindowMsgHandledType WOLMapSelectMenuSystem( GameWindow *window, UnsignedInt msg
 				UnicodeString map;
 				
 				// get the selected index
-				GadgetListBoxGetSelected( winMapWindow, &selected );
+				// the Random tab's map, already staged and in the cache, or else the list's row
+				AsciiString asciiMap = RandomMapTabMap();
+				if( !asciiMap.isEmpty() )
+					selected = 0;
+				else
+					GadgetListBoxGetSelected( winMapWindow, &selected );
 
 				if( selected != -1 )
 				{
+					if( asciiMap.isEmpty() )
+					{
+						// get text of the map to load
+						map = GadgetListBoxGetText( winMapWindow, selected, 0 );
 
-					// get text of the map to load
-					map = GadgetListBoxGetText( winMapWindow, selected, 0 );
-					
-					
-					// set the map name in the global data map name
-					AsciiString asciiMap;
-					const char *mapFname = (const char *)GadgetListBoxGetItemData( winMapWindow, selected );
-					DEBUG_ASSERTCRASH(mapFname, ("No map item data"));
-					if (mapFname)
-						asciiMap = mapFname;
-					else
-						asciiMap.translate( map );
+						// set the map name in the global data map name
+						const char *mapFname = (const char *)GadgetListBoxGetItemData( winMapWindow, selected );
+						DEBUG_ASSERTCRASH(mapFname, ("No map item data"));
+						if (mapFname)
+							asciiMap = mapFname;
+						else
+							asciiMap.translate( map );
+					}
 					TheGameSpyGame->setMap(asciiMap);
 					asciiMap.toLower();
 					std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->find(asciiMap);

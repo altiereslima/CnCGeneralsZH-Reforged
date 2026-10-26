@@ -61,6 +61,9 @@ W3DSnowManager::~W3DSnowManager()
 // into a screen-aligned quad was taken out of the API, and the replacement is a geometry shader the
 // backend does not have.  The snow already carries a second path that builds those quads on the CPU
 // and draws them through DX8Wrapper, so a presenting D3D11 run takes that one and gets its snow.
+// SDL3 GPU on Linux is the same: Vulkan sizes a point only from a PointSize the vertex program
+// writes, the device's fixed-function programs write none, so a point list there is a one-pixel
+// dot and a pipeline the validation layers reject (VUID-VkGraphicsPipelineCreateInfo-topology-08773).
 static Bool snowWantsPointSprites(void)
 {
 	return TheWeatherSetting->m_usePointSprites
@@ -69,7 +72,11 @@ static Bool snowWantsPointSprites(void)
 
 static Bool snowUsesPointSprites(void)
 {
+#if defined(__linux__)
+	return FALSE;
+#else
 	return !Direct3D11_Present_Is_Enabled() && snowWantsPointSprites();
+#endif
 }
 
 void W3DSnowManager::init( void )

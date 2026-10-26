@@ -153,6 +153,9 @@ extern Bool Command_formationDragArmed( Bool setting, Bool haveMovableSelection,
 /** Which signal a SIGNAL_* meta key drops; SIGNAL_KIND_COUNT for every other message. */
 extern SignalKind Command_signalKindForMeta( GameMessage::Type meta );
 
+/** What a signal asks of the computer allies, an AITeamRequestKind; -1 for one that asks nothing. */
+extern Int Command_teamRequestForSignal( SignalKind kind );
+
 class Player;
 /** Single-player test hook: make this player the one at the keyboard, throwing away any AI behind
   * it first.  FALSE if that player cannot be played (yourself, neutral, observer, beaten) or this

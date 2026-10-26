@@ -340,6 +340,8 @@ public:
 	UnsignedInt m_expireFrame;						///< frame we expire on
 	WorldAnimationOptions m_options;			///< options
 	Real m_zRisePerSecond;								///< Z units to rise per second
+	const ThingTemplate *m_rankOf;				///< a grade gained: its insignia is drawn instead of the animation, when it has one
+	Int m_rankInsignia;										///< the grade gained, as RankLadder::insigniaIndex
 
 };
 typedef std::list< WorldAnimationData *> WorldAnimationList;
@@ -1208,7 +1210,9 @@ public:
 													const Coord3D *pos,
 													WorldAnimationOptions options,
 													Real durationInSeconds,
-													Real zRisePerSecond );
+													Real zRisePerSecond,
+													const ThingTemplate *rankOf = NULL,
+													Int rankInsignia = 0 );
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	virtual void DEBUG_addFloatingText(const AsciiString& text,const Coord3D * pos, Color color);
@@ -1261,6 +1265,7 @@ protected:
 	void destroyPlacementIcons( void );													///< Destroy placement icons
 	void handleBuildPlacements( void );													///< handle updating of placement icons based on mouse pos
 	void handleRadiusCursor();																	///< handle updating of "radius cursors" that follow the mouse pos
+	void updateAuraRings();																			///< the ground ring of each aura a selected or hovered leader gives
 
 	void incrementSelectCount( void ) { ++m_selectCount; }			///< Increase by one the running total of "selected" drawables
 	void decrementSelectCount( void ) { --m_selectCount; }			///< Decrease by one the running total of "selected" drawables
@@ -1548,6 +1553,16 @@ protected:
 	RadiusDecalTemplate					m_radiusCursors[RADIUSCURSOR_COUNT];
 	RadiusDecal									m_curRadiusCursor;
 	RadiusCursorType						m_curRcType;
+
+	enum { AURA_RING_MAX = 32 };
+	struct AuraRing
+	{
+		ObjectID		id;					///< INVALID_ID: a free slot
+		Int					kind;				///< RankAura
+		Real				radius;			///< as drawn
+		RadiusDecal	decal;
+	};
+	AuraRing										m_auraRings[AURA_RING_MAX];
 
 	//Floating Text Data
 	FloatingTextList						m_floatingTextList;				///< Our list of floating text

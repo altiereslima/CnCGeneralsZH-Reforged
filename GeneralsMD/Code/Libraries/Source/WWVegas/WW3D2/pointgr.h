@@ -235,25 +235,29 @@ public:
 	/// Bind a reserved range holding quads written by Write_Billboard and put it into the sorting
 	/// pool, with the state Render gives a billboarded QUADS group; then release the range.  The
 	/// shader has to be one Would_Sort_Billboards accepts.  glow: the quads' normals hold the glow
-	/// Write_Billboard was given, for the Direct3D 11 backend to add after the shade.  Render thread
-	/// only.
+	/// Write_Billboard was given, for the Direct3D 11 backend to add after the shade.  fire: the
+	/// caller wrote each particle's age and seed into v2 for the fire look (ffshader.h,
+	/// FIRE_LOOK_SAMPLING).  emissive: an Emissive system's quads, which take no shadow and no
+	/// smoke shade (Direct3D11_Set_Emissive).  Render thread only.
 	static void				Insert_Sorted_Billboards(SortingBillboardRange *range, int quads,
-										TextureClass *texture, const ShaderClass &shader, bool glow = false);
+										TextureClass *texture, const ShaderClass &shader, bool glow = false,
+										bool fire = false, bool emissive = false);
 
-	/// One billboard's four vertices: the transform, corner table and single-frame UVs Render uses
-	/// for a billboarded QUADS group with per-point sizes, orientations and colours, written the
+	/// One billboard's four vertices: the transform, corner table and frame UVs Render uses for a
+	/// billboarded QUADS group with per-point sizes, orientations, colours and frames, written the
 	/// same way so the vertices come out bit for bit the same.  color is packed already
 	/// (DX8Wrapper::Convert_Color_Clamp).  glow goes in the normal, which an unlit billboard does not
-	/// otherwise read.  Touches nothing but its arguments and the static tables, so any thread may
-	/// call it.
+	/// otherwise read.  frame_log2 and frame pick one cell of a square atlas, as
+	/// Set_Frame_Row_Column_Count_Log2 and the frame array do; 0 and 0 are the whole texture.
+	/// Touches nothing but its arguments and the static tables, so any thread may call it.
 	static inline void		Write_Billboard(VertexFormatXYZNDUV2 *quad, const Matrix4x4 &view,
 										const Vector3 &world, float size, unsigned char orientation, unsigned color,
-										const Vector3 &glow)
+										const Vector3 &glow, unsigned frame_log2=0, unsigned frame=0)
 	{
 		const Vector4 result=view*world;
 		const Vector3 point(result.X,result.Y,result.Z);
 		const Vector3 *corners=_QuadVertexLocationOrientationTable[orientation];
-		const Vector2 *uv=_QuadVertexUVFrameTable[0];
+		const Vector2 *uv=_QuadVertexUVFrameTable[frame_log2] + frame*4;
 		for (int k=0;k<4;++k)
 		{
 			const Vector3 location=point + corners[k] * size;

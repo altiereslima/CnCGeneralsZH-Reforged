@@ -39,6 +39,11 @@
 #include "PosixDevice9.h"
 #include "SdlGpuFrame.h"
 #include "SdlResourceMirror.h"
+#include "SdlSunShadowDebug.h"
+#include "Platform/SunShadow.h"
+#include "Platform/SunSmoke.h"
+#include "../Libraries/Source/WWVegas/WW3D2/ffshader.h"
+#include "Platform/EngineShaderName.h"
 
 #include <SDL3/SDL.h>
 
@@ -529,6 +534,654 @@ static void check_render_targets(PosixDevice9 *device)
 	target_texture->Release();
 }
 
+#if defined(__linux__)
+// Runtime sun capture and diagnostic mode overrides are enabled only on Linux.
+static void check_sun_capture(PosixDevice9 *device)
+{
+    begin(device, BLUE);
+    device->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);
+    device->SetRenderState(D3DRS_ZWRITEENABLE, 1);
+    device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+    device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, 0);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE, 0);
+    D3DVIEWPORT9 sceneView = {3, 5, 24, 20, 0, 1};
+    device->SetViewport(&sceneView);
+    ScreenVertex v[6];
+    quad(v, 0, 0, 32, 32, .4f, RED);
+    CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, v, sizeof(v[0])) == D3D_OK);
+    read_back(device);
+    const std::vector<uint8_t> scene = pixels;
+
+    IDirect3DTexture9 *savedTexture = NULL;
+    CHECK(device->CreateTexture(1,1,1,0,D3DFMT_A8R8G8B8,D3DPOOL_MANAGED,&savedTexture,NULL)==D3D_OK);
+    device->SetTexture(7,savedTexture); // unused by this program, owned across the pass
+    D3DMATRIX sceneWorld;
+    device->GetTransform(D3DTS_WORLD,&sceneWorld);
+    CHECK(!device->Begin_Sun_Shadow(0));
+    CHECK(device->Begin_Sun_Shadow(32));
+    CHECK(!device->Begin_Sun_Shadow(64)); // re-entry leaves the first capture intact
+    device->SetTexture(7,NULL);
+    savedTexture->Release(); // the capture now holds the only reference
+    D3DMATRIX casterWorld=sceneWorld; casterWorld._41=13.0f;
+    device->SetTransform(D3DTS_WORLD,&casterWorld);
+    device->SetRenderState(D3DRS_ZWRITEENABLE, 0); // a sorted rotor still writes sun depth
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, 1);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    quad(v, 0, 0, 16, 32, .3f, 0x0700FF00); // below the existing 8/255 caster threshold
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, v, sizeof(v[0]));
+    quad(v, 16, 0, 32, 32, .3f, 0x8000FF00);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, v, sizeof(v[0]));
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE); // additive light must not occlude
+    quad(v, 0, 0, 32, 32, .1f, WHITE);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, v, sizeof(v[0]));
+    CHECK(device->End_Sun_Shadow());
+    D3DVIEWPORT9 restored;
+    device->GetViewport(&restored);
+    CHECK(memcmp(&restored, &sceneView, sizeof(restored)) == 0);
+    RenderUInt32 blend=1,write=0;
+    device->GetRenderState(D3DRS_ALPHABLENDENABLE,&blend);
+    device->GetRenderState(D3DRS_ZWRITEENABLE,&write);
+    CHECK(blend==0 && write==1);
+    D3DMATRIX restoredWorld;device->GetTransform(D3DTS_WORLD,&restoredWorld);
+    CHECK(memcmp(&sceneWorld,&restoredWorld,sizeof(sceneWorld))==0);
+    IDirect3DBaseTexture9 *restoredTexture=NULL;
+    device->GetTexture(7,&restoredTexture);
+    CHECK(restoredTexture==savedTexture && restoredTexture->GetLevelCount()==1);
+    if(restoredTexture) restoredTexture->Release();
+    device->SetTexture(7,NULL);
+    read_back(device);
+    CHECK(pixels == scene);
+    std::vector<float> depth;
+    CHECK(device->Read_Sun_Shadow(depth));
+    if (depth.size()==32*32) {
+        CHECK(depth[16*32+8]==1.0f);
+        CHECK(depth[16*32+24]>.299f && depth[16*32+24]<.301f);
+    } else CHECK(false);
+    // Scene depth and the restored state must survive too, not just its color.
+    quad(v, 0, 0, 32, 32, .6f, GREEN);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, v, sizeof(v[0]));
+    read_back(device);
+    CHECK(pixels == scene);
+
+    CHECK(device->Begin_Sun_Shadow(64));
+    CHECK(device->End_Sun_Shadow()); // no casters must erase stale depth
+    CHECK(device->Read_Sun_Shadow(depth));
+    for(float d:depth) CHECK(d==1.0f);
+    CHECK(device->Begin_Sun_Shadow(32));
+    CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,1,NULL,sizeof(v[0]))==D3DERR_INVALIDCALL);
+    CHECK(!device->End_Sun_Shadow());
+    CHECK(device->Begin_Sun_Shadow(32));
+    CHECK(device->DrawPrimitiveUP((D3DPRIMITIVETYPE)999,1,v,sizeof(v[0]))==D3DERR_INVALIDCALL);
+    CHECK(!device->End_Sun_Shadow()); // rejected capture must not authorize stencil suppression
+    CHECK(!device->Read_Sun_Shadow(depth));
+    device->Clear_Sun_Shadow();
+    sceneView={0,0,SIZE,SIZE,0,1};device->SetViewport(&sceneView);
+    device->SetRenderState(D3DRS_CULLMODE,D3DCULL_CCW);
+    printf("sun capture: alpha/rotor and additive rules, scene color/depth/state, empty/resize/refusal checked\n");
+}
+
+// An independent world-space fixture: a left-half blocker at z=.25, white ground
+// at z=.75, and a translated/scaled scene camera with a nonzero viewport origin.
+static void check_sun_receivers(PosixDevice9 *device)
+{
+    {
+    SunShadow::SceneScope mainScene(device,true);
+    D3DMATRIX identity = {}; identity._11=identity._22=identity._33=identity._44=1;
+    device->SetTransform(D3DTS_WORLD,&identity);
+    device->SetTransform(D3DTS_VIEW,&identity);
+    device->SetTransform(D3DTS_PROJECTION,&identity);
+    begin(device,BLUE);
+    device->SetRenderState(D3DRS_ZENABLE,1);
+    device->SetRenderState(D3DRS_ZWRITEENABLE,1);
+    device->SetRenderState(D3DRS_ZFUNC,D3DCMP_LESSEQUAL);
+    device->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE,0);
+    device->SetFVF(D3DFVF_XYZ|D3DFVF_DIFFUSE);
+    struct V { float x,y,z; uint32_t color; };
+    const V caster[] = {{-1,1,.25f,WHITE},{0,1,.25f,WHITE},{-1,-1,.25f,WHITE},
+        {0,1,.25f,WHITE},{0,-1,.25f,WHITE},{-1,-1,.25f,WHITE}};
+    const V receiver[] = {{-1,1,.75f,WHITE},{1,1,.75f,WHITE},{-1,-1,.75f,WHITE},
+        {1,1,.75f,WHITE},{1,-1,.75f,WHITE},{-1,-1,.75f,WHITE}};
+    CHECK(device->Begin_Sun_Shadow(32));
+    CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,caster,sizeof(V))==D3D_OK);
+    CHECK(device->End_Sun_Shadow());
+    D3DMATRIX view=identity,projection=identity;
+    view._41=.25f; projection._11=.8f; projection._22=.8f;
+    device->SetTransform(D3DTS_VIEW,&view);
+    device->SetTransform(D3DTS_PROJECTION,&projection);
+    D3DVIEWPORT9 viewport={3,5,24,20,.2f,.8f}; device->SetViewport(&viewport);
+    const auto parameters = [&] { return SunShadow::Parameters(device,0,.5f,0,0,0,1,0); };
+    CHECK(parameters()); CHECK(SunShadow::ReceivesView(device));
+    CHECK(SunShadow::OwnsSceneShadows(device));
+    const auto draw = [&] {
+        D3DVIEWPORT9 current; device->GetViewport(&current);
+        D3DVIEWPORT9 whole={0,0,SIZE,SIZE,0,1}; device->SetViewport(&whole);
+        device->Clear(0,NULL,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,BLUE,1,0);
+        device->SetViewport(&current);
+        CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,receiver,sizeof(V))==D3D_OK);
+        read_back(device);
+    };
+    draw();
+    CHECK_PIXEL(10,15,0xFF808080); CHECK_PIXEL(17,15,0xFF808080);
+    CHECK_PIXEL(18,15,WHITE); CHECK_PIXEL(24,15,WHITE);
+    CHECK_PIXEL(1,15,BLUE); CHECK_PIXEL(15,3,BLUE);
+    const auto shadowed = pixels;
+    CHECK(SunShadow::Parameters(device,0,0,0,0,0,1,0)); draw(); CHECK_PIXEL(10,15,WHITE);
+    CHECK(SunShadow::Parameters(device,2,.5f,0,0,0,1,0)); draw(); CHECK_PIXEL(10,15,WHITE);
+    CHECK(SunShadow::Parameters(device,0,.5f,4,0,0,1,0)); draw(); CHECK_PIXEL(17,15,0xFF808080);
+    CHECK(SunShadow::Parameters(device,0,.5f,4,0,8,1,0)); draw();
+    // A .5 depth gap opens the existing radius to four texels: the hard edge now
+    // contains both lit and blocked taps. Full sky fill raises the interior to white.
+    CHECK((at(17,15)&255)>128 && (at(17,15)&255)<255);
+    CHECK(SunShadow::Parameters(device,0,.5f,4,0,8,1,1)); draw(); CHECK_PIXEL(10,15,WHITE);
+    CHECK(!SunShadow::Parameters(device,0,.5f,1,2,0,1,0));
+    CHECK(!SunShadow::ReceivesView(device));
+    CHECK(parameters()); draw(); CHECK(pixels==shadowed);
+    // Exercise every transcribed ground pixel program, including the road's blended
+    // no-depth-write layer. All-white inputs yield the same analytic .5/1 sunlight.
+    IDirect3DTexture9 *white=make_texture(device,1,1,D3DFMT_A8R8G8B8,&WHITE,sizeof(WHITE));
+    for(unsigned i=0;i<5;++i) device->SetTexture(i,white);
+    const RenderUInt32 tokens[]={0xffff0101u,0x0000ffffu};
+    IDirect3DPixelShader9 *ground=NULL; CHECK(device->CreatePixelShader(tokens,&ground)==D3D_OK);
+    const char *names[]={"terrain.pso","terrainnoise.pso","terrainnoise2.pso","fterrain.pso",
+        "fterrain0.pso","fterrainnoise.pso","fterrainnoise2.pso","roadnoise2.pso"};
+    device->SetPixelShader(ground);
+    for(const char *name:names) {
+        PosixDevice_Name_Shader(ground,name);
+        draw(); CHECK_PIXEL(10,15,0xFF808080); CHECK_PIXEL(24,15,WHITE);
+    }
+    device->SetRenderState(D3DRS_ZWRITEENABLE,0);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,1);
+    device->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);
+    draw(); CHECK_PIXEL(10,15,0xFF808080); CHECK_PIXEL(24,15,WHITE);
+    device->SetRenderState(D3DRS_ZWRITEENABLE,1);device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);
+    device->SetPixelShader(NULL);ground->Release();
+    for(unsigned i=0;i<5;++i) device->SetTexture(i,NULL);
+    white->Release();
+    // Scoped exclusions include nesting. Deferred draws keep their own constant bytes.
+    {
+        SunShadow::ReceiverExclusion exclusion(device);
+        { SunShadow::ReceiverExclusion nested(device); draw(); CHECK_PIXEL(10,15,WHITE); }
+        draw(); CHECK_PIXEL(10,15,WHITE);
+    }
+    draw(); CHECK(pixels==shadowed);
+    // A nested scene is independent even if its matrices and viewport match. Its
+    // attempted clear/capture must not destroy the outer scene's completed map.
+    for (bool eligible : {false,true}) {
+        {
+            SunShadow::SceneScope nestedScene(device,eligible);
+            CHECK(SunShadow::ReceiversExcluded(device));
+            CHECK(!SunShadow::ReceivesView(device));
+            CHECK(!SunShadow::OwnsSceneShadows(device));
+            SunShadow::Clear(device);
+            CHECK(!SunShadow::Begin(device,64));
+            CHECK(!parameters());
+            draw(); CHECK_PIXEL(10,15,WHITE);
+        }
+        CHECK(!SunShadow::ReceiversExcluded(device));
+        CHECK(SunShadow::OwnsSceneShadows(device));
+        draw(); CHECK(pixels==shadowed);
+    }
+    // An independent target cannot borrow shadow ownership even with the exact
+    // same camera, depth attachment and viewport. Read both targets independently.
+    IDirect3DTexture9 *otherTexture=NULL;
+    IDirect3DSurface9 *otherTarget=NULL,*back=NULL,*copy=NULL;
+    CHECK(device->CreateTexture(SIZE,SIZE,1,D3DUSAGE_RENDERTARGET,D3DFMT_A8R8G8B8,
+        D3DPOOL_DEFAULT,&otherTexture,NULL)==D3D_OK);
+    CHECK(otherTexture->GetSurfaceLevel(0,&otherTarget)==D3D_OK);
+    CHECK(device->GetRenderTarget(0,&back)==D3D_OK);
+    CHECK(device->SetRenderTarget(0,otherTarget)==D3D_OK);
+    device->SetViewport(&viewport);
+    CHECK(!SunShadow::ReceivesView(device)); CHECK(!SunShadow::OwnsSceneShadows(device));
+    draw(); CHECK(pixels==shadowed); // draw() reads the original back buffer
+    CHECK(device->CreateOffscreenPlainSurface(SIZE,SIZE,D3DFMT_A8R8G8B8,D3DPOOL_SYSTEMMEM,&copy,NULL)==D3D_OK);
+    CHECK(device->GetRenderTargetData(otherTarget,copy)==D3D_OK);
+    D3DLOCKED_RECT locked;
+    CHECK(copy->LockRect(&locked,NULL,D3DLOCK_READONLY)==D3D_OK);
+    CHECK(((const uint32_t*)((const uint8_t*)locked.pBits+15*locked.Pitch))[10]==WHITE);
+    copy->UnlockRect(); copy->Release();
+    CHECK(device->SetRenderTarget(0,back)==D3D_OK); device->SetViewport(&viewport);
+    otherTarget->Release(); otherTexture->Release(); back->Release();
+    CHECK(SunShadow::OwnsSceneShadows(device)); draw(); CHECK(pixels==shadowed);
+    // A secondary camera/viewport must keep legacy coverage and receive no stale map.
+    D3DVIEWPORT9 other=viewport; other.X=4; device->SetViewport(&other);
+    CHECK(!SunShadow::ReceivesView(device)); CHECK(!SunShadow::OwnsSceneShadows(device));
+    draw(); CHECK_PIXEL(10,15,WHITE);
+    device->SetViewport(&viewport);
+    D3DMATRIX otherView=view; otherView._41+=.1f; device->SetTransform(D3DTS_VIEW,&otherView);
+    CHECK(!SunShadow::ReceivesView(device));
+    // Temporary camera-space drawing within the owning scene must not bring
+    // stencil volumes back after other geometry already received mapped shadows.
+    CHECK(SunShadow::OwnsSceneShadows(device)); draw(); CHECK_PIXEL(10,15,WHITE);
+    device->SetTransform(D3DTS_VIEW,&view);
+    draw(); CHECK(pixels==shadowed);
+    // Ordinary solid geometry can mark stencil for the later occlusion pass.
+    device->SetRenderState(D3DRS_STENCILENABLE,1);
+    device->SetRenderState(D3DRS_STENCILFUNC,D3DCMP_ALWAYS);
+    device->SetRenderState(D3DRS_STENCILPASS,D3DSTENCILOP_REPLACE);
+    device->SetRenderState(D3DRS_STENCILREF,7);
+    draw(); CHECK(pixels==shadowed);
+    device->SetRenderState(D3DRS_STENCILENABLE,0);
+    // The bridge's depth-writing alpha-tested material also uses ordinary alpha
+    // blending. Ordinary transparent materials receive too, even without depth writes.
+    // Tree exclusion still takes precedence.
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,1);
+    device->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE,1);
+    device->SetRenderState(D3DRS_ALPHAFUNC,D3DCMP_GREATER);
+    device->SetRenderState(D3DRS_ALPHAREF,8);
+    draw(); CHECK(pixels==shadowed);
+    { SunShadow::ReceiverExclusion tree(device); draw(); CHECK_PIXEL(10,15,WHITE); }
+    device->SetRenderState(D3DRS_ZWRITEENABLE,0); draw(); CHECK(pixels==shadowed);
+    device->SetRenderState(D3DRS_ZWRITEENABLE,1);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE,0); draw(); CHECK(pixels==shadowed);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);
+    // Additive light must stay unshadowed; lack of depth writes alone is not an exclusion.
+    device->SetRenderState(D3DRS_ZWRITEENABLE,0); draw(); CHECK(pixels==shadowed);
+    device->SetRenderState(D3DRS_ZWRITEENABLE,1);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,1);
+    device->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_ONE);
+    device->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_ONE);
+    draw(); CHECK_PIXEL(10,15,WHITE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);
+    CHECK(parameters()); draw(); CHECK(pixels==shadowed);
+    // Leave a receiver queued against the old allocation, then replace it. End
+    // submits both in order; the queued draw must still sample the old blocker.
+    device->Clear(0,NULL,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,BLUE,1,0);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,receiver,sizeof(V));
+    CHECK(device->Begin_Sun_Shadow(64)); CHECK(device->End_Sun_Shadow());
+    read_back(device); CHECK_PIXEL(10,15,0xFF808080);
+    // An empty replacement clears the previous blocker; parameters must be renewed.
+    CHECK(!SunShadow::ReceivesView(device)); CHECK(parameters()); draw(); CHECK_PIXEL(10,15,WHITE);
+    // Invalid allocation requests fall back immediately; the last map cannot
+    // silently remain the current frame's shadow source.
+    CHECK(!SunShadow::Begin(device,0)); CHECK(!SunShadow::OwnsSceneShadows(device));
+    CHECK(!parameters());
+    CHECK(SunShadow::Begin(device,32)); CHECK(SunShadow::End(device)); CHECK(parameters());
+    device->SetTransform(D3DTS_VIEW,&identity); device->SetTransform(D3DTS_PROJECTION,&identity);
+    viewport={0,0,SIZE,SIZE,0,1};device->SetViewport(&viewport);
+    device->SetRenderState(D3DRS_CULLMODE,D3DCULL_CCW);
+    } // no capture or stencil ownership may escape its scene
+    CHECK(!SunShadow::ReceivesView(device)); CHECK(!SunShadow::OwnsSceneShadows(device));
+    std::vector<float> expiredDepth; CHECK(!device->Read_Sun_Shadow(expiredDepth));
+    {
+        SunShadow::SceneScope nextScene(device,true);
+        CHECK(!SunShadow::OwnsSceneShadows(device));
+    }
+    printf("sun receivers: shared filter, offset/depth-range matrix, exclusions, nested scenes, targets and empty replacement checked\n");
+}
+
+
+// Analytic two-sphere moments, then the production sampler/constant/camera paths.
+static void check_sun_smoke(PosixDevice9 *device)
+{
+    D3DMATRIX identity={}; identity._11=identity._22=identity._33=identity._44=1;
+    const float casters[]={0,0,.25f,.5f,1, 0,0,.75f,.5f,2};
+    auto *gpu=device->Get_Gpu();
+    CHECK(gpu->Fill_Sun_Smoke(&identity._11,casters,2));
+    CHECK(gpu->Sun_Smoke_Count()==2);
+    std::vector<float> moments;
+    CHECK(gpu->Read_Sun_Smoke(moments));
+    if(moments.size()==512*512*4) {
+        const unsigned middle=(256*512+256)*4;
+        const float rim=1-2*(1.0f/256)*(1.0f/256), shape=rim*rim;
+        CHECK(std::fabs(moments[middle]-3*shape)<1e-5f);
+        CHECK(std::fabs(moments[middle+1]-1.75f*shape)<1e-5f);
+        CHECK(std::fabs(moments[middle+2]-1.375f*shape)<1e-5f);
+        CHECK(moments[middle+3]==.25f);
+        CHECK(moments[0]==0 && moments[1]==0 && moments[2]==0 && moments[3]==1);
+    }
+    std::vector<float> projected;
+    // A quadrant away from the origin catches an inverted Y axis or swapped instance fields.
+    const float offcentre[]={.5f,.5f,.3f,.2f,2};
+    CHECK(gpu->Fill_Sun_Smoke(&identity._11,offcentre,1));
+    CHECK(gpu->Read_Sun_Smoke(moments));
+    if(moments.size()==512*512*4) {
+        CHECK(moments[(128*512+384)*4]>1.99f);
+        CHECK(moments[(128*512+384)*4+3]==.3f);
+        CHECK(moments[(384*512+384)*4]==0 && moments[(128*512+128)*4]==0);
+    }
+    const float invalid[]={4,0,.5f,.1f,1, 0,0,.5f,0,1, 0,0,.5f,.1f,-1,
+        0,0,.5f,.1f,NAN};
+    CHECK(SunSmoke::Project(&identity._11,invalid,4,projected)==0);
+    std::vector<float> many;
+    for(unsigned i=0;i<SunSmoke::MaxCasters+1;++i) many.insert(many.end(),casters,casters+5);
+    CHECK(SunSmoke::Project(&identity._11,many.data(),SunSmoke::MaxCasters+1,projected)==SunSmoke::MaxCasters);
+    {
+    SunShadow::SceneScope scene(device,true);
+    device->SetTransform(D3DTS_WORLD,&identity); device->SetTransform(D3DTS_VIEW,&identity);
+    device->SetTransform(D3DTS_PROJECTION,&identity);
+    D3DVIEWPORT9 viewport={0,0,SIZE,SIZE,0,1};device->SetViewport(&viewport);
+    begin(device,0);
+    device->SetRenderState(D3DRS_ZENABLE,1);device->SetRenderState(D3DRS_ZWRITEENABLE,1);
+    device->SetRenderState(D3DRS_ZFUNC,D3DCMP_LESSEQUAL);device->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);device->SetRenderState(D3DRS_ALPHATESTENABLE,0);
+    CHECK(SunShadow::Begin(device,32)); CHECK(SunShadow::End(device));
+    const float cloud[]={0,0,.5f,.5f,2};
+    CHECK(SunShadow::FillSmoke(device,cloud,1,.6f));
+    viewport={3,5,24,20,.2f,.8f};device->SetViewport(&viewport);
+    CHECK(SunShadow::Parameters(device,0,0,0,0,0,1,0));
+    struct V {float x,y,z;uint32_t color;};
+    const auto draw=[&](float z,uint32_t colour=WHITE,float offset=0,bool read=true,uint32_t background=0) {
+        const V v[]={{-2+offset,2,z,colour},{2+offset,2,z,colour},{-2+offset,-2,z,colour},
+            {2+offset,2,z,colour},{2+offset,-2,z,colour},{-2+offset,-2,z,colour}};
+        device->Clear(0,nullptr,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,background,1,0);
+        device->SetFVF(D3DFVF_XYZ|D3DFVF_DIFFUSE);
+        CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,v,sizeof(V))==D3D_OK);
+        if(read) read_back(device);
+    };
+    draw(.9f); const int behind=at(15,15)&255;
+    CHECK(behind>=123 && behind<=128); // logistic integral, gain .6, optical depth 2
+    CHECK_PIXEL(4,6,WHITE); // outside the projected disc, even with viewport/depth offsets
+    draw(.1f); CHECK((at(15,15)&255)>=235 && (at(15,15)&255)<=240);
+    // Refill must submit the queued old-map reader before overwriting its texture.
+    draw(.9f,WHITE,0,false);
+    const float moved[]={.8f,.8f,.5f,.1f,2};
+    CHECK(SunShadow::FillSmoke(device,moved,1,.6f)); read_back(device);
+    CHECK(int(at(15,15)&255)==behind);
+    const V farther[]={{-2,2,.95f,GREEN},{2,2,.95f,GREEN},{-2,-2,.95f,GREEN},
+        {2,2,.95f,GREEN},{2,-2,.95f,GREEN},{-2,-2,.95f,GREEN}};
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,farther,sizeof(V));read_back(device);
+    CHECK(int(at(15,15)&255)==behind); // refill preserves scene depth as well as colour
+    draw(.9f); CHECK_PIXEL(15,15,WHITE);
+    CHECK(SunShadow::FillSmoke(device,offcentre,1,.6f));
+    draw(.9f); CHECK((at(21,10)&255)>120 && (at(21,10)&255)<140);
+    CHECK_PIXEL(9,10,WHITE);CHECK_PIXEL(21,20,WHITE);
+    CHECK(SunShadow::FillSmoke(device,cloud,1,.6f));
+    device->SetRenderState(D3DRS_ZWRITEENABLE,0);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,1);
+    device->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);
+    draw(.9f,0x80ffffff); CHECK(std::abs(int(at(15,15)&255)-behind/2)<=2);
+    device->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_ONE);device->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_ONE);
+    draw(.9f);CHECK_PIXEL(15,15,WHITE);
+    device->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_ZERO);device->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_SRCCOLOR);
+    draw(.9f,0xff808080,0,true,WHITE);CHECK_PIXEL(15,15,0xff808080); // multiplier remains unshaded
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);
+    // Perspective main view, followed by the sorting renderer's camera-space vertices.
+    D3DMATRIX view=identity,projection=identity; view._41=.25f;projection._34=.5f;
+    device->SetTransform(D3DTS_VIEW,&view);device->SetTransform(D3DTS_PROJECTION,&projection);
+    CHECK(SunShadow::Parameters(device,0,0,0,0,0,1,0));
+    device->SetTransform(D3DTS_VIEW,&identity);CHECK(SunShadow::ReceivesView(device));
+    draw(.25f,WHITE,.25f);CHECK_PIXEL(17,15,WHITE); // sunward face has no smoke ahead
+    draw(.9f,WHITE,.25f);CHECK((at(17,15)&255)>70 && (at(17,15)&255)<95);
+    const auto particle=pixels;
+    // Firelight in normals reaches the pixel after shadowing, exactly once.
+    struct G {float x,y,z,nx,ny,nz;uint32_t colour;};
+    const G glow[]={{-1.75f,2,.9f,.2f,0,0,0xff808080},{2.25f,2,.9f,.2f,0,0,0xff808080},
+        {-1.75f,-2,.9f,.2f,0,0,0xff808080},{2.25f,2,.9f,.2f,0,0,0xff808080},
+        {2.25f,-2,.9f,.2f,0,0,0xff808080},{-1.75f,-2,.9f,.2f,0,0,0xff808080}};
+    device->Clear(0,nullptr,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0,1,0);
+    device->SetFVF(D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_DIFFUSE);
+    device->SetRenderState(D3DRS_SPECULARENABLE,1);
+    SunShadow::SetSmokeGlow(device,true);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,glow,sizeof(G)); read_back(device);
+    const uint32_t lit=at(17,15);
+    CHECK(std::abs(int((lit>>16)&255)-int((lit>>8)&255)-51)<=2);
+    SunShadow::SetSmokeGlow(device,false);device->SetRenderState(D3DRS_SPECULARENABLE,0);
+    { SunShadow::ReceiverExclusion excluded(device);draw(.9f,WHITE,.25f);CHECK_PIXEL(17,15,WHITE); }
+    { SunShadow::SceneScope nested(device,true);
+      CHECK(!SunShadow::FillSmoke(device,nullptr,0,0));draw(.9f,WHITE,.25f);CHECK_PIXEL(17,15,WHITE); }
+    draw(.9f,WHITE,.25f);CHECK(pixels==particle);
+    CHECK(SunShadow::FillSmoke(device,nullptr,0,0));draw(.9f,WHITE,.25f);CHECK_PIXEL(17,15,WHITE);
+    CHECK(!gpu->Sun_Smoke_Texture());
+    device->SetTransform(D3DTS_VIEW,&identity);device->SetTransform(D3DTS_PROJECTION,&identity);
+    viewport={0,0,SIZE,SIZE,0,1};device->SetViewport(&viewport);
+    device->SetRenderState(D3DRS_ZWRITEENABLE,1);
+    // Cloaked casters use Windows' Bayer coverage; resetting the effect restores full coverage.
+    for(float opacity : {0.0f,.5f,1.0f,2.0f}) {
+        CHECK(SunShadow::Begin(device,32));
+        const float parameters[]={0,0,0,opacity};
+        SunShadow::SetCasterEffect(device,DRAW_EFFECT_CLOAK_SHADOW,parameters);
+        ScreenVertex v[6];quad(v,0,0,32,32,.3f,WHITE);device->SetFVF(SCREEN_FVF);
+        device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,v,sizeof(ScreenVertex));
+        CHECK(SunShadow::End(device));std::vector<float> depth;CHECK(device->Read_Sun_Shadow(depth));
+        unsigned occupied=0;for(float z:depth) occupied+=z<1;
+        CHECK(occupied==unsigned(std::min(opacity,1.0f)*.5f*1024));
+    }
+    CHECK(SunShadow::Begin(device,32));
+    ScreenVertex v[6];quad(v,0,0,32,32,.3f,WHITE);device->SetFVF(SCREEN_FVF);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,v,sizeof(ScreenVertex));CHECK(SunShadow::End(device));
+    std::vector<float> depth;CHECK(device->Read_Sun_Shadow(depth));for(float z:depth) CHECK(z<1);
+    }
+    printf("smoke: moments/front, offset/depth-range reconstruction, queued refill, alpha particles, fire glow, exclusions, empty map and cloak coverage checked\n");
+}
+
+// The tree vertex program stores sway metadata in the normal slot. Verify its
+// actual displaced alpha silhouette, then receive sunlight through that same program.
+static void check_sun_trees(PosixDevice9 *device)
+{
+    {
+    SunShadow::SceneScope scene(device,true);
+    D3DMATRIX identity={};identity._11=identity._22=identity._33=identity._44=1;
+    for(auto transform:{D3DTS_WORLD,D3DTS_VIEW,D3DTS_PROJECTION}) device->SetTransform(transform,&identity);
+    begin(device,BLUE);
+    device->SetRenderState(D3DRS_ZENABLE,1);device->SetRenderState(D3DRS_ZWRITEENABLE,1);
+    device->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE,1);
+    device->SetRenderState(D3DRS_ALPHAFUNC,D3DCMP_GREATEREQUAL);
+    device->SetRenderState(D3DRS_ALPHAREF,96);
+    const uint32_t leaf[]={WHITE,0x00ffffff};
+    IDirect3DTexture9 *texture=make_texture(device,2,1,D3DFMT_A8R8G8B8,leaf,sizeof(leaf));
+    device->SetTexture(0,texture);
+    device->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_POINT);
+    device->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_POINT);
+    device->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_MODULATE);
+    device->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+    device->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);
+    device->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_MODULATE);
+    device->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+    device->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);
+    device->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);
+    const RenderUInt32 tokens[]={0xfffe0101u,0x0000ffffu};
+    IDirect3DVertexShader9 *shader=nullptr;
+    CHECK(device->CreateVertexShader(tokens,&shader)==D3D_OK);
+    PosixDevice_Name_Shader(shader,"trees.vso");device->SetVertexShader(shader);
+    device->SetFVF(D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_DIFFUSE|D3DFVF_TEX1);
+    device->SetVertexShaderConstantF(4,&identity._11,4);
+    const float sway[]={1,0,0,0};device->SetVertexShaderConstantF(9,sway,1);
+    const float noSway[]={0,0,0,0};device->SetVertexShaderConstantF(8,noSway,1);
+    struct TreeVertex {float x,y,z,type,shade,base;uint32_t color;float u,v;};
+    TreeVertex leafQuad[]={
+        {-.75f,.5f,.25f,1,1,0,WHITE,0,0},{.25f,.5f,.25f,1,1,0,WHITE,1,0},
+        {-.75f,-.5f,.25f,1,1,0,WHITE,0,1},{.25f,.5f,.25f,1,1,0,WHITE,1,0},
+        {.25f,-.5f,.25f,1,1,0,WHITE,1,1},{-.75f,-.5f,.25f,1,1,0,WHITE,0,1}};
+    CHECK(SunShadow::Begin(device,32));
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,leafQuad,sizeof(TreeVertex));
+    CHECK(SunShadow::End(device));
+    std::vector<float> depth;CHECK(device->Read_Sun_Shadow(depth));
+    if(depth.size()==32*32) {
+        CHECK(depth[16*32+6]==1); // unswayed location is now clear
+        CHECK(depth[16*32+12]>.249f && depth[16*32+12]<.251f);
+        CHECK(depth[16*32+20]==1); // transparent half of the displaced leaf
+    }
+    CHECK(SunShadow::Parameters(device,0,.5f,0,0,0,1,0));
+    device->SetTexture(0,nullptr);
+    device->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_SELECTARG2);
+    device->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG2);
+    for(auto &v:leafQuad) {v.x=(v.x+.75f)*2-1;v.y*=2;v.z=.75f;v.type=0;}
+    device->Clear(0,nullptr,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,BLUE,1,0);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,leafQuad,sizeof(TreeVertex));read_back(device);
+    CHECK_PIXEL(12,16,0xff808080);CHECK_PIXEL(20,16,WHITE);
+    device->SetVertexShader(nullptr);shader->Release();texture->Release();
+    device->SetRenderState(D3DRS_ALPHATESTENABLE,0);
+    device->SetRenderState(D3DRS_CULLMODE,D3DCULL_CCW);
+    }
+    printf("sun trees: displaced alpha silhouette, transparent gaps and receiving checked\n");
+}
+
+static void check_sun_reset(PosixDevice9 *device)
+{
+    begin(device,BLUE);
+    CHECK(SunShadow::Begin(device,32)); CHECK(SunShadow::End(device));
+    CHECK(SunShadow::Parameters(device,0,.5f,0,0,0,1,0));
+    CHECK(SunShadow::OwnsSceneShadows(device));
+    // Keep work queued against the old scene allocation while Reset drains it.
+    ScreenVertex vertices[6]; quad(vertices,0,0,32,32,.5f,RED);
+    CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,vertices,sizeof(vertices[0]))==D3D_OK);
+    D3DPRESENT_PARAMETERS original=device->Get_Present_Parameters(), resized=original;
+    resized.BackBufferWidth=48; resized.BackBufferHeight=40;
+    CHECK(device->Reset(&resized)==D3D_OK);
+    std::vector<float> depth;
+    CHECK(!device->Read_Sun_Shadow(depth)); CHECK(!SunShadow::OwnsSceneShadows(device));
+    CHECK(!SunShadow::Parameters(device,0,.5f,0,0,0,1,0));
+    D3DVIEWPORT9 viewport; device->GetViewport(&viewport);
+    CHECK(viewport.Width==48 && viewport.Height==40);
+    begin(device,GREEN);
+    CHECK(SunShadow::Begin(device,64)); CHECK(SunShadow::End(device));
+    CHECK(SunShadow::Parameters(device,0,.5f,0,0,0,1,0));
+    CHECK(SunShadow::OwnsSceneShadows(device));
+    CHECK(device->Read_Sun_Shadow(depth)); CHECK(depth.size()==64*64);
+    for(float value:depth) CHECK(value==1.0f);
+    std::vector<uint8_t> resizedPixels;
+    CHECK(device->Get_Gpu()->Read_Back(device->Get_Gpu()->Back_Buffer(),48,40,resizedPixels));
+    for(size_t i=0;i<resizedPixels.size();i+=4)
+        CHECK(resizedPixels[i]==0 && resizedPixels[i+1]==255 && resizedPixels[i+2]==0 && resizedPixels[i+3]==255);
+    CHECK(device->Reset(&original)==D3D_OK);
+    CHECK(!SunShadow::OwnsSceneShadows(device));
+    printf("sun reset: pending work drained, stale capture invalidated, resized capture and scene verified\n");
+}
+
+static PosixDevice9 *sun_fault_device(IDirect3D9 *adapter)
+{
+    D3DPRESENT_PARAMETERS parameters={};
+    parameters.BackBufferWidth=parameters.BackBufferHeight=SIZE;
+    parameters.BackBufferFormat=D3DFMT_X8R8G8B8;
+    parameters.Windowed=parameters.EnableAutoDepthStencil=1;
+    parameters.AutoDepthStencilFormat=D3DFMT_D24S8;
+    IDirect3DDevice9 *created=NULL;
+    CHECK(adapter->CreateDevice(0,D3DDEVTYPE_HAL,NULL,0,&parameters,&created)==D3D_OK);
+    if(!created) return NULL;
+    PosixDevice9 *device=static_cast<PosixDevice9*>(created);
+    if(device->Create_Gpu_Frame(true)!=D3D_OK) { CHECK(false);device->Release();return NULL; }
+    begin(device,BLUE);
+    D3DMATRIX identity={};identity._11=identity._22=identity._33=identity._44=1;
+    device->SetTransform(D3DTS_WORLD,&identity);device->SetTransform(D3DTS_VIEW,&identity);
+    device->SetTransform(D3DTS_PROJECTION,&identity);
+    device->SetFVF(D3DFVF_XYZ|D3DFVF_DIFFUSE);
+    device->SetRenderState(D3DRS_ZENABLE,1);device->SetRenderState(D3DRS_ZWRITEENABLE,1);
+    device->SetRenderState(D3DRS_ZFUNC,D3DCMP_LESSEQUAL);
+    device->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE,0);device->SetRenderState(D3DRS_ALPHABLENDENABLE,0);
+    return device;
+}
+
+static void check_sun_failures(IDirect3D9 *adapter)
+{
+    Sdl_Sun_Shadow_Fault_Point() = nullptr;
+    struct V {float x,y,z;uint32_t color;};
+    const V caster[]={{-1,1,.25f,WHITE},{1,1,.25f,WHITE},{-1,-1,.25f,WHITE},
+        {1,1,.25f,WHITE},{1,-1,.25f,WHITE},{-1,-1,.25f,WHITE}};
+    const V left[]={{-1,1,.75f,WHITE},{0,1,.75f,WHITE},{-1,-1,.75f,WHITE},
+        {0,1,.75f,WHITE},{0,-1,.75f,WHITE},{-1,-1,.75f,WHITE}};
+    const V right[]={{0,1,.75f,WHITE},{1,1,.75f,WHITE},{0,-1,.75f,WHITE},
+        {1,1,.75f,WHITE},{1,-1,.75f,WHITE},{0,-1,.75f,WHITE}};
+    const auto parameters=[](PosixDevice9 *device){return SunShadow::Parameters(device,0,.5f,0,0,0,1,0);};
+    for(const char *fault : {"smoke-target","smoke-pipeline"}) {
+        PosixDevice9 *smokeDevice=sun_fault_device(adapter);if(!smokeDevice) continue;
+        { SunShadow::SceneScope scene(smokeDevice,true);
+        CHECK(SunShadow::Begin(smokeDevice,32));
+        CHECK(smokeDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,caster,sizeof(V))==D3D_OK);
+        CHECK(SunShadow::End(smokeDevice));
+        const float cloud[]={0,0,.5f,.5f,2};
+        Sdl_Sun_Shadow_Fault_Point() = fault;
+        CHECK(!SunShadow::FillSmoke(smokeDevice,cloud,1,.6f));
+        CHECK(!smokeDevice->Get_Gpu()->Sun_Smoke_Texture());
+        CHECK(parameters(smokeDevice));CHECK(SunShadow::OwnsSceneShadows(smokeDevice));
+        smokeDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,left,sizeof(V));
+        read_back(smokeDevice);CHECK_PIXEL(8,16,0xFF808080); // core depth map still works
+        Sdl_Sun_Shadow_Fault_Point() = nullptr;
+        CHECK(!SunShadow::FillSmoke(smokeDevice,cloud,1,.6f)); // bounded refusal, no per-frame retry spam
+        CHECK(!SunShadow::FillSmoke(smokeDevice,nullptr,0,0));
+        }
+        smokeDevice->Release();
+        printf("smoke fault %s: particle fallback signalled, core shadows retained, refusal latched\n",fault);
+    }
+    for(const char *fault: {"receiver-program","receiver-pipeline"}) for(bool late: {false,true}) {
+        PosixDevice9 *device=sun_fault_device(adapter);if(!device) continue;
+        {
+            SunShadow::SceneScope scene(device,true);
+            CHECK(SunShadow::Begin(device,32));
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,caster,sizeof(V))==D3D_OK);
+            CHECK(SunShadow::End(device));CHECK(parameters(device));
+            if(late) {
+                CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,left,sizeof(V))==D3D_OK);
+                read_back(device);CHECK_PIXEL(8,16,0xFF808080);CHECK_PIXEL(24,16,BLUE);
+                // A new shader/pipeline key after an actual submission, so the fault
+                // cannot be repaired just by discarding the current CPU draw batch.
+                device->SetRenderState(D3DRS_ALPHATESTENABLE,1);
+                device->SetRenderState(D3DRS_ALPHAFUNC,D3DCMP_GREATER);
+                device->SetRenderState(D3DRS_ALPHAREF,8);
+                CHECK(parameters(device)); // changing parameters cannot forget earlier draws
+            }
+            Sdl_Sun_Shadow_Fault_Point() = fault;
+            const unsigned recorded=device->Draws_Recorded();
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,right,sizeof(V))==D3D_OK);
+            CHECK(device->Draws_Recorded()==recorded+1);CHECK(device->Draw_Refusals().empty());
+            read_back(device);CHECK_PIXEL(24,16,WHITE);
+            CHECK_PIXEL(8,16,late ? 0xFF808080 : BLUE);
+            CHECK(!SunShadow::ReceivesView(device));CHECK(SunShadow::OwnsSceneShadows(device)==late);
+            CHECK(!parameters(device));CHECK(SunShadow::OwnsSceneShadows(device)==late);
+            Sdl_Sun_Shadow_Fault_Point() = nullptr;
+            // The failure latch now selects ordinary draws after clearing the fault point.
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,left,sizeof(V))==D3D_OK);
+            read_back(device);CHECK_PIXEL(8,16,WHITE);CHECK_PIXEL(24,16,WHITE);
+        }
+        CHECK(!SunShadow::OwnsSceneShadows(device));
+        {
+            SunShadow::SceneScope next(device,true);
+            CHECK(!SunShadow::Begin(device,32));CHECK(!parameters(device));
+            CHECK(!SunShadow::OwnsSceneShadows(device));
+            device->Clear(0,NULL,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,BLUE,1,0);
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,right,sizeof(V))==D3D_OK);
+            read_back(device);CHECK_PIXEL(24,16,WHITE);
+        }
+        D3DPRESENT_PARAMETERS reset=device->Get_Present_Parameters();CHECK(device->Reset(&reset)==D3D_OK);
+        CHECK(!SunShadow::Begin(device,32)); // Reset retains the refused program/pipeline cache
+        CHECK(!SunShadow::Begin(device,32));
+        device->Release(); // the next case recreates the device and can receive again
+        printf("sun fault %s %s: geometry retained, submitted pixels preserved, ownership and next-scene latch checked\n",
+            fault,late ? "after submission" : "before receivers");
+    }
+    PosixDevice9 *device=sun_fault_device(adapter);
+    if(device) {
+        {
+            SunShadow::SceneScope scene(device,true);
+            Sdl_Sun_Shadow_Fault_Point() = "target";
+            CHECK(!SunShadow::Begin(device,32));CHECK(!parameters(device));
+            CHECK(!SunShadow::OwnsSceneShadows(device));
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,right,sizeof(V))==D3D_OK);
+            read_back(device);CHECK_PIXEL(24,16,WHITE);
+            Sdl_Sun_Shadow_Fault_Point() = nullptr;
+            CHECK(SunShadow::Begin(device,32));
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,caster,sizeof(V))==D3D_OK);
+            CHECK(SunShadow::End(device));CHECK(parameters(device));
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,left,sizeof(V))==D3D_OK);
+            Sdl_Sun_Shadow_Fault_Point() = "target";
+            CHECK(!SunShadow::Begin(device,64));CHECK(!parameters(device));
+            CHECK(!SunShadow::OwnsSceneShadows(device));
+            read_back(device);CHECK_PIXEL(8,16,0xFF808080);CHECK_PIXEL(24,16,WHITE);
+            Sdl_Sun_Shadow_Fault_Point() = nullptr;
+            CHECK(SunShadow::Begin(device,64));CHECK(SunShadow::End(device));CHECK(parameters(device));
+            std::vector<float> depth;CHECK(device->Read_Sun_Shadow(depth));CHECK(depth.size()==64*64);
+            for(float value:depth) CHECK(value==1.0f);
+            CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,left,sizeof(V))==D3D_OK);
+            read_back(device);CHECK_PIXEL(8,16,WHITE);CHECK_PIXEL(24,16,WHITE);
+        }
+        device->Release();
+        printf("sun allocation fault: first allocation and replacement refused, queued old reader retained, recovery and empty clear checked\n");
+    }
+    Sdl_Sun_Shadow_Fault_Point() = nullptr;
+}
+
+#endif
+
 static void check_refusal(PosixDevice9 *device)
 {
 	IDirect3DCubeTexture9 *cube = NULL;
@@ -740,6 +1393,9 @@ int main()
 	device->SetFVF(SCREEN_FVF);
 	CHECK(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, v, sizeof(ScreenVertex)) == D3D_OK);
 	CHECK(device->Draws_Recorded() == 0);
+	CHECK(!SunShadow::Begin(device,32));
+	CHECK(!SunShadow::Parameters(device,0,.5f,0,0,0,1,0));
+	CHECK(!SunShadow::OwnsSceneShadows(device));
 
 	if (!SDL_Init(SDL_INIT_VIDEO) || device->Create_Gpu_Frame(true) != D3D_OK) {
 		printf("posix_gpu_draw_selfcheck: SKIP - no GPU device here: %s\n", SDL_GetError());
@@ -754,8 +1410,18 @@ int main()
 	check_min_vertex(device);
 	check_clears_and_depth(device);
 	check_render_targets(device);
+#if defined(__linux__)
+	check_sun_capture(device);
+	check_sun_receivers(device);
+	check_sun_smoke(device);
+	check_sun_trees(device);
+	check_sun_reset(device);
+#endif
 	check_refusal(device);
 	check_quad_derivatives(device);
+#if defined(__linux__)
+	check_sun_failures(d3d);
+#endif
 
 	printf("posix_gpu_draw_selfcheck: %s: %u draws recorded, %u textures and %u buffers uploaded, %u stale flushes\n",
 		SDL_GetGPUDeviceDriver(device->Get_Gpu()->Device()), device->Draws_Recorded(),

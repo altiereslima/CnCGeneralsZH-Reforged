@@ -58,10 +58,12 @@
 #include "Common/Monitors.h"
 #include "Common/GameMemory.h"
 #include "Common/INIException.h"
+#include "Common/FileWriteQueue.h"
 #include "Common/SafeDisc/CdaPfn.h"
 #include "Common/StackDump.h"
 #include "Common/MessageStream.h"
 #include "Common/PlayerList.h"
+#include "Common/Recorder.h"
 #include "Common/Registry.h"
 #include "Common/Team.h"
 #include "GameClient/InGameUI.h"
@@ -447,14 +449,28 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
             break;
 
 			case WM_QUERYENDSESSION:
-			{
-				// guarded like the focus handlers below: these messages can arrive before the
-				// engine is up and, more often, while it is tearing down - a close or end-session
-				// that lands after TheMessageStream is gone used to fault right here.
-				if (canPostQuitMessage())
-					TheMessageStream->appendMessage(GameMessage::MSG_META_DEMO_INSTANT_QUIT);
-				return 0;	//don't allow Windows to shutdown while game is running.
-			}
+				// Windows is logging off or shutting down.  Refusing put the game on the "apps are
+				// preventing shutdown" screen, Windows killed it anyway, and the launcher read that kill
+				// as a crash.  Say yes; WM_ENDSESSION below ends the process.
+				DEBUG_LOG(("Windows session ending (WM_QUERYENDSESSION 0x%llx)\n", (unsigned long long)lParam));
+				FileWriteQueue::flushAll();
+				return TRUE;
+
+			case WM_ENDSESSION:
+				// wParam FALSE: something else refused the end, so play on.  TRUE: Windows ends the
+				// process soon after this returns, so no quit path; the replay closed with its end time
+				// and length the way a quit closes it, the log out, then leave with 0.  The pump runs on
+				// the main thread between ticks, so the recorder is not mid-write; it is NULL before the
+				// engine is up and after it is gone.
+				if (wParam)
+				{
+					DEBUG_LOG(("Windows session ended, leaving\n"));
+					if (TheRecorder != NULL && TheRecorder->getMode() == RECORDERMODETYPE_RECORD)
+						TheRecorder->stopRecording();
+					FileWriteQueue::flushAll();
+					_exit(0);
+				}
+				return 0;
 
 			// ------------------------------------------------------------------------
 			case WM_CLOSE:
@@ -606,8 +622,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 					ClipCursor( NULL );
 					isCursorClippedToWindow = false;
 					// A -wav run is heard by its file, not a person: muting it here silenced the
-					// capture whenever another window took the focus.
-					if (TheAudio && TheGlobalData->m_wavEndFrame <= 0)
+					// capture whenever another window took the focus.  MuteInBackground off keeps it
+					// playing behind another window.
+					if (TheAudio && TheGlobalData->m_wavEndFrame <= 0 && TheGlobalData->m_muteInBackground)
 						TheAudio->loseFocus();
 				}  // end if
 				else
@@ -1533,6 +1550,13 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 		DEBUG_LOG(("CRC message is %d\n", GameMessage::MSG_LOGIC_CRC));
 
+		// The audio endpoint the options menu saved, handed to the backend before the audio device
+		// opens on the default: "" or a device that is gone plays on the default.
+		const size_t AUDIO_DEVICE_ID_BYTES = 256;	// an MMDevice id is about 55
+		char savedAudioDevice[AUDIO_DEVICE_ID_BYTES];
+		findEarlyOptionValue( "AudioDevice", savedAudioDevice, sizeof( savedAudioDevice ) );
+		AIL_ex_set_output_device( savedAudioDevice );
+
 		// run the game main loop
 		GameMain(argc, argv);
 
@@ -1563,7 +1587,7 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		 running: the thread list was destroyed first, and the mouse or texture loader thread faulted
 		 taking itself off it (Except.cpp, Unregister_Thread_ID), which is all a player's report ever
 		 showed.  Name what was thrown, and leave through ReleaseCrash's _exit so no destructor runs. */
-	catch (INIException e)
+	catch (const INIException &e)
 	{
 		RELEASE_CRASH((e.mFailureMessage ? e.mFailureMessage : "Uncaught INI exception in WinMain"));
 	}

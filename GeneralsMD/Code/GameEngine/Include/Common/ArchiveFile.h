@@ -35,6 +35,8 @@
 #include "Common/AsciiString.h"
 #include "Common/ArchiveFileSystem.h"
 
+#include <mutex>
+
 class File;
 
 /**
@@ -71,6 +73,12 @@ protected:
 	const ArchivedFileInfo *		getArchivedFileInfo(const AsciiString& filename) const;	///< return the ArchivedFileInfo from the directory tree.
 
 	File *m_file; ///< file pointer to the archive file on disk.  Kept open so we don't have to continuously open and close the file all the time.
+	/// Held across a seek on m_file and the read after it (RAMFile and StreamingArchiveFile::openFromArchive,
+	/// StreamingArchiveFile::read).  The handle has one file position, and the main thread, the logic
+	/// thread's model loads in an overlapped tick and the audio's streams all read archives: a seek from
+	/// one between another's seek and read hands it the wrong bytes.  One per archive, so a stream from
+	/// the music archive never waits on a model being read out of another.
+	std::mutex m_readLock;
 	DetailedArchivedDirectoryInfo m_rootDirectory;
 };
 

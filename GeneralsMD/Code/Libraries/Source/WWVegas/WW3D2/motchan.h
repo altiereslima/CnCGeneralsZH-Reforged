@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 /* $Header: /Commando/Code/ww3d2/motchan.h 5     11/29/01 1:07p Jani_p $ */
 /*********************************************************************************************** 
@@ -47,6 +48,8 @@
 #include "bittype.h"
 #include "w3d_file.h"
 #include "quat.h"
+#include "mutex.h"
+#include <atomic>
 
 class ChunkLoadClass;
 class Quaternion;
@@ -240,7 +243,10 @@ private:
 	uint32	NumTimeCodes;		// Number of packets
 
 	uint32	LastTimeCodeIdx;	// absolute index to last time code
-	uint32	CachedIdx;			// Last Index Used
+	// Last index used: a hint where the search starts, shared by every object playing this
+	// animation, which the sun's shadow pass poses on several threads.  Any packet index it holds
+	// finds the same packet, so it is read once and written whole.
+	std::atomic<uint32>	CachedIdx;
   
 	uint32	*	Data;			 	// pointer to packet data
 
@@ -282,6 +288,7 @@ private:
 
 	uint32	CacheFrame;
 	float	  *CacheData;			// the data for CachedFrame, and CachedFrame+1, x VectorLen
+	FastCriticalSectionClass CacheLock;	// the cache is shared by every object playing this animation
 
 	void 		Free(void);
 
@@ -322,7 +329,7 @@ private:
 	int		DefaultVal;
 	
 	uint32	NumTimeCodes;
-	uint32	CachedIdx;
+	std::atomic<uint32>	CachedIdx;	// a shared hint, as TimeCodedMotionChannelClass's
 
 	uint32	*Bits;
 

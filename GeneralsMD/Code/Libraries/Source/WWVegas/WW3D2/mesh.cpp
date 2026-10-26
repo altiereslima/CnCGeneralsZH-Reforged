@@ -126,6 +126,7 @@ static unsigned MeshDebugIdCount;
 
 bool MeshClass::Legacy_Meshes_Fogged = true;
 int MeshClass::Shadow_Pass_Light_Meshes = 0;
+bool MeshClass::Shadow_Lean_Casters = false;
 static SimpleDynVecClass<uint32> temp_apt;
 
 /*
@@ -662,6 +663,13 @@ int MeshClass::Get_Num_Polys(void) const
  * HISTORY:                                                                                    *
  *   12/10/98   GTH : Created.                                                                 *
  *=============================================================================================*/
+/* The FVF container a mesh's model is in, looked up only where it is used: a caster the sun's depth
+	 pass takes never reads it, and the walk to it is three loads a mesh. */
+static DX8FVFCategoryContainer * Peek_FVF_Container(DX8PolygonRendererList & renderers)
+{
+	return renderers.Peek_Head()->Get_Texture_Category()->Get_Container();
+}
+
 void MeshClass::Render(RenderInfoClass & rinfo)
 {
 	WWPROFILE("Mesh::Render");
@@ -707,8 +715,14 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 
 		const FrustumClass & frustum=rinfo.Camera.Get_Frustum();
 
-		if (	Model->Get_Flag(MeshGeometryClass::SKIN) ||
-				CollisionMath::Overlap_Test(frustum,Get_Bounding_Box())!=CollisionMath::OUTSIDE ) 
+		/*
+		** The sun's depth pass puts the frustum test off until it knows the mesh goes the old way: a
+		** lean caster is drawn whole and the clipping drops what lies outside the sun's box, the
+		** same depth the test would have left, without bringing its bounds up to date after every
+		** pose.
+		*/
+		if (	Model->Get_Flag(MeshGeometryClass::SKIN) || Shadow_Lean_Casters ||
+				CollisionMath::Overlap_Test(frustum,Get_Bounding_Box())!=CollisionMath::OUTSIDE )
 		{
 			bool rendered_something = false;
 			
@@ -739,11 +753,6 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 //			Model->Process_Texture_Reduction();
 
 			/*
-			** Look up the FVF container that this mesh is in
-			*/
-			DX8FVFCategoryContainer * fvf_container = Model->PolygonRendererList.Peek_Head()->Get_Texture_Category()->Get_Container();
-			
-			/*
 			** Check if we should render the base passes.  One special case here: if
 			** the mesh is translucent (alpha) and the base passes are disabled but we
 			** are rendering a shadow, we go ahead and render the base pass.  This is an ugly way
@@ -759,16 +768,26 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 				render_base_passes = true;
 			}
 			
+			const bool lean_caster = render_base_passes && Shadow_Lean_Casters
+				&& TheDX8MeshRenderer.Add_Shadow_Caster(this, rinfo.Additional_Pass_Count() != 0);
+			if (Shadow_Lean_Casters && !lean_caster && !Model->Get_Flag(MeshGeometryClass::SKIN)
+					&& CollisionMath::Overlap_Test(frustum,Get_Bounding_Box())==CollisionMath::OUTSIDE) {
+				return;
+			}
+
 			if (render_base_passes) {
 
 				/*
-				** Link each polygon renderer for this mesh into the visible list
+				** Link each polygon renderer for this mesh into the visible list, unless the sun's
+				** depth pass takes the mesh as an instanced caster.
 				*/
-				DX8PolygonRendererListIterator it(&(Model->PolygonRendererList));
-				while (!it.Is_Done()) {
-					DX8PolygonRendererClass* polygon_renderer=it.Peek_Obj();
-					polygon_renderer->Get_Texture_Category()->Add_Render_Task(polygon_renderer,this);
-					it.Next();
+				if (!lean_caster) {
+					DX8PolygonRendererListIterator it(&(Model->PolygonRendererList));
+					while (!it.Is_Done()) {
+						DX8PolygonRendererClass* polygon_renderer=it.Peek_Obj();
+						polygon_renderer->Get_Texture_Category()->Add_Render_Task(polygon_renderer,this);
+						it.Next();
+					}
 				}
 
 				rendered_something = true;
@@ -780,8 +799,9 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 			** for rendering
 			*/
 			for (int i=0; i<rinfo.Additional_Pass_Count(); i++) {
-				
+
 				MaterialPassClass * matpass = rinfo.Peek_Additional_Pass(i);
+				DX8FVFCategoryContainer * fvf_container = Peek_FVF_Container(Model->PolygonRendererList);
 
 				if ((!Is_Translucent()) || (matpass->Is_Enabled_On_Translucent_Meshes())) {
 					
@@ -800,11 +820,12 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 
 			/*
 			** If we rendered any base or procedural passes and this is a skin, we need
-			** to tell the mesh rendering system to process this skin
+			** to tell the mesh rendering system to process this skin.  A skin the sun's depth pass
+			** took is skinned on the GPU and has nothing in the container to fill.
 			*/
-			if (rendered_something && Model->Get_Flag(MeshGeometryClass::SKIN)) {
+			if (rendered_something && !lean_caster && Model->Get_Flag(MeshGeometryClass::SKIN)) {
 				//WWASSERT(dynamic_cast<DX8SkinFVFCategoryContainer *>(fvf_container) != NULL);
-				static_cast<DX8SkinFVFCategoryContainer*>(fvf_container)->Add_Visible_Skin(this);
+				static_cast<DX8SkinFVFCategoryContainer*>(Peek_FVF_Container(Model->PolygonRendererList))->Add_Visible_Skin(this);
 			}
 
 			/*

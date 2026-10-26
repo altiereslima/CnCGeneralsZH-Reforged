@@ -32,12 +32,14 @@
 #include "Common/Player.h"
 #include "Common/MessageStream.h"
 #include "Common/PlayerList.h"
+#include "Common/Science.h"
 #include "Common/SpecialPower.h"
 #include "Common/Team.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BehaviorModule.h"
@@ -199,6 +201,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_DOCK;
 	else if (token == "stop")
 		*action = SCENARIO_ACTION_STOP;
+	else if (token == "clickstop")
+		*action = SCENARIO_ACTION_CLICKSTOP;
 	else if (token == "arrive")
 		*action = SCENARIO_ACTION_ARRIVE;
 	else if (token == "particles")
@@ -209,6 +213,10 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_PRODUCE;
 	else if (token == "tally")
 		*action = SCENARIO_ACTION_TALLY;
+	else if (token == "purchase")
+		*action = SCENARIO_ACTION_PURCHASE;
+	else if (token == "resume")
+		*action = SCENARIO_ACTION_RESUME;
 	else if (token == "shiftmove")
 		*action = SCENARIO_ACTION_SHIFTMOVE;
 	else if (token == "shiftattackmove")
@@ -243,6 +251,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_REPEAT;
 	else if (token == "givemoney")
 		*action = SCENARIO_ACTION_GIVEMONEY;
+	else if (token == "rank")
+		*action = SCENARIO_ACTION_RANK;
 	else
 		return FALSE;
 
@@ -337,13 +347,17 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_SHIFTUPGRADE:	return SCENARIO_TOKENS_SHIFTUPGRADE;
 		case SCENARIO_ACTION_ATTACK:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_ENTER:				return SCENARIO_TOKENS_ATTACK;
+		case SCENARIO_ACTION_RESUME:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_DOCK:				return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_GUARD:				return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_PRODUCE:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_REPEAT:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_GIVEMONEY:		return SCENARIO_TOKENS_STANCE;
+		case SCENARIO_ACTION_RANK:				return SCENARIO_TOKENS_STANCE;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
+		case SCENARIO_ACTION_CLICKSTOP:		return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_TALLY:				return SCENARIO_TOKENS_STOP;
+		case SCENARIO_ACTION_PURCHASE:		return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_ARRIVE:			return SCENARIO_TOKENS_ARRIVE;
 	}
 	return SCENARIO_TOKENS_STOP;
@@ -441,6 +455,7 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 
 		case SCENARIO_ACTION_ATTACK:
 		case SCENARIO_ACTION_ENTER:
+		case SCENARIO_ACTION_RESUME:
 		case SCENARIO_ACTION_DOCK:
 		case SCENARIO_ACTION_GUARD:
 		case SCENARIO_ACTION_SHIFTATTACK:
@@ -468,6 +483,21 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 				return SCENARIO_PARSE_BAD_ACTION;
 			break;
 
+		case SCENARIO_ACTION_RANK:
+			action->name = tokens[ SCENARIO_STANCE_NAME_TOKEN ];
+			// xp N: N same-class kills of experience; grade N: the ladder's grade N
+			if (action->name == "xp" || action->name == "grade")
+			{
+				if (count <= SCENARIO_STANCE_NAME_TOKEN + 1)
+					return SCENARIO_PARSE_MISSING_ARGS;
+				if (!parseWholeNumber( tokens[ SCENARIO_STANCE_NAME_TOKEN + 1 ], &action->count ))
+					return SCENARIO_PARSE_BAD_COUNT;
+				break;
+			}
+			if (action->name != "veteran" && action->name != "elite" && action->name != "heroic")
+				return SCENARIO_PARSE_BAD_ACTION;
+			break;
+
 		case SCENARIO_ACTION_PRODUCE:
 		{
 			action->targetSelector = tokens[ 4 ];	// what to make
@@ -491,7 +521,9 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 			break;
 
 		case SCENARIO_ACTION_STOP:
+		case SCENARIO_ACTION_CLICKSTOP:
 		case SCENARIO_ACTION_TALLY:
+		case SCENARIO_ACTION_PURCHASE:
 			break;
 	}
 
@@ -1670,6 +1702,37 @@ static Bool executeWeaponAt( const ScenarioAction &action, Player *player, const
 	return TRUE;
 }
 
+/** The rank tree's button: the player is raised to the rank the science asks for and given the points
+	  it costs, and then MSG_PURCHASE_SCIENCE goes to the dispatcher as the control bar sends it, so the
+	  purchase itself is the one a click makes. */
+static const Int SCENARIO_HIGHEST_RANK = 5;
+
+static Bool executePurchase( const ScenarioAction &action, Player *player )
+{
+	const ScienceType science = TheScienceStore->getScienceFromInternalName( action.selector );
+	if (science == SCIENCE_INVALID)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d purchase: there is no science '%s'\n", action.frame, action.selector.str()));
+		return FALSE;
+	}
+
+	while (!TheScienceStore->playerHasPrereqsForScience( player, science ) && player->getRankLevel() < SCENARIO_HIGHEST_RANK)
+		player->setRankLevel( player->getRankLevel() + 1 );
+	const Int cost = TheScienceStore->getSciencePurchaseCost( science );
+	if (player->getSciencePurchasePoints() < cost)
+		player->addSciencePurchasePoints( cost - player->getSciencePurchasePoints() );
+
+	GameMessage *msg = newInstance( GameMessage )( GameMessage::MSG_PURCHASE_SCIENCE );
+	msg->friend_setPlayerIndex( player->getPlayerIndex() );
+	msg->appendIntegerArgument( science );
+	TheGameLogic->logicMessageDispatcher( msg, NULL );
+	msg->deleteInstance();
+
+	DEBUG_LOG(("SCENARIO: frame %d purchase slot %d '%s' rank %d: %s\n", action.frame, action.slot,
+						 action.selector.str(), player->getRankLevel(), player->hasScience( science ) ? "bought" : "refused"));
+	return player->hasScience( science );
+}
+
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
 	if (action.action == SCENARIO_ACTION_SHIFTUPGRADE)
@@ -1715,12 +1778,14 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 
 		case SCENARIO_ACTION_ATTACK:
 		case SCENARIO_ACTION_ENTER:
+		case SCENARIO_ACTION_RESUME:
 		case SCENARIO_ACTION_DOCK:
 		case SCENARIO_ACTION_GUARD:
 		{
 			const char *verb = (action.action == SCENARIO_ACTION_ATTACK) ? "attack"
 											 : (action.action == SCENARIO_ACTION_DOCK) ? "dock"
-											 : (action.action == SCENARIO_ACTION_GUARD) ? "guard" : "enter";
+											 : (action.action == SCENARIO_ACTION_GUARD) ? "guard"
+											 : (action.action == SCENARIO_ACTION_RESUME) ? "resume" : "enter";
 			Object *target = NULL;
 			if (action.targetSlot == SCENARIO_CIVILIAN_SLOT)
 			{
@@ -1747,6 +1812,8 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 				group->groupDock( target, CMD_FROM_SCRIPT );
 			else if (action.action == SCENARIO_ACTION_GUARD)
 				group->groupGuardObject( target, GUARDMODE_NORMAL, CMD_FROM_SCRIPT );
+			else if (action.action == SCENARIO_ACTION_RESUME)
+				group->groupResumeConstruction( target, CMD_FROM_PLAYER );
 			else
 				group->groupEnter( target, CMD_FROM_SCRIPT );
 
@@ -1803,10 +1870,44 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 			return TRUE;
 		}
 
+		case SCENARIO_ACTION_RANK:
+		{
+			const VeterancyLevel level = action.name == "veteran" ? LEVEL_VETERAN
+																 : action.name == "elite" ? LEVEL_ELITE : LEVEL_HEROIC;
+			const VecObjectID &ids = group->getAllIDs();
+			for (VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it)
+			{
+				Object *obj = TheGameLogic->findObjectByID( *it );
+				ExperienceTracker *tracker = obj->getExperienceTracker();
+				const RankLadder *ladder = TheGlobalData->getRankLadder( obj->getTemplate() );
+				const Int unitValue = RankLadder::unitValue( obj->getTemplate() );
+				if (action.name == "xp")
+					tracker->setExperienceAndLevel( action.count * unitValue );
+				else if (action.name == "grade" && ladder)
+					tracker->setExperienceAndLevel( ladder->threshold( unitValue, action.count ) );
+				else if (action.name != "grade")
+					tracker->setVeterancyLevel( level );
+				DEBUG_LOG(("SCENARIO: frame %d rank slot %d '%s' %s xp=%d grade=%d level=%d\n", action.frame, action.slot,
+									 obj->getTemplate()->getName().str(), action.name.str(), tracker->getCurrentExperience(),
+									 tracker->getGrade(), (Int)tracker->getVeterancyLevel()));
+			}
+			DEBUG_LOG(("SCENARIO: frame %d rank slot %d '%s' x%d %s %d\n",
+								 action.frame, action.slot, action.selector.str(), taken, action.name.str(), action.count));
+			break;
+		}
+
 		case SCENARIO_ACTION_STOP:
 		{
 			group->groupIdle( CMD_FROM_SCRIPT );
 			DEBUG_LOG(("SCENARIO: frame %d stop slot %d '%s' x%d\n",
+								 action.frame, action.slot, action.selector.str(), taken));
+			break;
+		}
+
+		case SCENARIO_ACTION_CLICKSTOP:
+		{
+			group->groupIdle( CMD_FROM_PLAYER );		// what GameLogicDispatch does with MSG_DO_STOP
+			DEBUG_LOG(("SCENARIO: frame %d clickstop slot %d '%s' x%d\n",
 								 action.frame, action.slot, action.selector.str(), taken));
 			break;
 		}
@@ -1936,6 +2037,9 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_TALLY)
 		return executeTally( action, player );
+
+	if (action.action == SCENARIO_ACTION_PURCHASE)
+		return executePurchase( action, player );
 
 	if (action.action == SCENARIO_ACTION_CONSTRUCT)
 		return executeConstruct( action, player, position );

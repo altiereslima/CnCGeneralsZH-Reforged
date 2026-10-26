@@ -217,6 +217,10 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 		switch( it->kind )
 		{
 			case DRAW_PUCK:
+				// an install whose W3D archives lack SCMNode.w3d (seen in a third-party repack) has no
+				// puck; retail drew one only for a rally point, every order draws one now
+				if( !m_waypointNodeRobj )
+					break;
 				m_waypointNodeRobj->Set_Position( points[ 0 ] );
 				WW3D::Render( *m_waypointNodeRobj, localRinfo );		// the little hockey puck
 				break;

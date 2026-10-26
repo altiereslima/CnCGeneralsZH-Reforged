@@ -121,6 +121,10 @@ public:
 		PRELIT_LIGHTMAP_MULTI_TEXTURE		= 0x00008000,
 
 		ALLOW_NPATCHES							= 0x00010000,
+
+		// Not in any file: W3DAssetManager::Recolor_Mesh sets it on a house colour mesh under
+		// the Team Glow option, and the mesh renderer hands it to Direct3D11_Set_Team_Glow.
+		TEAM_GLOW								= 0x00020000,
 	};
 
 	void							Reset_Geometry(int polycount,int vertcount);

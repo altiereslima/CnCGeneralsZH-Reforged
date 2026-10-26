@@ -1,40 +1,24 @@
-<div align="center">
+<picture><source media="(prefers-color-scheme: dark)" srcset=".github/media/banner-dark.png"><img alt="Zero Hour Reforged" src=".github/media/banner-light.png" width="800"></picture>
 
-# Zero Hour Reforged
+EA published the source of Command & Conquer: Generals and Zero Hour in February 2025. Zero Hour
+Reforged is that source worked on as a game: around sixty bugs EA shipped in 2003 fixed, a computer
+opponent that builds a base and plays without cheating, a Direct3D 11 renderer, a new interface and
+mods that load side by side. Windows x64 players install it through a free launcher; macOS and Linux
+build it from this repository.
 
-Command & Conquer: Generals Zero Hour, rebuilt from the source EA opened and played as a game again.<br>
-64-bit, on Windows, macOS and Linux.
+Game v3.2.0, released 2026-10-20. Launcher v1.7.0, released the same day. `main` carries work that
+is not in a release yet; it sits at the top of [CHANGELOG.md](CHANGELOG.md) and is marked `main` in
+the tables below.
 
-<img src=".github/media/hero.jpg" alt="American tanks cross a stone bridge into a German village under an A-10 strike, long morning shadows over the stream" width="100%">
+[![release](https://img.shields.io/github/v/release/olcayseygan/CnCGeneralsZH-Reforged?style=for-the-badge&label=release&labelColor=0c1220&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/latest)
+[![last commit](https://img.shields.io/github/last-commit/olcayseygan/CnCGeneralsZH-Reforged/main?style=for-the-badge&label=last%20commit&labelColor=0c1220&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/commits/main)
+[![license](https://img.shields.io/badge/license-GPL--3.0%20%2B%20EA%20terms-4459b6?style=for-the-badge&labelColor=0c1220)](LICENSE.md)
 
-[![release](https://img.shields.io/github/v/release/olcayseygan/CnCGeneralsZH-Reforged?style=for-the-badge&label=release&labelColor=161b22&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/latest)
-[![last commit](https://img.shields.io/github/last-commit/olcayseygan/CnCGeneralsZH-Reforged/main?style=for-the-badge&label=last%20commit&labelColor=161b22&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/commits/main)
-[![stars](https://img.shields.io/github/stars/olcayseygan/CnCGeneralsZH-Reforged?style=for-the-badge&labelColor=161b22&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/stargazers)
-[![license](https://img.shields.io/badge/license-GPL--3.0%20%2B%20EA%20terms-0d1117?style=for-the-badge&labelColor=161b22)](LICENSE.md)
+[zerohour.gg](https://zerohour.gg) · [Play it](#play-it) · [What is in it](#what-is-in-it) · [Every change](CHANGELOG.md) · [Build it](#build-it) · [How it is tested](#how-it-is-tested) · [Not there yet](#not-there-yet) · [Help out](#help-out) · [Discussions](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/discussions)
 
-![platforms](https://img.shields.io/badge/runs%20on-Windows%20x64%20%7C%20macOS%20%7C%20Linux%20%7C%20Steam%20Deck-0d1117?style=for-the-badge&labelColor=161b22)
-![renderers](https://img.shields.io/badge/draws%20with-Direct3D%2011%20%7C%20Direct3D%209%20%7C%20Metal%20%7C%20Vulkan-0d1117?style=for-the-badge&labelColor=161b22)
-![languages](https://img.shields.io/badge/text-English%20%7C%20T%C3%BCrk%C3%A7e%20%7C%20Deutsch-0d1117?style=for-the-badge&labelColor=161b22)
+<img src=".github/media/hero.jpg" alt="A beach battle around two oil derricks: American tanks and Humvees on the left, Chinese tanks and GLA infantry on the right, a Chinese Helix and a MiG overhead, no interface on screen" width="100%">
 
-[zerohour.gg](https://zerohour.gg) · [Play it](#play-it) · [Every change](CHANGELOG.md) · [Build it](#build-it) · [How it is tested](#how-it-is-tested) · [Help out](#help-out) · [Discussions](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/discussions)
-
-</div>
-
----
-
-EA published the source of Generals and Zero Hour in February 2025, for preservation. The game itself
-never left the shelf: it is still sold, and it still runs on Steam.
-
-Reforged is that source worked on as a game. About 580 engine source files were ported to Visual
-Studio 2022 and to 64-bit, and in October 2026 the same tree learned SDL3, for Macs and Linux. Around sixty bugs that EA shipped in 2003
-were found and fixed, most of them by a test before anyone read the code. The computer opponent builds
-a base now. It never could.
-
-One balance pass went in, measured with 528 staged fights a round: defences no longer die cheaper
-than they cost, and the Dragon Tank, Quad Cannon, Paladin and Rocket Buggy were brought into line. The
-changelog has every number behind it.
-
-No game data ships here. You need your own copy of Zero Hour.
+<sub>A three-army fight over the oil derricks on a beach, a Helix and a MiG in the air, interface hidden.</sub>
 
 ## Where it runs
 
@@ -52,139 +36,171 @@ to the same checksum, and a Mac and a Linux PC have played a LAN match without o
 
 ## Then and now
 
-| | The source EA released | Reforged |
-|:--|:--|:--|
-| Program | 32-bit, stalls and dies past 4 GB | 64-bit, no ceiling |
-| Frame rate | the picture waits on the game's clock | uncapped, and the rules keep their own |
-| Worst logic turn | `2,976 ms` | `243 ms` |
-| A 23-cell route | `55,000` cells searched in `256 ms` | `10,000` cells in `25 ms` |
-| Route searching over a match | `11.8 s` | `1.6 s` |
-| A screen of fire and smoke | 459 draw batches, `11.6 ms` a frame | 177 batches, `6.7 ms` |
-| Smoke and fire sprites on screen | the rest silently dropped past about 16,000 | all 101,000 of a test drawn, `8.3 ms` a frame |
-| Skirmish opponent | urgent orders and one power plant | builds, scouts, expands, steals tanks and retreats |
-| A tank told to stop | halts on the spot | rolls 12 units on its brakes |
-| A kill's veterancy | all of it to the last shot | shared by damage done in the last ten seconds |
-| Base game textures | Zero Hour's downscaled copies | 481 originals at four times the resolution |
-| Infantry shadows | a flat blob | cast from the pose |
-| Language | English | English, Türkçe or Deutsch |
-| A crash | silence | a report with file and line, sent by the launcher |
+| | Before | Now | Since |
+|:--|:--|:--|:--|
+| Program | 32-bit, stalls and dies past 4 GB | 64-bit | 2.0.0 |
+| Battle steps | 30 a second | 60 a second, every speed and reload converted | 3.0.0 |
+| Late 4-player match, frames over 16.7 ms | 23% | 0.8%, the battle worked out on its own thread | 3.2.0 |
+| Worst logic turn | `2,976 ms` | `243 ms` | 0.0.1-alpha |
+| A 23-cell route | `55,000` cells searched in `256 ms` | `10,000` cells in `25 ms` | 0.0.1-alpha |
+| Route searching over a match | `11.8 s` | `1.6 s` | 0.0.1-alpha |
+| A screen of fire and smoke | 459 draw batches, `11.6 ms` a frame | 177 batches, `6.7 ms` | 1.0.3 |
+| Smoke and fire sprites on screen | the rest silently dropped past about 16,000 | all 101,000 of a test drawn, `8.3 ms` a frame | 1.0.3 |
+| Supply income, one pile, three sides | GLA 27 to 90 a second by stash distance, China 47 to 56, USA 55 | all three 49 to 60, near or far | 3.0.0 |
+| A tank shell on a soldier | 6 damage, 30 hits to kill a Ranger | 60 damage, three hits | 3.2.0 |
+| A Raptor's half circle at cruise | `1.7 s`, sliding sideways | `3.2 s`, banked | 3.2.0 |
+| A kill's veterancy | all of it to the last shot | a quarter to the last shot, the rest shared by damage done in the last ten seconds | 2.4.0 |
+| Ranks | three chevrons on every side | USA 28 grades, China 19, GLA 20 | `main` |
+| Maps a network room lists | 100, and 300 in skirmish | 4,096 | `main` |
+| First toxin cloud on a fresh install | a `3.5 s` freeze | no freeze, its shaders ship with the game | `main` |
+| First superweapon strike on a fresh install | a `110` to `130 ms` hitch each | none | `main` |
+| Base game textures | Zero Hour's downscaled copies | 481 originals at four times the resolution | 0.0.1-alpha |
 
-## What a match feels like now
+## What is in it
 
-### An opponent that plays by your rules
+Each row names the game version it arrived in. `main` means it is on this branch and in no release
+yet. [CHANGELOG.md](CHANGELOG.md) has the measurements behind every line.
 
-One wrong value kept the skirmish AI building only what its script marked urgent, plus a single power
-plant. Every skirmish played against this code since 2003 was against an opponent that could not
-build a base. It builds one now, and keeps its supply trucks working when a pile runs dry instead of
-parking them beside it.
+### Graphics
 
-It no longer cheats to do it. The AI used to auto-target through the fog of war and read your start
-position straight off the lobby. Now it scouts, with one cheap
-unit touring the start positions for the whole match, and counts only what it has seen. It walks a
-rifleman into oil derricks instead of shelling them. A GLA computer keeps a hijacker on call for the
-first of your vehicles that comes within walking distance.
+| What | Since |
+|:--|:--|
+| Direct3D 11 draws by default, with glow and edge smoothing over the battlefield only; `-d3d9` brings back the old renderer | 1.0.0 |
+| Shadows soften and pale as the caster leaves the ground, so a helicopter's spreads as it climbs and a tank's stays hard | 2.0.0 |
+| Classic Graphics puts the 2003 look back in one click | 2.0.0 |
+| Fullscreen Fit picks stretch or bands when the resolution is not the monitor's shape | 2.6.0 |
+| The whole options screen is in the game again, every page the launcher sets | 3.1.0 |
+| The options screen restyled to match the other menus | 3.2.0 |
+| Trees cast the shadow of their crowns, gaps between the fronds included, on Direct3D 11 on Windows and Linux | `main` |
+| Linux draws the sun's shadows and the smoke shadows Windows already had | `main` |
+| Modern water, under Options > Water Style: waves that catch the sun, foam at the shore and off boat hulls; Classic stays the default | `main` |
+| Volumetric hazard clouds, under Options > Cloud Style: toxin, anthrax and nuclear fields as moving smoke at their real size and length; Classic stays the default | `main` |
+| Fire burns: 182 kinds of flame start white-hot and cool through yellow, orange and red to soot | `main` |
+| Warm Light and Haze, Team Color Glow and Water Foam, three Direct3D 11 looks, off until ticked; the haze costs 0.4 ms a frame | `main` |
+| Explosion, lit smoke and cloud shaders ship with the game, and one nobody recorded is built beside the game instead of stopping the picture | `main` |
 
-Easy, Medium and Hard differ in what the computer is allowed to decide. No level gets extra money,
-cheaper units, faster building or longer sight. Measured over 32 headless matches with the seats
-swapped both ways, Hard beats Easy 15-0.
+![A night fight in a river valley under blue moonlight: an explosion and a burning patch of ground light the trees around them while an A-10 and Comanches cross overhead](.github/media/night-fire.jpg)
 
-![A Hard AI's American base on Twilight Flame at 7:51: airfield, war factory, strategy centre under construction, power plants, Comanches and tanks between the buildings](.github/media/ai-base.jpg)
+<sub>A night fight in a river valley: fire on the ground lights the trees from below while an A-10 and Comanches cross overhead.</sub>
 
-### Vehicles that drive and soldiers that walk
+![Modern water: two PT boats run up a channel between cliffs, away from a stone and timber bridge, each trailing a white foam wake; a beach at the top right, no interface on screen](.github/media/water.jpg)
 
-A Crusader used to reach top speed in a thirtieth of a second and stop dead the frame it was told
-to. Every vehicle now picks up speed over about a second and brakes for the end of its
-move before it gets there. Sent a short way behind itself, a tank backs up instead of spinning on the
-spot, and a Humvee sent further does a three-point turn.
+<sub>Modern water, from Options > Water Style: two PT boats leave foam wakes up a channel. On `main`, not in 3.2.0.</sub>
 
-Turrets keep firing on the move. A Technical driving past four Troop Crawlers hit them twice; it now
-hits them 11 times, as fast as it fires standing still. A running Ranger sent back the way he came
-plants his feet and pivots, where he used to slide backwards past his own nose.
+![A volumetric Anthrax Bomb cloud: purple smoke spread over a GLA and American fight on a beach with oil derricks, the bomber leaving to the left over the water, Comanches and a boat at the top right, no interface on screen](.github/media/hazard.jpg)
 
-Groups travel as a crowd. Each unit holds its own line across the road and pulls round something
-slower in front when there is room, so a column no longer queues for a mile behind one damaged truck. Long moves stopped hitching once EA's coarse route search,
-which never ran, finally did its job.
+<sub>An Anthrax Bomb cloud drawn volumetric, from Options > Cloud Style. On `main`, not in 3.2.0.</sub>
 
-### Veterancy for everyone who fought
+### The battle
 
-Two Crusaders could grind an Overlord down to a sliver and a passing Humvee's rocket took every point
-of it. The killing blow earns a quarter now, and the rest is shared among everything that hurt the
-target in the last ten seconds, by how much health each one took off. Healing earns too.
+| What | Since |
+|:--|:--|
+| Veterancy is shared by everyone who hurt the target in the last ten seconds; healing earns too | 2.4.0 |
+| The three sides mine a supply pile at the same pace, near the drop-off or far from it | 3.0.0 |
+| The battle runs 60 steps a second, double the 30 of 2003; every speed, delay and reload was converted, so a Crusader still fires every two seconds | 3.0.0 |
+| `-logicthread 1` works the battle out on its own thread beside the drawing; off by default again after 3.3.0's crashes | 3.2.0 |
+| Turbo mode replaces the speed dropdown: one lobby box, set by the host in a network game, two seconds of battle in every real one | 3.2.0 |
+| Jets bank into turns, sweep wide at speed, take off down the runway, fly a landing circuit and taxi on their wheels | 3.2.0 |
+| A jet shot down hits for 80 where it lands, 160 for a B-52 or a cargo plane, and leaves fire for about six seconds; its owner and allies are spared | 3.2.0 |
+| A tank shell that hits a soldier does the 60 it does to a tank, where it did 6 | 3.2.0 |
+| Missiles weave a few degrees in flight, the weave fading as they close in | 3.2.0 |
+| A rank ladder for every army: 28 American grades from E-1 Private to General of the Army, 19 Chinese, 20 GLA, each with its insignia beside the health bar; the top is 120 kills of a unit like your own | `main` |
+| A hacker left without orders for ten seconds walks into an Internet Center with a free seat or opens its laptop where it stands | `main` |
 
-### A command bar in the middle
+### The computer opponent
 
-The command bar is one console in the middle of the bottom edge, its radar taller than before and the
-power bar lying over the build grid. Your general's powers grow out of its right end. The match clock
-hangs from the top with your money under it. A superweapon built, charged or fired anywhere on the
-map flashes its name under the clock in big letters, yours in white and an enemy's in red.
+One wrong value kept EA's skirmish AI building only what its script marked urgent, plus a single
+power plant. It builds a base now, scouts with one cheap unit and counts only what it has seen. Easy,
+Medium and Hard differ in what the computer may decide. No level gets extra money, cheaper units,
+faster building or longer sight. In 0.0.1-alpha, over 32 headless matches with the seats swapped
+both ways, Hard beat Easy 15-0.
 
-Left selects and right orders. A right drag scrolls the map the way it did in 2003. Shift on a build
-button queues five, Ctrl twenty. Hold Tab for a scoreboard; press the key above it for a console with
-a trainer panel for campaign and skirmish. HUD Size grows the whole console for a big screen read from
-the sofa.
+Since 3.2.0 each computer seat in the lobby also takes a personality, which says how it plays while
+the difficulty says how well. Normal is the computer you know. The others are Attacker, Turtle,
+Economist, Air Force, Rusher, Raider, Tech, Infantry, Armor, Sneaky, Opportunist, Supporter, Counter
+and Random. No personality gets extra money, faster building or tougher units. Allies with one answer their team: an Air
+Force strikes whoever hits your base, an Economist sends money to an ally who runs dry, and a beacon
+or `help`, `attack` or `money` typed in chat asks them for it.
 
-### Network games the host sets up
+![A Hard GLA computer player's base: palaces, barracks and supply buildings spread over red earth, a skirmish burning at the left edge](.github/media/ai-base.jpg)
 
-The lobby has a settings page. Peace time runs three, five, ten or fifteen minutes. The unit limit
-shares 840 units between the players. Superweapons can be limited to one or banned outright, and Pro
-Rules takes a fixed list of units and tricks out of every network match. Your ally's mouse shows on
-your map as a pool of their colour with their name on it.
+<sub>A Hard GLA computer player's base, interface hidden.</sub>
 
-Two separate PCs have played each other over LAN. On a single machine, two copies of the game can
-play each other through the LAN screen, which is how every network change here gets tested.
+![The skirmish lobby: the player's seat, an Easy computer playing Turtle as China Nuke General and a Hard computer playing Air Force as USA Air Force General, the Iron Dragon map preview and the match rules beside it](.github/media/lobby.jpg)
 
-![The LAN room's Lobby Settings page: starting cash, superweapons, tech respawn, peace time, shared income, Pro Rules and the unit limit](.github/media/lobby.jpg)
+<sub>The skirmish lobby from 3.2.0: a Personality box beside each computer seat's level, the map and its rules always in view.</sub>
 
-### A picture that holds up
+### Interface
 
-The game draws through Direct3D 11 by default, with glow and edge smoothing over the battlefield
-only, so the lettering on the command bar is never blurred. `-d3d9` brings back the old renderer.
+| What | Since |
+|:--|:--|
+| A superweapon built, charged or fired anywhere flashes its name under the clock, yours white, an ally's blue, an enemy's red | 2.4.0 |
+| German beside English and Turkish, chosen in Options or with `-language` | 2.5.0 |
+| The command buttons stand in the middle of the bottom edge, the radar at the left and the selection at the right, each drawn at your screen's height | 3.0.0 |
+| Every key rebinds on the launcher's Hotkeys page, with clashes marked before you play | 3.0.0 |
+| Vote kick: `/kick` and a name starts a 30-second vote that passes only when every other living player answers `/yes` | 3.0.0 |
+| The Hotkeys page is in the game too, as the last tab of the options screen | 3.1.0 |
+| Health bars a third thinner, with lost health drawn as a dark stretch | 3.2.0 |
+| Skirmish, LAN and online rooms laid out again: one row per seat, team colours, a square map preview, the rules always in view | 3.2.0 |
+| A loading screen with a card per player and, in a network game, each player's own load bar | 3.2.0 |
+| A score screen with a Summary page, money, army and building charts sampled every five seconds, and a build-order timeline | 3.2.0 |
+| Every campaign mission open from the campaign menu | 3.2.0 |
+| Each player's ping and frame rate on the Tab diplomacy screen in a network match, turning yellow for the one slowing it down | `main` |
 
-Shadows soften as the thing casting them leaves the ground, so a helicopter's spreads and pales as it
-climbs. Soldiers cast theirs from their pose and all 128 tree types cast theirs. Eighty-nine kinds of
-explosion light the ground around them, and fires light the smoke over them. The pools on Golden
-Oasis hold their palms upside down. The ground is drawn at twice the detail, with relief that follows the
-map's own sun.
+![An American base 7 minutes 24 seconds into a match against a Hard China computer player, interface in Turkish: the army drives north raising dust, the Barracks is selected, the command bar sits in the middle of the bottom edge with $22000 on its money plate, the radar at the bottom left, the portrait at the bottom right and the Ranger's build card open with its cost, strengths, health, damage, rate of fire, damage a second, range and build time](.github/media/hud-tr.jpg)
 
-![A night fight on Dark Night: burning ground lights the grass and tree trunks orange under blue moonlight while an A-10 and Comanches cross the valley](.github/media/night-fire.jpg)
+<sub>The in-match interface in Turkish, 7:24 into a match against a Hard China computer player, the Ranger's build card open.</sub>
 
-Classic Graphics, at the top of the Graphics page, puts the 2003 look back in one click. Text grows
-with the monitor, and on an ultrawide the view opens sideways, so a wider screen shows more
-battlefield.
+![The loading screen at 81%: eight player cards, the player "Reforged" as the USA Superweapon General with three Hard computer players on team 1 and four Hard computer players on team 2, each on a different general](.github/media/loading.jpg)
 
-### Türkçe and Deutsch
+<sub>The 3.2.0 loading screen, eight players, at 81%.</sub>
 
-Options > Gameplay > Language. Pick Türkçe and the menus, the command bar, briefings, tooltips and
-the credits come to 3,853 lines, written against one glossary of more than 1,400 terms. Deutsch is
-3,848 lines. Every one-key shortcut has its own letter inside its own name in both. Voices and videos
-stay as your install has them, so two players in one match can read it in two languages.
+![The score screen's Build order tab after a match between four Hard computer players: the summary rows above, each player's first structures and units on a timeline below](.github/media/score.jpg)
 
-![The Crusader's build card in Turkish, over the earlier command bar that ran from the bottom left corner](.github/media/turkish.jpg)
+<sub>The 3.2.0 score screen after four Hard computer players fought for about fifteen minutes.</sub>
 
-### On a Mac, on Linux and on the Steam Deck
+### Replays
 
-The first start finds your game. It looks in your Steam libraries, `~/Games`, `/Applications`, and
-CrossOver and Whisky bottles, and asks for the folder only when it comes up empty. The Flatpak has
-played a full check match on a Steam Deck. A match between Windows and a Mac has not been played yet.
+A replay is watched the way an observer watches a match (2.2.0). A strip along the bottom shows the
+time reached and the whole length; click anywhere on it to jump there. Beside it are pause and five
+speeds, from half to eight times the speed the match was played at. Every match is archived under its
+own date-and-time name.
 
-> [!NOTE]
-> [CHANGELOG.md](CHANGELOG.md) is the whole record: every change with the numbers behind it, and the
-> work that was tried and taken back out.
+### Mods
+
+| What | Since |
+|:--|:--|
+| `-mod <folder>` loads a mod's archives and its loose `Data` and `Art` files; give it once per mod, and the one named later wins | 3.0.0 |
+| `-modfactions` puts two total conversions in one match, each army building from its own mod's units | 3.0.0 |
+| `-modpatch <folder>` after a mod changes that mod and leaves the others alone | 3.0.0 |
+| A `mod.json` names the mod and its version, and the names go into every replay | 3.0.0 |
+| Reforged's balance, fixes, AI and menus load after the mod and win where both touch the same thing | 3.0.0 |
+| Contra and The Power of the West start and play | 3.0.0 |
+| Shockwave Chaos starts beside a second full mod | 3.2.0 |
+| Five full mods side by side (Contra, ShockWave, Shockwave Chaos, The End of Days, Tiberian Dawn Redux) | `main` |
+| Crashes fixed under Contra, The End of Days, Rise of the Reds, ShockWave, Shockwave Chaos and Reborn | `main` |
+
+The launcher's Mods page installs mods from a catalog and marks each one a patch or a full mod.
 
 ## Play it
 
 ### Windows
 
-1. Have Zero Hour installed from Steam or the EA app.
-2. Download the Reforged launcher from [zerohour.gg](https://zerohour.gg) and run it. The installer
-   is not code signed, so Windows SmartScreen asks once before it starts.
+1. Have Zero Hour installed from Steam or the EA app. No game data is included here; the launcher
+   uses the files of that install.
+2. Download the launcher from [zerohour.gg](https://zerohour.gg) and run it. The installer is not
+   code signed, so Windows SmartScreen asks once before it starts.
 3. The launcher finds your Zero Hour folder and lists every file it is about to write before it writes
    any. Each file it replaces is backed up first. Press Install, then Play.
 
-The launcher carries no game files of its own. It downloads the build and checks every file against
-a signed list, then keeps the game and itself up to date. A Steam copy still starts
-through Steam. Uninstall on the launcher's settings page puts back the files your game had before.
-When the game crashes, the launcher sends the report without asking you for anything.
+![The launcher's Home page in English: the wordmark and the tabs Health, Maps, Replays, Hotkeys, Mods, Options and Feedback along the top, a game picture on the left, Installation Ready to play, Game v3.2.0 installed, Launcher v1.7.0, a gold Play button and Reinstall](.github/media/launcher.jpg)
+
+<sub>Launcher v1.7.0, Home page.</sub>
+
+The launcher downloads the build, checks every file against a signed list and keeps the game and
+itself up to date. Its pages are Home, Mods, Maps, Replays, Hotkeys, Options, Health and Feedback, in
+English, Turkish or German. Uninstall puts back the files your game had before. When the game
+crashes, the launcher sends the report without asking you for anything.
 
 ### macOS and Linux
 
@@ -195,29 +211,98 @@ because Zero Hour mounts both. Saves and replays go to
 `~/Library/Application Support/Command and Conquer Generals Zero Hour Data` on a Mac and
 `~/.local/share/Command and Conquer Generals Zero Hour Data` on Linux.
 
+<details>
+<summary>Where it looks for Zero Hour</summary>
+
+<br>
+
+First match wins (`PosixInstallRoot.cpp`, `PosixChooseInstallRoot`):
+
+1. `-root <folder>` on the command line
+2. `InstallPath` in `Registry.ini` in the data folder above, while it still holds the game
+3. The known places below, for the staged build (`build-linux/ZeroHourReforged/bin/generals`) and the packages.
+   A bare `build-linux/generals` uses its own folder instead
+4. A folder chooser, asked until the choice holds Zero Hour. The answer goes into `Registry.ini`
+
+| Where | Linux | macOS |
+|:--|:--|:--|
+| `~/Games/<name>` | yes | yes |
+| `<library>/steamapps/common/<name>` for every Steam library: `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, Flatpak's `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`, and each library their `libraryfolders.vdf` lists (an SD card's too) | yes | |
+| `/Applications/<name>` | | yes |
+| CrossOver and Whisky bottles: `drive_c/Program Files*/` (`EA Games`, `Origin Games`, `Steam/steamapps/common`, `Command & Conquer The First Decade`, or the folder itself) `/<name>` | | yes |
+
+`<name>` is any of `Command & Conquer Generals Zero Hour`, `Command and Conquer Generals Zero Hour`,
+`Command & Conquer Generals - Zero Hour`, `Command & Conquer(tm) Generals Zero Hour` or `Zero Hour`,
+spelled exactly. A folder counts when it holds `INIZH.big` and the original Generals' `Textures.big`
+is in it, in `ZH_Generals/`, in `../Command & Conquer Generals` or `../Command & Conquer(tm) Generals`
+beside it, or in the folder `Generals\InstallPath` in `Registry.ini` names. File names inside these
+folders match in any case. When only Generals is missing, the chooser asks for its folder too.
+
+</details>
+
 The upscaled art has no download there. Copy the `Reforged*.big` files into `ReforgedArt/` in that
 folder by hand, or play at the original textures.
+
+No install to point it at? `./extract-game.sh <iso|folder> [target]` lays the games out from a disc, an
+`.iso` or a copy of a Windows install, without installing or Wine: Zero Hour into target, Generals into
+`target/ZH_Generals`. The default target is `~/Games/Command & Conquer Generals Zero Hour`, after asking.
+Run it once per disc. It needs `7z` or `bsdtar` for an `.iso`, and `unshield` for InstallShield discs.
+Discs carry 1.00 and the engine is 1.04's, so files from a 1.04 install (Steam, the EA app) are safer.
+
+### Command line
+
+| Switch | What it does |
+|:--|:--|
+| `-d3d9` | draws through Direct3D 9 instead of Direct3D 11 |
+| `-dx11post off` | the Direct3D 11 picture without its finishing passes |
+| `-win`, `-fullscreen`, `-borderless` | the window mode for this run |
+| `-xres <w>` `-yres <h>` | the resolution for this run |
+| `-msaa [N]` | multisampling; bare is 4x, a number asks for N from 2 to 16 |
+| `-language english\|turkish\|german` | the language for this run, over the one Options saved |
+| `-mod <folder>` | loads a mod; repeat it for several, the later one wins |
+| `-modpatch <folder>` | a patch for the mod given before it, or for Zero Hour's files when it comes first |
+| `-modfactions` | each mod's armies join Zero Hour's instead of replacing them |
+| `-replay <name>` | opens a replay from the replay folder, extension optional |
+| `-loadsave <name>` | opens a save game the same way |
+| `-quickstart` | skips the intro movie, the shell map and the menu animations |
+| `-nologo`, `-novideo` | skip the EA logo, or every movie |
+| `-noaudio` | starts with every sound off |
+| `-logicthread 1` | works the battle out on its own thread beside the drawing; the default 0 works it out between frames |
+
+<details>
+<summary>For testing: unattended computer matches</summary>
+
+<br>
+
+| Switch | What it does |
+|:--|:--|
+| `-autoskirmish <players>` | starts a skirmish between computer players without the menus, 2 to 8 seats |
+| `-aidiff easy\|medium\|hard` | the difficulty those players take |
+| `-aipersona <slot> <name>` | gives one seat a personality by name, written into the replay like a lobby pick |
+| `-observer` | watches the match instead of taking a seat |
+| `-headless` | plays it with no window and no sound |
+
+</details>
 
 <details>
 <summary>Settings the options screen does not show</summary>
 
 <br>
 
-Almost everything is on the seven pages of the options screen. These still live only in
-`Options.ini`, in your Zero Hour Data folder.
+`ShowAllyCursors = no` in `Options.ini`, in your Zero Hour Data folder, stops sending your mouse
+position to allies and stops drawing theirs.
 
-| Line | What it does |
-|:--|:--|
-| `ShowAllyCursors = no` | stops sending your mouse position to allies and stops drawing theirs |
-| `EdgeScrollInWindowedMode = yes` | scrolls at the screen edge in a window too |
+`Hotkeys.ini`, beside it, takes a block that brings back the command bar's keys as the game shipped
+them: attack move, stop, guard, rally point, evacuate, sell and combat drop on their own labels'
+letters, and every button that lost its letter to one of them keeping it.
 
-On the command line, `-d3d9` starts the old renderer and `-dx11post off` gives the Direct3D 11 picture
-without its finishing passes. `-nologo` skips the EA logo and `-novideo` every movie, and `-loadsave
-<name>` opens a save game the way `-replay` opens a replay.
+```ini
+FixedOrderKeys
+  Enabled = No
+End
+```
 
 </details>
-
----
 
 ## Build it
 
@@ -252,7 +337,8 @@ build.bat clean              :: throw the build tree away first
 
 Double-click `build.bat`. On a clone that has never been built it finds cmake, fetches what EA
 stripped, configures, builds, and copies the exe and the five FFmpeg DLLs into `GeneralsMD/Run/`,
-which is where the game data is and the only place the game starts. Three minutes on a 2024 desktop.
+which is where the game data is and the only place the game starts. About three minutes on a 2024
+desktop.
 
 Visual Studio 2022 with the Desktop C++ workload is the one prerequisite. It brings ATL, which
 `PreRTS.h` needs; a Build Tools install needs the `Microsoft.VisualStudio.Component.VC.ATL` component
@@ -297,14 +383,15 @@ On Ubuntu 24.04 the Linux packages are:
 ```sh
 sudo apt-get install cmake ninja-build g++ git curl unzip xz-utils make pkg-config python3 libx11-dev \
   libxext-dev libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev libxss-dev libxtst-dev libwayland-dev \
-  libxkbcommon-dev wayland-protocols libegl-dev libdrm-dev libgbm-dev libvulkan-dev
+  libxkbcommon-dev wayland-protocols libegl-dev libdrm-dev libgbm-dev libvulkan-dev libfontconfig-dev lld unifdef
 ```
 
 `GeneralsMD/Code/Tools/linux-portable.sh` builds inside Valve's Steam Runtime 3 "sniper" SDK and makes
 one folder that runs on SteamOS and any desktop Linux of the last five years with nothing installed.
 `GeneralsMD/Code/Tools/linux-packages.sh` wraps that folder as an AppImage, a `.deb`, an `.rpm`, an
 Arch `.pkg.tar.zst` and a single-file `.flatpak`, each built in docker and checked for glibc 2.31 at
-most.
+most. `add-to-menu.sh`, in the folder `./build-linux.sh` makes, puts the game in the desktop's app
+menu with Generals' icon.
 
 The game finds its install from `-root <dir>`, then `Registry.ini` in the user data folder, then the
 usual places, then a folder chooser on the first launch. The install itself is never written to.
@@ -314,15 +401,16 @@ usual places, then a folder chooser on the first launch. The install itself is n
 
 ## How it is tested
 
-There is no debugger on the machine this is built on, so the game tests itself.
+There is no debugger on the machine this is built on, so the game tests itself. Code changes are
+made with AI assistance, one person directs them, and replays and measurements test them.
 
-- `ctest` runs 58 tests on a Windows build: the engine's and the libraries' own, plus the port's
+- `ctest` runs 63 tests on a Windows build: the engine's and the libraries' own, plus the port's
   device, shader generators, file systems, input, audio, LAN and packaging.
-- Headless, a 23-minute skirmish plays out in 38 seconds, the same way on every run, and opens no
-  window at all.
+- Headless, a whole skirmish between computer players plays out with no window and no sound, the
+  same way on every run.
 - A logic change is argued with replay CRCs. The 32-bit build and the 64-bit one played the same 3000
   frames of computer against computer to the same checksum before 32-bit was retired.
-- An AI change is argued with 20 headless matches on the same seeds, win rate and match length before
+- An AI change is argued with headless matches on the same seeds, win rate and match length before
   and after.
 - A graphics change is argued in pixels: the same frame of the same match from two builds, and the
   pixels between them counted.
@@ -344,9 +432,10 @@ every abstract interface the engine names, and nothing under `GameEngine/` names
 The logic and client split is the determinism boundary. `GameLogic` owns every `Object` and everything
 that has to checksum identically on every machine in a network game; `GameClient` owns drawables and
 input. Input never reaches logic directly. It becomes a message on a stream, and whatever survives the
-translators lands on the command list for the next logic frame. Objects are
-composed from modules declared in INI, so a new behaviour is a module class and an INI block rather
-than an edit to `Object`.
+translators lands on the command list for the next logic frame. Since 3.2.0, outside network games,
+that frame is worked out on a thread of its own while the client draws the last one.
+Objects are composed from modules declared in INI, so a new behaviour is a module class and an INI
+block rather than an edit to `Object`.
 
 | Path | What lives there |
 |:--|:--|
@@ -367,20 +456,24 @@ them, and any source change separates them.
 ## Not there yet
 
 - Internet play. LAN works between separate PCs; matches over the internet wait on a lobby server of
-  Reforged's own, which is still on paper.
+  Reforged's own, which is still on paper. A network game needs every player on the same version.
 - A Direct3D 11 frame still costs a little more than a Direct3D 9 one, 7.6 ms against 6.3 ms on a
   screen full of Inferno Cannon fire. `-d3d9` is the way back.
+- Modern water stops the first frame on a fresh install for about ten seconds while its two shaders
+  compile. Volumetric clouds stay off by default until their cost in a big battle is measured.
 - No gamepad, and no Direct3D 12.
 - The Windows ARM64 build has not run on an ARM64 machine, and the macOS and Linux packages carry no
-  upscaled art.
+  upscaled art. A match between Windows and a Mac has not been played.
+- Replays and mid-match saves from before 3.0.0's 60-step battle do not load. Replays recorded before
+  the rank ladder and the other `main` changes to the battle play out differently.
 - SafeDisc stays stubbed.
 
 ## Help out
 
-Two PCs and an evening are still the most useful thing anyone can give this: a LAN match between two
-real machines, Windows against Windows or Windows against a Mac, reported as an
-[issue](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/issues). A clean match counts as much as
-a broken one.
+The one machine this is built on cannot test a LAN match between two real PCs. Play one, Windows
+against Windows or Windows against a Mac, and report it as an
+[issue](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/issues), a clean match as well as a
+broken one.
 
 Pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the commit format and the check
 every pull request runs, and [Discussions](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/discussions)
@@ -389,12 +482,11 @@ is open for anything that is not an issue yet.
 ## Credits
 
 Electronic Arts released the source in 2025. İlyas Akın (ilyasakin) wrote the macOS, Linux and Windows
-ARM64 port. Fixes taken from [TheSuperHackers/GeneralsGameCode](https://github.com/TheSuperHackers/GeneralsGameCode),
+ARM64 port, and Andreas Berger found the macOS and Linux build breaks that followed 3.0.0.
+Fixes taken from [TheSuperHackers/GeneralsGameCode](https://github.com/TheSuperHackers/GeneralsGameCode),
 the community's CMake port of the same source, are credited where they landed, in the code and in the
 commits. Third-party libraries are fetched at pinned versions and keep their own licences;
 [NOTICE.md](NOTICE.md) lists who wrote what and under which licence.
-
----
 
 <details>
 <summary>EA's original README</summary>
@@ -450,11 +542,4 @@ This repository is for preservation purposes only and is archived without suppor
 
 </details>
 
-<div align="center">
-<sub>
-
-GPL v3 with additional terms, see [LICENSE.md](LICENSE.md).
-Preservation release © Electronic Arts. Not affiliated with or endorsed by Electronic Arts.
-
-</sub>
-</div>
+<sub>GPL v3 with additional terms, see [LICENSE.md](LICENSE.md). Preservation release © Electronic Arts. Not affiliated with or endorsed by Electronic Arts.</sub>

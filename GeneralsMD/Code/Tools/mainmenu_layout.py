@@ -1,18 +1,33 @@
 #!/usr/bin/env python3
-"""Add the campaign mission panel to the main menu layout.
+"""Add the campaign pick and campaign mission panels to the main menu layout.
 
 Picking USA, GLA or China in the single player menu opens a panel with a button for each of that
 campaign's missions, so a campaign can be started at any mission; the difficulty panel follows the
 pick as it always did.  The panel is the single player menu's own (MapBorder: six buttons in a
-frame) cloned whole and renamed, which is how it keeps EA's frame, button art, font and sounds:
+frame) cloned whole and renamed, which is how it keeps EA's frame, button art, font and sounds, and
+then grown by two buttons, since the original 2003 campaigns run to seven missions:
 
     MapBorder5 / EarthMap5
-        ButtonMission1 .. ButtonMission5     the campaign's missions, top to bottom
-        ButtonMissionBack                    back to the single player menu
+        ButtonMission1 .. ButtonMission7     the campaign's missions, top to bottom
+        ButtonMissionBack                    back to the pick panel or the single player menu
 
-It sits exactly where the single player menu does, which is hidden while it shows.  The labels are
-set by MainMenu.cpp from GUI:CampaignMission; the transitions that flash it in and out are in
-Data/INI/WindowTransitionsReforged.ini.
+MainMenu.cpp shrinks the frame to the campaign it shows and moves Back up under its last mission.
+
+When the side's original Generals campaign is installed, a pick panel comes first, the multiplayer
+menu's (MapBorder1: two buttons and Back) cloned the same way:
+
+    MapBorder6 / EarthMap6
+        ButtonCampaignGenerals               the original 2003 campaign
+        ButtonCampaignZH                     Zero Hour's campaign
+        ButtonCampaignBack                   back to the single player menu
+
+It is PICK_WIDEN wider than the other panels, to the left, so "GENERALS ZERO HOUR" fits its button
+at 800x600 (211 pixels of Arial at 15 points against 208); the right edges stay in line.  The
+recent-save buttons under the extra strip are never shown.
+
+Both sit where the single player menu does, which is hidden while either shows.  The labels
+are set from GUI:CampaignMission, GUI:CampaignZeroHour and GUI:CampaignGenerals; the transitions
+that flash them in and out are in Data/INI/WindowTransitionsReforged.ini.
 
     python bigfile.py extract ../../Run/WindowZH.big "Window\\Menus\\MainMenu.wnd" -o wnd
     python mainmenu_layout.py wnd/Window/Menus ../Data/Window/Menus
@@ -23,7 +38,7 @@ loose file beats WindowZH.big.
     python mainmenu_layout.py selfcheck
 
 reads the tracked files back and checks they agree: the layout carries every window the code and
-the Reforged transitions name, and Patch.str carries the label.  Run by CTest as
+the Reforged transitions name, and Patch.str carries the labels.  Run by CTest as
 mainmenu_selfcheck.
 """
 
@@ -43,7 +58,7 @@ TRANSITIONS = os.path.join(HERE, "..", "Data", "INI", "WindowTransitionsReforged
 MENU = "MainMenu"
 
 # the single player menu's windows -> their names in the clone, top button first
-RENAME = [
+MISSION_RENAME = [
     ("MapBorder", "MapBorder5"),
     ("EarthMap", "EarthMap5"),
     ("ButtonUSA", "ButtonMission1"),
@@ -54,7 +69,22 @@ RENAME = [
     ("ButtonSingleBack", "ButtonMissionBack"),
 ]
 
-STRINGS = ["GUI:CampaignMission"]
+# MISSION_BUTTONS in MainMenu.cpp; the clone brings five, the rest are copies of the fifth
+MISSION_BUTTONS = 7
+
+# the multiplayer menu's windows -> the pick panel's, with the label each button gets
+PICK_RENAME = [
+    ("MapBorder1", "MapBorder6", None),
+    ("EarthMap1", "EarthMap6", None),
+    ("ButtonOnline", "ButtonCampaignGenerals", "GUI:CampaignGenerals"),
+    ("ButtonNetwork", "ButtonCampaignZH", "GUI:CampaignZeroHour"),
+    ("ButtonMultiBack", "ButtonCampaignBack", None),
+]
+
+# 800x600 pixels the pick panel and its buttons grow by, leftwards
+PICK_WIDEN = 32
+
+STRINGS = ["GUI:CampaignMission", "GUI:CampaignZeroHour", "GUI:CampaignGenerals"]
 
 
 def drop_prop(window, key):
@@ -65,27 +95,66 @@ def drop_prop(window, key):
         del window.props[i]
 
 
-def build(layout):
-    template = layout.find("MapBorder")
+def full(name):
+    return "%s.wnd:%s" % (MENU, name)
+
+
+def clone_panel(layout, renames):
+    """Clone the frame the first rename names, renaming every window in it and relabelling the
+    buttons given a label.  A window the list leaves out would keep a name the code already uses."""
+    template = layout.find(renames[0][0])
     if template is None:
-        raise SystemExit("%s has no MapBorder to clone" % MENU)
+        raise SystemExit("%s has no %s to clone" % (MENU, renames[0][0]))
 
     panel = clone(template)
-    for old, new in RENAME:
+    for old, new, label in renames:
         window = panel.find(old)
         if window is None:
-            raise SystemExit("%s's MapBorder has no %s" % (MENU, old))
-        window.name = "%s.wnd:%s" % (MENU, new)
-        if new.startswith("ButtonMission") and new != "ButtonMissionBack":
-            window.set_prop("TEXT", '"GUI:CampaignMission"')
+            raise SystemExit("%s's %s has no %s" % (MENU, renames[0][0], old))
+        window.name = full(new)
+        if label:
+            window.set_prop("TEXT", '"%s"' % label)
             drop_prop(window, "TOOLTIPTEXT")
 
-    leftover = [w.name for w in panel.walk() if w.name not in
-                ["%s.wnd:%s" % (MENU, new) for _, new in RENAME]]
+    leftover = [w.name for w in panel.walk() if w.name not in [full(new) for _, new, _ in renames]]
     if leftover:
-        raise SystemExit("MapBorder has windows this tool does not rename: %s" % leftover)
+        raise SystemExit("%s has windows this tool does not rename: %s" % (renames[0][0], leftover))
+    return panel
 
-    layout.root.children.append(panel)
+
+def grow_missions(panel):
+    """Add ButtonMission6 .. on the fifth's step below it, and push Back and the frame down."""
+    earth = panel.find("EarthMap5")
+    fifth = panel.find("ButtonMission5")
+    step = fifth.rect[1] - panel.find("ButtonMission4").rect[1]
+    extra = MISSION_BUTTONS - 5
+    for n in range(6, MISSION_BUTTONS + 1):
+        button = clone(fifth, full("ButtonMission%d" % n))
+        button.move_by(0, step * (n - 5))
+        earth.children.append(button)
+    panel.find("ButtonMissionBack").move_by(0, step * extra)
+    for frame in (panel, earth):
+        l, t, r, b, cw, ch = frame.rect
+        frame.rect = (l, t, r, b + step * extra, cw, ch)
+
+
+def mission_names():
+    return [new for _, new in MISSION_RENAME] + [
+        "ButtonMission%d" % n for n in range(6, MISSION_BUTTONS + 1)]
+
+
+def build(layout):
+    label = "GUI:CampaignMission"
+    missions = clone_panel(layout, [
+        (old, new, label if new.startswith("ButtonMission") and new != "ButtonMissionBack" else None)
+        for old, new in MISSION_RENAME])
+    grow_missions(missions)
+    layout.root.children.append(missions)
+    pick = clone_panel(layout, PICK_RENAME)
+    for window in pick.walk():
+        l, t, r, b, cw, ch = window.rect
+        window.rect = (l - PICK_WIDEN, t, r, b, cw, ch)
+    layout.root.children.append(pick)
     return layout
 
 
@@ -120,7 +189,7 @@ def selfcheck():
         layout = wndlayout.load(path)
         names = set((w.name or "").split(":")[-1] for w in layout.root.walk())
 
-    wanted = set(new for _, new in RENAME) | transition_windows()
+    wanted = set(mission_names()) | set(new for _, new, _ in PICK_RENAME) | transition_windows()
     for name in sorted(wanted - names):
         problems.append("%s.wnd has no %s" % (MENU, name))
 

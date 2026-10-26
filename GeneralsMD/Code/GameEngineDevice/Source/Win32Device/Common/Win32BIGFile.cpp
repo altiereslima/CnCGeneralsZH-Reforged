@@ -73,7 +73,7 @@ File* Win32BIGFile::openFile( const Char *filename, Int access )
 		ramFile = newInstance( RAMFile );
 
 	ramFile->deleteOnClose();
-	if (ramFile->openFromArchive(m_file, fileInfo->m_filename, fileInfo->m_offset, fileInfo->m_size) == FALSE) {
+	if (ramFile->openFromArchive(m_file, m_readLock, fileInfo->m_filename, fileInfo->m_offset, fileInfo->m_size) == FALSE) {
 		ramFile->close();
 		ramFile = NULL;
 		// the archive was readable when it was opened: if its drive has gone since, say so and stop

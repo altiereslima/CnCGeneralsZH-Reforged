@@ -84,6 +84,11 @@ GUI:SignalAttentionPlaced
 "%s: look here!"
 END
 
+// The money request's line in the allies' chat, in the asker's own language.
+GUI:RequestMoneyChat
+"I need money!"
+END
+
 GUI:GamePaused
 "Game paused."
 END
@@ -158,6 +163,14 @@ GUI:Detail
 "Detail Preset"
 END
 
+GUI:GraphicsQuality
+"Performance / Quality"
+END
+
+TOOLTIP:GraphicsQuality
+"Left is the fastest picture, right the best looking. Dragging it sets the boxes on this page and on Effects, the cheap ones first, and the four presets are points along it. Change a box afterwards and the preset reads Custom. Applies when you press Accept; some settings wait for the next map or the next launch."
+END
+
 GUI:DetailNote0
 "Every box on, the most particles and thick smoke, and detail never drops in a big fight. Picking it only fills in the boxes; Accept applies it."
 END
@@ -175,7 +188,7 @@ GUI:DetailNote3
 END
 
 GUI:DetailNote4
-"Your own mix of the boxes on this page and on Effects. Accept keeps it as it is."
+"Your own mix of the boxes on this page and on Effects, or a point on the slider between two presets. Accept keeps it as it is."
 END
 
 GUI:Shadows3D
@@ -604,6 +617,82 @@ TOOLTIP:AmbientVolume
 "Birds, wind, water and the hum of a town. Sound FX no longer moves these, so the battle can stay loud while the world around it stays quiet."
 END
 
+GUI:MasterVolume
+"Master Volume"
+END
+
+TOOLTIP:MasterVolume
+"Turns the whole game up or down: music, effects, voices, ambience and movies. The other sliders keep the mix, this one sets how loud the mix is."
+END
+
+GUI:OptionsGroupMusic
+"Music"
+END
+
+GUI:DynamicMusic
+"Music Follows the Fight"
+END
+
+TOOLTIP:DynamicMusic
+"In a skirmish or online match the music answers the battle: one of your side's calmer tracks while nothing happens, a harder one once guns fire near the camera or at your forces, and back to calm a few seconds after the fight ends. Off leaves the music as the original game played it."
+END
+
+GUI:OptionsGroupOutput
+"Output"
+END
+
+GUI:AudioDevice
+"Output Device"
+END
+
+TOOLTIP:AudioDevice
+"The speakers or headphones the game plays through. Default follows Windows and moves with it when you plug in a headset. Applied when you Accept."
+END
+
+GUI:AudioDeviceDefault
+"Default"
+END
+
+GUI:SpeakerType
+"Speaker Setup"
+END
+
+TOOLTIP:SpeakerType
+"How the battlefield's sounds are placed around you. Headphones give each ear its own timing and tone, so a sound behind or beside you is heard there. 5.1 and 7.1 spread them over surround speakers; on Linux and macOS they play as stereo. Applied when you Accept."
+END
+
+GUI:SpeakerType0
+"Stereo Speakers"
+END
+
+GUI:SpeakerType1
+"Headphones"
+END
+
+GUI:SpeakerType2
+"5.1 Surround"
+END
+
+GUI:SpeakerType3
+"7.1 Surround"
+END
+
+GUI:MuteInBackground
+"Mute in Background"
+END
+
+TOOLTIP:MuteInBackground
+"Silences the game while another window has the focus. Off keeps it playing behind a browser or on a second monitor."
+END
+
+GUI:LegacySound
+"Legacy Sound"
+END
+
+TOOLTIP:LegacySound
+"The original game's sound: no echo off the map, no muffling by distance, hills or buildings, no delay or pitch bend on distant and passing sounds, no dip after big blasts, no cap on battle sounds or unit replies, no limiter, no map ambience and no music following the fight. Master volume, the device and the speakers still apply. Takes effect at once."
+END
+
 GUI:IsometricCamera
 "Isometric Camera"
 END
@@ -625,7 +714,7 @@ GUI:SnapCamera45
 END
 
 TOOLTIP:SnapCamera45
-"Rotating the camera clicks to the eight 45 degree headings instead of stopping anywhere."
+"Rotating the camera clicks to the eight 45 degree headings instead of stopping anywhere. Hold Shift while turning to get the other behaviour for that turn."
 END
 
 GUI:GridBuild
@@ -807,6 +896,18 @@ GUI:Language2
 "Deutsch"
 END
 
+GUI:Language3
+"Українська"
+END
+
+GUI:Language4
+"Русский"
+END
+
+GUI:Language5
+"Français"
+END
+
 TOOLTIP:Language
 "The language of menus, orders, briefings and subtitles. Voices and videos stay as installed. Takes effect the next time the game starts."
 END
@@ -856,7 +957,7 @@ TOOLTIP:StatArmor
 END
 
 TOOLTIP:StatArmorStronger
-"stronger"
+"stronger, less of each hit gets through"
 END
 
 TOOLTIP:StatNewWeapon
@@ -875,6 +976,35 @@ TOOLTIP:StatNewWeaponFigures
 "%d damage, %d range"
 END
 
+// The gloss after each figure on the card: what it counts, as the card computes it.  Damage is the
+// main weapon's primary damage a shot, the weapon that does the most a second; attack speed spreads
+// a clip's reload over its shots; range is in world units, 10 to a pathfinding cell, the square the
+// placement grid draws; build time counts the player's power and how many factories make the unit.
+
+TOOLTIP:StatHealthHint
+"(damage it can take after armor)"
+END
+
+TOOLTIP:StatDamageHint
+"(main weapon, one shot, before armor)"
+END
+
+TOOLTIP:StatAttackSpeedHint
+"(shots a second, reloads counted)"
+END
+
+TOOLTIP:StatDamagePerSecondHint
+"(damage × attack speed)"
+END
+
+TOOLTIP:StatRangeHint
+"(10 is one square of the placement grid)"
+END
+
+TOOLTIP:StatTimeHint
+"(with your power and factories now)"
+END
+
 // Under the figures: a unit's upgrades, or on an upgrade's card the units it changes.
 
 TOOLTIP:Upgrades
@@ -883,6 +1013,14 @@ END
 
 TOOLTIP:UpgradeChanges
 "CHANGES"
+END
+
+TOOLTIP:UpgradesHint
+"(without it → with it)"
+END
+
+TOOLTIP:UpgradeChangesHint
+"(plain unit → with this)"
 END
 
 TOOLTIP:UpgradeOwned
@@ -1182,6 +1320,38 @@ CONTROLBAR:Demo_ToolTipGLAScienceRebelAmbush
 "Allows you to create a surprise ambush of Rebels anywhere \n \n Rank 1: 4 Rebels \n Rank 2: 6 Rebels \n Rank 3: 10 Rebels \n \n Deploy from: Command Center"
 END
 
+GUI:WaterStyle
+"Water style"
+END
+
+GUI:WaterStyle0
+"Classic"
+END
+
+GUI:WaterStyle1
+"Modern"
+END
+
+TOOLTIP:WaterStyle
+"Classic uses the original water, sparkles, reflections and wakes. Modern adds waves, shoreline detail and hull foam. Applied when you Accept."
+END
+
+GUI:CloudStyle
+"Cloud style"
+END
+
+GUI:CloudStyle0
+"Classic"
+END
+
+GUI:CloudStyle1
+"Volumetric"
+END
+
+TOOLTIP:CloudStyle
+"Classic uses the original toxin and radiation effects. Volumetric adds moving smoke, darker nuclear haze and heat shimmer. Applies when you press Accept, to the clouds already on the field too."
+END
+
 LAN:ErrorModMismatch
 "This game runs different mods. The host's mods: %s. Start the game with the same mods, in the same order, to join."
 END
@@ -1196,6 +1366,14 @@ END
 
 GUI:CampaignMission
 "MISSION %d"
+END
+
+GUI:CampaignZeroHour
+"GENERALS ZERO HOUR"
+END
+
+GUI:CampaignGenerals
+"GENERALS"
 END
 
 GUI:MapCorrupt
@@ -1288,6 +1466,30 @@ END
 
 TOOLTIP:DebrisTrails
 "Blasts throw fragments that trail smoke, and wrecks shed burning shrapnel. Off keeps the original explosions. Applies when you press Accept."
+END
+
+GUI:MapLight
+"Warm Light and Haze"
+END
+
+TOOLTIP:MapLight
+"A low afternoon sun that lights the map warmer and casts longer shadows, and a light haze lying over low ground that aircraft part as they fly through it. Direct3D 11 only. Applies from the next map."
+END
+
+GUI:TeamGlow
+"Team Color Glow"
+END
+
+TOOLTIP:TeamGlow
+"The bright patches of each side's color on units and buildings glow in that color. Direct3D 11 only. Applies from the next map."
+END
+
+GUI:WaterFoam
+"Water Foam"
+END
+
+TOOLTIP:WaterFoam
+"Rivers and lakes carry flecks of foam and a band of it along the shore, and the sun's shadows fall on the water. The sea's waves are unchanged. Direct3D 11 and Classic water only, and off under Classic Graphics. Applies when you press Accept."
 END
 
 GUI:FormationDrag
@@ -1664,6 +1866,10 @@ GUI:HotkeysCommandSIGNAL_ATTENTION
 "Signal: look here"
 END
 
+GUI:HotkeysCommandREQUEST_MONEY
+"Ask allies for money"
+END
+
 GUI:HotkeysCommandBEGIN_WAYPOINTS
 "Queue orders (hold)"
 END
@@ -1820,6 +2026,67 @@ END
 
 GUI:AIPersonaTooltip
 "How this computer player plays, whatever its difficulty"
+END
+
+// What each personality does, shown when the pointer is over the box or a line of its list
+GUI:AIPersonaTooltipNormal
+"Plays exactly as the computer always has."
+END
+
+GUI:AIPersonaTooltipAttacker
+"Attacks early and often with smaller waves, spends its money as fast as it comes in and builds few defences."
+END
+
+GUI:AIPersonaTooltipTurtle
+"Puts up a defence line early and guns at the chokepoints, attacks late with big waves and pulls back sooner when it is losing."
+END
+
+GUI:AIPersonaTooltipEconomist
+"Income and upgrades first, a later first attack, and its spare money goes to the poorest ally."
+END
+
+GUI:AIPersonaTooltipAir
+"Builds airfields and sends its aircraft out on sorties, and turns away from them when your anti-air is heavy."
+END
+
+GUI:AIPersonaTooltipRusher
+"Throws everything into one attack, three minutes in on Hard and four and a half on Easy, with almost no defences. After it, it plays as an Attacker."
+END
+
+GUI:AIPersonaTooltipRaider
+"Sends small groups of its fastest vehicles around your army at your gatherers and workers, from the third minute on Hard and the fifth on Easy."
+END
+
+GUI:AIPersonaTooltipTech
+"Sits behind its defences and races to the superweapon, then plays as the normal computer once it stands. Turns its powers on whoever hits an ally."
+END
+
+GUI:AIPersonaTooltipInfantry
+"An infantry army trained from its barracks first, with its waves carried in transports."
+END
+
+GUI:AIPersonaTooltipArmor
+"A tank-heavy army that waits longer to gather and attacks in fewer, bigger waves."
+END
+
+GUI:AIPersonaTooltipSneaky
+"Favours units that turn invisible, spends its general's points on stealth first and comes in by the flanks and the back door."
+END
+
+GUI:AIPersonaTooltipOpportunist
+"Goes after the weakest enemy in sight, and after whoever is already fighting someone else."
+END
+
+GUI:AIPersonaTooltipSupporter
+"Joins its allies' attacks and sends its idle army to clear enemies out of an ally's base."
+END
+
+GUI:AIPersonaTooltipCounter
+"Reads your army harder and builds what beats it, even on Easy."
+END
+
+GUI:AIPersonaTooltipRandom
+"One of the personalities above, drawn when the match starts. Never Normal."
 END
 
 GUI:AIPersona
@@ -2081,6 +2348,18 @@ TOOLTIP:MoneyTransfer
 "Scroll or click - and + to pick the amount: 100 a step, 1,000 with Ctrl, 10,000 with Shift, 100,000 with both. Send hands it over."
 END
 
+GUI:DiplomacyPing
+"Ping"
+END
+
+GUI:DiplomacyFps
+"FPS"
+END
+
+TOOLTIP:DiplomacyNet
+"Ping is the player's round trip to the host in milliseconds (the host has none), FPS how many game frames a second his machine keeps up with. Yellow numbers mark the slowest player, and the whole match runs at his speed."
+END
+
 GUI:LobbyRecord
 "Record"
 END
@@ -2176,4 +2455,1071 @@ END
 
 GUI:GraphNoData
 "Nothing was recorded in this match."
+END
+
+RANK:NextRank
+"Next rank %d/%d XP"
+END
+
+RANK:PerkSIGHT
+"Sight +%d%%"
+END
+
+RANK:PerkSTILL_GUARD
+"Standing still: %d%% less damage taken"
+END
+
+RANK:PerkMEND
+"Out of combat: heals %d%% a second"
+END
+
+RANK:PerkSPOTTER
+"Spots for the artillery"
+END
+
+RANK:PerkSCATTER
+"Artillery scatter -%d%%"
+END
+
+RANK:PerkDEATH_RALLY
+"When it falls, allies nearby take %d%% less damage for 10 seconds"
+END
+
+RANK:PerkDETECT
+"Detects stealth within %d"
+END
+
+RANK:PerkAURA_RADIUS
+"Aura reach +%d%%"
+END
+
+RANK:PerkAURA_RATE_OF_FIRE
+"Aura: rate of fire +%d%%"
+END
+
+RANK:PerkAURA_SIGHT
+"Aura: sight +%d%%"
+END
+
+RANK:PerkAURA_GUARD
+"Aura: %d%% less damage taken"
+END
+
+RANK:PerkAURA_RANGE
+"Aura: artillery range +%d%%"
+END
+
+RANK:America0
+"E-1 Private"
+END
+
+RANK:America1
+"E-2 Private"
+END
+
+RANK:America2
+"E-3 Private First Class"
+END
+
+RANK:America3
+"E-4 Specialist"
+END
+
+RANK:America4
+"E-4 Corporal"
+END
+
+RANK:America5
+"E-5 Sergeant"
+END
+
+RANK:America6
+"E-6 Staff Sergeant"
+END
+
+RANK:America7
+"E-7 Sergeant First Class"
+END
+
+RANK:America8
+"E-8 Master Sergeant"
+END
+
+RANK:America9
+"E-8 First Sergeant"
+END
+
+RANK:America10
+"E-9 Sergeant Major"
+END
+
+RANK:America11
+"E-9 Command Sergeant Major"
+END
+
+RANK:America12
+"E-9 Sergeant Major of the Army"
+END
+
+RANK:America13
+"W-1 Warrant Officer"
+END
+
+RANK:America14
+"W-2 Chief Warrant Officer"
+END
+
+RANK:America15
+"W-3 Chief Warrant Officer"
+END
+
+RANK:America16
+"W-4 Chief Warrant Officer"
+END
+
+RANK:America17
+"W-5 Chief Warrant Officer"
+END
+
+RANK:America18
+"O-1 Second Lieutenant"
+END
+
+RANK:America19
+"O-2 First Lieutenant"
+END
+
+RANK:America20
+"O-3 Captain"
+END
+
+RANK:America21
+"O-4 Major"
+END
+
+RANK:America22
+"O-5 Lieutenant Colonel"
+END
+
+RANK:America23
+"O-6 Colonel"
+END
+
+RANK:America24
+"O-7 Brigadier General"
+END
+
+RANK:America25
+"O-8 Major General"
+END
+
+RANK:America26
+"O-9 Lieutenant General"
+END
+
+RANK:America27
+"O-10 General"
+END
+
+RANK:America28
+"General of the Army"
+END
+
+RANK:China0
+"Unranked"
+END
+
+RANK:China1
+"Private"
+END
+
+RANK:China2
+"Private First Class"
+END
+
+RANK:China3
+"Corporal"
+END
+
+RANK:China4
+"Sergeant"
+END
+
+RANK:China5
+"Staff Sergeant Second Class"
+END
+
+RANK:China6
+"Staff Sergeant First Class"
+END
+
+RANK:China7
+"Master Sergeant Third Class"
+END
+
+RANK:China8
+"Master Sergeant Second Class"
+END
+
+RANK:China9
+"Master Sergeant First Class"
+END
+
+RANK:China10
+"Second Lieutenant"
+END
+
+RANK:China11
+"First Lieutenant"
+END
+
+RANK:China12
+"Captain"
+END
+
+RANK:China13
+"Major"
+END
+
+RANK:China14
+"Lieutenant Colonel"
+END
+
+RANK:China15
+"Colonel"
+END
+
+RANK:China16
+"Senior Colonel"
+END
+
+RANK:China17
+"Major General"
+END
+
+RANK:China18
+"Lieutenant General"
+END
+
+RANK:China19
+"General"
+END
+
+RANK:GLA0
+"Unranked"
+END
+
+RANK:GLA1
+"Recruit"
+END
+
+RANK:GLA2
+"Irregular"
+END
+
+RANK:GLA3
+"Fighter"
+END
+
+RANK:GLA4
+"Raider"
+END
+
+RANK:GLA5
+"Hardened Raider"
+END
+
+RANK:GLA6
+"Squadhand"
+END
+
+RANK:GLA7
+"Squad Leader"
+END
+
+RANK:GLA8
+"Cell Leader"
+END
+
+RANK:GLA9
+"Senior Cell Leader"
+END
+
+RANK:GLA10
+"Raid Captain"
+END
+
+RANK:GLA11
+"Column Captain"
+END
+
+RANK:GLA12
+"Strike Commander"
+END
+
+RANK:GLA13
+"Field Commander"
+END
+
+RANK:GLA14
+"Sector Commander"
+END
+
+RANK:GLA15
+"Warlord"
+END
+
+RANK:GLA16
+"Regional Warlord"
+END
+
+RANK:GLA17
+"High Warlord"
+END
+
+RANK:GLA18
+"General"
+END
+
+RANK:GLA19
+"Grand General"
+END
+
+RANK:GLA20
+"Supreme Liberator"
+END
+
+// Turkiye's ladder, the Turkish Land Forces' ranks under their Turkish names in every language
+RANK:Turkiye0
+"Unranked"
+END
+
+RANK:Turkiye1
+"Er"
+END
+
+RANK:Turkiye2
+"Onbaşı"
+END
+
+RANK:Turkiye3
+"Çavuş"
+END
+
+RANK:Turkiye4
+"Uzman Çavuş"
+END
+
+RANK:Turkiye5
+"Astsubay Çavuş"
+END
+
+RANK:Turkiye6
+"Astsubay Kıdemli Çavuş"
+END
+
+RANK:Turkiye7
+"Astsubay Üstçavuş"
+END
+
+RANK:Turkiye8
+"Astsubay Kıdemli Üstçavuş"
+END
+
+RANK:Turkiye9
+"Astsubay Başçavuş"
+END
+
+RANK:Turkiye10
+"Astsubay Kıdemli Başçavuş"
+END
+
+RANK:Turkiye11
+"Teğmen"
+END
+
+RANK:Turkiye12
+"Üsteğmen"
+END
+
+RANK:Turkiye13
+"Yüzbaşı"
+END
+
+RANK:Turkiye14
+"Binbaşı"
+END
+
+RANK:Turkiye15
+"Yarbay"
+END
+
+RANK:Turkiye16
+"Albay"
+END
+
+RANK:Turkiye17
+"Tuğgeneral"
+END
+
+RANK:Turkiye18
+"Tümgeneral"
+END
+
+RANK:Turkiye19
+"Korgeneral"
+END
+
+RANK:Turkiye20
+"Orgeneral"
+END
+
+RANK:Turkiye21
+"Mareşal"
+END
+
+// The Turkiye faction (PlayerTemplateReforged.ini, TurkiyeReforged.ini). Units, buildings, buttons, upgrades.
+
+INI:FactionTurkiye
+"Turkiye (Experimental)"
+END
+
+SIDE:Turkiye
+"Turkiye (Experimental)"
+END
+
+TOOLTIP:BioStrategyLong_Turkiye
+"Turkiye kills from range but cannot see for itself: its artillery fires 600 and sees 100, so a spotter, a UAV or a radar tower has to find the target"
+END
+
+GUI:BioFeatures_Turkiye
+"Long-range artillery, short sight \n Combat Engineers dig Siper bunkers at the front \n Spotters, UAVs and radar towers aim the guns"
+END
+
+OBJECT:TurkiyeInfantryMehmetcik
+"Mehmetcik Rifleman"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryMehmetcik
+"&Mehmetcik Rifleman"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryMehmetcik
+"Line infantry. Clears and holds buildings."
+END
+
+OBJECT:TurkiyeInfantryEngineer
+"Combat Engineers"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryEngineer
+"Combat &Engineers"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryEngineer
+"Builds and repairs structures. Infantry: it can be crushed and shot."
+END
+
+OBJECT:TurkiyeInfantrySungur
+"Sungur Gunner"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantrySungur
+"&Sungur Gunner"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantrySungur
+"Missile infantry against tanks and aircraft."
+END
+
+OBJECT:TurkiyeInfantrySpotter
+"Spotter Team"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantrySpotter
+"S&potter Team"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantrySpotter
+"Sees 500 and barely fights. It cannot hide, so keep it out of reach. Put it on a hill and the artillery behind it can shoot."
+END
+
+OBJECT:TurkiyeInfantryMaroonBeret
+"Maroon Beret"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryMaroonBeret
+"Maroon &Beret"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryMaroonBeret
+"Special forces. Camouflaged, sees 350 for the artillery and plants timed and remote charges."
+END
+
+OBJECT:TurkiyeVehicleSupplyTruck
+"Supply Truck"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleSupplyTruck
+"Supply &Truck"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleSupplyTruck
+"Carries supplies to the Supply Center."
+END
+
+OBJECT:TurkiyeVehicleCobra
+"Cobra Scout"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleCobra
+"&Cobra Scout"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleCobra
+"Fast, fragile car with a machine gun and seats for five infantry. Sees 250, too short to aim the artillery from afar."
+END
+
+OBJECT:TurkiyeVehicleKirpi
+"Kirpi APC"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleKirpi
+"&Kirpi APC"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleKirpi
+"Armored personnel carrier for five infantry."
+END
+
+OBJECT:TurkiyeTankAltay
+"Altay Tank"
+END
+
+CONTROLBAR:ConstructTurkiyeTankAltay
+"&Altay Tank"
+END
+
+CONTROLBAR:ToolTipTurkiyeTankAltay
+"Main battle tank, the only direct-fire vehicle in Turkiye's factory."
+END
+
+OBJECT:TurkiyeVehicleKorkut
+"Korkut Air Defense"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleKorkut
+"K&orkut Air Defense"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleKorkut
+"Air defense: twin cannons out to 350 against aircraft. Cannot fire at the ground."
+END
+
+OBJECT:TurkiyeVehicleFirtina
+"Firtina Howitzer"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleFirtina
+"&Firtina Howitzer"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleFirtina
+"Fires a heavy shell with a wide blast out to 600 and sees 100: it needs a spotter, a UAV or a radar tower to aim."
+END
+
+OBJECT:TurkiyeVehicleSakarya
+"Sakarya Rocket Launcher"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleSakarya
+"&Sakarya Rocket Launcher"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleSakarya
+"Fires a six-rocket salvo over a wide area out to 500, then reloads for 12 seconds. Needs a spotter."
+END
+
+OBJECT:TurkiyeTankKoral
+"Koral Electronic Warfare"
+END
+
+CONTROLBAR:ConstructTurkiyeTankKoral
+"Ko&ral Electronic Warfare"
+END
+
+CONTROLBAR:ToolTipTurkiyeTankKoral
+"Electronic warfare vehicle; its beam shuts enemy buildings down from 400."
+END
+
+OBJECT:TurkiyeVehicleBayraktar
+"Bayraktar UAV"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleBayraktar
+"&Bayraktar UAV"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleBayraktar
+"Hovers where it is sent and sees 550, the artillery's best eye. Light munitions."
+END
+
+OBJECT:TurkiyeVehicleGokbey
+"Gokbey Helicopter"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleGokbey
+"&Gokbey Helicopter"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleGokbey
+"Transport helicopter for five infantry."
+END
+
+OBJECT:TurkiyeJetAkinci
+"Akinci UAV"
+END
+
+CONTROLBAR:ConstructTurkiyeJetAkinci
+"&Akinci UAV"
+END
+
+CONTROLBAR:ToolTipTurkiyeJetAkinci
+"Heavy armed UAV. Dies under air defense."
+END
+
+OBJECT:TurkiyeJetKizilelma
+"Kizilelma Fighter"
+END
+
+CONTROLBAR:ConstructTurkiyeJetKizilelma
+"&Kizilelma Fighter"
+END
+
+CONTROLBAR:ToolTipTurkiyeJetKizilelma
+"Strike fighter: its missiles hit aircraft and ground targets alike."
+END
+
+OBJECT:TurkiyeRadarTower
+"Radar Tower"
+END
+
+CONTROLBAR:ConstructTurkiyeRadarTower
+"&Radar Tower"
+END
+
+CONTROLBAR:ToolTipTurkiyeRadarTower
+"Fixed eye: sees 500 for the artillery. Draws power. A target."
+END
+
+OBJECT:TurkiyeSiper
+"Siper Bunker"
+END
+
+CONTROLBAR:ConstructTurkiyeSiper
+"Siper B&unker"
+END
+
+CONTROLBAR:ToolTipTurkiyeSiper
+"Trench bunker for five infantry, dug wherever the engineers stand. Mehmetcik in it hold off infantry, Sungur gunners hold off tanks."
+END
+
+OBJECT:TurkiyeLandMine
+"Minefield"
+END
+
+CONTROLBAR:ConstructTurkiyeLandMine
+"&Minefield"
+END
+
+CONTROLBAR:ToolTipTurkiyeLandMine
+"A charge buried in the ground. Needs the Mine Kit."
+END
+
+UPGRADE:TurkiyeExtendedRange
+"Extended Range"
+END
+
+CONTROLBAR:UpgradeTurkiyeExtendedRange
+"&Extended Range"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeExtendedRange
+"Firtina and Sakarya reach 15 percent further."
+END
+
+UPGRADE:TurkiyePrecisionGuidance
+"Precision Guidance"
+END
+
+CONTROLBAR:UpgradeTurkiyePrecisionGuidance
+"&Precision Guidance"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyePrecisionGuidance
+"Shots at ground nobody sees spread four times less."
+END
+
+UPGRADE:TurkiyeArmorPack
+"Reinforced Hull"
+END
+
+CONTROLBAR:UpgradeTurkiyeArmorPack
+"Reinforced &Hull"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeArmorPack
+"Kirpi and Altay get 20 percent more health."
+END
+
+UPGRADE:TurkiyeMineKit
+"Mine Kit"
+END
+
+CONTROLBAR:UpgradeTurkiyeMineKit
+"Mine &Kit"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeMineKit
+"Combat Engineers can lay mines."
+END
+
+OBJECT:TurkiyeCommandCenter
+"Headquarters"
+END
+
+CONTROLBAR:ConstructTurkiyeCommandCenter
+"&Headquarters"
+END
+
+OBJECT:TurkiyePowerPlant
+"Power Plant"
+END
+
+CONTROLBAR:ConstructTurkiyePowerPlant
+"&Power Plant"
+END
+
+OBJECT:TurkiyeBarracks
+"Barracks"
+END
+
+CONTROLBAR:ConstructTurkiyeBarracks
+"&Barracks"
+END
+
+OBJECT:TurkiyeWarFactory
+"Factory"
+END
+
+CONTROLBAR:ConstructTurkiyeWarFactory
+"&Factory"
+END
+
+OBJECT:TurkiyeAirfield
+"Airfield"
+END
+
+CONTROLBAR:ConstructTurkiyeAirfield
+"&Airfield"
+END
+
+OBJECT:TurkiyeSupplyCenter
+"Supply Center"
+END
+
+CONTROLBAR:ConstructTurkiyeSupplyCenter
+"&Supply Center"
+END
+
+OBJECT:TurkiyePatriotBattery
+"Hisar Battery"
+END
+
+CONTROLBAR:ConstructTurkiyePatriotBattery
+"H&isar Battery"
+END
+
+SCIENCE:TurkiyeMinefield
+"Minefield"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceMinefield
+"A cargo plane sows a minefield wherever you point. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeMinefield
+"Mine&field"
+END
+
+CONTROLBAR:TooltipTurkiyeMinefield
+"Minefield \n Recharge: 4:00"
+END
+
+SCIENCE:TurkiyeFuelResupply
+"Fuel Resupply"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceFuelResupply
+"Bayraktar drones carry one more munition on every sortie."
+END
+
+SCIENCE:TurkiyeSwarmMunition
+"Loitering Munition"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceSwarmMunition
+"One loitering munition circles where you point and dives on the most expensive target it finds. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeSwarmMunition
+"Loitering &Munition"
+END
+
+CONTROLBAR:TooltipTurkiyeSwarmMunition
+"Loitering Munition \n Recharge: 3:00"
+END
+
+SCIENCE:TurkiyeElectronicBlinding
+"Electronic Blinding"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceElectronicBlinding
+"Every enemy with a building in the target area loses its radar for 30 seconds. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeElectronicBlinding
+"Electronic &Blinding"
+END
+
+CONTROLBAR:TooltipTurkiyeElectronicBlinding
+"Electronic Blinding \n Recharge: 4:00"
+END
+
+SCIENCE:TurkiyeSwarmStrike
+"Swarm Strike"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceSwarmStrike
+"A swarm of munitions hunts down the ten most valuable targets in a wide area, one munition each. A packed base shrugs it off; a spread-out army does not. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeSwarmStrike
+"S&warm Strike"
+END
+
+CONTROLBAR:TooltipTurkiyeSwarmStrike
+"Swarm Strike \n Recharge: 6:00"
+END
+
+UPGRADE:TurkiyeThermal
+"Thermal Sights"
+END
+
+CONTROLBAR:UpgradeTurkiyeThermal
+"T&hermal Sights"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeThermal
+"Spotter Teams see out to 650 and Cobras to 320, and both spot camouflaged units."
+END
+
+UPGRADE:TurkiyeFuelCell
+"Fuel Cell"
+END
+
+CONTROLBAR:UpgradeTurkiyeFuelCell
+"&Fuel Cell"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeFuelCell
+"The Bayraktar stays over the target twice as long, with twice the munitions."
+END
+
+UPGRADE:TurkiyeSwarmSoftware
+"Swarm Software"
+END
+
+CONTROLBAR:UpgradeTurkiyeSwarmSoftware
+"Swarm Soft&ware"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeSwarmSoftware
+"Bayraktar munitions pick their own target: the most expensive enemy in reach."
+END
+
+UPGRADE:TurkiyeFuelResupply
+"Fuel Resupply"
+END
+
+SCIENCE:TurkiyeRapidDeployment
+"Rapid Deployment"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceRapidDeployment
+"A cargo plane drops six Mehmetcik and two Sungur gunners wherever you point. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeRapidDeployment
+"&Rapid Deployment"
+END
+
+CONTROLBAR:TooltipTurkiyeRapidDeployment
+"Rapid Deployment \n Recharge: 3:00"
+END
+
+SCIENCE:TurkiyeFireMission
+"Fire Mission"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceFireMission
+"Thirty-six heavy shells fall on the target from off the map. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeFireMission
+"Fire M&ission"
+END
+
+CONTROLBAR:TooltipTurkiyeFireMission
+"Fire Mission \n Recharge: 4:00"
+END
+
+SCIENCE:TurkiyeCommandoRaid
+"Commando Raid"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceCommandoRaid
+"A Maroon Beret and two spotter teams parachute wherever you point: eyes and charges behind the enemy's lines. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeCommandoRaid
+"&Commando Raid"
+END
+
+CONTROLBAR:TooltipTurkiyeCommandoRaid
+"Commando Raid \n Recharge: 5:00"
+END
+
+OBJECT:TurkiyeKarguBase
+"Kargu Drone Base"
+END
+
+CONTROLBAR:ConstructTurkiyeKarguBase
+"&Kargu Drone Base"
+END
+
+OBJECT:TurkiyeHarekatMerkezi
+"Operations Center"
+END
+
+CONTROLBAR:ConstructTurkiyeHarekatMerkezi
+"&Operations Center"
+END
+
+CONTROLBAR:ToolTipTurkiyeHarekatMerkezi
+"Turkiye's technology building. The whole army fights under one battle plan at a time: Bombardment, Search and Destroy or Hold the Line. Researches Advanced Training and Chemical Suits, and opens the Kargu Drone Base, the Sakarya, the Koral, the Akinci and the Maroon Beret. \n \n Requires: Factory or Airfield \n Energy Required: 2"
+END
+
+OBJECT:TurkiyeKapalicarsi
+"Grand Bazaar"
+END
+
+CONTROLBAR:ConstructTurkiyeKapalicarsi
+"&Grand Bazaar"
+END
+
+CONTROLBAR:ToolTipTurkiyeKapalicarsi
+"Turkiye's black market. Pays 20 every 2 seconds and sells Countermeasures for the Bayraktar, the Akinci and the Kizilelma, and Worker Shoes for the engineers. \n \n Requires: Factory"
+END
+
+CONTROLBAR:ToolTipTurkiyeKarguBase
+"Sends a swarm of sixteen kamikaze drones anywhere on the map. Each one hunts down one of the most valuable targets in the circle and dives into it; spread-out armies suffer most. They climb to the ceiling and come down like Scud missiles, and nothing can shoot them on the way. \n \n Requires: Operations Center \n Energy Required: 10 \n Recharge: 5:00"
+END
+
+CONTROLBAR:TurkiyeKarguSwarm
+"&Kargu Swarm"
+END
+
+CONTROLBAR:TooltipTurkiyeKarguSwarm
+"Kargu Swarm \n Recharge: 5:00"
+END
+
+GUI:SuperweaponTurkiyeKarguSwarm
+"Kargu Swarm"
+END
+
+GUI:RandomMapTemplate
+"Map type"
+END
+
+GUI:RandomMapAnyTemplate
+"Surprise me"
+END
+
+GUI:RandomMapSize
+"Map size"
+END
+
+GUI:RandomMapSizeTiny
+"Tiny"
+END
+
+GUI:RandomMapSizeSmall
+"Small"
+END
+
+GUI:RandomMapSizeMedium
+"Medium"
+END
+
+GUI:RandomMapSizeLarge
+"Large"
+END
+
+GUI:RandomMapSizeHuge
+"Extra Large"
+END
+
+// The staging rooms' army screen, opened from a seat's army box.  %s in the Confirm label is the
+// army's name, %s in LeftOut the armies a plain Random never draws, and the two %d in Pool are the
+// ticked armies and the armies that can be ticked.
+GUI:FactionPickTitle
+"Select Army"
+END
+
+GUI:FactionPickRandomAll
+"Random All"
+END
+
+GUI:FactionPickCustom
+"Custom Selection"
+END
+
+GUI:FactionPickConfirm
+"Confirm %s"
+END
+
+GUI:FactionPickRandom
+"Random picks one of these armies for you when the match starts."
+END
+
+GUI:FactionPickLeftOut
+"Random never draws: %s. Tick it under Custom Selection to add it."
+END
+
+GUI:FactionPickPool
+"Random picks one of the %d armies ticked on the left, out of %d. Click an army to tick it or take it out."
+END
+
+// %s is a side's name as its heading reads (USA, China, a mod's side): the pool is that side and nothing else.
+GUI:FactionPickRandomSide
+"Random %s"
+END
+
+GUI:FactionPickSideHint
+"A side's box ticks or clears the whole side; its name leaves that side alone in the draw."
+END
+
+GUI:FactionPickSideNameHint
+"Click a side's name to play a random army of that side."
 END

@@ -71,7 +71,7 @@ static const Real VEHICLE_STOP_SECONDS = 0.8f;				// no vehicle takes longer tha
 static const Real VEHICLE_YAW_EASE_FRAMES = ConvertRetailFrames(6.0f);			// frames for a turn to wind up to TurnRate, or back down from it
 static const Real VEHICLE_STILL_SHARE = 0.1f;					// below this share of top speed a vehicle may choose to go forward or back
 static const Real VEHICLE_REVERSE_SHARE = 0.45f;			// share of top speed a vehicle backs up at
-static const Real VEHICLE_REVERSE_BODY_LENGTHS = 3.0f;	// a goal behind and closer than this along the route is backed up to
+static const Real VEHICLE_REVERSE_BODY_LENGTHS = 3.0f;	// a car backs straight up to a goal behind and closer than this along the route; a tank times it
 static const Real VEHICLE_REVERSE_COS = -0.34f;				// cos 110 degrees: behind, for that
 static const Real VEHICLE_BEND_COS = 0.985f;					// cos 10 degrees: a gentler bend is driven at full speed
 static const Real VEHICLE_MIN_SLIDE = ConvertRetailPerFrameRate(0.08f);					// the slide onto the goal in the last cell moves at least this far a frame
@@ -811,6 +811,8 @@ Locomotor::Locomotor(const LocomotorTemplate* tmpl)
 	m_brakingFactor = 1.0f;
 	m_maxLift = BIGNUM;
 	m_maxSpeed = BIGNUM;
+	m_speedFactor = 1.0f;
+	m_speedScale = 1.0f;
 	m_maxAccel = BIGNUM;
 	m_maxBraking = BIGNUM;
 	m_maxTurnRate = BIGNUM;
@@ -850,6 +852,8 @@ Locomotor::Locomotor(const Locomotor& that)
 	m_brakingFactor = that.m_brakingFactor;
 	m_maxLift = that.m_maxLift;
 	m_maxSpeed = that.m_maxSpeed;
+	m_speedFactor = that.m_speedFactor;
+	m_speedScale = that.m_speedScale;
 	m_maxAccel = that.m_maxAccel;
 	m_maxBraking = that.m_maxBraking;
 	m_maxTurnRate = that.m_maxTurnRate;
@@ -880,6 +884,8 @@ Locomotor& Locomotor::operator=(const Locomotor& that)
 		m_brakingFactor = that.m_brakingFactor;
 		m_maxLift = that.m_maxLift;
 		m_maxSpeed = that.m_maxSpeed;
+		m_speedFactor = that.m_speedFactor;
+		m_speedScale = that.m_speedScale;
 		m_maxAccel = that.m_maxAccel;
 		m_maxBraking = that.m_maxBraking;
 		m_maxTurnRate = that.m_maxTurnRate;
@@ -920,12 +926,14 @@ void Locomotor::crc( Xfer *xfer )
 	* 1: Initial version
 	* 3: m_diveDistance
 	* 4: m_yawRate, m_driveAccelX, m_driveAccelY
-	* 5: m_driveSpeed, m_driveFrame */
+	* 5: m_driveSpeed, m_driveFrame
+	* 6: m_speedFactor
+	* 7: m_speedScale */
 // ------------------------------------------------------------------------------------------------
 void Locomotor::xfer( Xfer *xfer )
 {
 	// version
-	const XferVersion currentVersion = 5;
+	const XferVersion currentVersion = 7;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -966,6 +974,12 @@ void Locomotor::xfer( Xfer *xfer )
 		xfer->xferUnsignedInt(&m_driveFrame);
 	}
 
+	if (version >= 6)
+		xfer->xferReal(&m_speedFactor);
+
+	if (version >= 7)
+		xfer->xferReal(&m_speedScale);
+
 }  // end xfer
 
 // ------------------------------------------------------------------------------------------------
@@ -992,7 +1006,9 @@ Real Locomotor::getMaxSpeedForCondition(BodyDamageType condition) const
 		speed = m_template->m_maxSpeed;
 	else
 		speed = m_template->m_maxSpeedDamaged;
+	speed *= m_speedScale;
 
+	speed *= m_speedFactor;
 	if (speed > m_maxSpeed)
 		speed = m_maxSpeed;
 
@@ -1977,6 +1993,18 @@ void Locomotor::moveTowardsPositionVehicle(Object* obj, PhysicsBehavior *physics
 	{
 		Bool behind = (treads || m_template->m_canMoveBackward) && goalCos < VEHICLE_REVERSE_COS;
 		Bool close = onPathDistToGoal < VEHICLE_REVERSE_BODY_LENGTHS * bodyLength;
+		if (treads)
+		{
+			/* A tank backs up only while that is the quicker way there: the trip at VEHICLE_REVERSE_SHARE of
+				 its speed against pivoting round to the goal at TREAD_PIVOT_SHARE of its TurnRate and driving
+				 it at full speed.  Three body lengths backed a Crusader up as far as 90 units: sent 70 behind
+				 itself it took 5.6 seconds backing and takes 4.2 turning round.  It still backs up to about
+				 40 with the goal dead behind and 24 at 110 degrees.  Multiplied out, so a TurnRate of 0
+				 reverses rather than divides by it. */
+			Real turnAround = ATan2(fabs(goalSin), goalCos);
+			close = onPathDistToGoal * (1.0f - VEHICLE_REVERSE_SHARE) * TREAD_PIVOT_SHARE * turnRate
+				< turnAround * VEHICLE_REVERSE_SHARE * maxSpeed;
+		}
 		setFlag(MOVING_BACKWARDS, behind && (close || !treads));
 		setFlag(DOING_THREE_POINT_TURN, behind && !close && !treads);
 	}
@@ -3997,6 +4025,13 @@ void LocomotorSet::clear()
 }
 
 //-------------------------------------------------------------------------------------------------
+void LocomotorSet::setSpeedScale(Real scale)
+{
+	for (int i = 0; i < m_locomotors.size(); ++i)
+		m_locomotors[i]->setSpeedScale(scale);
+}
+
+//-------------------------------------------------------------------------------------------------
 void LocomotorSet::addLocomotor(const LocomotorTemplate* lt)
 {
 	Locomotor* loco = TheLocomotorStore->newLocomotor(lt);
@@ -4026,6 +4061,13 @@ Locomotor* LocomotorSet::findLocomotor(LocomotorSurfaceTypeMask t)
 			return curLocomotor;
 	}
 	return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+void LocomotorSet::setSpeedFactor(Real factor)
+{
+	for (LocomotorVector::iterator it = m_locomotors.begin(); it != m_locomotors.end(); ++it)
+		(*it)->setSpeedFactor(factor);
 }
 
 

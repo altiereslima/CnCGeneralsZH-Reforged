@@ -105,6 +105,7 @@ struct StaticGameLODInfo
 	Int m_sampleCount3D; ///<How many 3-D (World) samples should we allow simultaneously (Note: Hardware may support less than the desired number)
 	Int m_streamCount; ///<How many streaming audio things should we allow simultaneously (Note: Hardware may support less than the desired number)
 	Int m_maxParticleCount; ///<maximum number of particles that can exist
+	Int m_gpuParticleCapacity; ///<Direct3D 11 particle ring slots for what goes past m_maxParticleCount, 0 for none
 	Bool m_useShadowVolumes;	///<use volumetric shadows if available.
 	Bool m_useShadowDecals;	///<use 2D Decal shadows.
 	Bool m_useCloudMap;	///<use cloud shadows scrolling over terrain.
@@ -174,7 +175,7 @@ public:
 	void init(void);	///<initialize tables of preset LOD's.
 	void setCurrentTextureReduction(Int val) {m_currentTextureReduction = val;}
 	Int getCurrentTextureReduction(void) {return m_currentTextureReduction;}
-	Int getStaticGameLODIndex(AsciiString name);
+	static Int getStaticGameLODIndex(AsciiString name);	///< static: the options catalog reads a preset's name before the manager exists
 	Int getDynamicGameLODIndex(AsciiString name);
 	inline Bool isParticleSkipped(void);
 	inline Bool isDebrisSkipped(void);
@@ -252,9 +253,16 @@ ParticlePriorityType GameLODManager::getMinDynamicParticleSkipPriority(void)
 	return m_minDynamicParticleSkipPriority;
 }
 
-/** The Ultra level made from whatever GameLOD.ini says High is: every effect on, the particle limit
-	* at the top of the options slider, and no dropping detail when the frame rate dips. */
+/** The Ultra level made from whatever GameLOD.ini says High is, with the biggest Direct3D 11 particle
+	* ring.  What it shows on the options pages is applyGraphicsQualityStep's, as for every preset. */
 extern StaticGameLODInfo makeUltraStaticGameLOD( const StaticGameLODInfo &high );
+
+/** The fields applyStaticLODLevel hands on that the options pages have a control for, set to what the
+	* Performance / Quality slider shows at this step (TheGraphicsQualityTable in OptionsCatalog.cpp).
+	* The fields with no control - tank tracks, the particle ring, the frame limit - keep what they held,
+	* and so do the trees, which a preset gives whenever the memory test passed, and the cloud map,
+	* which is a catalog option the preset does not apply. */
+extern void applyGraphicsQualityStep( StaticGameLODInfo &info, Int step );
 
 extern GameLODManager *TheGameLODManager;
 #endif _GAME_LOD_H_

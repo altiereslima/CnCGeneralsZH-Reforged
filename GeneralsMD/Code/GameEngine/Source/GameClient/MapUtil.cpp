@@ -743,6 +743,40 @@ static const char *mapFileNamePart( const AsciiString& fname )
 	return sep ? sep + 1 : fname.str();
 }
 
+// A generated map's name in the list: "<template> (Random) (N)", or "Random (N)" with no template,
+// where its file name would say "rmg_v17_..." to the player.  FALSE for any other map.
+static Bool generatedMapDisplayName( const MapCache& cache, const AsciiString& fname, Int numPlayers, UnicodeString& displayName )
+{
+	if (!isGeneratedMapPath( fname ))
+		return FALSE;
+
+	UnicodeString random = TheGameText->fetch( "GUI:Random" );
+	AsciiString templatePath;
+	if (generatedMapTemplate( fname, templatePath ))
+	{
+		MapCache::const_iterator shipped = cache.find( templatePath );
+		if (shipped != cache.end() && !shipped->second.m_nameLookupTag.isEmpty())
+			displayName = TheGameText->fetch( shipped->second.m_nameLookupTag );
+		else
+		{
+			AsciiString name = mapFileNamePart( templatePath );
+			for (Int i = 0; i < 4; ++i)
+				name.removeLastChar();
+			displayName.translate( name );
+		}
+		displayName.concat( u" (" );
+		displayName.concat( random );
+		displayName.concat( u")" );
+	}
+	else
+		displayName = random;
+
+	UnicodeString players;
+	players.format( u" (%d)", numPlayers );
+	displayName.concat( players );
+	return TRUE;
+}
+
 //Bool MapCache::addMap( AsciiString dirName, AsciiString fname, WinTimeStamp timestamp, UnsignedInt filesize, Bool isOfficial )
 Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInfo, Bool isOfficial)
 {
@@ -795,6 +829,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 					(*this)[lowerFname].m_displayName.concat(extension);
 				}
 			}
+			generatedMapDisplayName( *this, lowerFname, md.m_numPlayers, (*this)[lowerFname].m_displayName );
 //			DEBUG_LOG(("MapCache::addMap - found match for map %s\n", lowerFname.str()));
 			return FALSE;	// OK, it checks out.
 		}
@@ -882,6 +917,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 		DEBUG_LOG(("Map name is now '%s'\n", WideCharAsUtf8( md.m_displayName.str() ).str()));
 		TheGameText->reset();
 	}
+	generatedMapDisplayName( *this, lowerFname, md.m_numPlayers, md.m_displayName );
 
 	getExtent(&(md.m_extent));
 
@@ -1146,17 +1182,11 @@ Bool isValidMap( AsciiString mapName, Bool isMultiplayer )
 		return FALSE;
 	TheMapCache->updateCache();
 
-	mapName.toLower();
-	MapCache::iterator it = TheMapCache->find(mapName);
-	if (it != TheMapCache->end())
-	{
-		if (isMultiplayer == it->second.m_isMultiplayer)
-		{
-			return TRUE;
-		}
-	}
-
-	return FALSE;
+	// findMap, not find: a generated map is in the cache only while the generator holds it, and one
+	// it has let go of - the room's map after a match, the one remembered from the last run - is
+	// still a map, built again from its name
+	const MapMetaData *md = TheMapCache->findMap(mapName);
+	return md != NULL && isMultiplayer == md->m_isMultiplayer;
 }  // end isValidMap
 
 //-------------------------------------------------------------------------------------------------
@@ -1222,24 +1252,31 @@ const MapMetaData *MapCache::findMap(AsciiString mapName)
 		return &(it->second);
 
 	//
-	// A generated map is in the cache only if something staged it this run, and a replay, a save or
-	// a game somebody else is hosting names one that nothing here has built.  The name carries the
-	// settings, so the map is built now and cached like any other rather than reported missing -
-	// which is what the map is asked for at, among other places, the point where the start
-	// positions are dealt out, and that caller does not survive a no.
+	// A map that is there but not in the cache is read now and cached like any other rather than
+	// reported missing - which is what the map is asked for at, among other places, the point where
+	// the start positions are dealt out, and that caller does not survive a no.  Two ways to get
+	// here: a generated map is in the cache only if something staged it this run, and a replay, a
+	// save or a game somebody else is hosting names one that nothing here has built (the name
+	// carries the settings, so it is built on the spot); and a mod's own Maps\MapCache.ini shadows
+	// the shipped one, so a shipped map the mod's file leaves out - the Generals Challenge maps
+	// under some mods - is in the archives but nowhere in the cache.
 	//
-	if (!isGeneratedMapPath(mapName))
+	FileInfo fileInfo;
+	if (!TheFileSystem->getFileInfo(mapName, &fileInfo))
 		return NULL;
 
-	FileInfo generatedInfo;
-	if (!TheFileSystem->getFileInfo(mapName, &generatedInfo))
-		return NULL;
-
+	const Bool isUserMap = isGeneratedMapPath(mapName) || mapName.startsWithNoCase(getUserMapDir());
 	m_seen[mapName] = TRUE;
-	addMap(getUserMapDir(), mapName, &generatedInfo, FALSE);
+	addMap(isUserMap ? getUserMapDir() : getMapDir(), mapName, &fileInfo, FALSE);
 
 	it = find(mapName);
-	return (it == end()) ? NULL : &(it->second);
+	if (it == end())
+		return NULL;
+	// added as unofficial so a map that does not parse is left out instead of thrown; one from the
+	// archives is still a shipped map, and nothing offers to send it to the other players
+	if (!isUserMap)
+		it->second.m_isOfficial = TRUE;
+	return &(it->second);
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -122,7 +122,7 @@ TEST(engineshader_keeps_the_two_halves_apart)
 TEST(engineshader_adds_the_sparkles_and_then_shrouds_the_trapezoid_water)
 {
 	std::string hlsl;
-	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_TRAPEZOID, plain_pipeline(), hlsl));
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_CLASSIC_TRAPEZOID, plain_pipeline(), hlsl));
 	CHECK(contains(hlsl, "float4 current = saturate(input.Diffuse * texel0);"));
 	CHECK(contains(hlsl, "current.rgb = saturate(texel1.rgb * texel2.rgb + current.rgb);"));
 	CHECK(contains(hlsl, "current.rgb = saturate(current.rgb * texel3.rgb);"));
@@ -133,7 +133,7 @@ TEST(engineshader_adds_the_sparkles_and_then_shrouds_the_trapezoid_water)
 TEST(engineshader_darkens_only_the_river_waters_sparkles_by_the_vertex_alpha)
 {
 	std::string hlsl;
-	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_RIVER, plain_pipeline(), hlsl));
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_CLASSIC_RIVER, plain_pipeline(), hlsl));
 	CHECK(contains(hlsl, "current.rgb = saturate(input.Diffuse.rgb * texel0.rgb);"));
 	CHECK(contains(hlsl, "current.a = saturate(texel0.a * texel3.a);"));
 	CHECK(contains(hlsl, "sparkle = saturate(sparkle * input.Diffuse.a);"));
@@ -173,10 +173,28 @@ TEST(engineshader_writes_the_alpha_test_and_the_fog_into_a_water_program)
 	pipeline.AlphaTestEnabled = true;
 	pipeline.AlphaFunction = D3DCMP_GREATEREQUAL;
 
-	std::string hlsl;
-	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_TRAPEZOID, pipeline, hlsl));
-	CHECK(contains(hlsl, "lerp(FogColour.rgb, current.rgb, saturate(input.Fog))"));
-	CHECK(contains(hlsl, "AlphaReference"));
+	const EngineShaderProgram programs[] = { ENGINE_SHADER_WATER_CLASSIC_TRAPEZOID,
+		ENGINE_SHADER_WATER_TRAPEZOID, ENGINE_SHADER_WATER_RIVER };
+	for (const EngineShaderProgram program : programs) {
+		std::string hlsl;
+		CHECK(EngineShader_Pixel_Program(program, pipeline, hlsl));
+		CHECK(contains(hlsl, "lerp(FogColour.rgb, current.rgb, saturate(input.Fog))"));
+		CHECK(contains(hlsl, "AlphaReference"));
+	}
+}
+
+// The Modern names are the Modern text on Direct3D 11 as well, and the Classic names keep the
+// transcription that target always wrote, so a Classic frame compiles exactly what it did.
+TEST(engineshader_writes_modern_water_only_for_the_modern_names)
+{
+	std::string modern, classic;
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_TRAPEZOID, plain_pipeline(), modern));
+	CHECK(contains(modern, "Texture14 : register(t14)"));
+	CHECK(contains(modern, "cbuffer WaterVisualBlock2 : register(b3)"));
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_CLASSIC_TRAPEZOID, plain_pipeline(), classic));
+	CHECK(!contains(classic, "Texture4"));
+	CHECK(EngineShader_Is_Modern_Water(ENGINE_SHADER_WATER_RIVER));
+	CHECK(!EngineShader_Is_Modern_Water(ENGINE_SHADER_WATER_CLASSIC_RIVER));
 }
 
 // lrp r0, v0.w, t1, t0 is t0 + v0.w * (t1 - t0), so the vertex alpha is the weight of the second
@@ -241,7 +259,7 @@ TEST(engineshader_leaves_the_roads_vertex_colour_until_last)
 TEST(engineshader_declares_the_four_stages_the_water_samples)
 {
 	std::string hlsl;
-	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_RIVER, plain_pipeline(), hlsl));
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_CLASSIC_RIVER, plain_pipeline(), hlsl));
 	for (unsigned stage = 0; stage < MAXIMUM_COMBINER_STAGES; ++stage) {
 		char sampler[64];
 		snprintf(sampler, sizeof(sampler), "Texture%u.Sample(Sampler%u, input.TexCoord%u)",
@@ -379,13 +397,14 @@ TEST(engineshader_writes_programs_the_compiler_accepts)
 	pipeline.AlphaFunction = D3DCMP_GREATER;
 
 	std::string trapezoid;
-	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_TRAPEZOID, pipeline, trapezoid));
-	CHECK(compiles(compile, trapezoid, EngineShader_Name(ENGINE_SHADER_WATER_TRAPEZOID),
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_CLASSIC_TRAPEZOID, pipeline, trapezoid));
+	CHECK(compiles(compile, trapezoid, EngineShader_Name(ENGINE_SHADER_WATER_CLASSIC_TRAPEZOID),
 		PIXEL_PROFILE));
 
 	std::string river;
-	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_RIVER, pipeline, river));
-	CHECK(compiles(compile, river, EngineShader_Name(ENGINE_SHADER_WATER_RIVER), PIXEL_PROFILE));
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_CLASSIC_RIVER, pipeline, river));
+	CHECK(compiles(compile, river, EngineShader_Name(ENGINE_SHADER_WATER_CLASSIC_RIVER),
+		PIXEL_PROFILE));
 
 	std::string reflection;
 	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_REFLECTION, pipeline, reflection));
@@ -395,4 +414,15 @@ TEST(engineshader_writes_programs_the_compiler_accepts)
 	std::string monochrome;
 	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_MONOCHROME, pipeline, monochrome));
 	CHECK(compiles(compile, monochrome, EngineShader_Name(ENGINE_SHADER_MONOCHROME), PIXEL_PROFILE));
+
+	std::string trapezoid_foam;
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_TRAPEZOID_FOAM, pipeline, trapezoid_foam));
+	CHECK(contains(trapezoid_foam, "SceneDepth"));
+	CHECK(compiles(compile, trapezoid_foam, EngineShader_Name(ENGINE_SHADER_WATER_TRAPEZOID_FOAM),
+		PIXEL_PROFILE));
+
+	std::string river_foam;
+	CHECK(EngineShader_Pixel_Program(ENGINE_SHADER_WATER_RIVER_FOAM, pipeline, river_foam));
+	CHECK(compiles(compile, river_foam, EngineShader_Name(ENGINE_SHADER_WATER_RIVER_FOAM),
+		PIXEL_PROFILE));
 }

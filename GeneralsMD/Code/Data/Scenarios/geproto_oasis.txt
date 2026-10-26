@@ -1,0 +1,47 @@
+# Renderer prototype pairs on Golden Oasis (Cinema/geproto_oasis.txt): the shadowbase USA base on
+# the open scrub round 2250,3540 and its Chinese cluster to the east, a tank fight between them,
+# Humvees driving through the base, a Crusader column over the long bridge and another down the
+# cracked-mud approach to the Kandahar bridge. Same seed and frames for every switch set.
+#
+#   generals.exe -win -borderless -quickstart -noshellmap -multiInstance -fps 120 -noFPSLimit
+#     -particlecap 2500 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario geproto_oasis
+#     -cinema geproto_oasis -video 180 1620 geproto -maxframes 1680 [-protoXxx]
+
+# the American base
+30    spawn      0  AmericaPowerPlant             1  1950 3380
+30    spawn      0  AmericaPowerPlant             1  2040 3380
+30    spawn      0  AmericaBarracks               1  2160 3380
+30    spawn      0  AmericaWarFactory             1  2320 3370
+30    spawn      0  AmericaAirfield               1  2520 3370
+30    spawn      0  AmericaSupplyCenter           1  1980 3550
+30    spawn      0  AmericaCommandCenter          1  2200 3550
+30    spawn      0  AmericaStrategyCenter         1  2410 3550
+30    spawn      0  AmericaPatriotBattery         1  1950 3720
+30    spawn      0  AmericaParticleCannonUplink   1  2080 3730
+30    spawn      0  AmericaSupplyDropZone         1  2230 3730
+30    spawn      0  AmericaFireBase               1  2350 3720
+30    spawn      0  AmericaWarFactory             1  2480 3730
+30    spawn      0  AmericaPowerPlant             1  2600 3720
+
+# the Chinese cluster
+30    spawn      1  ChinaWarFactory               1  2850 3450
+30    spawn      1  ChinaBarracks                 1  2980 3450
+30    spawn      1  ChinaPowerPlant               1  2850 3600
+30    spawn      1  ChinaPowerPlant               1  2950 3600
+
+# traffic through the base, along the lane between the two rows
+30    spawn      0  AmericaVehicleHumvee          2  1880 3460 30
+300   move       0  AmericaVehicleHumvee             2700 3460
+
+# the fight north of the base
+30    spawn      0  AmericaTankCrusader           4  2450 3200 40
+30    spawn      1  ChinaTankBattleMaster         4  3050 3250 40
+600   attackmove 0  AmericaTankCrusader              2750 3230
+600   attackmove 1  ChinaTankBattleMaster            2750 3230
+
+# a column over the long bridge, and one down the approach to the Kandahar bridge
+30    spawn      0  AmericaTankPaladin            3  2417 893 40
+60    move       0  AmericaTankPaladin               3168 1822
+30    spawn      1  ChinaTankGattling             3  2043 1136 40
+900   move       1  ChinaTankGattling                1471 1859

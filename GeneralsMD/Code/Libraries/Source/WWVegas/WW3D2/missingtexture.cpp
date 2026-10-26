@@ -175,7 +175,10 @@ void MissingTexture::_Init()
 
 void MissingTexture::_Deinit()
 {
-	_MissingTexture->Release();
+	// Null when the device could not make it, which DX8Wrapper::Create_Device refuses and releases.
+	if (_MissingTexture) {
+		_MissingTexture->Release();
+	}
 	_MissingTexture=0;
 }
 

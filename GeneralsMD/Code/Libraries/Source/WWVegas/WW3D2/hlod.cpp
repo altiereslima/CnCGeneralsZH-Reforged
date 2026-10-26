@@ -2224,7 +2224,14 @@ void HLodClass::Special_Render(SpecialRenderInfoClass & rinfo)
  *=============================================================================================*/
 void HLodClass::Set_Transform(const Matrix3D &m)
 {
-	Animatable3DObjClass::Set_Transform(m); 
+	// W3DModelDraw hands every model its drawable's transform each draw, and a building standing in its
+	// base pose got the same bits back and posed its whole skeleton again: Base_Update writes the same
+	// bones from the same root, so a pose still current is kept.  Bitwise, so not even a zero's sign
+	// differs.  An animated model always takes the call, since its clock moves at the next pose.
+	if (CurMotionMode == BASE_POSE && Is_Hierarchy_Valid() && !Are_Sub_Object_Transforms_Dirty()
+			&& memcmp(&m, &Transform, sizeof(Matrix3D)) == 0)
+		return;
+	Animatable3DObjClass::Set_Transform(m);
 	Set_Sub_Object_Transforms_Dirty(true);
 }
 

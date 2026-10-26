@@ -229,6 +229,7 @@ private:
 	};
 	static Bool isAsset( const Names &names, const std::string &word );
 	static Bool isAssetField( const std::string &field );	///< a field whose value names a model, animation, texture or sound file
+	static size_t namedAfterKeyword( const std::string &word );	///< "OCL:X" gives 4, where the name starts; 0 for any other word
 	typedef Bool (ModNamespace::*WordTest)( const std::string &word, Bool assetField ) const;
 	Bool isNameOrAsset( const std::string &word, Bool assetField ) const;
 	Bool isModLabel( const std::string &word, Bool assetField ) const;
@@ -291,6 +292,7 @@ public:
 	static void parseMetaMapDefinition( INI *ini );
 	static void parseCommandButtonHotKeyDefinition( INI *ini );
 	static void parseCommandBarGridDefinition( INI *ini );
+	static void parseFixedOrderKeysDefinition( INI *ini );
 	static void parseFXListDefinition( INI *ini );
 	static void parseObjectCreationListDefinition( INI* ini );
 	static void parseMultiplayerSettingsDefinition( INI* ini );

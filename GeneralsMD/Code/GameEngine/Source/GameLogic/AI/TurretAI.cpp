@@ -1058,6 +1058,7 @@ StateReturnType TurretAIAimTurretState::update()
 	TurretTargetType targetType =  turret->friend_getTurretTarget(enemy, enemyPosition);
 	Object *enemyForDistanceCheckOnly = enemy;	// Note: Do not use this anywhere except for the range check.
 	Bool aimingAtGround = (targetType != TARGET_OBJECT);	// a position, or a building; decided before enemy is nulled
+	Real bodyMiddleHeight = 0.0f;	// a shot at an object lands somewhere on its body (Weapon::randomPointOnBody), on average its middle
 
 	Bool nothingInRange = false;
 	switch (targetType)
@@ -1113,9 +1114,11 @@ StateReturnType TurretAIAimTurretState::update()
 					enemyPosition = info.attackPoint1;
 				}
 			}	
-			else 
+			else
 			{
 				enemyPosition = *enemy->getPosition();
+				const GeometryInfo& geom = enemy->getGeometryInfo();
+				bodyMiddleHeight = (geom.getMaxHeightAbovePosition() - geom.getMaxHeightBelowPosition()) / 2;
 			}
 
 			enemyAI = enemy ? enemy->getAI() : NULL;
@@ -1192,8 +1195,43 @@ StateReturnType TurretAIAimTurretState::update()
 	{
 		Real desiredPitch = 0;
 
+		// Linked turrets fire every weapon at once (the battleship's two), so a turret aims for the
+		// weapon it carries, which need not be the current one.
+		const Weapon* turretWeapon = curWeapon;
+		if( !turret->isWeaponSlotOnTurret( slot ) )
+		{
+			for( Int other = PRIMARY_WEAPON; other < WEAPONSLOT_COUNT; ++other )
+			{
+				const Weapon* carried = obj->getWeaponInWeaponSlot( (WeaponSlotType)other );
+				if( carried && turret->isWeaponSlotOnTurret( (WeaponSlotType)other ) )
+				{
+					turretWeapon = carried;
+					break;
+				}
+			}
+		}
+		const WeaponTemplate* shot = turretWeapon->getTemplate();
+		// A shell with a flight time leaves along the parabola that lands it on time, so the barrel goes to
+		// that pitch, measured from where the shell will leave the muzzle. The muzzle moves as the barrel
+		// does, and the next frame's aim takes the moved muzzle; the gun's own art pitch (the Fire Base's
+		// barrel is modelled 25 degrees up) comes out of the difference between barrel and turret.
+		if( shot->getBallisticFlightFrames() > 0 )
+		{
+			Matrix3D launchTransform(true);
+			Coord3D launchPos;
+			Weapon::calcProjectileLaunchPosition( obj, turretWeapon->getWeaponSlot(), turretWeapon->getCurBarrel(), launchTransform, launchPos );
+			Vector3 barrel = launchTransform.Get_X_Vector();
+			Real barrelPitch = ATan2( barrel.Z, sqrtf( sqr( barrel.X ) + sqr( barrel.Y ) ) );
+			Coord3D landing = enemyPosition;
+			landing.z += bodyMiddleHeight;
+			desiredPitch = turret->getTurretPitch() + shot->getBallisticLaunchPitch( launchPos, landing ) - barrelPitch;
+			if( desiredPitch < turret->getMinPitch() )
+			{
+				desiredPitch = turret->getMinPitch();
+			}
+		}
 		// Some turrets want to fire at a set pitch, and some want to fire straight to the target
-		if( turret->getFirePitch() > 0 )
+		else if( turret->getFirePitch() > 0 )
 		{
 			desiredPitch = turret->getFirePitch();
 		}

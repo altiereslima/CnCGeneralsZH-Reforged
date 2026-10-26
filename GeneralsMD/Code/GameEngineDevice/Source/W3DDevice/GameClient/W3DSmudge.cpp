@@ -239,6 +239,16 @@ Bool W3DSmudgeManager::testHardwareSupport(void)
 	if (m_hardwareSupportStatus == SMUDGE_SUPPORT_UNKNOWN)
 	{	//we have not done the test yet.
 
+#if defined(__linux__)
+		// The probe's second quad, like every smudge after it, samples the render texture it draws
+		// into.  SDL3 GPU cannot read a pass's own target, so the device refuses that draw; the
+		// untouched block then matched the first quad and the probe answered yes, and each smudge
+		// was refused in its turn.  Answer no without the feedback draw: smudge systems draw
+		// nothing either way.
+		m_hardwareSupportStatus = SMUDGE_SUPPORT_NO;
+		return FALSE;
+#endif
+
 		IDirect3DTexture9 *backTexture=W3DShaderManager::getRenderTexture();
 		if (!backTexture)
 		{	//do trivial test first to see if render target exists.

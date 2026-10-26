@@ -1,0 +1,3 @@
+# Scenarios/deployguard.txt from the side: the cannon on the left, the Technicals' spawn point at
+# the right edge, hills behind, no map edge. Held for all four kills with -video 1100 5100.
+0.0   cut   850 510 0.95 0 12

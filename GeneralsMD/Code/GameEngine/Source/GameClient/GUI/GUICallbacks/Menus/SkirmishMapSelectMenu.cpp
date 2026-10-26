@@ -31,7 +31,6 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
-#include "Lib/Clock.h"
 
 #include "Common/GameEngine.h"
 #include "Common/MessageStream.h"
@@ -48,7 +47,6 @@
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/GUIUtil.h"
 #include "GameClient/MapUtil.h"
-#include "Common/RandomMapGenerator.h"
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 static NameKeyType buttonBack = NAMEKEY_INVALID;
@@ -59,89 +57,6 @@ static GameWindow *mapList = NULL;
 
 static NameKeyType radioButtonSystemMapsID = NAMEKEY_INVALID;
 static NameKeyType radioButtonUserMapsID = NAMEKEY_INVALID;
-
-/** The random map rows, one per size.  There is no window layout file in this fork to add a
-	button or a dropdown to - every .wnd lives inside the shipped archives - so the size choice is
-	three rows in the map list instead of a control beside it.  None of them is a map in the cache,
-	so each carries its tag where every other row carries its file name, and choosing one generates
-	a map of that size and picks it. */
-static const char *theRandomMapRowTags[RANDOM_MAP_SIZE_COUNT] =
-{
-	"**random-small**",
-	"**random-normal**",
-	"**random-large**"
-};
-
-/// Which size a row asks for, or RANDOM_MAP_SIZE_COUNT for a row that is a real map.
-static RandomMapSize randomMapSizeOfRow( const char *itemData )
-{
-	if( itemData != NULL )
-	{
-		for( Int size = 0; size < RANDOM_MAP_SIZE_COUNT; size++ )
-		{
-			if( strcmp( itemData, theRandomMapRowTags[size] ) == 0 )
-				return (RandomMapSize)size;
-		}
-	}
-
-	return RANDOM_MAP_SIZE_COUNT;
-}
-
-static Bool isRandomMapRow( const char *itemData )
-{
-	return randomMapSizeOfRow( itemData ) != RANDOM_MAP_SIZE_COUNT;
-}
-
-/** The three generated map rows, which are only offered when -randommaps asks for them.  The
-	generator still hands out seeds a match should not be played on - a supply dock behind a cliff,
-	a start with one way out - and the map list is the wrong place to meet one, so until it is
-	finished the maps are reached from the command line, where -randommap names the seed being
-	played and a bad one can simply be dropped. */
-static void addRandomMapRows( GameWindow *listbox )
-{
-	if( listbox == NULL || TheGlobalData == NULL || !TheGlobalData->m_randomMapsInMenus )
-		return;
-
-	// Spelled out here rather than fetched: the string tables live in the shipped
-	// archives, and a missing label would read "MISSING: GUI:RandomMap" on screen.
-	static const WideChar *theRandomMapRowLabels[RANDOM_MAP_SIZE_COUNT] =
-	{
-		u"Random map, small - new seed every time (8)",
-		u"Random map - new seed every time (8)",
-		u"Random map, large - new seed every time (8)"
-	};
-
-	Color color = GameMakeColor( 255, 255, 255, 255 );
-	Int numColumns = GadgetListBoxGetNumColumns( listbox );
-
-	for( Int size = 0; size < RANDOM_MAP_SIZE_COUNT; size++ )
-	{
-		UnicodeString label( theRandomMapRowLabels[size] );
-		Int index = GadgetListBoxAddEntryText( listbox, label, color, -1, numColumns - 1 );
-		GadgetListBoxSetItemData( listbox, (void *)theRandomMapRowTags[size], index );
-	}
-}
-
-/** Generate a map, keep it where the map cache will find it, and hand back its path.  The seed
-	comes off the clock: this is the client picking a map, not the simulation, so it may be as
-	random as the player expects a reroll to be. */
-static Bool generateRandomMapForSkirmish( RandomMapSize size, AsciiString& mapPathOut )
-{
-	RandomMapSettings settings;
-	settings.m_seed = (Int)Clock_Milliseconds_Coarse();
-	settings.m_numPlayers = RandomMapGenerator::MAX_PLAYERS;
-	settings.m_playableCells = RandomMapGenerator::cellsFor( size, settings.m_numPlayers );
-
-	if( !stageRandomMap( settings, mapPathOut ) )
-		return FALSE;
-
-	mapPathOut.toLower();
-
-	if( TheMapCache )
-		TheMapCache->updateCache();
-
-	return TRUE;
-}
 
 static GameWindow *buttonMapStartPosition[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 																								NULL,NULL,NULL,NULL };
@@ -162,6 +77,7 @@ static void NullifyControls()
 	{
 		buttonMapStartPosition[i] = NULL;
 	}
+	RandomMapTabShutdown();
 }
 
 extern WindowLayout *skirmishMapSelectLayout;
@@ -325,9 +241,9 @@ void SkirmishMapSelectMenuInit( WindowLayout *layout, void *userData )
 			populateMapListbox( mapList, FALSE, FALSE, TheSkirmishGameInfo->getMap() );
 			populateMapListboxNoReset( mapList, FALSE, TRUE, TheSkirmishGameInfo->getMap() );
 		}
-		addRandomMapRows( mapList );
 		mapList->winSetTooltipFunc(mapListTooltipFunc);
 	}
+	RandomMapTabInit( "SkirmishMapSelectMenu.wnd", parent, winMapPreview, buttonMapStartPosition, TheSkirmishGameInfo, TRUE );
 
 }  // end SkirmishMapSelectMenuInit
 
@@ -414,8 +330,10 @@ WindowMsgHandledType SkirmishMapSelectMenuInput( GameWindow *window, UnsignedInt
 WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedInt msg, 
 																				  WindowMsgData mData1, WindowMsgData mData2 )
 {
-	
-	switch( msg ) 
+	if( RandomMapTabHandle( msg, mData1, mData2 ) )
+		return MSG_HANDLED;
+
+	switch( msg )
 	{
 
 		// --------------------------------------------------------------------------------------------
@@ -489,16 +407,6 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 					// set the map name in the global data map name
 					AsciiString asciiMap;
 					const char *mapFname = (const char *)GadgetListBoxGetItemData( mapWindow, rowSelected );
-
-					// The random map row has no map behind it until it is chosen, so there is
-					// nothing to preview and no start positions to lay out yet.
-					if( isRandomMapRow( mapFname ) )
-					{
-						winMapPreview->winClearStatus(WIN_STATUS_IMAGE);
-						positionStartSpots( AsciiString::TheEmptyString, buttonMapStartPosition, winMapPreview);
-						break;
-					}
-
 					DEBUG_ASSERTCRASH(mapFname, ("No map item data"));
 					if (mapFname)
 						asciiMap = mapFname;
@@ -532,7 +440,6 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 				if (TheMapCache)
 					TheMapCache->updateCache();
 				populateMapListbox( mapList, TRUE, TRUE, TheSkirmishGameInfo->getMap() );
-				addRandomMapRows( mapList );
 				//LANPreferences pref;
 				//pref["UseSystemMapDir"] = "yes";
 				//pref.write();
@@ -543,7 +450,6 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 					TheMapCache->updateCache();
 				populateMapListbox( mapList, FALSE, FALSE, TheSkirmishGameInfo->getMap() );
 				populateMapListboxNoReset( mapList, FALSE, TRUE, TheSkirmishGameInfo->getMap() );
-				addRandomMapRows( mapList );
 				//LANPreferences pref;
 				//pref["UseSystemMapDir"] = "no";
 				//pref.write();
@@ -563,37 +469,26 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 			else if ( controlID == buttonOK )
 			{
 
-				Int selected;
+				Int selected = 0;
 				UnicodeString map;
 				GameWindow *mapWindow = TheWindowManager->winGetWindowFromId( parent, listboxMap );
 
-				// get the selected index
-				GadgetListBoxGetSelected( mapWindow, &selected );
+				// the Random tab's map, already staged and in the cache, or else the list's row
+				AsciiString asciiMap = RandomMapTabMap();
+				if( asciiMap.isEmpty() )
+					GadgetListBoxGetSelected( mapWindow, &selected );
 
 				if( selected != -1 )
 				{
-					//buttonPushed = true;
-					// set the map name in the global data map name
-					AsciiString asciiMap;
-					const char *mapFname = (const char *)GadgetListBoxGetItemData( mapWindow, selected );
-					DEBUG_ASSERTCRASH(mapFname, ("No map item data"));
-
-					// Choosing a random map row is the reroll: a fresh seed, a fresh map built in
-					// memory at the size the row asks for, and the map cache reloaded so the rest
-					// of this runs unchanged.
-					RandomMapSize randomSize = randomMapSizeOfRow( mapFname );
-					if( randomSize != RANDOM_MAP_SIZE_COUNT )
+					if( asciiMap.isEmpty() )
 					{
-						AsciiString generatedMap;
-						if( !generateRandomMapForSkirmish( randomSize, generatedMap ) )
-							break;
-
-						asciiMap = generatedMap;
+						const char *mapFname = (const char *)GadgetListBoxGetItemData( mapWindow, selected );
+						DEBUG_ASSERTCRASH(mapFname, ("No map item data"));
+						if (mapFname)
+							asciiMap = mapFname;
+						else
+							asciiMap.translate( map );
 					}
-					else if (mapFname)
-						asciiMap = mapFname;
-					else
-						asciiMap.translate( map );
 					TheSkirmishGameInfo->setMap( asciiMap );
 
 					const MapMetaData *md = TheMapCache->findMap(asciiMap);

@@ -256,6 +256,9 @@ class ObjectModule : public Module
 
 	MEMORY_POOL_GLUE_ABC( ObjectModule )			///< this abstract class needs memory pool hooks
 
+	// the upgrade data shared by a module's template acts on, and names, the module's object
+	friend class UpgradeMuxData;
+
 public:
 
 	ObjectModule( Thing *thing, const ModuleData* moduleData );

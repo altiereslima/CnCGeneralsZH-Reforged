@@ -29,7 +29,7 @@ from control_client import Control, ControlError
 RUN_DIRECTORY = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "Run"))
 EXE_NAME = "generals.exe"
 FIRST_CONTROL_PORT = 8787
-MAXIMUM_COPIES = 3  # four copies stall at frame 61 in the disconnect keepalive, not chased
+MAXIMUM_COPIES = 8  # eight ran clean on 2026-10-24; the map needs a start spot per copy (Iron Dragon has 8)
 CONNECT_TIMEOUT_SECONDS = 120.0
 MATCH_START_TIMEOUT_SECONDS = 180.0
 PRESS_INTERVAL_SECONDS = 0.5
@@ -129,7 +129,7 @@ def play(arguments: argparse.Namespace, games: list) -> list:
 def main() -> int:
     arguments = parse_arguments()
     if not 2 <= arguments.copies <= MAXIMUM_COPIES:
-        raise SystemExit("--copies is 2 or 3, got %d; four stall at frame 61" % arguments.copies)
+        raise SystemExit("--copies is 2 to %d, got %d" % (MAXIMUM_COPIES, arguments.copies))
 
     processes = [subprocess.Popen(command_line(arguments, slot), cwd=RUN_DIRECTORY)
                  for slot in range(arguments.copies)]

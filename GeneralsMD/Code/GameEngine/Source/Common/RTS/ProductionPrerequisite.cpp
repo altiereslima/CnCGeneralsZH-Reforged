@@ -98,7 +98,11 @@ void ProductionPrerequisite::resolveNames()
  			aren't yet loaded in the world builder but will all go away later anyway etc */
 			DEBUG_ASSERTCRASH(m_prereqUnits[i].unit,("could not find prereq %s\n",m_prereqUnits[i].name.str()));
 
-			m_prereqUnits[i].name.clear(); // we're done with it
+			// a mod can name an Object it never defines; the name stays so a later load can still
+			// resolve it and the build tooltip can say what is missing. Until then the prereq is
+			// unsatisfiable: nothing a player owns matches a NULL template.
+			if( m_prereqUnits[i].unit )
+				m_prereqUnits[i].name.clear(); // we're done with it
 		}
 
 	}
@@ -226,6 +230,18 @@ void ProductionPrerequisite::addUnitPrereq( const std::vector<AsciiString>& unit
 }  // end addUnitPrereq
 
 //-------------------------------------------------------------------------------------------------
+// a prereq a mod names but never defines has no template, only its INI name (resolveNames)
+static UnicodeString prereqDisplayName(const ThingTemplate *unit, const AsciiString &name)
+{
+	if (unit)
+		return unit->getDisplayName();
+
+	UnicodeString missing;
+	missing.translate(name);
+	return missing;
+}
+
+//-------------------------------------------------------------------------------------------------
 // returns an asciistring which is a list of all the prerequisites
 // not satisfied yet
 UnicodeString ProductionPrerequisite::getRequiresList(const Player *player) const
@@ -263,7 +279,6 @@ UnicodeString ProductionPrerequisite::getRequiresList(const Player *player) cons
 	}
 	
 	// check to see if anything is required
-	const ThingTemplate *unit;
 	UnicodeString unitName;
 	Bool firstRequirement = true;
 	for (i = 0; i < cnt; i++)
@@ -273,8 +288,7 @@ UnicodeString ProductionPrerequisite::getRequiresList(const Player *player) cons
 			
 			if(orRequirements[i])
 			{
-				unit = m_prereqUnits[i-1].unit;
-				unitName = unit->getDisplayName();
+				unitName = prereqDisplayName(m_prereqUnits[i-1].unit, m_prereqUnits[i-1].name);
 				unitName.concat( u" " );
 				unitName.concat(TheGameText->fetch("CONTROLBAR:OrRequirement", NULL));
 				unitName.concat( u" " );
@@ -282,8 +296,7 @@ UnicodeString ProductionPrerequisite::getRequiresList(const Player *player) cons
 			}
 
 			// get the requirement and then its name
-			unit = m_prereqUnits[i].unit;
-			unitName = unit->getDisplayName();
+			unitName = prereqDisplayName(m_prereqUnits[i].unit, m_prereqUnits[i].name);
 
 			// gets command button, and then modifies unitName
 			//CommandButton *cmdButton = TheControlBar->findCommandButton(unit->getName());

@@ -2534,8 +2534,10 @@ void Team::killTeam(void)
 
 	evacuateTeam();
 
-	// beacons are effectively dead, so we need to destroy via a non-kill() method
-	const ThingTemplate *beaconTemplate = TheThingFactory->findTemplate( getControllingPlayer()->getPlayerTemplate()->getBeaconTemplate() );
+	// beacons are effectively dead, so we need to destroy via a non-kill() method.
+	// A neutral or civilian side has no player template and so no beacon.
+	const PlayerTemplate *playerTemplate = getControllingPlayer()->getPlayerTemplate();
+	const ThingTemplate *beaconTemplate = playerTemplate ? TheThingFactory->findTemplate( playerTemplate->getBeaconTemplate() ) : NULL;
 
 	// now find objects to kill
 	for (DLINK_ITERATOR<Object> iter = iterate_TeamMemberList(); !iter.done(); iter.advance()) {

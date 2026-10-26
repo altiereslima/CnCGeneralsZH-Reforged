@@ -1009,10 +1009,16 @@ void W3DRadar::update( void )
 	// phase 3).
 	if( m_overlayDrawn && TheGameClient->getFrame() % OVERLAY_REFRESH_RATE == 0 )
 	{
+		// The simulation runs on while the device is lost (the log's "Direct3D device LOST", a driver
+		// reset), and then the texture has no surface to give.  Nothing can be drawn into it until the
+		// device is back; the next refresh redraws the overlay whole.
+		SurfaceClass *surface = m_overlayTexture->Get_Surface_Level();
+		if( surface == NULL )
+			return;
+
 		m_overlayDrawn = FALSE;
 
 		// reset the overlay texture
-		SurfaceClass *surface = m_overlayTexture->Get_Surface_Level();
 		surface->Clear();
 		REF_PTR_RELEASE(surface);
 

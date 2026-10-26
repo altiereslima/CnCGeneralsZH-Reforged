@@ -43,6 +43,10 @@ enum AudioAffect : int
 	AudioAffect_All			= (AudioAffect_Music | AudioAffect_Sound | AudioAffect_Sound3D | AudioAffect_Speech | AudioAffect_Ambient),
 
 	AudioAffect_SystemSetting = 0x10,
+
+	/// the Master slider, a factor on every other volume; system setting only, and outside All, so
+	/// losing focus mutes through the others and leaves it where the player put it
+	AudioAffect_Master	= 0x40,
 };
 
 #endif // _AUDIOAFFECT_H_

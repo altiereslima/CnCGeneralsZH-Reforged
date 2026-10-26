@@ -58,6 +58,7 @@ void Direct3D11_Mirror_Light_Disabled(unsigned) {}
 DX11BufferTwinClass * Direct3D11_Twin_Vertex_Buffer(unsigned, bool) { return NULL; }
 DX11BufferTwinClass * Direct3D11_Twin_Index_Buffer(unsigned, bool) { return NULL; }
 void Direct3D11_Mirror_Texture(unsigned, struct IDirect3DBaseTexture9 *) {}
+void Direct3D11_Set_Haze_Shroud(struct IDirect3DBaseTexture9 *, const float [4]) {}
 
 void Direct3D11_Set_Headlights(const float *, unsigned, const float [3]) {}
 void Direct3D11_Set_Blast_Lights(const float *, unsigned) {}
@@ -73,8 +74,15 @@ std::string Direct3D11_Shadow_Map_Report() { return std::string("no Direct3D 11 
 void Direct3D11_Set_Shadow_Parameters(float, float, float, float, float, float, float) {}
 void Direct3D11_Clear_Shadow_Parameters() {}
 bool Direct3D11_Fill_Smoke_Map(const float *, unsigned, float) { return false; }
+bool Direct3D11_Upload_Shadow_Casters(const float * const *, const unsigned *, unsigned, const float * const *, unsigned) { return false; }
+bool Direct3D11_Draw_Shadow_Casters(const DX11ShadowCasterRun *, unsigned) { return false; }
+bool Direct3D11_Upload_Shadow_Skin(const DX11ShadowSkinVertex *, unsigned, unsigned &) { return false; }
+unsigned Direct3D11_Shadow_Skin_Generation() { return 0; }
 void Direct3D11_Set_Scene_View(const float [16]) {}
 void Direct3D11_Set_Smoke_Glow(bool) {}
+void Direct3D11_Set_Fire_Look(bool) {}
+void Direct3D11_Set_Emissive(bool) {}
+void Direct3D11_Set_Team_Glow(bool) {}
 void Direct3D11_Set_Draw_Effect(unsigned, const float [4]) {}
 bool Direct3D11_Draw_Effects() { return false; }
 void Direct3D11_Allow_Draw_Effects(bool) {}
@@ -102,6 +110,7 @@ void Direct3D11_Present_Enable(bool) {}
 bool Direct3D11_Present_Is_Enabled() { return false; }
 bool Direct3D11_Can_Tear() { return false; }
 bool Direct3D11_Take_Present_Failure(long &) { return false; }
+long Direct3D11_Device_Removed_Reason() { return 0; }
 void Direct3D11_Set_VSync(bool) {}
 // Windows answers whether it understood the chain's text.  There is no post-process here to
 // understand it for, so every chain is refused.
@@ -139,6 +148,8 @@ void Direct3D11_Mirror_Vertex_Shader(const void *) {}
 // transcriptions by the name they were registered under, as the Direct3D 11 backend does (A3e).
 void Direct3D11_Register_Engine_Shader(const void * shader, const char * name) { PosixDevice_Name_Shader(shader, name); }
 void Direct3D11_Mirror_Vertex_Shader_Constant(unsigned, const float *, unsigned) {}
+void Direct3D11_Set_Water_Constants(unsigned, const float *, unsigned) {}
+std::string Direct3D11_Water_Report() { return std::string("no Direct3D 11 backend"); }
 bool Direct3D11_Draw_Indexed_Triangles(unsigned, unsigned, unsigned) { return false; }
 bool Direct3D11_Draw_Indexed_Strip(unsigned, unsigned, unsigned) { return false; }
 bool Direct3D11_Draw_User_Strip(const void *, unsigned, unsigned) { return false; }
@@ -168,10 +179,14 @@ void Direct3D11_Statistics(unsigned & pipelines_built, unsigned long long & draw
 	draws_refused = 0;
 }
 
-void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held)
+void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held, unsigned & off_frame,
+	double & longest_milliseconds, unsigned long long & draws_waited)
 {
 	shipped = 0;
 	held = 0;
+	off_frame = 0;
+	longest_milliseconds = 0.0;
+	draws_waited = 0;
 }
 void Direct3D11_Take_Frame_Cost(double & pipeline_milliseconds, unsigned & pipelines,
 	double & texture_milliseconds, unsigned & textures, unsigned & depth_copies,

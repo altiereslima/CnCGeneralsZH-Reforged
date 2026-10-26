@@ -170,6 +170,8 @@
 #include "GameLogic/Module/SpecialAbilityUpdate.h"
 #include "GameLogic/Module/MissileLauncherBuildingUpdate.h"
 #include "GameLogic/Module/StealthDetectorUpdate.h"
+#include "GameLogic/Module/JammerUpdate.h"
+#include "GameLogic/Module/IdleHackerUpdate.h"
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/Module/SpawnPointProductionExitUpdate.h"
 #include "GameLogic/Module/SpawnBehavior.h"
@@ -211,6 +213,7 @@
 #include "GameLogic/Module/UnpauseSpecialPowerUpgrade.h"
 #include "GameLogic/Module/WeaponBonusUpgrade.h"
 #include "GameLogic/Module/WeaponSetUpgrade.h"
+#include "GameLogic/Module/SightUpgrade.h"
 #include "GameLogic/Module/CostModifierUpgrade.h"
 #include "GameLogic/Module/ExperienceScalarUpgrade.h"
 #include "GameLogic/Module/MaxHealthUpgrade.h"
@@ -263,6 +266,8 @@
 
 // special power modules
 #include "GameLogic/Module/CashHackSpecialPower.h"
+#include "GameLogic/Module/SwarmStrikeSpecialPower.h"
+#include "GameLogic/Module/RadarJamSpecialPower.h"
 #include "GameLogic/Module/DefectorSpecialPower.h"
 #ifdef ALLOW_DEMORALIZE
 #include "GameLogic/Module/DemoralizeSpecialPower.h"
@@ -393,6 +398,8 @@ void ModuleFactory::init( void )
 	addModule( AutoFindHealingUpdate );
 	addModule( BaseRegenerateUpdate );
 	addModule( StealthDetectorUpdate );
+	addModule( JammerUpdate );
+	addModule( IdleHackerUpdate );
 	addModule( StealthUpdate );
 	addModule( DeletionUpdate );
 	addModule( SmartBombTargetHomingUpdate );
@@ -494,6 +501,7 @@ void ModuleFactory::init( void )
 	addModule( UnpauseSpecialPowerUpgrade );
 	addModule( WeaponBonusUpgrade );
 	addModule( WeaponSetUpgrade );
+	addModule( SightUpgrade );
 	addModule( ExperienceScalarUpgrade );
 	addModule( MaxHealthUpgrade );
 
@@ -545,6 +553,8 @@ void ModuleFactory::init( void )
 
 	// special power modules
 	addModule( CashHackSpecialPower );
+	addModule( SwarmStrikeSpecialPower );
+	addModule( RadarJamSpecialPower );
 	addModule( DefectorSpecialPower );
 #ifdef ALLOW_DEMORALIZE
 	addModule( DemoralizeSpecialPower );

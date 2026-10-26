@@ -34,6 +34,8 @@
 #include "SdlProgramCache.h"
 #include "ffshader.h"
 #include "ffvertex.h"
+#include "engineshader.h"
+#include "Platform/EngineShaderName.h"
 
 #include <SDL3/SDL.h>
 
@@ -68,6 +70,43 @@ static void check_slot_lines()
 	CHECK(textures.size() == 3 && textures[2] == 2 && samplers[2] == 2);
 	Sdl_Read_Slot_Lines("// SDL3 slot 6: texture t4, sampler state s1\n// SDL3 slot 4: texture t4, sampler state s0\n", 7, textures, samplers);
 	CHECK(textures[6] == 4 && samplers[6] == 1 && textures[4] == 4 && samplers[4] == 0 && textures[5] == 5 && samplers[5] == 5);
+}
+
+struct WaterShaderNameProbe : PosixDevice9 { using PosixDevice9::Engine_Name_Of; };
+
+static void check_live_water_style_programs(PosixDevice9 *device,SdlProgramCache &cache)
+{
+    const RenderUInt32 tokens[]={0xffff0101u,0x0000ffffu};
+    IDirect3DPixelShader9 *shader=NULL;
+    CHECK(device->CreatePixelShader(tokens,&shader)==D3D_OK);
+    if (!shader) return;
+    CHECK(device->SetPixelShader(shader)==D3D_OK);
+    PixelPipelineDescription pipeline={};
+    const char *names[]={"river water ps.1.1","classic river water ps.1.1",
+        "trapezoid water ps.1.1","classic trapezoid water ps.1.1"};
+    const SdlProgram *programs[4]={};
+    const unsigned built=cache.Programs_Built();
+    for (unsigned pass=0;pass<32;++pass) for (unsigned style=0;style<4;++style) {
+        PosixDevice_Name_Shader(shader,names[style]);
+        IDirect3DPixelShader9 *bound=NULL;
+        CHECK(device->GetPixelShader(&bound)==D3D_OK && bound==shader);
+        const auto engine=EngineShader_From_File(WaterShaderNameProbe::Engine_Name_Of(bound).c_str());
+        if (bound) bound->Release();
+        const SdlProgram &program=cache.Engine_Pixel_Program(engine,pipeline);
+        CHECK(program.Shader!=NULL);
+        if (!pass) programs[style]=&program;
+        CHECK(&program==programs[style]);
+#if defined(__linux__)
+        if (style&1) CHECK(program.SamplerSlots==6 && program.UniformBuffers==1);
+        else CHECK(program.SamplerSlots>6);
+#else
+        CHECK(program.SamplerSlots==6 && program.UniformBuffers==1);
+#endif
+    }
+    CHECK(cache.Programs_Built()==built+4);
+    CHECK(programs[0]->Shader!=programs[1]->Shader && programs[2]->Shader!=programs[3]->Shader);
+    device->SetPixelShader(NULL);shader->Release();
+    printf("sdl_program_cache_selfcheck: 128 water style changes on the same bound shader, four distinct cached GPU programs, no recompiles on return\n");
 }
 
 int main()
@@ -161,6 +200,8 @@ int main()
 	CHECK(refused.Shader == NULL && !refused.Refusal.empty());
 	const SdlProgram &refused_again = cache.Pixel_Program(combiner);
 	CHECK(refused_again.Shader == NULL && cache.Programs_Refused() == refused_before + 1);
+
+	check_live_water_style_programs(device,cache);
 
 	printf("sdl_program_cache_selfcheck: %s, %u programs built in %.0f ms, %u refused\n",
 		SDL_GetGPUDeviceDriver(frame->Device()), cache.Programs_Built(), cache.Milliseconds_Compiling(),

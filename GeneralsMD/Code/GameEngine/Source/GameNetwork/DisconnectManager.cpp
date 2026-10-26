@@ -228,13 +228,13 @@ void DisconnectManager::updateDisconnectStatus(ConnectionManager *conMgr) {
 			Int slot = translatedSlotPosition(i, conMgr->getLocalPlayerID());
 			if (slot != -1) {
 				time_t curTime = Clock_Milliseconds();
-				time_t newTime = TheGlobalData->m_networkPlayerTimeoutTime - (curTime - m_playerTimeouts[slot]);
+				time_t newTime = TheGlobalData->m_networkSilentPlayerDropTime - (curTime - m_playerTimeouts[slot]);
 
 // if someone is more than 2/3 timed out, lets get our frame numbers sync'd up.  Also if someone is voted out
 // lets do the same thing.
 
 				if (m_haveNotifiedOtherPlayersOfCurrentFrame == FALSE) {
-					if ((newTime < TheGlobalData->m_networkPlayerTimeoutTime / 3) || (isPlayerVotedOut(slot, conMgr) == TRUE)) {
+					if ((newTime < TheGlobalData->m_networkSilentPlayerDropTime / 3) || (isPlayerVotedOut(slot, conMgr) == TRUE)) {
 						TheNetwork->notifyOthersOfCurrentFrame();
 						m_haveNotifiedOtherPlayersOfCurrentFrame = TRUE;
 					}
@@ -566,7 +566,17 @@ void DisconnectManager::turnOnScreen(ConnectionManager *conMgr) {
 	m_disconnectState = DISCONNECTSTATETYPE_SCREENON;
 	m_lastKeepAliveSendTime = -1;
 	populateDisconnectScreen(conMgr);
-	resetPlayerTimeouts(conMgr);
+
+	/* EA restarted every countdown here, so a player who had already been silent for the 12s it
+		 takes to open this screen got the whole timeout on top.  Count from their last packet
+		 instead; anyone still talking reads as zero silence and starts from now as before. */
+	time_t now = Clock_Milliseconds();
+	for (Int i = 0; i < MAX_SLOTS; ++i) {
+		Int slot = translatedSlotPosition(i, conMgr->getLocalPlayerID());
+		if (slot != -1) {
+			m_playerTimeouts[slot] = now - conMgr->getTimeSinceLastPacketFrom(i);
+		}
+	}
 	TheDisconnectMenu->hidePacketRouterTimeout();
 
 	m_haveNotifiedOtherPlayersOfCurrentFrame = FALSE;
@@ -725,7 +735,7 @@ Bool DisconnectManager::hasPlayerTimedOut(Int slot) {
 		return FALSE;
 	}
 
-	time_t newTime = TheGlobalData->m_networkPlayerTimeoutTime - (Clock_Milliseconds() - m_playerTimeouts[slot]);
+	time_t newTime = TheGlobalData->m_networkSilentPlayerDropTime - (Clock_Milliseconds() - m_playerTimeouts[slot]);
 	if (newTime <= 0) {
 		return TRUE;
 	}

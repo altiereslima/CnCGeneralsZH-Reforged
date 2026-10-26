@@ -366,7 +366,7 @@ SDL_GPUTexture * SdlResourceMirrors::Surface(IDirect3DSurface9 * surface, bool d
 	SDL_zero(info);
 	info.type = SDL_GPU_TEXTURETYPE_2D;
 	info.format = (SDL_GPUTextureFormat)(depth ? Frame->Depth_Format() : SdlGpuFrame::Target_Format());
-	info.usage = depth ? SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET
+	info.usage = depth ? Frame->Depth_Usage()
 		: (SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
 	info.width = desc.Width;
 	info.height = desc.Height;

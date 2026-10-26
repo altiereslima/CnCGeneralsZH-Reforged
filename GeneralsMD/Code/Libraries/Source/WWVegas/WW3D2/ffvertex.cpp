@@ -514,6 +514,11 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		&& (texture_coordinate_set_count(description.FVF) < 2 || is_pretransformed(description.FVF))) {
 		return false;
 	}
+	if (description.FireLook
+		&& (texture_coordinate_set_count(description.FVF) < 2 || is_pretransformed(description.FVF)
+			|| description.StageCount > 1)) {
+		return false;
+	}
 
 	// A pre-transformed vertex has been through the transform, the lighting and the coordinate
 	// generation already: its position is in pixels, its colour is in the vertex, and D3D9 reads
@@ -708,6 +713,10 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		snprintf(line, sizeof(line), "    output.TexCoord%u = float2(0.0, 0.0);\n", stage);
 		hlsl += line;
 	}
+	// The fire look's age and seed, in the output the missing second stage left empty.
+	if (description.FireLook) {
+		hlsl += "    output.TexCoord1 = input.TexCoord1;\n";
+	}
 
 	hlsl +=
 		"    output.Position = mul(model_position, WorldViewProjection);\n"
@@ -763,6 +772,9 @@ std::string VertexShader_Key(const VertexPipelineDescription & description)
 	}
 	if (description.SoftParticle) {
 		key += ":Z";
+	}
+	if (description.FireLook) {
+		key += ":B";
 	}
 	return key;
 }

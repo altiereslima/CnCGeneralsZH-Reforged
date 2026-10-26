@@ -78,6 +78,7 @@ class StreamingArchiveFile : public RAMFile
 	protected:
 
 		File					*m_file;											///< The archive file that I came from
+		std::mutex		*m_archiveLock;								///< its ArchiveFile::m_readLock, held across each seek and read
 		Int						m_startingPos;								///< My starting position in the archive
 		Int						m_size;												///< My length
 		Int						m_curPos;											///< My current position.
@@ -101,7 +102,7 @@ class StreamingArchiveFile : public RAMFile
 		virtual Bool	scanString(AsciiString &newString) { DEBUG_CRASH(("Should not call scanString on a streaming file.\n")); return FALSE; } 
 
 		virtual Bool	open( File *file );																	///< Open file for fast RAM access
-		virtual Bool	openFromArchive(File *archiveFile, const AsciiString& filename, Int offset, Int size); ///< copy file data from the given file at the given offset for the given size.
+		virtual Bool	openFromArchive(File *archiveFile, std::mutex &archiveLock, const AsciiString& filename, Int offset, Int size); ///< stream the given file's bytes at the given offset for the given size
 		virtual Bool	copyDataToFile(File *localFile) { DEBUG_CRASH(("Are you sure you meant to copyDataToFile on a streaming file?")); return FALSE; }
 
 		virtual char* readEntireAndClose() { DEBUG_CRASH(("Are you sure you meant to readEntireAndClose on a streaming file?")); return NULL; }

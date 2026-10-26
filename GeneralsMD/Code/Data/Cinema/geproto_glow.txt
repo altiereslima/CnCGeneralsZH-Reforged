@@ -1,0 +1,12 @@
+# Team glow close-ups over Scenarios/geproto_glow.txt on Golden Oasis. Run with a -video range so
+# this clock is the logic frame over 60.
+
+0     hud     off
+3     cut     2850 3420 0.6 -45 0
+14    shot    # the Chinese cluster with the tanks closing on it
+14.3  cut     2700 3360 0.8 -45 0
+16    shot    # between the base and the cluster
+16.3  cut     2850 3420 0.6 -45 0
+18    shot    # the cluster again
+18.3  cut     2320 3420 0.6 -45 0
+20    shot    # the American war factory and the lane
