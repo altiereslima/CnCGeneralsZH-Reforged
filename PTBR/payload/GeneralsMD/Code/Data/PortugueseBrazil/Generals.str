@@ -1078,6 +1078,126 @@ CONTROLBAR:ConstructGLAWorker
 "&Trabalhador"
 END
 
+CONTROLBAR:ConstructTurkiyeAirfield
+"&Base Aérea"
+END
+
+CONTROLBAR:ConstructTurkiyeBarracks
+"Quar&tel"
+END
+
+CONTROLBAR:ConstructTurkiyeCommandCenter
+"&Quartel-General"
+END
+
+CONTROLBAR:ConstructTurkiyeHarekatMerkezi
+"Centro de &Operações"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryEngineer
+"&Engenheiros de Combate"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryMaroonBeret
+"&Boina Bordô"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantryMehmetcik
+"Fuzileiro &Mehmetcik"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantrySpotter
+"Equipe de Obser&vação"
+END
+
+CONTROLBAR:ConstructTurkiyeInfantrySungur
+"Atirador &Sungur"
+END
+
+CONTROLBAR:ConstructTurkiyeJetAkinci
+"VANT &Akinci"
+END
+
+CONTROLBAR:ConstructTurkiyeJetKizilelma
+"Caça &Kizilelma"
+END
+
+CONTROLBAR:ConstructTurkiyeKapalicarsi
+"&Grande Bazar"
+END
+
+CONTROLBAR:ConstructTurkiyeKarguBase
+"Base de Drones &Kargu"
+END
+
+CONTROLBAR:ConstructTurkiyeLandMine
+"Campo &Minado"
+END
+
+CONTROLBAR:ConstructTurkiyePatriotBattery
+"Bateria H&isar"
+END
+
+CONTROLBAR:ConstructTurkiyePowerPlant
+"&Usina de Energia"
+END
+
+CONTROLBAR:ConstructTurkiyeRadarTower
+"Torre de &Radar"
+END
+
+CONTROLBAR:ConstructTurkiyeSiper
+"B&unker Siper"
+END
+
+CONTROLBAR:ConstructTurkiyeSupplyCenter
+"&Central de Suprimentos"
+END
+
+CONTROLBAR:ConstructTurkiyeTankAltay
+"Tanque &Altay"
+END
+
+CONTROLBAR:ConstructTurkiyeTankKoral
+"Guerra Eletrônica Ko&ral"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleBayraktar
+"VANT &Bayraktar"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleCobra
+"Batedor &Cobra"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleFirtina
+"Obuseiro &Firtina"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleGokbey
+"Helicóptero &Gokbey"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleKirpi
+"Blindado &Kirpi"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleKorkut
+"Defesa Antiaérea K&orkut"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleSakarya
+"Lança-Foguetes &Sakarya"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleSupplyTruck
+"Caminhão de Suprimen&tos"
+END
+
+CONTROLBAR:ConstructTurkiyeWarFactory
+"&Fábrica"
+END
+
 CONTROLBAR:Contaminate
 "&Contaminar"
 END
@@ -2682,6 +2802,162 @@ CONTROLBAR:ToolTipTransportExit
 "Ordena que esta unidade deixe o transporte."
 END
 
+CONTROLBAR:TooltipTurkiyeCommandoRaid
+"Incursão de Comandos \n Recarga: 5:00"
+END
+
+CONTROLBAR:TooltipTurkiyeElectronicBlinding
+"Cegueira Eletrônica \n Recarga: 4:00"
+END
+
+CONTROLBAR:TooltipTurkiyeFireMission
+"Missão de Fogo \n Recarga: 4:00"
+END
+
+CONTROLBAR:ToolTipTurkiyeHarekatMerkezi
+"O edifício de tecnologia da Turquia. O exército inteiro luta sob um plano de batalha por vez: Bombardeio, Buscar e Destruir ou Manter a Linha. Pesquisa Treinamento Avançado e Trajes Químicos, e libera a Base de Drones Kargu, o Sakarya, o Koral, o Akinci e o Boina Bordô. \n \n Requer: Fábrica ou Base Aérea \n Energia Necessária: 2"
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryEngineer
+"Constrói e repara estruturas. É infantaria: pode ser esmagado e baleado."
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryMaroonBeret
+"Forças especiais. Camuflado, vê a 350 para a artilharia e planta cargas com timer e remotas."
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantryMehmetcik
+"Infantaria de linha. Limpa e mantém edifícios."
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantrySpotter
+"Vê a 500 e quase não luta. Não consegue se esconder, então mantenha-a fora de alcance. Coloque-a em um morro e a artilharia atrás dela pode atirar."
+END
+
+CONTROLBAR:ToolTipTurkiyeInfantrySungur
+"Infantaria com mísseis contra tanques e aeronaves."
+END
+
+CONTROLBAR:ToolTipTurkiyeJetAkinci
+"VANT pesado armado. Morre sob defesa antiaérea."
+END
+
+CONTROLBAR:ToolTipTurkiyeJetKizilelma
+"Caça de ataque: seus mísseis atingem aeronaves e alvos no solo."
+END
+
+CONTROLBAR:ToolTipTurkiyeKapalicarsi
+"O mercado negro da Turquia. Paga 20 a cada 2 segundos e vende Contramedidas para o Bayraktar, o Akinci e o Kizilelma, e Sapatos de Trabalhador para os engenheiros. \n \n Requer: Fábrica"
+END
+
+CONTROLBAR:ToolTipTurkiyeKarguBase
+"Envia um enxame de dezesseis drones kamikaze para qualquer ponto do mapa. Cada um caça um dos alvos mais valiosos do círculo e mergulha nele; exércitos espalhados sofrem mais. Eles sobem até o teto e descem como mísseis Scud, e nada pode abatê-los no caminho. \n \n Requer: Centro de Operações \n Energia Necessária: 10 \n Recarga: 5:00"
+END
+
+CONTROLBAR:TooltipTurkiyeKarguSwarm
+"Enxame Kargu \n Recarga: 5:00"
+END
+
+CONTROLBAR:ToolTipTurkiyeLandMine
+"Uma carga enterrada no chão. Requer o Kit de Minas."
+END
+
+CONTROLBAR:TooltipTurkiyeMinefield
+"Campo Minado \n Recarga: 4:00"
+END
+
+CONTROLBAR:ToolTipTurkiyeRadarTower
+"Olho fixo: vê a 500 para a artilharia. Consome energia. Um alvo."
+END
+
+CONTROLBAR:TooltipTurkiyeRapidDeployment
+"Mobilização Rápida \n Recarga: 3:00"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceCommandoRaid
+"Um Boina Bordô e duas equipes de observação saltam de paraquedas onde você apontar: olhos e cargas atrás das linhas inimigas. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceElectronicBlinding
+"Todo inimigo com um edifício na área do alvo perde o radar por 30 segundos. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceFireMission
+"Trinta e seis projéteis pesados caem sobre o alvo vindos de fora do mapa. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceFuelResupply
+"Os drones Bayraktar levam uma munição a mais em cada missão."
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceMinefield
+"Um avião de carga semeia um campo minado onde você apontar. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceRapidDeployment
+"Um avião de carga solta seis Mehmetcik e dois atiradores Sungur onde você apontar. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceSwarmMunition
+"Uma munição vagante circula onde você apontar e mergulha no alvo mais caro que encontrar. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceSwarmStrike
+"Um enxame de munições caça os dez alvos mais valiosos em uma área ampla, uma munição para cada. Uma base compacta mal sente; um exército espalhado, sim. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeSiper
+"Bunker de trincheira para cinco soldados de infantaria, cavado onde os engenheiros estiverem. Mehmetcik dentro dele seguram a infantaria; atiradores Sungur seguram os tanques."
+END
+
+CONTROLBAR:TooltipTurkiyeSwarmMunition
+"Munição Vagante \n Recarga: 3:00"
+END
+
+CONTROLBAR:TooltipTurkiyeSwarmStrike
+"Ataque de Enxame \n Recarga: 6:00"
+END
+
+CONTROLBAR:ToolTipTurkiyeTankAltay
+"Tanque de batalha principal, o único veículo de tiro direto da fábrica da Turquia."
+END
+
+CONTROLBAR:ToolTipTurkiyeTankKoral
+"Veículo de guerra eletrônica; seu feixe desliga edifícios inimigos a 400."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleBayraktar
+"Paira onde for enviado e vê a 550, o melhor olho da artilharia. Munição leve."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleCobra
+"Carro rápido e frágil com metralhadora e lugar para cinco soldados de infantaria. Vê a 250, pouco demais para mirar a artilharia de longe."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleFirtina
+"Dispara um projétil pesado com grande explosão a até 600 e vê a 100: precisa de um observador, um VANT ou uma torre de radar para mirar."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleGokbey
+"Helicóptero de transporte para cinco soldados de infantaria."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleKirpi
+"Transporte blindado de pessoal para cinco soldados de infantaria."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleKorkut
+"Defesa antiaérea: canhões duplos com alcance de 350 contra aeronaves. Não pode atirar no solo."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleSakarya
+"Dispara uma salva de seis foguetes sobre uma área ampla a até 500 e depois recarrega por 12 segundos. Precisa de um observador."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleSupplyTruck
+"Leva suprimentos até a Central de Suprimentos."
+END
+
 CONTROLBAR:ToolTipUpgradeChinaEMPMines
 "As Minas liberam uma explosão de Nêutron quando acionadas"
 END
@@ -2756,6 +3032,34 @@ END
 
 CONTROLBAR:ToolTipUpgradeGLAWorkerRealCommandSet
 "Alterna a barra de comando para construir estruturas verdadeiras"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeArmorPack
+"Kirpi e Altay ganham 20% mais vida."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeExtendedRange
+"Firtina e Sakarya alcançam 15% mais longe."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeFuelCell
+"O Bayraktar fica sobre o alvo pelo dobro do tempo, com o dobro de munições."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeMineKit
+"Os Engenheiros de Combate podem colocar minas."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyePrecisionGuidance
+"Disparos contra terreno que ninguém vê se espalham quatro vezes menos."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeSwarmSoftware
+"As munições do Bayraktar escolhem o próprio alvo: o inimigo mais caro ao alcance."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeThermal
+"Equipes de Observação veem a até 650 e Cobras a até 320, e ambos detectam unidades camufladas."
 END
 
 CONTROLBAR:ToolTipUSABuildAirField
@@ -3064,6 +3368,38 @@ END
 
 CONTROLBAR:TransportExit
 "Sair do Transporte"
+END
+
+CONTROLBAR:TurkiyeCommandoRaid
+"&Incursão de Comandos"
+END
+
+CONTROLBAR:TurkiyeElectronicBlinding
+"&Cegueira Eletrônica"
+END
+
+CONTROLBAR:TurkiyeFireMission
+"Missão de &Fogo"
+END
+
+CONTROLBAR:TurkiyeKarguSwarm
+"Enxame &Kargu"
+END
+
+CONTROLBAR:TurkiyeMinefield
+"Campo &Minado"
+END
+
+CONTROLBAR:TurkiyeRapidDeployment
+"Mobilização &Rápida"
+END
+
+CONTROLBAR:TurkiyeSwarmMunition
+"&Munição Vagante"
+END
+
+CONTROLBAR:TurkiyeSwarmStrike
+"Ataque de &Enxame"
 END
 
 CONTROLBAR:UnderConstructionDesc
@@ -3388,6 +3724,34 @@ END
 
 CONTROLBAR:UpgradeSuicideBomb
 "Habilidade de Demolições"
+END
+
+CONTROLBAR:UpgradeTurkiyeArmorPack
+"&Casco Reforçado"
+END
+
+CONTROLBAR:UpgradeTurkiyeExtendedRange
+"Alcance &Estendido"
+END
+
+CONTROLBAR:UpgradeTurkiyeFuelCell
+"Célula de Com&bustível"
+END
+
+CONTROLBAR:UpgradeTurkiyeMineKit
+"&Kit de Minas"
+END
+
+CONTROLBAR:UpgradeTurkiyePrecisionGuidance
+"Guiagem de &Precisão"
+END
+
+CONTROLBAR:UpgradeTurkiyeSwarmSoftware
+"Soft&ware de Enxame"
+END
+
+CONTROLBAR:UpgradeTurkiyeThermal
+"Miras &Térmicas"
 END
 
 CONTROLBAR:USAUpgradeRocketPods
@@ -4758,6 +5122,66 @@ GUI:AIPersonaTooltip
 "Como este jogador do computador joga, seja qual for a dificuldade"
 END
 
+GUI:AIPersonaTooltipAir
+"Constrói bases aéreas e manda suas aeronaves em missões, e desiste delas quando a sua antiaérea é forte."
+END
+
+GUI:AIPersonaTooltipArmor
+"Um exército cheio de tanques que espera mais para se reunir e ataca em ondas menos numerosas e maiores."
+END
+
+GUI:AIPersonaTooltipAttacker
+"Ataca cedo e com frequência em ondas menores, gasta o dinheiro assim que ele entra e constrói poucas defesas."
+END
+
+GUI:AIPersonaTooltipCounter
+"Analisa melhor o seu exército e constrói o que o vence, até no Fácil."
+END
+
+GUI:AIPersonaTooltipEconomist
+"Renda e melhorias primeiro, um primeiro ataque mais tardio, e o dinheiro que sobra vai para o aliado mais pobre."
+END
+
+GUI:AIPersonaTooltipInfantry
+"Um exército de infantaria treinado primeiro no quartel, com as ondas levadas em transportes."
+END
+
+GUI:AIPersonaTooltipNormal
+"Joga exatamente como o computador sempre jogou."
+END
+
+GUI:AIPersonaTooltipOpportunist
+"Vai atrás do inimigo mais fraco à vista, e de quem já estiver lutando com outro."
+END
+
+GUI:AIPersonaTooltipRaider
+"Manda pequenos grupos dos seus veículos mais rápidos contornando o seu exército até os seus coletores e trabalhadores, a partir do terceiro minuto no Difícil e do quinto no Fácil."
+END
+
+GUI:AIPersonaTooltipRandom
+"Uma das personalidades acima, sorteada quando a partida começa. Nunca Normal."
+END
+
+GUI:AIPersonaTooltipRusher
+"Joga tudo em um único ataque, aos três minutos no Difícil e aos quatro e meio no Fácil, quase sem defesas. Depois dele, joga como um Atacante."
+END
+
+GUI:AIPersonaTooltipSneaky
+"Prefere unidades que ficam invisíveis, gasta os pontos de general primeiro em furtividade e chega pelos flancos e pela porta dos fundos."
+END
+
+GUI:AIPersonaTooltipSupporter
+"Junta-se aos ataques dos aliados e manda o exército parado expulsar inimigos da base de um aliado."
+END
+
+GUI:AIPersonaTooltipTech
+"Fica atrás das defesas e corre para a superarma, depois joga como o computador normal quando ela estiver de pé. Usa seus poderes contra quem atacar um aliado."
+END
+
+GUI:AIPersonaTooltipTurtle
+"Ergue cedo uma linha de defesa e armas nos pontos de passagem, ataca tarde com grandes ondas e recua mais cedo quando está perdendo."
+END
+
 GUI:AIPersonaTurtle
 "Tartaruga"
 END
@@ -4860,6 +5284,14 @@ END
 
 GUI:Audio
 "ÁUDIO"
+END
+
+GUI:AudioDevice
+"Dispositivo de Saída"
+END
+
+GUI:AudioDeviceDefault
+"Padrão"
 END
 
 GUI:AudioHardware
@@ -5222,6 +5654,10 @@ GUI:BioFeatures_Pos9
 "Acesso às melhores forças \n Todos os heróis \n Todas as Superarmas \n Diversos Poderes dos Generais \n Unidades de várias facções \n Defesas avançadas"
 END
 
+GUI:BioFeatures_Turkiye
+"Artilharia de longo alcance, visão curta \n Engenheiros de Combate cavam bunkers Siper na linha de frente \n Observadores, VANTs e torres de radar miram os canhões"
+END
+
 GUI:BioFeatures_USA
 "MOAB \n Contramedidas \n Mísseis Destruidores de Bunkers \n Drone Hellfire \n Nave de Artilharia Spectre \n Drone Sentinela \n Tanque de Microondas \n Avenger \n Base de Fogo"
 END
@@ -5530,8 +5966,16 @@ GUI:Campaign
 "CAMPANHA"
 END
 
+GUI:CampaignGenerals
+"GENERALS"
+END
+
 GUI:CampaignMission
 "MISSÃO %d"
+END
+
+GUI:CampaignZeroHour
+"GENERALS ZERO HOUR"
 END
 
 GUI:Cancel
@@ -5752,6 +6196,18 @@ END
 
 GUI:CloudShadows
 "Sombras das Nuvens"
+END
+
+GUI:CloudStyle
+"Estilo das nuvens"
+END
+
+GUI:CloudStyle0
+"Clássico"
+END
+
+GUI:CloudStyle1
+"Volumétrico"
 END
 
 GUI:Color
@@ -6071,11 +6527,19 @@ GUI:DetailNote3
 END
 
 GUI:DetailNote4
-"A sua própria combinação das caixas desta página e da aba Efeitos. Aceitar a mantém como está."
+"A sua própria combinação das caixas desta página e da aba Efeitos, ou um ponto na barra entre duas predefinições. Aceitar a mantém como está."
 END
 
 GUI:DetailsSetToLowest
 "Nível de detalhes gráficos baixo"
+END
+
+GUI:DiplomacyFps
+"FPS"
+END
+
+GUI:DiplomacyPing
+"Ping"
 END
 
 GUI:DirectConnect
@@ -6144,6 +6608,10 @@ END
 
 GUI:DrawScrollAnchor
 "Mostrar Âncora"
+END
+
+GUI:DynamicMusic
+"Música Segue a Batalha"
 END
 
 GUI:EA
@@ -6244,6 +6712,46 @@ END
 
 GUI:Faction
 "Exército"
+END
+
+GUI:FactionPickConfirm
+"Confirmar %s"
+END
+
+GUI:FactionPickCustom
+"Seleção Personalizada"
+END
+
+GUI:FactionPickLeftOut
+"Aleatório nunca sorteia: %s. Marque em Seleção Personalizada para incluir."
+END
+
+GUI:FactionPickPool
+"Aleatório escolhe um dos %d exércitos marcados à esquerda, de %d. Clique em um exército para marcá-lo ou tirá-lo."
+END
+
+GUI:FactionPickRandom
+"Aleatório escolhe um destes exércitos para você quando a partida começa."
+END
+
+GUI:FactionPickRandomAll
+"Tudo Aleatório"
+END
+
+GUI:FactionPickRandomSide
+"Aleatório: %s"
+END
+
+GUI:FactionPickSideHint
+"A caixa de um lado marca ou desmarca o lado inteiro; o nome dele não mexe nesse lado no sorteio."
+END
+
+GUI:FactionPickSideNameHint
+"Clique no nome de um lado para jogar com um exército aleatório desse lado."
+END
+
+GUI:FactionPickTitle
+"Escolher Exército"
 END
 
 GUI:Faster
@@ -6480,6 +6988,10 @@ END
 
 GUI:GraphGeneralPower
 "Poder do general"
+END
+
+GUI:GraphicsQuality
+"Desempenho / Qualidade"
 END
 
 GUI:GraphNoData
@@ -6958,6 +7470,10 @@ GUI:HotkeysCommandPLACE_BEACON
 "Colocar sinalizador"
 END
 
+GUI:HotkeysCommandREQUEST_MONEY
+"Pedir dinheiro aos aliados"
+END
+
 GUI:HotkeysCommands
 "Comandos"
 END
@@ -7411,6 +7927,18 @@ GUI:Language2
 END
 
 GUI:Language3
+"Українська"
+END
+
+GUI:Language4
+"Русский"
+END
+
+GUI:Language5
+"Français"
+END
+
+GUI:Language6
 "Português (Brasil)"
 END
 
@@ -7428,6 +7956,10 @@ END
 
 GUI:LastUpdated
 "Última atualização do perfil"
+END
+
+GUI:LegacySound
+"Som Original"
 END
 
 GUI:LessParticlesFaster
@@ -7662,12 +8194,20 @@ GUI:MapCorrupt
 "O mapa %ls está danificado e não pode ser jogado."
 END
 
+GUI:MapLight
+"Luz Quente e Névoa"
+END
+
 GUI:MapName:
 "Mapa:"
 END
 
 GUI:MapPreview
 "Visão do Mapa"
+END
+
+GUI:MasterVolume
+"Volume Geral"
 END
 
 GUI:MatchingProgress
@@ -7844,6 +8384,10 @@ END
 
 GUI:Mute
 "Mudo"
+END
+
+GUI:MuteInBackground
+"Mudo em Segundo Plano"
 END
 
 GUI:MyInfo
@@ -8050,8 +8594,16 @@ GUI:OptionsGroupMenus
 "Menus"
 END
 
+GUI:OptionsGroupMusic
+"Música"
+END
+
 GUI:OptionsGroupOrders
 "Mouse e Ordens"
+END
+
+GUI:OptionsGroupOutput
+"Saída"
 END
 
 GUI:OptionsGroupParticles
@@ -8418,6 +8970,38 @@ GUI:Random
 "Aleatório"
 END
 
+GUI:RandomMapAnyTemplate
+"Surpreenda-me"
+END
+
+GUI:RandomMapSize
+"Tamanho do mapa"
+END
+
+GUI:RandomMapSizeHuge
+"Extragrande"
+END
+
+GUI:RandomMapSizeLarge
+"Grande"
+END
+
+GUI:RandomMapSizeMedium
+"Médio"
+END
+
+GUI:RandomMapSizeSmall
+"Pequeno"
+END
+
+GUI:RandomMapSizeTiny
+"Minúsculo"
+END
+
+GUI:RandomMapTemplate
+"Tipo de mapa"
+END
+
 GUI:RandomSide
 "Aleatório"
 END
@@ -8488,6 +9072,10 @@ END
 
 GUI:ReplaySaved
 "Replay Salvo"
+END
+
+GUI:RequestMoneyChat
+"Preciso de dinheiro!"
 END
 
 GUI:Reset
@@ -9030,6 +9618,26 @@ GUI:SortPing
 "Conexão"
 END
 
+GUI:SpeakerType
+"Configuração de Som"
+END
+
+GUI:SpeakerType0
+"Caixas Estéreo"
+END
+
+GUI:SpeakerType1
+"Fones de Ouvido"
+END
+
+GUI:SpeakerType2
+"Surround 5.1"
+END
+
+GUI:SpeakerType3
+"Surround 7.1"
+END
+
 GUI:SpecialAbilityDetonateCharges
 "Detonar Explosivos"
 END
@@ -9230,6 +9838,10 @@ GUI:SuperweaponTerrorCell
 "Célula Terrorista"
 END
 
+GUI:SuperweaponTurkiyeKarguSwarm
+"Enxame Kargu"
+END
+
 GUI:SupplyPileLimit
 "Limite por Pilha"
 END
@@ -9284,6 +9896,10 @@ END
 
 GUI:Team
 "Equipe"
+END
+
+GUI:TeamGlow
+"Brilho da Cor do Time"
 END
 
 GUI:TechRespawn
@@ -9676,6 +10292,22 @@ END
 
 GUI:WasdCamera
 "Câmera com W A S D"
+END
+
+GUI:WaterFoam
+"Espuma na Água"
+END
+
+GUI:WaterStyle
+"Estilo da água"
+END
+
+GUI:WaterStyle0
+"Clássico"
+END
+
+GUI:WaterStyle1
+"Moderno"
 END
 
 GUI:WaterWaves
@@ -10204,6 +10836,10 @@ END
 
 INI:FactionObserver
 "Observador"
+END
+
+INI:FactionTurkiye
+"Turquia (Experimental)"
 END
 
 INI:MissingDisplayName
@@ -14754,6 +15390,126 @@ OBJECT:TunnelNetwork
 "Rede de Túneis"
 END
 
+OBJECT:TurkiyeAirfield
+"Base Aérea"
+END
+
+OBJECT:TurkiyeBarracks
+"Quartel"
+END
+
+OBJECT:TurkiyeCommandCenter
+"Quartel-General"
+END
+
+OBJECT:TurkiyeHarekatMerkezi
+"Centro de Operações"
+END
+
+OBJECT:TurkiyeInfantryEngineer
+"Engenheiros de Combate"
+END
+
+OBJECT:TurkiyeInfantryMaroonBeret
+"Boina Bordô"
+END
+
+OBJECT:TurkiyeInfantryMehmetcik
+"Fuzileiro Mehmetcik"
+END
+
+OBJECT:TurkiyeInfantrySpotter
+"Equipe de Observação"
+END
+
+OBJECT:TurkiyeInfantrySungur
+"Atirador Sungur"
+END
+
+OBJECT:TurkiyeJetAkinci
+"VANT Akinci"
+END
+
+OBJECT:TurkiyeJetKizilelma
+"Caça Kizilelma"
+END
+
+OBJECT:TurkiyeKapalicarsi
+"Grande Bazar"
+END
+
+OBJECT:TurkiyeKarguBase
+"Base de Drones Kargu"
+END
+
+OBJECT:TurkiyeLandMine
+"Campo Minado"
+END
+
+OBJECT:TurkiyePatriotBattery
+"Bateria Hisar"
+END
+
+OBJECT:TurkiyePowerPlant
+"Usina de Energia"
+END
+
+OBJECT:TurkiyeRadarTower
+"Torre de Radar"
+END
+
+OBJECT:TurkiyeSiper
+"Bunker Siper"
+END
+
+OBJECT:TurkiyeSupplyCenter
+"Central de Suprimentos"
+END
+
+OBJECT:TurkiyeTankAltay
+"Tanque Altay"
+END
+
+OBJECT:TurkiyeTankKoral
+"Guerra Eletrônica Koral"
+END
+
+OBJECT:TurkiyeVehicleBayraktar
+"VANT Bayraktar"
+END
+
+OBJECT:TurkiyeVehicleCobra
+"Batedor Cobra"
+END
+
+OBJECT:TurkiyeVehicleFirtina
+"Obuseiro Firtina"
+END
+
+OBJECT:TurkiyeVehicleGokbey
+"Helicóptero Gokbey"
+END
+
+OBJECT:TurkiyeVehicleKirpi
+"Blindado Kirpi"
+END
+
+OBJECT:TurkiyeVehicleKorkut
+"Defesa Antiaérea Korkut"
+END
+
+OBJECT:TurkiyeVehicleSakarya
+"Lança-Foguetes Sakarya"
+END
+
+OBJECT:TurkiyeVehicleSupplyTruck
+"Caminhão de Suprimentos"
+END
+
+OBJECT:TurkiyeWarFactory
+"Fábrica"
+END
+
 OBJECT:TVStation
 "Estação de TV"
 END
@@ -14944,6 +15700,426 @@ END
 
 RADAR:UnitUnderAttack
 "Unidade sob ataque."
+END
+
+RANK:America0
+"E-1 Soldado"
+END
+
+RANK:America1
+"E-2 Soldado"
+END
+
+RANK:America10
+"E-9 Sargento-Mor"
+END
+
+RANK:America11
+"E-9 Sargento-Mor de Comando"
+END
+
+RANK:America12
+"E-9 Sargento-Mor do Exército"
+END
+
+RANK:America13
+"W-1 Suboficial"
+END
+
+RANK:America14
+"W-2 Suboficial-Chefe"
+END
+
+RANK:America15
+"W-3 Suboficial-Chefe"
+END
+
+RANK:America16
+"W-4 Suboficial-Chefe"
+END
+
+RANK:America17
+"W-5 Suboficial-Chefe"
+END
+
+RANK:America18
+"O-1 Segundo-Tenente"
+END
+
+RANK:America19
+"O-2 Primeiro-Tenente"
+END
+
+RANK:America2
+"E-3 Soldado de Primeira Classe"
+END
+
+RANK:America20
+"O-3 Capitão"
+END
+
+RANK:America21
+"O-4 Major"
+END
+
+RANK:America22
+"O-5 Tenente-Coronel"
+END
+
+RANK:America23
+"O-6 Coronel"
+END
+
+RANK:America24
+"O-7 General de Brigada"
+END
+
+RANK:America25
+"O-8 General de Divisão"
+END
+
+RANK:America26
+"O-9 Tenente-General"
+END
+
+RANK:America27
+"O-10 General"
+END
+
+RANK:America28
+"General do Exército"
+END
+
+RANK:America3
+"E-4 Especialista"
+END
+
+RANK:America4
+"E-4 Cabo"
+END
+
+RANK:America5
+"E-5 Sargento"
+END
+
+RANK:America6
+"E-6 Segundo-Sargento"
+END
+
+RANK:America7
+"E-7 Sargento de Primeira Classe"
+END
+
+RANK:America8
+"E-8 Sargento-Mestre"
+END
+
+RANK:America9
+"E-8 Primeiro-Sargento"
+END
+
+RANK:China0
+"Sem Patente"
+END
+
+RANK:China1
+"Soldado"
+END
+
+RANK:China10
+"Segundo-Tenente"
+END
+
+RANK:China11
+"Primeiro-Tenente"
+END
+
+RANK:China12
+"Capitão"
+END
+
+RANK:China13
+"Major"
+END
+
+RANK:China14
+"Tenente-Coronel"
+END
+
+RANK:China15
+"Coronel"
+END
+
+RANK:China16
+"Coronel Sênior"
+END
+
+RANK:China17
+"General de Divisão"
+END
+
+RANK:China18
+"Tenente-General"
+END
+
+RANK:China19
+"General"
+END
+
+RANK:China2
+"Soldado de Primeira Classe"
+END
+
+RANK:China3
+"Cabo"
+END
+
+RANK:China4
+"Sargento"
+END
+
+RANK:China5
+"Sargento de Segunda Classe"
+END
+
+RANK:China6
+"Sargento de Primeira Classe"
+END
+
+RANK:China7
+"Sargento-Mestre de Terceira Classe"
+END
+
+RANK:China8
+"Sargento-Mestre de Segunda Classe"
+END
+
+RANK:China9
+"Sargento-Mestre de Primeira Classe"
+END
+
+RANK:GLA0
+"Sem Patente"
+END
+
+RANK:GLA1
+"Recruta"
+END
+
+RANK:GLA10
+"Capitão de Incursão"
+END
+
+RANK:GLA11
+"Capitão de Coluna"
+END
+
+RANK:GLA12
+"Comandante de Ataque"
+END
+
+RANK:GLA13
+"Comandante de Campo"
+END
+
+RANK:GLA14
+"Comandante de Setor"
+END
+
+RANK:GLA15
+"Senhor da Guerra"
+END
+
+RANK:GLA16
+"Senhor da Guerra Regional"
+END
+
+RANK:GLA17
+"Grão-Senhor da Guerra"
+END
+
+RANK:GLA18
+"General"
+END
+
+RANK:GLA19
+"Grande General"
+END
+
+RANK:GLA2
+"Irregular"
+END
+
+RANK:GLA20
+"Libertador Supremo"
+END
+
+RANK:GLA3
+"Combatente"
+END
+
+RANK:GLA4
+"Saqueador"
+END
+
+RANK:GLA5
+"Saqueador Veterano"
+END
+
+RANK:GLA6
+"Membro de Esquadrão"
+END
+
+RANK:GLA7
+"Líder de Esquadrão"
+END
+
+RANK:GLA8
+"Líder de Célula"
+END
+
+RANK:GLA9
+"Líder de Célula Sênior"
+END
+
+RANK:NextRank
+"Próxima patente %d/%d XP"
+END
+
+RANK:PerkAURA_GUARD
+"Aura: %d%% menos dano recebido"
+END
+
+RANK:PerkAURA_RADIUS
+"Alcance da aura +%d%%"
+END
+
+RANK:PerkAURA_RANGE
+"Aura: alcance da artilharia +%d%%"
+END
+
+RANK:PerkAURA_RATE_OF_FIRE
+"Aura: cadência de tiro +%d%%"
+END
+
+RANK:PerkAURA_SIGHT
+"Aura: visão +%d%%"
+END
+
+RANK:PerkDEATH_RALLY
+"Quando cai, aliados próximos recebem %d%% menos dano por 10 segundos"
+END
+
+RANK:PerkDETECT
+"Detecta unidades furtivas a até %d"
+END
+
+RANK:PerkMEND
+"Fora de combate: cura %d%% por segundo"
+END
+
+RANK:PerkSCATTER
+"Dispersão da artilharia -%d%%"
+END
+
+RANK:PerkSIGHT
+"Visão +%d%%"
+END
+
+RANK:PerkSPOTTER
+"Observa para a artilharia"
+END
+
+RANK:PerkSTILL_GUARD
+"Parado: %d%% menos dano recebido"
+END
+
+RANK:Turkiye0
+"Sem Patente"
+END
+
+RANK:Turkiye1
+"Er"
+END
+
+RANK:Turkiye10
+"Astsubay Kıdemli Başçavuş"
+END
+
+RANK:Turkiye11
+"Teğmen"
+END
+
+RANK:Turkiye12
+"Üsteğmen"
+END
+
+RANK:Turkiye13
+"Yüzbaşı"
+END
+
+RANK:Turkiye14
+"Binbaşı"
+END
+
+RANK:Turkiye15
+"Yarbay"
+END
+
+RANK:Turkiye16
+"Albay"
+END
+
+RANK:Turkiye17
+"Tuğgeneral"
+END
+
+RANK:Turkiye18
+"Tümgeneral"
+END
+
+RANK:Turkiye19
+"Korgeneral"
+END
+
+RANK:Turkiye2
+"Onbaşı"
+END
+
+RANK:Turkiye20
+"Orgeneral"
+END
+
+RANK:Turkiye21
+"Mareşal"
+END
+
+RANK:Turkiye3
+"Çavuş"
+END
+
+RANK:Turkiye4
+"Uzman Çavuş"
+END
+
+RANK:Turkiye5
+"Astsubay Çavuş"
+END
+
+RANK:Turkiye6
+"Astsubay Kıdemli Çavuş"
+END
+
+RANK:Turkiye7
+"Astsubay Üstçavuş"
+END
+
+RANK:Turkiye8
+"Astsubay Kıdemli Üstçavuş"
+END
+
+RANK:Turkiye9
+"Astsubay Başçavuş"
 END
 
 SCIENCE:ChinaArtilleryBarrage
@@ -15176,6 +16352,38 @@ END
 
 SCIENCE:TempName
 "Nome Temporário da Habilidade"
+END
+
+SCIENCE:TurkiyeCommandoRaid
+"Incursão de Comandos"
+END
+
+SCIENCE:TurkiyeElectronicBlinding
+"Cegueira Eletrônica"
+END
+
+SCIENCE:TurkiyeFireMission
+"Missão de Fogo"
+END
+
+SCIENCE:TurkiyeFuelResupply
+"Reabastecimento de Combustível"
+END
+
+SCIENCE:TurkiyeMinefield
+"Campo Minado"
+END
+
+SCIENCE:TurkiyeRapidDeployment
+"Mobilização Rápida"
+END
+
+SCIENCE:TurkiyeSwarmMunition
+"Munição Vagante"
+END
+
+SCIENCE:TurkiyeSwarmStrike
+"Ataque de Enxame"
 END
 
 SCIENCE:USAA10Strike1
@@ -15558,6 +16766,10 @@ SIDE:GLAToxinGeneral
 "General de Toxinas do E.L.G."
 END
 
+SIDE:Turkiye
+"Turquia (Experimental)"
+END
+
 Team:0
 "Nenhum"
 END
@@ -15656,6 +16868,10 @@ END
 
 TOOLTIP:AssignHotkeyCurrent
 "O comando ao qual este Atalho está atribuído no momento."
+END
+
+TOOLTIP:AudioDevice
+"As caixas de som ou os fones de ouvido pelos quais o jogo toca. Padrão segue o Windows e muda junto quando você conecta um headset. Vale ao pressionar Aceitar."
 END
 
 TOOLTIP:AudioSurround
@@ -15978,6 +17194,10 @@ TOOLTIP:BioStrategyLong_Random
 "Seleciona uma facção aleatoriamente."
 END
 
+TOOLTIP:BioStrategyLong_Turkiye
+"A Turquia mata de longe, mas não enxerga sozinha: sua artilharia atira a 600 e vê a 100, então um observador, um VANT ou uma torre de radar precisa achar o alvo"
+END
+
 TOOLTIP:BioStrategyLong_USA
 "Os EUA usam tecnologia avançada, precisão e poder aéreo para superar seus inimigos."
 END
@@ -16070,6 +17290,10 @@ TOOLTIP:CloudShadows
 "As sombras das nuvens passam sobre o terreno. Custa pouco. Entra em vigor ao clicar em Aceitar."
 END
 
+TOOLTIP:CloudStyle
+"Clássico usa os efeitos originais de toxina e radiação. Volumétrico acrescenta fumaça em movimento, névoa nuclear mais escura e distorção de calor. Vale ao pressionar Aceitar, também para as nuvens que já estão em campo."
+END
+
 TOOLTIP:CommandCategory
 "Escolha uma categoria de comandos do teclado."
 END
@@ -16130,6 +17354,10 @@ TOOLTIP:DeleteAccount
 "Apagar sua conta atual."
 END
 
+TOOLTIP:DiplomacyNet
+"Ping é o tempo de ida e volta do jogador até o host em milissegundos (o host não tem), e FPS é quantos quadros de jogo por segundo a máquina dele aguenta. Números amarelos marcam o jogador mais lento, e a partida inteira roda na velocidade dele."
+END
+
 TOOLTIP:Disconnect
 "Defina sua tolerância para o total de desconexões do oponente."
 END
@@ -16156,6 +17384,10 @@ END
 
 TOOLTIP:DrawScrollAnchor
 "Coloca um marcador onde começou a rolagem arrastando com o botão direito."
+END
+
+TOOLTIP:DynamicMusic
+"Em partidas de combate ou online, a música responde à batalha: uma das faixas mais calmas do seu lado enquanto nada acontece, uma mais pesada quando há tiros perto da câmera ou contra as suas forças, e de volta à calma alguns segundos depois que a luta termina. Desligado, a música toca como no jogo original."
 END
 
 TOOLTIP:EdgeScrollWindowed
@@ -16262,6 +17494,10 @@ TOOLTIP:GetUpdate
 "Fazer download de atualização do jogo."
 END
 
+TOOLTIP:GraphicsQuality
+"À esquerda fica a imagem mais rápida, à direita a mais bonita. Arrastar a barra ajusta as caixas desta página e da aba Efeitos, as mais leves primeiro, e as quatro predefinições são pontos ao longo dela. Mude uma caixa depois e a predefinição passa a Personalizado. Vale ao pressionar Aceitar; algumas opções esperam o próximo mapa ou a próxima vez que o jogo for aberto."
+END
+
 TOOLTIP:GridBuild
 "Posiciona as estruturas na grade de 10 unidades usada pelo sistema de rotas, desenhada sob o edifício enquanto você o posiciona, para que dois edifícios colocados a olho fiquem encostados em vez de deixar um vão estreito demais para passar. Desligado, só ficam marcadas as células onde nada pode ser construído."
 END
@@ -16366,6 +17602,10 @@ TOOLTIP:LANPlayer
 "%ls@%ls"
 END
 
+TOOLTIP:LegacySound
+"O som do jogo original: sem eco no mapa, sem abafamento por distância, morros ou edifícios, sem atraso ou variação de tom em sons distantes e que passam, sem queda de volume após grandes explosões, sem limite de sons de batalha ou de respostas das unidades, sem limitador, sem ambiente do mapa e sem música acompanhando a batalha. Volume geral, dispositivo e caixas de som continuam valendo. Tem efeito na hora."
+END
+
 TOOLTIP:LightingStyle
 "Reforged dá a cada mapa um sol mais forte e mais quente, faces mais escuras na sombra e sombras mais profundas, mantendo a hora do dia. Clássica é a luz chapada de 2003, e os Gráficos Clássicos sempre a usam. Entra em vigor no próximo mapa."
 END
@@ -16418,6 +17658,10 @@ TOOLTIP:MapHardSuccess
 "Parabéns! Você venceu esta batalha contra um oponente Brutal!"
 END
 
+TOOLTIP:MapLight
+"Um sol baixo de fim de tarde que ilumina o mapa com tons mais quentes e projeta sombras mais longas, e uma névoa leve sobre as partes baixas que as aeronaves abrem ao atravessá-la. Só no Direct3D 11. Vale a partir do próximo mapa."
+END
+
 TOOLTIP:MapMaxBrutalSuccess
 "Parabéns! Você venceu esse campo de batalha contra o número máximo de oponentes de nível Difícil!"
 END
@@ -16436,6 +17680,10 @@ END
 
 TOOLTIP:MapPreviewWindow
 "A visão do mapa pode dar a você uma vantagem na batalha. Procure pelas Docas de Suprimento e pelas Instalações Técnicas. Nela você também pode selecionar sua Posição Inicial."
+END
+
+TOOLTIP:MasterVolume
+"Aumenta ou diminui o jogo inteiro: música, efeitos, vozes, ambiente e vídeos. Os outros controles mantêm a mistura; este define o volume da mistura."
 END
 
 TOOLTIP:matchingprogress
@@ -16480,6 +17728,10 @@ END
 
 TOOLTIP:MSAA
 "Suaviza o serrilhado nas bordas dos modelos. Só o renderizador Direct3D 9 usa esta opção: o renderizador padrão suaviza as bordas por conta própria e a ignora. Se a placa não oferecer o nível escolhido, será usado o maior nível compatível. Entra em vigor na próxima vez que o jogo iniciar."
+END
+
+TOOLTIP:MuteInBackground
+"Silencia o jogo enquanto outra janela estiver em foco. Desligado, ele continua tocando atrás de um navegador ou em um segundo monitor."
 END
 
 TOOLTIP:MyInfo
@@ -16767,7 +18019,7 @@ TOOLTIP:SnapBuildNeighbour
 END
 
 TOOLTIP:SnapCamera45
-"Faz a rotação da câmera encaixar nas oito direções de 45 graus em vez de parar em qualquer ângulo."
+"Faz a rotação da câmera encaixar nas oito direções de 45 graus em vez de parar em qualquer ângulo. Segure Shift enquanto gira para ter o outro comportamento naquele giro."
 END
 
 TOOLTIP:SortBuddies
@@ -16779,7 +18031,7 @@ TOOLTIP:SpeakerSelect
 END
 
 TOOLTIP:SpeakerType
-"Selecione sua Configuração de Alto-Falantes."
+"Como os sons do campo de batalha são posicionados ao seu redor. Fones de ouvido dão a cada ouvido o próprio tempo e timbre, então um som atrás ou ao seu lado é ouvido ali. 5.1 e 7.1 espalham os sons por caixas surround; no Linux e no macOS eles tocam em estéreo. Vale ao pressionar Aceitar."
 END
 
 TOOLTIP:StagingPlayerInfo
@@ -16823,23 +18075,39 @@ TOOLTIP:StatArmor
 END
 
 TOOLTIP:StatArmorStronger
-"reforçada"
+"reforçada, menos de cada golpe passa"
 END
 
 TOOLTIP:StatAttackSpeed
 "Velocidade de ataque"
 END
 
+TOOLTIP:StatAttackSpeedHint
+"(disparos por segundo, recargas incluídas)"
+END
+
 TOOLTIP:StatDamage
 "Dano"
+END
+
+TOOLTIP:StatDamageHint
+"(arma principal, um disparo, antes da blindagem)"
 END
 
 TOOLTIP:StatDamagePerSecond
 "Dano por segundo"
 END
 
+TOOLTIP:StatDamagePerSecondHint
+"(dano × velocidade de ataque)"
+END
+
 TOOLTIP:StatHealth
 "Vida"
+END
+
+TOOLTIP:StatHealthHint
+"(dano que aguenta depois da blindagem)"
 END
 
 TOOLTIP:StatNewWeapon
@@ -16866,12 +18134,20 @@ TOOLTIP:StatRange
 "Alcance"
 END
 
+TOOLTIP:StatRangeHint
+"(10 é um quadrado da grade de posicionamento)"
+END
+
 TOOLTIP:StatSeconds
 "%ds"
 END
 
 TOOLTIP:StatTime
 "Tempo de construção"
+END
+
+TOOLTIP:StatTimeHint
+"(com a sua energia e as suas fábricas agora)"
 END
 
 TOOLTIP:StopSearch
@@ -16900,6 +18176,10 @@ END
 
 TOOLTIP:TankTreads
 "Ativa/Desativa os rastros deixados pelos veículos. Desative esta opção para melhorar o desempenho do jogo."
+END
+
+TOOLTIP:TeamGlow
+"As áreas claras da cor de cada lado nas unidades e nos edifícios brilham nessa cor. Só no Direct3D 11. Vale a partir do próximo mapa."
 END
 
 TOOLTIP:TechBuilding
@@ -16982,12 +18262,20 @@ TOOLTIP:UpgradeChanges
 "EFEITOS"
 END
 
+TOOLTIP:UpgradeChangesHint
+"(unidade simples → com esta)"
+END
+
 TOOLTIP:UpgradeOwned
 "já possui"
 END
 
 TOOLTIP:Upgrades
 "MELHORIAS"
+END
+
+TOOLTIP:UpgradesHint
+"(sem ela → com ela)"
 END
 
 TOOLTIP:UseAccount
@@ -17024,6 +18312,14 @@ END
 
 TOOLTIP:WasdCamera
 "W A S D movem a câmera. F ataca, G para, H move e ataca, J protege e K mantém posição; a linha superior da barra de comandos usa Q E R T Y U I. Apenas nos controles modernos."
+END
+
+TOOLTIP:WaterFoam
+"Rios e lagos ganham pontos de espuma e uma faixa dela ao longo da margem, e as sombras do sol caem sobre a água. As ondas do mar não mudam. Só no Direct3D 11 com a água Clássica, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
+END
+
+TOOLTIP:WaterStyle
+"Clássico usa a água, os brilhos, os reflexos e os rastros originais. Moderno acrescenta ondas, detalhes nas margens e espuma nos cascos. Vale ao pressionar Aceitar."
 END
 
 TOOLTIP:WaterWaves
@@ -17384,6 +18680,38 @@ END
 
 UPGRADE:TranqDarts
 "Dardos Tranquilizantes"
+END
+
+UPGRADE:TurkiyeArmorPack
+"Casco Reforçado"
+END
+
+UPGRADE:TurkiyeExtendedRange
+"Alcance Estendido"
+END
+
+UPGRADE:TurkiyeFuelCell
+"Célula de Combustível"
+END
+
+UPGRADE:TurkiyeFuelResupply
+"Reabastecimento de Combustível"
+END
+
+UPGRADE:TurkiyeMineKit
+"Kit de Minas"
+END
+
+UPGRADE:TurkiyePrecisionGuidance
+"Guiagem de Precisão"
+END
+
+UPGRADE:TurkiyeSwarmSoftware
+"Software de Enxame"
+END
+
+UPGRADE:TurkiyeThermal
+"Miras Térmicas"
 END
 
 UPGRADE:UpgradeChinaIsotopeStability
