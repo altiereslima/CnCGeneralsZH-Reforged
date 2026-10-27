@@ -64,13 +64,20 @@ MEDIA_LOCALE_FILES=[
     "Art/Textures/GameOver.tga","Art/Textures/victorious.dds",
 ]
 
+# The console of a Windows runner is not UTF-8: a character it lacks prints as "?" instead of failing.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 def now():
     return dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 def run(cmd, *, cwd=None, log=None, check=True):
     cmd = [str(x) for x in cmd]
     print("[stage15]", " ".join(f'"{x}"' if " " in x else x for x in cmd))
-    cp = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # The tests print UTF-8 (the Cyrillic and Turkish string tables since 3.4); the Windows code page
+    # cannot decode it.
+    cp = subprocess.run(cmd, cwd=cwd, text=True, encoding="utf-8", errors="replace",
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if log:
         Path(log).write_text(cp.stdout or "", encoding="utf-8", errors="replace")
     if cp.stdout:
