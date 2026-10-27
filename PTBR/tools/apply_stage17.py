@@ -22,7 +22,7 @@ LAUNCHER_CHECK = (
 )
 
 def replace_once(path, old, new):
-    text = path.read_text(encoding="utf-8-sig")
+    text = path.read_text(encoding="utf-8")
     n = text.count(old)
     if n != 1:
         fail(f"{path}: esperado 1 bloco, encontrado {n}")

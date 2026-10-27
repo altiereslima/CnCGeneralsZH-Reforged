@@ -154,6 +154,12 @@ def main():
         raise RuntimeError("missing postcondition: the version label still says Reforged")
     checks["version_label"]="PASS"
 
+    # MSVC reads a source without a BOM in the Windows code page: the patched test file has to keep
+    # upstream's, or its Turkish and Cyrillic literals compile wrong (capitals_reach_turkish_and_cyrillic_letters).
+    if not (code/"Tests/test_gameengine.cpp").read_bytes().startswith(b"\xef\xbb\xbf"):
+        raise RuntimeError("missing postcondition: test_gameengine.cpp lost its UTF-8 BOM")
+    checks["utf8_bom_kept"]="PASS"
+
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
     if miss_core:

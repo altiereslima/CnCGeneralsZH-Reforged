@@ -7,7 +7,7 @@ def fail(msg):
     raise SystemExit("STAGE03: " + msg)
 
 def replace_once(path, old, new):
-    text = path.read_text(encoding="utf-8-sig")
+    text = path.read_text(encoding="utf-8")
     n = text.count(old)
     if n != 1:
         fail(f"{path}: esperado 1 bloco, encontrado {n}")
@@ -33,7 +33,7 @@ def main():
     # Improve localized art fallback:
     # selected text language -> registry/install language -> generic Art directory.
     p = code / "GameEngineDevice" / "Source" / "W3DDevice" / "GameClient" / "W3DFileSystem.cpp"
-    text = p.read_text(encoding="utf-8-sig")
+    text = p.read_text(encoding="utf-8")
     needle = (
         "\t// We need to be able to grab w3d's from a localization dir, since Germany hates exploding people units.\n"
         "\tif( fileType == FILE_TYPE_W3D )\n"

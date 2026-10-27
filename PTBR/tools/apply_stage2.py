@@ -19,7 +19,7 @@ def die(msg):
     raise SystemExit("STAGE02: " + msg)
 
 def replace_once(path: Path, old: str, new: str):
-    text = path.read_text(encoding="utf-8-sig")
+    text = path.read_text(encoding="utf-8")
     n = text.count(old)
     if n != 1:
         die(f"{path}: esperado 1 bloco, encontrado {n}")
@@ -180,7 +180,7 @@ def main():
 
     # 7) Localized textures/models follow TextLanguage first.
     p = code / "GameEngineDevice" / "Source" / "W3DDevice" / "GameClient" / "W3DFileSystem.cpp"
-    text = p.read_text(encoding="utf-8-sig")
+    text = p.read_text(encoding="utf-8")
     old_lookup = "GetRegistryLanguage().str()"
     lookup_count = text.count(old_lookup)
     if lookup_count != 2:
