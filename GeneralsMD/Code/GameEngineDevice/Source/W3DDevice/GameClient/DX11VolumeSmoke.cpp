@@ -7,8 +7,9 @@
 //
 // A tank's death is an ammunition cook-off, laid out on the dying hull's own box (its template's
 // length, width and height and its heading, read from the drawable).  Orange flame and black soot
-// burst out low along the hull and roll along the ground off both ends, a ragged white-yellow
-// plume of fire flares up out of the hull top in six to eight thin, uneven jets, two to four
+// burst out low along the hull and roll along the ground off both ends over a skirt of pale dust,
+// a ragged white-yellow plume of fire flares up out of the hull top in ten to twelve thin, uneven
+// jets about as high as the band is long and cools to grey-brown smoke, two to four
 // smaller pops follow over a few seconds, and then the hull burns: a thick black column for half
 // a minute that rises from its whole length, leans with the wind and thins.
 //
@@ -1345,27 +1346,61 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, 1.25f, 8.0f * fade, 0.35f);
 			}
 		}
-		// The plume: six to eight thin, uneven jets of white-hot fire fanning up out of the hull top,
-		// leaning out along the hull, each slowing fast and widening a little, so the flare reads as
-		// ragged streaks.  Each lays down thin smoke at a rate that goes with its speed, the same a
-		// cell along the whole jet, and pushes the air only lightly.  Thick, wide, pushing hard or at
-		// a fixed rate, a jet carried its smoke along with its head and arrived at the top as a round
-		// ball with nothing under it; with dust in it, it climbed on as a brown finger.
-		const unsigned jets = 6 + unsigned(unit(850) * 2.99f);
+		// The plume, the photo's tallest part: ten to twelve thin jets of white-hot fire and dust
+		// shot up out of the hull top in the first half second, each to its own height, fanning out
+		// as they climb, so the flare is ragged and opens upwards.  A jet's path is at most 24 cells
+		// long and its head never more than 12 cells off the blast's axis, where the grid's round
+		// sides start to fade the smoke out.  The tallest heads, lifted on by the heat still in them,
+		// do reach the fade under the grid's top, which softens them; at 20 the plume stood only
+		// half again as high as the hull's top, too low for the photo.  Each lays
+		// down thin smoke at a rate that goes with its speed, the same a cell along the whole jet,
+		// and pushes the air only lightly.  A thick jet, a hard push or a fixed rate carried the
+		// smoke along with the head and left a round ball at the top with nothing under it.  The
+		// fire burns brighter for the first second (soot[3] below), so the plume flares white and
+		// then hangs as grey-brown smoke and dust.
+		const float reach = (std::min)((std::max)(2.3f * L + 1.7f * W, 12.0f), 24.0f);
+		const unsigned jets = 10 + unsigned(unit(850) * 2.99f);
 		for (unsigned j = 0; j < jets; ++j) {
-			const float age = t - 0.05f * unit(851 + j), lasts = 0.15f + 0.2f * unit(860 + j);
-			if (age < 0 || age > lasts) continue;
-			const float tilt = 0.1f + 0.65f * unit(870 + j);
-			const float end = unit(880 + j) < 0.5f ? 0.0f : 3.14159265f;
-			const float azimuth = end + (unit(890 + j) - 0.5f) * 1.6f;
-			const float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth), dz = std::cos(tilt);
-			const float speed = 45.0f + 30.0f * unit(930 + j), slows = 0.2f;
-			const float travelled = speed * slows * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
-			const float a0 = (unit(940 + j) - 0.5f) * L * 1.2f, c0 = (unit(950 + j) - 0.5f) * W * 0.6f;
-			const float rate = 22.0f * now / speed;
-			// hot enough at its centre that the falloff still leaves its cells white-yellow, not orange
-			onHull(a0 + da * travelled, c0 + dc * travelled, H * 0.4f + dz * travelled, 1.3f + 2.5f * age,
-				da * now, dc * now, dz * now, rate, 3.5f, rate * 0.3f, 0.15f);
+			auto field = [&](unsigned f) { return unit(1000 + 16 * j + f); };
+			// a jet stops once it has slowed to a fifth of its speed: lingering at the top it heated a
+			// round ball there
+			const float age = t - 0.15f * field(0), slows = 0.18f;
+			if (age < 0 || age > 1.5f * slows) continue;
+			const float tilt = 0.05f + 0.65f * field(1);
+			const float end = field(2) < 0.5f ? 0.0f : 3.14159265f;
+			const float azimuth = end + (field(3) - 0.5f) * 2.4f;
+			float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth);
+			const float dz = std::cos(tilt);
+			const float height = reach * (0.6f + 0.4f * field(4)), speed = height / slows;
+			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
+			// A long hull's outer jets lean less, so a whole jet, head and push, ends inside 12 cells
+			// (0.78 of its height is as far as it gets before it stops).
+			const float a0 = (field(5) - 0.5f) * L * 1.2f, c0 = (field(6) - 0.5f) * W * 0.6f;
+			const float lean = std::sqrt(da * da + dc * dc) * 0.78f * height;
+			if (lean > 1e-3f) {
+				const float k = (std::min)(1.0f, (std::max)(0.0f, 12.0f - std::sqrt(a0 * a0 + c0 * c0)) / lean);
+				da *= k;
+				dc *= k;
+			}
+			const float along = a0 + da * travelled, across = c0 + dc * travelled;
+			// Smoke and heat both go with the jet's speed: white-hot low down, cooler where it slows.
+			// Half dust, which the sun lights pale; the soot is what glows (a jet of twice as much dust
+			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.
+			// The same width all the way up: the fan of jets is what widens the plume.  Jets that
+			// widened as they climbed stood on a thin stem under a fat top, a mushroom.
+			const float rate = 36.0f * now / speed;
+			onHull(along, across, H * 0.4f + dz * travelled, 1.6f, da * now, dc * now, dz * now, rate,
+				3.5f * std::pow(now / speed, 0.25f), rate, 0.15f);
+		}
+		soot[3] = 1.6f + 4.6f * std::exp(-t / 0.3f);	// the default 1.6 once the flare is over
+		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
+		if (t < 0.9f) {
+			const float fade = 1 - t / 0.9f;
+			for (unsigned k = 0; k < 4; ++k) {
+				const float s = k < 2 ? -0.7f : 0.7f, side = (k & 1) ? 1.0f : -1.0f;
+				onHull(s * L * (1.0f + 0.4f * unit(960 + k)), side * W * 1.1f, 0.5f, (std::max)(W * 0.9f, 2.5f),
+					s * 4.0f * fade, side * 6.0f * fade, 0.5f, 0, 0, 10.0f * fade, 0.3f);
+			}
 		}
 		// the cook-off pops, two to four, each a hot orange puff out of a hatch somewhere on the hull
 		const unsigned pops = 2 + unsigned(unit(900) * 2.99f);
