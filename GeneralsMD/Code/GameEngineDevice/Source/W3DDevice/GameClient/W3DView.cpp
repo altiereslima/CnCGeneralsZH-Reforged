@@ -980,12 +980,14 @@ void W3DView::aimCamera( void )
 	// Take the distance the terrain is actually drawn over instead, and open it with the height -
 	// at twice the height you see twice as far.  -directorrecord's panes set the zoom outright with
 	// the height's settling held off, so there the eye's own height opens it as well: a pane twice
-	// as high as the held height cut the far ground off in a black band.  Only there, so every
-	// other camera keeps the far plane it had.
+	// as high as the held height cut the far ground off in a black band.  A -cinema list holds the
+	// settling off and sets the zoom outright the same way, and a pulled-back shot lost the ground
+	// past the ridge to the same band.  Only those two, so every other camera keeps the far plane
+	// it had.
 	static const Real VIEW_DEFAULT_MAX_HEIGHT_ABOVE_TERRAIN = 310.0f;
 	farZ = (WorldHeightMap::NORMAL_DRAW_WIDTH * 1.08f) * MAP_XY_FACTOR;
 	Real height = m_heightAboveGround;
-	if (TheGlobalData->m_directorRecord && !m_okToAdjustHeight)
+	if ((TheGlobalData->m_directorRecord || TheGlobalData->m_cinemaScript.isNotEmpty()) && !m_okToAdjustHeight)
 		height = max(height, m_cameraOffset.z * getZoom() - m_groundLevel);
 	const Real heightMultiplier = height / VIEW_DEFAULT_MAX_HEIGHT_ABOVE_TERRAIN;
 	if (heightMultiplier > 1.0f)

@@ -21,9 +21,11 @@
 // patch of dust under it.
 //
 // A nuclear-class blast (the missile, the GLA's, the MOAB) has a volume of its own, much bigger:
-// a white flash, a fireball that rises fast and slows, a brief white condensation shell, a dust
-// skirt racing out ahead, and then a toroidal cap rolling round a narrow stem fed by air drawn in
-// along the ground, red-brown early, grey later, spreading flat once it stops rising.
+// a white flash, a white dome at the shock front, a fireball glowing from inside that rises,
+// slows and flattens into a cauliflower cap three to four times as wide as its grey-brown stem of
+// dust, a white collar round the stem for a few seconds, a low wall of dust racing out along the
+// ground, and the cap cooling to cream, white on top and dark underneath.  The cap and the stem are
+// shapes the cells are drawn towards, so they hold; the flow rolls and smears them.
 //
 // The sim is the same for all of them: a slab of a shared 3D atlas per blast, soot and dust in
 // two channels (the dust settles under gravity, the soot rises with the heat), and each logic
@@ -113,6 +115,9 @@ const float Drag = 0.045f;				// per cell/s of speed
 const float VelocityHalfLife = 3.0f;
 const float HeatHalfLife = 1.8f;
 const float DustHalfLife = 6.0f;
+const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
+const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
+const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
 
 const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/s, w heat
@@ -175,6 +180,11 @@ struct SimConstants {
 	float Power[MaxSlabs][4];
 	float Shape[MaxSlabs][4];
 	float Motion[MaxSlabs][4];
+	// A nuclear blast's mushroom, the shape its cells are drawn towards (MushroomPass).  Cap: the soot
+	// it holds, its centre's height, its radius across and its half height, in cells.  Stem: the
+	// dust it holds, its radius, the height of its top, how fast a second the cells reach the shape.
+	float Cap[MaxSlabs][4];
+	float Stem[MaxSlabs][4];
 	float Puffs[MaxSlabs * MaxPuffs * 3][4];
 	float Origins[MaxSlabs][4];		// each slab's world corner, for the movers below
 	float MoverCount[4];
@@ -193,10 +203,11 @@ struct DrawConstants {
 	float Ambient[4];
 	float SunDir[4];		// towards the sun
 	float Blast[4];			// the core's centre and radius in cells
-	float Effects[4];		// flash, condensation shell radius in cells and opacity, unused
-	float Extra[4];			// unused, the flash's height over its width, its radius in cells, unused
+	float Effects[4];		// flash, condensation shell radius in cells and opacity, the collar's opacity
+	float Extra[4];			// the collar's radius in cells, the flash's height over its width, its radius in cells, the collar's height in cells
 	float ClipLow[4];		// the world box the march keeps to: the grid's, or for the air where smoke is
 	float ClipHigh[4];
+	float Look[4];			// the light the shade side keeps, the fine billows' depth, the sun's share, unused
 };
 
 // What every program starts with, after the tier's GX, GY, GZ and SLABS: the fade that keeps smoke
@@ -258,6 +269,8 @@ cbuffer Sim : register(b0)
     float4 Power[VOLS];
     float4 Shape[VOLS];
     float4 Motion[VOLS];
+    float4 Cap[VOLS];
+    float4 Stem[VOLS];
     float4 Puffs[VOLS * PUFFS * 3];
     float4 Origins[VOLS];
     float4 MoverCount;
@@ -472,6 +485,7 @@ void main(uint3 id : SV_DispatchThreadID)
     float4 blast = Blasts[slab];
     float4 power = Power[slab];
     float4 shape = Shape[slab];
+    float4 cap = Cap[slab];		// a nuclear mushroom's, else nothing
     float4 vt = 0;
     DEN d = 0;
     if (volume.w > 0.5) {
@@ -520,14 +534,17 @@ void main(uint3 id : SV_DispatchThreadID)
     float4 motion = Motion[slab];
     if (motion.z > 0) {
         float across = (rho - motion.y) / 3;
-        float band = exp(-across * across) * layer;
+        // a nuclear surge stands taller at its front, a rolling wall of dust that still runs
+        // between the buildings rather than over them
+        float wall = cap.x > 0 ? 1 - smoothstep(1.5, 4.5, cell.z - groundAt((int2)cell.xy, slab)) : layer;
+        float band = exp(-across * across) * wall;
         vt.xy = lerp(vt.xy, radial * motion.z * (1 + 0.3 * jitterAt(id).x), 0.5 * band);
         d.y = max(d.y, motion.w * band * (0.4 + valueNoise(cell / 2.5, slab + 9)));
     }
     // The vortex ring: a torus round the core, up through the middle, out over the top, down
     // outside the rim and in underneath; it rolls the cap and draws the ground air inward.
     if (shape.x > 0) {
-        float h = cell.z - blast.z;
+        float h = cell.z - (cap.x > 0 ? cap.y : blast.z);	// a mushroom's ring rolls inside its cap
         float dr = rho - shape.y;
         float q = sqrt(dr * dr + h * h);
         float tube = max(shape.y * 0.5, 1.5);
@@ -535,15 +552,16 @@ void main(uint3 id : SV_DispatchThreadID)
         float3 swirl = float3(radial * h, -dr) * (shape.x / max(q, 0.75));
         swirl.z += motion.x;
         vt.xyz = lerp(vt.xyz, swirl, 0.3 * k);
-        // the cap is the ring: soot and heat fed into the tube while it climbs, so it reads as a torus
-        if (motion.x > 0.3) {
+        // a bomb's cap is the ring: soot and heat fed into the tube while it climbs, so it reads as
+        // a torus (a nuclear cap has its own shape below)
+        if (motion.x > 0.3 && cap.x <= 0) {
             float tubeCore = exp(-q * q / (tube * tube * 0.35));
             d.x = max(d.x, 1.2 * tubeCore * (0.4 + 1.2 * valueNoise(cell / 2.5 + Step.y * 0.3, slab + 3)));
             vt.w = max(vt.w, 0.9 * tubeCore);
         }
     }
     // The stem: air drawn in along the ground under the cap and up the axis into it.
-    if (shape.w > 0) {
+    if (shape.w > 0 && cap.x <= 0) {
         float ring = max(shape.y, 2);
         float ground = layer * (1 - smoothstep(ring * 1.5, ring * 3, rho));
         float axis = exp(-rho * rho / (ring * ring * 0.2)) * (cell.z < blast.z ? 1 : 0);
@@ -551,7 +569,7 @@ void main(uint3 id : SV_DispatchThreadID)
         vt.xyz = lerp(vt.xyz, stem, 0.15 * max(ground, axis));
     }
     // The hot core, lumpy from the start so the rising cap breaks into billows.
-    if (power.y > 0 || power.z > 0) {
+    if ((power.y > 0 || power.z > 0) && cap.x <= 0) {
         float r = length(cell - blast.xyz);
         if (r < blast.w) {
             float k = sqrt(1 - r / blast.w);
@@ -559,6 +577,42 @@ void main(uint3 id : SV_DispatchThreadID)
             vt.w = max(vt.w, power.z * k * (0.6 + 0.8 * valueNoise(cell / 3 + 11, slab)));
         }
     }
+)HLSL";
+
+// A nuclear blast's mushroom (Cap, Stem; reference/nuclear-real.jpg): the cap a ball of fire on the
+// ground that rises, flattens and widens into a dome whose rim curls under, its surface lumped into
+// billows that boil slowly; the stem a column of dust from the ground up into it, flared at its
+// foot.  The cells are drawn towards that shape at Stem.w a second and never set to it, so the
+// flow still rolls and smears them.  Left to the flow alone the cap spread thin and the noise ate
+// it inside twelve seconds, while the dust it dropped buried the base.  Soot that leaves the cap
+// and dust that leaves the stem thin out (Keep.w), so the shape stays a mushroom and the surge is
+// a ring that passes: the stem's dust, heavy, fell out of it and spread over the whole plateau.  The heat is the cap's, hottest in its middle
+// and its lumps, so the fireball glows from inside and its rim burns red.
+const char *const MushroomPass = R"HLSL(
+    if (cap.x > 0 && rho < cap.z * 1.6 + 3) {
+        float4 stem = Stem[slab];
+        float h = cell.z - cap.y;
+        float lumps = valueNoise(cell / 3.2 + float3(0, 0, -Step.y * 0.25), slab + 21) * 0.65
+            + valueNoise(cell / 1.6 + float3(0, 0, -Step.y * 0.4), slab + 23) * 0.35;
+        // a ball at first, a dome later: flatter underneath, the rim hanging lower than the middle
+        float flat = saturate((0.95 - cap.w / cap.z) / 0.53);
+        float rim = saturate(rho / cap.z);
+        float below = cap.w * (lerp(1.0, 0.5, flat) + 0.7 * flat * rim * rim * rim);
+        float e = length(float2(rho / cap.z, h / (h < 0 ? below : cap.w)));
+        float surface = e - 0.8 * (lumps - 0.5);	// cauliflower: the surface pushed in and out
+        float inCap = 1 - smoothstep(0.88, 1.0, surface);
+        float overGround = cell.z - groundAt((int2)cell.xy, slab);
+        float stemR = stem.y * (1 + 0.8 * exp(-overGround / 2)) * (0.8 + 0.4 * lumps);
+        float inStem = (1 - smoothstep(0.6, 1.0, rho / stemR)) * (1 - smoothstep(stem.z - 2, stem.z + 1, cell.z));
+        float rate = saturate(stem.w * dt);
+        float soot = cap.x * inCap, dust = stem.x * inStem;
+        if (soot > d.x) d.x += (soot - d.x) * rate;
+        if (dust > d.y) d.y += (dust - d.y) * rate;
+        d.x *= lerp(Keep.w, 1, saturate((1.3 - surface) * 3));
+        d.y *= lerp(Keep.w, 1, saturate(inStem * 3));
+        vt.w = max(vt.w, power.z * inCap * (1 - 0.45 * saturate(e)) * (0.7 + 0.6 * lumps));
+        vt.z = lerp(vt.z, shape.w, 0.15 * inStem);
+    } else if (cap.x > 0) d *= Keep.w;
 )HLSL";
 
 const char *const AdvectPassEnd = R"HLSL(
@@ -748,6 +802,7 @@ cbuffer Draw : register(b0)
     float4 Extra;
     float4 ClipLow;		// the world box the march keeps to, inside the grid's: where the smoke can be
     float4 ClipHigh;
+    float4 Look;		// the light the shade side keeps, the fine billows' depth, the sun's share
 };
 float3 worldAt(float2 pixel, float depth)
 {
@@ -804,7 +859,15 @@ float4 main(float4 position : SV_Position) : SV_Target
         float3 clamped = clamp(cell, float3(0, 0, 0), float3(GX - 1, GY - 1, GZ - 1));
         float3 uvw = float3((clamped.x + 0.5) / GX, (clamped.y + 0.5) / GY, (clamped.z + 0.5 + slabBase) / (GZ * SLABS));
         DEN dd = Den.SampleLevel(Linear, uvw, 0);
-        if (dd.x + dd.y < 0.004 && Effects.z <= 0) {	// empty air costs one sample
+        // a nuclear cap's condensation collar: a white skirt round the stem just under the cap,
+        // sloping down outwards, for a few seconds
+        float collar = 0;
+        if (Effects.w > 0) {
+            float dr = length(fromBlast.xy) - Extra.x;
+            float dz = cell.z - Extra.w + 0.2 * dr;
+            collar = Effects.w * exp(-dr * dr / max(Extra.x * Extra.x * 0.18, 1) - dz * dz * 0.5);
+        }
+        if (dd.x + dd.y < 0.004 && Effects.z <= 0 && collar < 0.004) {	// empty air costs one sample
 #ifdef AIR
             ++i;	// and the air's, most of its box, is crossed two steps at a time
 #endif
@@ -831,6 +894,7 @@ float4 main(float4 position : SV_Position) : SV_Target
             float across = (r - Effects.y) / max(Effects.y * 0.1, 0.5);
             shell = Effects.z * exp(-across * across) * saturate(fromBlast.z / Effects.y + 0.4) * (0.5 + n);
         }
+        shell += collar * (0.2 + 1.4 * n);	// as white as the shell, broken up by the billows
         float total = dd.x + dd.y + shell;
         if (total < 0.004) continue;
         // billows: the surface is eroded by the noise, the inside left whole
@@ -838,6 +902,14 @@ float4 main(float4 position : SV_Position) : SV_Target
         float eroded = total * saturate(0.35 + 1.1 * n);	// the air's smoke is thin: the noise shapes it, it does not eat it
 #else
         float eroded = max(total - (1 - n) * 0.45 * (1 - saturate(total * 1.2)), 0);
+        // a nuclear cap's cauliflower: a hard surface where its smoke passes a threshold, the
+        // threshold pushed about by finer billows, ten units across, than its cells can hold.  Eaten
+        // softly, the cap was a blurred beige ball lit the same all over.
+        if (Look.y > 0) {
+            float fine = Noise.SampleLevel(Wrap, cell / 3.5 + float3(Slab.x * 0.53, 0.21, -Camera.w * 0.03), 0);
+            // the soot only: the thin dust of the surge and the stem's foot keeps the soft edge
+            eroded = eroded * (1 - dd.x / total) + dd.x * lerp(1, smoothstep(0.3, 0.55, dd.x + (fine - 0.5) * 0.6), Look.y);
+        }
 #endif
         float sigma = eroded * walls(cell) * Slab.y * Slab.w;
         if (sigma <= 0) continue;
@@ -850,7 +922,7 @@ float4 main(float4 position : SV_Position) : SV_Target
 #else
         float3 albedo = (Soot.rgb * dd.x + Dust.rgb * dd.y + float3(0.92, 0.93, 0.95) * shell) / total;
 #endif
-        float3 lit = albedo * tint * (0.26 + 0.12 * height + 0.75 * sun * phase);
+        float3 lit = albedo * tint * (Look.x + 0.12 * height + Look.z * sun * phase);
         float3 source = (lit + fireColour(heat) * Soot.w * (dd.x / total)) * sigma;
         float through = exp(-sigma * stepLength);
         color += transmittance * (source - source * through) / sigma;
@@ -879,6 +951,7 @@ const float AirCoverage = 0.7f;			// a billboard's opacity at its centre, agains
 // A sphere's falloff, the trilinear blur of a few cells and the noise take most of the opacity a
 // particle's density was worked out for; this gives it back (by eye, on volair's dust and smoke).
 const float AirGain = 4.0f;
+const float AirTrailOver = 150.0f;		// units over the box's top: a system with a particle that high keeps its billboards
 
 struct Volume {
 	bool live = false;
@@ -1132,7 +1205,7 @@ bool makeTier(DX11BackendClass *backend, ID3D11Device *device, Tier &tier, const
 	static const char *const names[ProgramCount] = { "volsmoke curl", "volsmoke advect", "volsmoke divergence",
 		"volsmoke jacobi", "volsmoke project", "volsmoke light", "volsmoke scroll" };
 	const std::string sources[ProgramCount] = {
-		prelude + CurlPass, prelude + MoverPass + AdvectPass + AdvectPassEnd, prelude + DivergencePass,
+		prelude + CurlPass, prelude + MoverPass + AdvectPass + MushroomPass + AdvectPassEnd, prelude + DivergencePass,
 		prelude + PressureHelpers + JacobiPass, prelude + PressureHelpers + ProjectPass, prelude + LightPass,
 		prelude + ScrollPass };
 	std::vector<unsigned char> code;
@@ -1343,9 +1416,13 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 	std::memset(power, 0, 16);
 	std::memset(shape, 0, 16);
 	std::memset(motion, 0, 16);
+	float *cap = sim.Cap[slab], *stem = sim.Stem[slab];
+	std::memset(cap, 0, 16);
+	std::memset(stem, 0, 16);
 	shape[2] = 1000.0f;		// no ceiling
 	unsigned count = 0;
 	float flash = 0, shellRadius = 0, shellOpacity = 0, flashTall = 1.0f, flashWide = 3.0f;
+	float collarOpacity = 0, collarRadius = 0, collarHeight = 0, shade = ShadeLight, billows = 0, sunShare = SunShare;
 	float soot[4] = { 0.06f, 0.055f, 0.05f, 1.6f }, dust[3] = { 0.52f, 0.43f, 0.31f };
 	const float bx = volume.blast[0], by = volume.blast[1], bz = volume.blast[2];
 
@@ -1518,51 +1595,74 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			shape[3] = 2.5f * std::exp(-t / 10.0f);
 		}
 	} else {
-		// nuclear: the flash, the fireball rising fast and slowing, the condensation shell, the
-		// skirt racing out, then the rolling cap on its stem, spreading once it stops.  Sized so the
-		// whole mushroom stays in the play camera's view: it stops 24 cells (240 units) up and its
-		// cap spreads to 16 cells; the surge on the ground keeps its full reach.
-		const float rise = 1 - std::exp(-t / 5.0f);
-		const float radius = 3.5f + 3.5f * (1 - std::exp(-t / 3.0f));
-		blast[2] = bz + 22.0f * rise;
-		blast[3] = radius;
-		motion[0] = 22.0f / 5.0f * std::exp(-t / 5.0f);
+		// nuclear, after real ones (reference/nuclear-real.jpg): the flash and a white dome at the
+		// shock front for a second and a half; a ball of fire on the ground, yellow-white inside an
+		// orange-red shell, that rises, slows, flattens and widens into a cap three to four times as
+		// wide as the grey-brown stem of dust under it; a white collar round the stem for a few
+		// seconds; the cap cooling to cream, lit from outside, white on top and dark underneath; and
+		// a low wall of dust racing out along the ground past the base.  Sized for the play camera:
+		// the cap stops about 25 cells (250 units) up, 12 cells across its radius, so the stem shows
+		// under it from the game's own camera and the whole mushroom stays on screen; the surge keeps
+		// its full reach.  The shape is held by MushroomPass; the old flow-only cap read as a dark
+		// disc and was gone in twelve seconds, and its 40 seconds of ground dust buried the base.
+		const float capZ = bz + 2.0f + 20.0f * (1 - std::exp(-t / 3.2f));
+		const float capR = (std::min)(6.5f * (1 - std::exp(-t / 0.12f)) + 7.0f * (1 - std::exp(-(std::max)(t - 1.0f, 0.0f) / 5.0f))
+			+ 0.04f * (std::max)(t - 20.0f, 0.0f), 16.0f);
+		const float capH = capR * (0.95f - 0.57f * smoothstep01(t, 1.0f, 9.0f));
+		const float fade = 1 - smoothstep01(t, 50.0f, 85.0f);
+		// thin while it is fire, so the glow shows from inside it; thick smoke once it has cooled
+		cap[0] = (0.35f + 0.85f * smoothstep01(t, 3.0f, 10.0f)) * fade;
+		cap[1] = capZ;
+		cap[2] = (std::max)(capR, 1.0f);
+		cap[3] = (std::max)(capH, 1.0f);
+		// a narrow stem: at 3 cells it stood half as wide as the cap, a thick brown trunk
+		stem[0] = 0.9f * smoothstep01(t, 1.0f, 3.5f) * fade;
+		stem[1] = 1.4f + 0.8f * smoothstep01(t, 1.2f, 8.0f);
+		stem[2] = capZ - 0.4f * capH;
+		stem[3] = 4.0f + 20.0f * std::exp(-t / 0.3f);	// the fireball is there at once, the rest follows
+		blast[3] = (std::max)(capR, 3.5f);		// the skirt's footprint
+		motion[0] = 20.0f / 3.2f * std::exp(-t / 3.2f);	// the cap's rise, which the ring carries
 		flash = t < 0.06f ? 40.0f : 40.0f * std::exp(-(t - 0.06f) / 0.15f);
-		flashWide = radius * 1.5f;
+		flashWide = (std::max)(capR, 4.0f) * 1.5f;
 		flashTall = 1.2f;
-		if (t < 4.0f) power[1] = 1.3f;
-		power[2] = 2.0f * std::exp(-t / 5.0f);
-		if (t < 1.0f) { power[0] = 70.0f * std::exp(-t / 0.5f); power[3] = 1.2f; }
+		// the cap's heat: white for half a second, yellow-orange at two, red embers by ten
+		power[2] = 2.0f * std::exp(-t / 0.9f) + 1.6f * std::exp(-t / 9.0f);
+		if (t < 1.0f) { power[0] = 70.0f * std::exp(-t / 0.5f); power[3] = 0.3f; }
 		// the base surge: a ring front of dust racing out along the ground, far past the fireball,
-		// slowing as it goes, 42 cells (420 units) out over a 1.6 s constant
+		// slowing as it goes, 42 cells (420 units) out over a 1.6 s constant.  It drops dust all
+		// the way out: at 1.6 that was a brown blanket over the whole base, at 0.7 a tan one.
 		if (t < 7.0f) {
 			motion[1] = 42.0f * (1 - std::exp(-t / 1.6f));
 			motion[2] = 42.0f / 1.6f * std::exp(-t / 1.6f) * 1.2f;
-			motion[3] = 1.6f * (1 - t / 7.0f);
+			motion[3] = 0.22f * (1 - t / 7.0f);
 		}
-		if (t > 0.3f && t < 2.2f) {
-			shellRadius = radius * 1.7f;
-			shellOpacity = 1.2f * std::sin((t - 0.3f) / 1.9f * 3.14159265f);
+		// the Wilson cloud: a white dome running out with the shock front, centred on the ground
+		if (t > 0.12f && t < 1.8f) {
+			shellRadius = 7.0f + 20.0f * smoothstep01(t, 0.12f, 1.5f);
+			shellOpacity = 1.4f * std::sin((t - 0.12f) / 1.68f * 3.14159265f);
 		}
-		if (t > 0.8f) {
-			shape[0] = 35.0f * std::exp(-t / 30.0f);
-			shape[1] = radius * (0.9f + 0.03f * (std::max)(t - 10.0f, 0.0f));
-			shape[1] = (std::min)(shape[1], 16.0f);
+		// the condensation collar, round the stem just under the cap
+		if (t > 2.5f && t < 8.5f) {
+			// at 0.9 and the cap's whole radius it stood round the stem as a thick white tyre
+			collarOpacity = 0.35f * std::sin((t - 2.5f) / 6.0f * 3.14159265f);
+			collarRadius = capR * 0.7f;
+			collarHeight = capZ - capH * 0.9f;
 		}
-		shape[2] = bz + 24.0f;
-		if (t > 1.5f) shape[3] = 14.0f * std::exp(-t / 40.0f);
-		// the ground dust the stem draws up
-		if (t > 0.5f && t < 40.0f)
-			for (unsigned k = 0; k < 5; ++k) {
-				const float a = k * 1.2566371f, r = k == 0 ? 0.0f : 6.0f;
-				emit(slab, count, { bx + r * std::cos(a), by + r * std::sin(a), bz, 4.0f, 0, 0, 0, 0, 0, 1.5f, 0 });
-			}
-		const float grey = (std::min)(t / 25.0f, 1.0f);
-		soot[0] = 0.42f + (0.70f - 0.42f) * grey;
-		soot[1] = 0.24f + (0.68f - 0.24f) * grey;
-		soot[2] = 0.14f + (0.65f - 0.14f) * grey;
+		shape[0] = 12.0f * std::exp(-t / 30.0f);	// the ring rolling the cap's rim under
+		shape[1] = capR * 0.65f;
+		shape[2] = capZ;		// heat lifts nothing past the cap's middle: above, it stood the cap up into a ball
+		shape[3] = 6.0f * stem[0];					// the stem's dust rising into it
+		// white on its sunlit top, dark underneath: more sun and a little more sky than the rest
+		// take, where at 0.26 and 0.75 the cooled cap read as one flat grey-brown
+		shade = 0.34f;
+		sunShare = 1.0f;
+		billows = smoothstep01(t, 2.0f, 6.0f);	// once it is thick smoke: the thin fireball keeps its soft glow
+		// dark smoke round the fire at first, cream once it is lit only by the sun, greyer late
+		const float cream = smoothstep01(t, 3.0f, 12.0f), grey = smoothstep01(t, 20.0f, 50.0f);
+		const float early[3] = { 0.32f, 0.22f, 0.16f }, lit[3] = { 0.88f, 0.84f, 0.78f }, late[3] = { 0.80f, 0.79f, 0.78f };
+		for (unsigned i = 0; i < 3; ++i) soot[i] = early[i] + (lit[i] - early[i]) * cream + (late[i] - lit[i]) * grey;
 		soot[3] = 2.2f;
-		dust[0] = 0.50f; dust[1] = 0.38f; dust[2] = 0.26f;
+		dust[0] = 0.55f; dust[1] = 0.48f; dust[2] = 0.41f;	// the stem and the surge, grey-brown
 	}
 	sim.Volumes[slab][1] = (float)count;
 	if (draw) {
@@ -1572,9 +1672,15 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		draw->Effects[0] = flash;
 		draw->Effects[1] = shellRadius;
 		draw->Effects[2] = shellOpacity;
-		draw->Extra[0] = 0;
+		draw->Effects[3] = collarOpacity;
+		draw->Extra[0] = collarRadius;
 		draw->Extra[1] = flashTall;
 		draw->Extra[2] = flashWide;
+		draw->Extra[3] = collarHeight;
+		draw->Look[0] = shade;
+		draw->Look[1] = billows;
+		draw->Look[2] = sunShare;
+		draw->Look[3] = 0;
 	}
 }
 
@@ -1659,6 +1765,7 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 	sim.Keep[0] = std::pow(0.5f, dt / HeatHalfLife);
 	sim.Keep[1] = std::pow(0.5f, dt / VelocityHalfLife);
 	sim.Keep[2] = std::pow(0.5f, dt / DustHalfLife);
+	sim.Keep[3] = std::pow(0.5f, dt / CapSpillHalfLife);
 	for (unsigned i = 0; i < 3; ++i) sim.Sun[i] = sunToward[i];
 	sim.Sun[3] = Extinction;
 	sim.Wind[0] = WindX;
@@ -1995,6 +2102,8 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 		const bool dusty = airLookOf(system->getTemplate(), system).dust;
 		const float fade = system->getStealthFade();
 		unsigned inside = 0, outside = 0;
+		bool above = false;
+		const size_t start = found.size();
 		for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) {
 			const float alpha = (std::min)(p->getAlpha() * fade * AirCoverage, 0.95f);
 			if (alpha < 0.02f) continue;
@@ -2006,6 +2115,7 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 			if (at->x < low[0] + rim || at->x > high[0] - rim || at->y < low[1] + rim || at->y > high[1] - rim
 					|| at->z < low[2] || at->z > high[2] - rim) {
 				++outside;
+				above = above || at->z > high[2] + AirTrailOver;
 				continue;
 			}
 			++inside;
@@ -2018,8 +2128,16 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy });
 		}
 		// a system with no particle in the box (a plume past the screen's edge zoomed out, a column
-		// over a cliff) keeps its billboards until the box comes to it: nothing else would draw it
-		if (outside && !inside) airOutside.insert(id);
+		// over a cliff) keeps its billboards until the box comes to it: nothing else would draw it.
+		// One that reaches well over the box's top keeps them all, its part inside too: a nuclear
+		// missile's trail coming down from a thousand units up drew as a short stub under nothing,
+		// where Off draws a thick grey column all the way up.  Well over, so a burning building's
+		// column that tops the box by a little stays in the air as the box steps with the camera.
+		// ponytail: no hysteresis; a plume that straddles the line flips, add a second's hold if one does
+		if (above) {
+			found.resize(start);
+			airOutside.insert(id);
+		} else if (outside && !inside) airOutside.insert(id);
 		else airOutside.erase(id);
 	}
 	const size_t cap = air.particles;
@@ -2564,6 +2682,8 @@ void Render(const HazardCloud::Camera &camera)
 			std::memset(draw.Blast, 0, sizeof(draw.Blast));
 			std::memset(draw.Effects, 0, sizeof(draw.Effects));
 			std::memset(draw.Extra, 0, sizeof(draw.Extra));
+			const float look[4] = { ShadeLight, 0, SunShare, 0 };
+			std::memcpy(draw.Look, look, sizeof(look));
 			const float slab[4] = { 0, 1, AirShapes[level].stepCells, AirExtinction };
 			std::memcpy(draw.Slab, slab, sizeof(slab));
 			upload(context, state.drawConstants, &draw, sizeof(draw));
