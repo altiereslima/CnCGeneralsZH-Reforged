@@ -1386,7 +1386,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// round ball there
 			const float age = t - 0.15f * field(0), slows = 0.18f;
 			if (age < 0 || age > 1.5f * slows) continue;
-			const float tilt = 0.25f + 0.8f * field(1);
+			const float tilt = 0.25f + 0.8f * std::sqrt(field(1));	// more of them at the outer angles: a fan wide at the top
 			const float end = field(2) < 0.5f ? 0.0f : 3.14159265f;
 			const float azimuth = end + (field(3) - 0.5f) * 2.4f;
 			float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth);
@@ -1404,15 +1404,22 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 				dc *= k;
 			}
 			const float along = a0 + da * travelled, across = c0 + dc * travelled;
-			// Smoke and heat both go with the jet's speed: white-hot low down, cooler where it slows.
+			// Smoke and heat both go with the jet's speed, hottest low down; it cools once laid.
 			// Some dust, which the sun lights pale; the soot is what glows (a jet of twice as much dust
 			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.  Hot
-			// enough low down to burn near-white (fireColour past 1.6).  The same width all the way
-			// up: the fan of jets is what widens the plume.  Jets that widened as they climbed stood
-			// on a thin stem under a fat top, a mushroom.
-			const float rate = 36.0f * now / speed;
-			onHull(along, across, H * 0.4f + dz * travelled, 2.0f, da * now, dc * now, dz * now, rate,
-				4.6f * std::pow(now / speed, 0.4f), rate * 0.6f, 0.15f);
+			// enough low down to burn near-white (fireColour past 1.6).  The fan of jets is what
+			// widens the plume; one jet widens only a little.  Thin jets that doubled their width as
+			// they climbed stood on a thin stem under a fat top, a mushroom.
+			// thick enough at the top that the fire's glow outshines the sunlit smoke there, which
+			// read orange-brown at 36
+			const float rate = 60.0f * now / speed;
+			// a little wider as it climbs: the advection smears a two-cell jet's heat into the cold air
+			// round it, which cooled the fan's top half to orange however hot the head was
+			onHull(along, across, H * 0.4f + dz * travelled, 2.0f + 0.05f * travelled, da * now, dc * now, dz * now, rate,
+				// never under 3.2 while it runs (the jets are done by 0.42 s), so the heads, falloff and
+				// all, stay past the near-white end and the whole fan flares pale, as the photo's does;
+				// at 2.4 the upper half was already orange
+				(std::max)(4.6f * std::pow(now / speed, 0.4f), 3.2f), rate * 0.4f, 0.15f);
 		}
 		soot[3] = 1.6f + 4.6f * std::exp(-t / 0.3f);	// the default 1.6 once the flare is over
 		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
