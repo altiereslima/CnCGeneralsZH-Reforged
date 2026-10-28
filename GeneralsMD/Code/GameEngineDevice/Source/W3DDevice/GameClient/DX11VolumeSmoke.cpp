@@ -8,8 +8,8 @@
 // A tank's death is an ammunition cook-off, laid out on the dying hull's own box (its template's
 // length, width and height and its heading, read from the drawable).  Orange flame and black soot
 // burst out low along the hull and roll along the ground off both ends over a skirt of pale dust,
-// a ragged white-yellow plume of fire flares up out of the hull top in ten to twelve thin, uneven
-// jets about as high as the band is long and cools to grey-brown smoke, two to four
+// a ragged near-white plume of fire fans up out of the hull top in twelve to fourteen uneven
+// jets, on High twice as high as the band is long, and cools to grey-brown smoke, two to four
 // smaller pops follow over a few seconds, and then the hull burns: a thick black column for half
 // a minute that rises from its whole length, leans with the wind and thins.
 //
@@ -40,8 +40,8 @@
 // with it Off Takes, Hides and Render return before touching anything.  With it on, every
 // system of a blast this takes draws no billboards, its GPU overflow particles included; the
 // shell keeps its additive fire and flash cards, the tank and the nuclear blast have none, and
-// the tank's ground ring is taken with them.  Its scrap and the smoke trails behind the scrap
-// stay the game's own.
+// the tank's ground ring and the smoke trails behind its flying scrap are taken with them.  The
+// scrap itself, and every gun's muzzle smoke, stay the game's own.
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
 #include "Common/LogicThread.h"
@@ -760,7 +760,10 @@ float3 fireColour(float heat)
 {
     float3 colour = lerp(float3(0.6, 0.07, 0.02), float3(1.0, 0.42, 0.08), smoothstep(0.55, 0.95, heat));
     colour = lerp(colour, float3(1.0, 0.88, 0.62), smoothstep(0.95, 1.5, heat));
-    return colour * smoothstep(0.5, 1.0, heat) * (1 + 2 * smoothstep(1.1, 1.8, heat));
+    // hotter than a shell's core, a tank's plume and a nuke's first second: overexposed near-white,
+    // as the photo of a tank going up is
+    colour = lerp(colour, float3(1.0, 0.97, 0.9), smoothstep(1.6, 2.6, heat));
+    return colour * smoothstep(0.5, 1.0, heat) * (1 + 2 * smoothstep(1.1, 1.8, heat) + 2 * smoothstep(1.6, 2.6, heat));
 }
 float4 main(float4 position : SV_Position) : SV_Target
 {
@@ -1363,27 +1366,27 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, 1.25f, 8.0f * fade, 0.35f);
 			}
 		}
-		// The plume, the photo's tallest part: ten to twelve thin jets of white-hot fire and dust
+		// The plume, the photo's tallest part: twelve to fourteen jets of white-hot fire and dust
 		// shot up out of the hull top in the first half second, each to its own height, fanning out
 		// as they climb, so the flare is ragged and opens upwards.  The tallest is set for about
-		// twice the base band's length once the heat has lifted it on, sixteen cells short of the
-		// grid's top (24 on Low's 40, 40 on High's 56), and no head goes more than 15 cells off the
-		// blast's axis, where the grid's round sides fade the smoke out by a few percent.  With 12 a
-		// High plume, twice as tall, came out a narrow pillar.  Each lays
+		// twice the base band's length once the heat has lifted it on, twenty cells short of the
+		// grid's top (20 on Low's 40, 36 on High's 56: hot heads rise on into the lid), and they
+		// lean out up to a radian and 15 cells off the blast's axis, so the fan opens wide at the
+		// top.  Kept to 12 cells and 0.8, a High plume twice as tall came out a narrow pillar.  Each lays
 		// down thin smoke at a rate that goes with its speed, the same a cell along the whole jet,
 		// and pushes the air only lightly.  A thick jet, a hard push or a fixed rate carried the
 		// smoke along with the head and left a round ball at the top with nothing under it.  The
 		// fire burns brighter for the first second (soot[3] below), so the plume flares white and
 		// then hangs as grey-brown smoke and dust.
-		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 16.0f);
-		const unsigned jets = 10 + unsigned(unit(850) * 2.99f);
+		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 20.0f);
+		const unsigned jets = 12 + unsigned(unit(850) * 2.99f);	// with the base and the skirt, the 24 a slab holds
 		for (unsigned j = 0; j < jets; ++j) {
 			auto field = [&](unsigned f) { return unit(1000 + 16 * j + f); };
 			// a jet stops once it has slowed to a fifth of its speed: lingering at the top it heated a
 			// round ball there
 			const float age = t - 0.15f * field(0), slows = 0.18f;
 			if (age < 0 || age > 1.5f * slows) continue;
-			const float tilt = 0.05f + 0.75f * field(1);
+			const float tilt = 0.25f + 0.8f * field(1);
 			const float end = field(2) < 0.5f ? 0.0f : 3.14159265f;
 			const float azimuth = end + (field(3) - 0.5f) * 2.4f;
 			float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth);
@@ -1391,7 +1394,8 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float height = reach * (0.6f + 0.4f * field(4)), speed = height / slows;
 			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
 			// A long hull's or a tall jet's lean is cut, so a whole jet, head and push, ends inside 15
-			// cells (0.78 of its height is as far as it gets before it stops).
+			// cells, where walls() has faded it by a few percent (0.78 of its height is as far as it
+			// gets).
 			const float a0 = (field(5) - 0.5f) * L * 1.2f, c0 = (field(6) - 0.5f) * W * 0.6f;
 			const float lean = std::sqrt(da * da + dc * dc) * 0.78f * height;
 			if (lean > 1e-3f) {
@@ -1401,13 +1405,14 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			}
 			const float along = a0 + da * travelled, across = c0 + dc * travelled;
 			// Smoke and heat both go with the jet's speed: white-hot low down, cooler where it slows.
-			// Half dust, which the sun lights pale; the soot is what glows (a jet of twice as much dust
-			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.
-			// The same width all the way up: the fan of jets is what widens the plume.  Jets that
-			// widened as they climbed stood on a thin stem under a fat top, a mushroom.
+			// Some dust, which the sun lights pale; the soot is what glows (a jet of twice as much dust
+			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.  Hot
+			// enough low down to burn near-white (fireColour past 1.6).  The same width all the way
+			// up: the fan of jets is what widens the plume.  Jets that widened as they climbed stood
+			// on a thin stem under a fat top, a mushroom.
 			const float rate = 36.0f * now / speed;
-			onHull(along, across, H * 0.4f + dz * travelled, 1.6f, da * now, dc * now, dz * now, rate,
-				3.5f * std::pow(now / speed, 0.25f), rate, 0.15f);
+			onHull(along, across, H * 0.4f + dz * travelled, 2.0f, da * now, dc * now, dz * now, rate,
+				4.6f * std::pow(now / speed, 0.4f), rate * 0.6f, 0.15f);
 		}
 		soot[3] = 1.6f + 4.6f * std::exp(-t / 0.3f);	// the default 1.6 once the flare is over
 		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
@@ -1674,9 +1679,12 @@ AirLook airLookOf(const ParticleSystemTemplate *tmplate, ParticleSystem *system)
 	// Flying bits and the smoke trails behind them (ReforgedDebrisTrail, ReforgedShrapnelPuff, the
 	// ReforgedBlastShardPuff sizes, TankStruckDebris, TrackDebrisDirt*): the air keeps what a
 	// particle stamped for seconds after it moved on, so a fast clod left its whole path behind as a
-	// brown tentacle and a thin streak stood as a wide pale ray.  These keep the game's own look.
+	// brown tentacle and a thin streak stood as a wide pale ray.  These keep the game's own look,
+	// and so does a gun's muzzle smoke (TankMuzzleFlashSmoke and the rest): one short puff stamped
+	// as a sphere into cells seven units across lay on the ground in front of the gun as a flat
+	// tan disc, where the game's own puff is soft grey and drifts.
 	look.scrap = system->getPriority() == DEBRIS_TRAIL || std::strstr(name, "Debris") || std::strstr(name, "Shrapnel")
-		|| std::strstr(name, "Shard");
+		|| std::strstr(name, "Shard") || std::strstr(name, "Muzzle");
 	airLooks[tmplate] = look;
 	return look;
 }
@@ -2197,6 +2205,28 @@ bool Takes(ParticleSystem *system)
 	// other smoke or dust go to the air.
 	// A loose ground-aligned system is let as far as a tank's blast: the stock ring a tank's death
 	// lays on the ground (MammothTankExplosionShockwave), which the photo has none of.
+	// The smoke trail behind a plate or a shard thrown off a dying tank stood as a thick grey arc
+	// over the plume, where the photo has a few faint straight streaks at most: one that starts
+	// beside a tank's blast, in its first half second, is hidden with the blast's own systems.
+	// Only trails on thrown scrap (hung on a debris object) and the vehicle shrapnel's; a shell's
+	// shard trails landing beside the tank keep theirs.  Its own position is local to the plate it
+	// rides on, so its first particle says where it is.
+	const bool trail = system->getAttachedObject() != INVALID_ID || std::strstr(system->getTemplate()->getName().str(), "Shrapnel");
+	Particle *first = system->isUsingStreak() && trail ? system->getFirstParticle() : nullptr;
+	if (first && airLookOf(system->getTemplate(), system).scrap && TheGameLogic) {
+		const int now = (int)TheGameLogic->getFrame();
+		const int seen = firstSeen.emplace(id, now).first->second;
+		const Coord3D where = *first->getPosition();
+		for (const Volume &volume : volumes) {
+			if (!volume.live || volume.kind != TankDeath || seen < volume.born - 10 || seen > volume.born + 30) continue;
+			const float dx = where.x - (volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell);
+			const float dy = where.y - (volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell);
+			if (dx * dx + dy * dy > joinRadius(volume) * joinRadius(volume)) continue;
+			pruneSets();
+			takenSystems.insert(id);
+			return true;
+		}
+	}
 	const bool loose = !system->isUsingStreak() && system->getVolumeParticleDepth() <= 1
 		&& system->getAttachedObject() == INVALID_ID && system->getAttachedDrawable() == INVALID_DRAWABLE_ID
 		&& system->getPriority() != AREA_EFFECT;
