@@ -16,10 +16,14 @@ class ThingTemplate;
 
 /** One defence's hittable ground.  Sample (i, j) sits at world (originX + i * step, originY + j * step).
 	* distance[ j * width + i ] is in world units: positive inside the ground the defence can hit, negative
-	* outside, nought on the edge, clamped to +-distanceLimit.  The edge drawn where the field taken
-	* bilinearly crosses nought lies only in grid cells whose four corners the logic's own tests passed
-	* (ReachOverlay.cpp says how), so the renderer must not grow the area: draw nothing where the
-	* filtered distance is at or under nought. */
+	* outside, nought on the edge, clamped to +-distanceLimit, and smoothed so its edge has no grid steps.
+	* The edge drawn where the field taken bilinearly crosses nought lies only in grid cells whose four
+	* corners the logic's own tests passed (ReachOverlay.cpp says how), so the renderer must not grow the
+	* area: draw nothing where the filtered distance is at or under nought.
+	*
+	* hardness, on the same grid, says what the nearest edge is: 1 where it is the end of the guns' reach
+	* (a range ring, drawn as a line), 0 where something blocks it (a cliff, a building, the fog), which
+	* fades in softly instead.  Taken bilinearly too. */
 struct ReachOverlayField
 {
 	Real originX;
@@ -29,9 +33,10 @@ struct ReachOverlayField
 	Int height;
 	Real distanceLimit;
 	std::vector< Real > distance;
+	std::vector< Real > hardness;
 	Color color;							///< the owner's colour, alpha ignored
 	Real opacity;							///< 0..1, the whole area's strength this frame
-	UnsignedInt version;			///< changes whenever distance or the grid changes, so a texture can be kept
+	UnsignedInt version;			///< changes whenever distance, hardness or the grid changes, so a texture can be kept
 };
 
 /** The fields to draw this frame, in no particular order.  Empty when nothing is shown, and always
@@ -39,8 +44,8 @@ struct ReachOverlayField
 void ReachOverlay_getFields( std::vector< const ReachOverlayField * > &out );
 
 /** Work out this frame's fields: the selected defences of the local player, an ally or (to an
-	* observer) anyone, and while a building is on the cursor every such defence plus the one on the
-	* cursor.  InGameUI::update calls it once a frame. */
+	* observer) anyone, or while a defence is on the placement cursor that one alone.  Nothing else is
+	* ever drawn.  InGameUI::update calls it once a frame. */
 void ReachOverlay_update( void );
 
 /** Sample a standing defence's field, and its template's on the cursor at the same spot, against

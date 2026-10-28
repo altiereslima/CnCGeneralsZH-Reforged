@@ -61,8 +61,9 @@
 //
 // The tests are taken on a grid, a quarter of a pathfind cell apart, and a grid point is lit only if
 // it and its eight neighbours all pass.  The renderer paints where the field, taken bilinearly, is
-// above nought, which needs one lit corner, so every painted spot lies in a grid cell whose four
-// corners all passed.  ReachOverlay_prove measures what is left: points between the grid points.
+// above nought, which needs one lit corner (shadeField smooths the field but holds every unlit point
+// below nought), so every painted spot lies in a grid cell whose four corners all passed.
+// ReachOverlay_prove measures what is left: points between the grid points.
 //-------------------------------------------------------------------------------------------------
 
 static const Real LIVE_STEP = PATHFIND_CELL_SIZE_F * 0.25f;		///< a standing defence's grid
@@ -308,24 +309,28 @@ static Real standHeight( Real x, Real y )
 	return z;
 }
 
+/// what a grid point's tests said: out of the guns' reach (a range edge, drawn as a line), passed, or
+/// in reach but blocked (a cliff, a building, the sight line, the fog: an edge that fades in)
+enum { REACH_OUT = 0, REACH_PASS = 1, REACH_BLOCKED = 2 };
+
 //-------------------------------------------------------------------------------------------------
 /** Every test but the fog, for the worst ground target standing at (x, y). */
 //-------------------------------------------------------------------------------------------------
-static Bool hitsGroundAt( const ReachShooter &s, const GroundProbe &probe, Real x, Real y )
+static UnsignedByte hitsGroundAt( const ReachShooter &s, const GroundProbe &probe, Real x, Real y )
 {
 	const Real dx = x - s.center.x;
 	const Real dy = y - s.center.y;
 	if( dx * dx + dy * dy > s.reachBound * s.reachBound )
-		return FALSE;
+		return REACH_OUT;
 
 	Coord3D at;
 	at.set( x, y, standHeight( x, y ) );
 
 	const PathfindCell *cell = TheAI->pathfinder()->getCell( LAYER_GROUND, &at );
 	if( cell == NULL || cell->getType() == PathfindCell::CELL_OBSTACLE )
-		return FALSE;
+		return REACH_BLOCKED;
 	if( TheTerrainLogic->findBridgeAt( &at ) != NULL )
-		return FALSE;
+		return REACH_BLOCKED;
 
 	// FROM_BOUNDINGSPHERE_2D from the defence's edge to the target's middle
 	Real distSqr;
@@ -341,7 +346,7 @@ static Bool hitsGroundAt( const ReachShooter &s, const GroundProbe &probe, Real 
 	const Real look = s.obj ? Weapon_elevatedRange( s.obj, s.acquireRange, at.z )
 		: s.acquireRange + Weapon_elevationRangeBonus( s.acquireRange, s.center.z - at.z );
 	if( distSqr > look * look )
-		return FALSE;
+		return REACH_OUT;
 
 	// the widest target's edge is this much nearer than its middle (distCalcProc_BoundaryAndBoundary_2D)
 	const Real edge = max( 0.0f, sqrtf( distSqr ) - probe.widestRadius );
@@ -352,7 +357,7 @@ static Bool hitsGroundAt( const ReachShooter &s, const GroundProbe &probe, Real 
 		if( gun.live )
 		{
 			if( !gun.live->isWithinAttackRange( s.obj, &at ) )
-				return FALSE;
+				return REACH_OUT;
 		}
 		else
 		{
@@ -360,13 +365,13 @@ static Bool hitsGroundAt( const ReachShooter &s, const GroundProbe &probe, Real 
 			const Real reach = range + Weapon_elevationRangeBonus( range, s.center.z - at.z );
 			const Real minimum = gun.tmpl->getMinimumAttackRange();
 			if( distSqr > reach * reach || distSqr < minimum * minimum )
-				return FALSE;
+				return REACH_OUT;
 		}
 		const Real minimum = gun.tmpl->getMinimumAttackRange();
 		if( minimum > 0.0f && edge * edge < minimum * minimum )
-			return FALSE;
+			return REACH_OUT;
 		if( pitchLimited( gun.tmpl ) && fabs( at.z - s.center.z ) >= PITCH_FREE_HEIGHT )
-			return FALSE;
+			return REACH_BLOCKED;
 	}
 
 	if( s.lineOfSight )
@@ -376,21 +381,21 @@ static Bool hitsGroundAt( const ReachShooter &s, const GroundProbe &probe, Real 
 		if( s.obj )
 		{
 			if( !ThePartitionManager->isClearLineOfSightTerrain( s.obj, *s.obj->getPosition(), NULL, top ) )
-				return FALSE;
+				return REACH_BLOCKED;
 			if( TheAI->pathfinder()->isAttackViewBlockedByObstacle( s.obj, *s.obj->getPosition(), NULL, at ) )
-				return FALSE;
+				return REACH_BLOCKED;
 		}
 		else
 		{
 			Coord3D eye = s.center;
 			eye.z = s.eyeZ;
 			if( !ThePartitionManager->isClearLineOfSightTerrain( NULL, eye, NULL, top ) )
-				return FALSE;
+				return REACH_BLOCKED;
 			if( TheAI->pathfinder()->isGroundViewBlockedByObstacle( s.center, at, s.standingIn ) )
-				return FALSE;
+				return REACH_BLOCKED;
 		}
 	}
-	return TRUE;
+	return REACH_PASS;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -399,7 +404,7 @@ static Bool hitsGroundAt( const ReachShooter &s, const GroundProbe &probe, Real 
 struct ReachEntry
 {
 	ReachOverlayField field;
-	std::vector< UnsignedByte > geometry;		///< every test but the fog passed at this grid point
+	std::vector< UnsignedByte > geometry;		///< REACH_PASS where every test but the fog passed at this grid point
 	UnsignedInt signature;
 	UnsignedInt fogFrame;
 	UnsignedInt lastWanted;
@@ -433,7 +438,7 @@ static void traceGeometry( ReachEntry &entry, const ReachShooter &s, Real step )
 	{
 		const Real y = entry.field.originY + j * step;
 		for( Int i = 0; i < w; ++i )
-			entry.geometry[ j * w + i ] = hitsGroundAt( s, probe, entry.field.originX + i * step, y ) ? 1 : 0;
+			entry.geometry[ j * w + i ] = hitsGroundAt( s, probe, entry.field.originX + i * step, y );
 	}
 
 	// the bound allows for all the high ground a range can gain; cut the grid down to what passed,
@@ -443,7 +448,7 @@ static void traceGeometry( ReachEntry &entry, const ReachShooter &s, Real step )
 	{
 		for( Int i = 0; i < w; ++i )
 		{
-			if( !entry.geometry[ j * w + i ] )
+			if( entry.geometry[ j * w + i ] != REACH_PASS )
 				continue;
 			loI = min( loI, i );
 			hiI = max( hiI, i );
@@ -477,10 +482,65 @@ static void traceGeometry( ReachEntry &entry, const ReachShooter &s, Real step )
 	entry.fogFrame = 0;
 }
 
+/// a separable Gaussian over the grid, sigma in grid steps; past the border the edge sample holds,
+/// and the border is two points of nothing (traceGeometry's crop)
+static void blurGrid( std::vector< Real > &v, Int w, Int h, Real sigma )
+{
+	const Int radius = (Int)ceilf( 2.5f * sigma );
+	std::vector< Real > weight( radius + 1 );
+	Real sum = 0.0f;
+	for( Int r = 0; r <= radius; ++r )
+	{
+		weight[ r ] = expf( -0.5f * (Real)( r * r ) / ( sigma * sigma ) );
+		sum += r == 0 ? weight[ r ] : 2.0f * weight[ r ];
+	}
+	for( Int r = 0; r <= radius; ++r )
+		weight[ r ] /= sum;
+
+	// one line of samples, stride apart, through a padded copy so the inner loop has no clamp
+	std::vector< Real > line( max( w, h ) + 2 * radius );
+	auto pass = [ & ]( Real *first, Int count, Int stride )
+	{
+		for( Int n = 0; n < count; ++n )
+			line[ radius + n ] = first[ n * stride ];
+		for( Int r = 0; r < radius; ++r )
+		{
+			line[ r ] = first[ 0 ];
+			line[ radius + count + r ] = first[ ( count - 1 ) * stride ];
+		}
+		for( Int n = 0; n < count; ++n )
+		{
+			const Real *at = &line[ radius + n ];
+			Real total = weight[ 0 ] * at[ 0 ];
+			for( Int r = 1; r <= radius; ++r )
+				total += weight[ r ] * ( at[ -r ] + at[ r ] );
+			first[ n * stride ] = total;
+		}
+	};
+	for( Int j = 0; j < h; ++j )
+		pass( &v[ j * w ], w, 1 );
+	for( Int i = 0; i < w; ++i )
+		pass( &v[ i ], h, w );
+}
+
+static const Real SMOOTH_SIGMA = 4.0f;		///< world units the edge is smoothed over, at least a grid step
+static const Real SMOOTH_MARGIN = 0.6f;		///< grid steps the smoothed edge is pulled in, past the steps' corners
+static const Real UNLIT_HOLD = 0.05f;			///< grid steps an unlit point is held under nought whatever the blur says
+
 //-------------------------------------------------------------------------------------------------
 /** The fog on top of the geometry, then the erosion, then the signed distance (a chamfer walk, a
-	* grid step straight and step root two across; only the sign is load-bearing, the size only shapes
-	* the border the renderer draws). */
+	* grid step straight and step root two across), smoothed.  Only the sign is load-bearing; the size
+	* shapes the border the renderer draws.
+	*
+	* The lit points are the grid's own staircase, and so is a field taken straight from them: a range
+	* ring drawn in steps of a grid point, a cliff's edge in steps of a pathfind cell.  The distance is
+	* blurred, which lays the edge along the middle of the steps, and pulled in by a margin so it passes
+	* inside their corners.  Whatever the blur did, an unlit point is then held below nought, so the
+	* edge the renderer draws still lies only in grid cells with a lit corner, whose four corners all
+	* passed: the area can shrink by the margin, never grow.
+	*
+	* The hardness is what the nearest failed point failed on, out of reach (a ring, hard) or blocked
+	* (soft), blurred as the distance is so a ring meeting a cliff turns from line to fade smoothly. */
 //-------------------------------------------------------------------------------------------------
 static void shadeField( ReachEntry &entry )
 {
@@ -489,19 +549,49 @@ static void shadeField( ReachEntry &entry )
 	const Int h = field.height;
 	const Real step = field.step;
 
+	// hard: what the nearest failed point failed on, 1 out of reach, 0 blocked (a point in reach that
+	// the fog hides counts as blocked); gap: how far that point is, in grid steps, a city-block walk
 	std::vector< UnsignedByte > seen( w * h, 0 );
+	std::vector< Real > hard( w * h, 1.0f );
+	std::vector< Int > gap( w * h, w + h );
 	for( Int j = 0; j < h; ++j )
 	{
 		for( Int i = 0; i < w; ++i )
 		{
 			const Int k = j * w + i;
-			if( !entry.geometry[ k ] )
-				continue;
-			Coord3D at;
-			at.set( field.originX + i * step, field.originY + j * step, 0.0f );
-			seen[ k ] = ThePartitionManager->getShroudStatusForPlayer( entry.playerIndex, &at ) == CELLSHROUD_CLEAR ? 1 : 0;
+			if( entry.geometry[ k ] == REACH_PASS )
+			{
+				Coord3D at;
+				at.set( field.originX + i * step, field.originY + j * step, 0.0f );
+				seen[ k ] = ThePartitionManager->getShroudStatusForPlayer( entry.playerIndex, &at ) == CELLSHROUD_CLEAR ? 1 : 0;
+			}
+			if( !seen[ k ] )
+			{
+				gap[ k ] = 0;
+				hard[ k ] = entry.geometry[ k ] == REACH_OUT ? 1.0f : 0.0f;
+			}
 		}
 	}
+	auto take = [ & ]( Int k, Int from )
+	{
+		if( gap[ from ] + 1 < gap[ k ] )
+		{
+			gap[ k ] = gap[ from ] + 1;
+			hard[ k ] = hard[ from ];
+		}
+	};
+	for( Int j = 0; j < h; ++j )
+		for( Int i = 0; i < w; ++i )
+		{
+			if( i > 0 ) take( j * w + i, j * w + i - 1 );
+			if( j > 0 ) take( j * w + i, ( j - 1 ) * w + i );
+		}
+	for( Int j = h - 1; j >= 0; --j )
+		for( Int i = w - 1; i >= 0; --i )
+		{
+			if( i < w - 1 ) take( j * w + i, j * w + i + 1 );
+			if( j < h - 1 ) take( j * w + i, ( j + 1 ) * w + i );
+		}
 
 	// lit: it and its eight neighbours passed
 	std::vector< UnsignedByte > lit( w * h, 0 );
@@ -561,15 +651,29 @@ static void shadeField( ReachEntry &entry )
 		}
 	}
 
-	// a fog refresh that changed nothing keeps the version, so the renderer keeps its texture
-	Bool changed = (Int)field.distance.size() != w * h;
-	field.distance.resize( w * h );
 	for( Int k = 0; k < w * h; ++k )
 	{
 		const Real magnitude = min( d[ k ] - 0.5f * step, DISTANCE_LIMIT );
-		const Real value = lit[ k ] ? magnitude : -magnitude;
-		changed = changed || field.distance[ k ] != value;
+		d[ k ] = lit[ k ] ? magnitude : -magnitude;
+	}
+	const Real sigma = max( SMOOTH_SIGMA / step, 1.0f );
+	blurGrid( d, w, h, sigma );
+	blurGrid( hard, w, h, sigma );
+
+	// a fog refresh that changed nothing keeps the version, so the renderer keeps its texture
+	Bool changed = (Int)field.distance.size() != w * h || (Int)field.hardness.size() != w * h;
+	field.distance.resize( w * h );
+	field.hardness.resize( w * h );
+	for( Int k = 0; k < w * h; ++k )
+	{
+		Real value = d[ k ] - SMOOTH_MARGIN * step;
+		if( !lit[ k ] )
+			value = min( value, -UNLIT_HOLD * step );
+		value = max( -DISTANCE_LIMIT, min( value, DISTANCE_LIMIT ) );
+		const Real hardness = hard[ k ];
+		changed = changed || field.distance[ k ] != value || field.hardness[ k ] != hardness;
 		field.distance[ k ] = value;
+		field.hardness[ k ] = hardness;
 	}
 	if( changed || entry.regridded )
 		field.version = ++theVersion;
@@ -706,20 +810,11 @@ void ReachOverlay_update( void )
 		theStructures.push_back( mark );
 	}
 
-	// which defences are wanted: the selected ones, and while a building is on the cursor every one
-	// the local player is shown
+	// which defences are wanted: the selected ones, or while a building is on the cursor none but
+	// that one; every defence at once buries the ground in colour
 	std::vector< const Object * > wanted;
 	const ThingTemplate *pending = TheInGameUI->getPendingPlaceType();
-	if( pending != NULL )
-	{
-		for( size_t k = 0; k < theStructures.size(); ++k )
-		{
-			const Object *obj = TheGameLogic->findObjectByID( theStructures[ k ].id );
-			if( revealedToLocal( obj ) )
-				wanted.push_back( obj );
-		}
-	}
-	else
+	if( pending == NULL )
 	{
 		const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 		for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )

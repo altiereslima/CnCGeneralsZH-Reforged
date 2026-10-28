@@ -9,6 +9,11 @@
 //
 // The fields of one owner are drawn in one pass as one area, the union of their distances (the
 // largest), so overlaps neither darken nor draw a line through each other.
+//
+// The look, like the game's own radius decals: a thin wash in the owner's colour, stronger toward the
+// edge, and along the end of the guns' reach a light line with a dark hairline under it and a faint
+// band that leaves it every few seconds and runs inward.  Where a cliff, a building or the fog cuts
+// the area there is no line; the wash fades in from the edge instead (the field's hardness).
 #include "W3DDevice/GameClient/W3DReachOverlay.h"
 
 #include "Common/Debug.h"
@@ -52,7 +57,9 @@ struct Constants
 	float Viewport[ 4 ];			// pixel origin (half a pixel in, as the backend's viewport sits), size
 	float Colour[ 4 ];				// the owner's colour; w unused
 	float Look0[ 4 ];					// border width, band width, fill alpha, band alpha
-	float Look1[ 4 ];					// line alpha, line toward white, field count
+	float Look1[ 4 ];					// line alpha, line toward white, field count, seconds
+	float Look2[ 4 ];					// soft width, soft line, ripple alpha, ripple period
+	float Look3[ 4 ];					// ripple span, ripple width, shade width, shade alpha
 	float Grid[ FieldsPerPass ][ 4 ];		// origin, 1 / step, -distanceLimit
 	float Size[ FieldsPerPass ][ 4 ];		// width - 1, height - 1, opacity
 };
@@ -65,11 +72,13 @@ cbuffer Reach : register(b0)
     float4 Colour;
     float4 Look0;
     float4 Look1;
+    float4 Look2;
+    float4 Look3;
     float4 Grid[32];
     float4 Size[32];
 };
 Texture2D<float> SceneDepth : register(t0);
-Texture2D<float> Fields[32] : register(t1);
+Texture2D<float2> Fields[32] : register(t1);	// distance, hardness
 
 float4 main(float4 position : SV_Position) : SV_Target
 {
@@ -79,9 +88,10 @@ float4 main(float4 position : SV_Position) : SV_Target
     float w = abs(world.w) < 0.000001 ? 0.000001 : world.w;
     float2 at = world.xy / w;
 
-    // the union of the fields: the largest distance, and the strongest opacity among the fields
-    // the pixel is inside
+    // the union of the fields: the largest distance with its hardness, and the strongest opacity
+    // among the fields the pixel is inside
     float d = -1.0e6;
+    float hard = 1;
     float inside[32];
     uint count = (uint)Look1.z;
     [unroll] for (uint i = 0; i < 32; ++i)
@@ -90,18 +100,24 @@ float4 main(float4 position : SV_Position) : SV_Target
         if (i < count)
         {
             float2 g = (at - Grid[i].xy) * Grid[i].z;
+            float2 here = float2(Grid[i].w, 1);
             if (all(g >= 0) && all(g <= Size[i].xy))
             {
                 float2 base = min(floor(g), Size[i].xy - 1);
                 float2 f = g - base;
                 int3 p = int3(base, 0);
-                float a = Fields[i].Load(p);
-                float b = Fields[i].Load(p + int3(1, 0, 0));
-                float c = Fields[i].Load(p + int3(0, 1, 0));
-                float e = Fields[i].Load(p + int3(1, 1, 0));
-                inside[i] = lerp(lerp(a, b, f.x), lerp(c, e, f.x), f.y);
+                float2 a = Fields[i].Load(p);
+                float2 b = Fields[i].Load(p + int3(1, 0, 0));
+                float2 c = Fields[i].Load(p + int3(0, 1, 0));
+                float2 e = Fields[i].Load(p + int3(1, 1, 0));
+                here = lerp(lerp(a, b, f.x), lerp(c, e, f.x), f.y);
+                inside[i] = here.x;
             }
-            d = max(d, inside[i]);
+            if (here.x > d)
+            {
+                d = here.x;
+                hard = here.y;
+            }
         }
     }
 
@@ -112,16 +128,28 @@ float4 main(float4 position : SV_Position) : SV_Target
     [unroll] for (uint k = 0; k < 32; ++k)
         if (k < count) opacity = max(opacity, Size[k].z * saturate(inside[k] / pixel));
 
-    // nothing at or under nought: the antialiasing ramps inward from the edge, never out of it
+    // Nothing at or under nought: every ramp below runs inward from the edge, never out of it.  A
+    // range edge is a line antialiased over the pixel; a blocked one fades in over the soft width.
+    hard = saturate(hard);
     float edge = saturate(d / pixel);
+    float cover = lerp(smoothstep(0, Look2.x, d), edge, hard);
     float border = max(Look0.x, pixel);
-    float stroke = edge * saturate((border - d) / pixel + 0.5) * Look1.x;
+    float stroke = edge * saturate((border - d) / pixel + 0.5) * Look1.x * lerp(Look2.y, 1, hard);
+    float shadeEnd = border + max(Look3.z, pixel);
+    float shade = saturate((d - border) / pixel + 0.5) * saturate((shadeEnd - d) / pixel + 0.5) * Look3.w * hard;
+
+    // a faint band leaves the range line every period and runs inward, thinning as it goes
+    float phase = frac(Look1.w / Look2.w);
+    float r = (d - border - phase * Look3.x) / Look3.y;
+    float ripple = exp(-r * r) * (1 - phase) * Look2.z * hard;
+
     float band = saturate(1 - d / Look0.y);
-    float fill = (Look0.z + Look0.w * band * band) * edge;
-    float alpha = stroke + fill * (1 - stroke);
-    float3 colour = lerp(Colour.rgb, float3(1, 1, 1), Look1.y) * stroke + Colour.rgb * fill * (1 - stroke);
+    float fill = saturate(Look0.z + Look0.w * band * band + ripple) * cover;
+    float4 result = float4(Colour.rgb * fill, fill);
+    result = result * (1 - shade) + float4(0, 0, 0, shade);
+    result = result * (1 - stroke) + float4(lerp(Colour.rgb, float3(1, 1, 1), Look1.y) * stroke, stroke);
     if (d <= 0 || depth >= 1) discard;
-    return float4(colour, alpha) * opacity;
+    return result * opacity;
 }
 )HLSL";
 
@@ -238,13 +266,20 @@ ID3D11ShaderResourceView *viewFor( const ReachOverlayField &field )
 	description.Height = (UINT)field.height;
 	description.MipLevels = 1;
 	description.ArraySize = 1;
-	description.Format = DXGI_FORMAT_R32_FLOAT;
+	description.Format = DXGI_FORMAT_R32G32_FLOAT;
 	description.SampleDesc.Count = 1;
 	description.Usage = D3D11_USAGE_IMMUTABLE;
 	description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	const size_t samples = (size_t)field.width * field.height;
+	std::vector< float > texels( samples * 2 );
+	for( size_t k = 0; k < samples; ++k )
+	{
+		texels[ 2 * k ] = field.distance[ k ];
+		texels[ 2 * k + 1 ] = k < field.hardness.size() ? field.hardness[ k ] : 1.0f;
+	}
 	D3D11_SUBRESOURCE_DATA data = {};
-	data.pSysMem = field.distance.data();
-	data.SysMemPitch = (UINT)( field.width * sizeof( Real ) );
+	data.pSysMem = texels.data();
+	data.SysMemPitch = (UINT)( field.width * 2 * sizeof( float ) );
 	if( FAILED( shared.device->CreateTexture2D( &description, &data, &made.texture ) )
 		|| FAILED( shared.device->CreateShaderResourceView( made.texture, nullptr, &made.view ) ) )
 	{
@@ -438,6 +473,16 @@ Bool DX11ReachOverlay_Draw( CameraClass &camera, const std::vector< const ReachO
 	constants.Look0[ 3 ] = ReachLook::BandAlpha;
 	constants.Look1[ 0 ] = ReachLook::LineAlpha;
 	constants.Look1[ 1 ] = ReachLook::LineWhite;
+	// the render clock, wrapped so a float keeps its milliseconds; the ripple's period divides it
+	constants.Look1[ 3 ] = (float)( WW3D::Get_Sync_Time() % 600000u ) * 0.001f;
+	constants.Look2[ 0 ] = ReachLook::SoftWidth;
+	constants.Look2[ 1 ] = ReachLook::SoftLine;
+	constants.Look2[ 2 ] = ReachLook::RippleAlpha;
+	constants.Look2[ 3 ] = ReachLook::RipplePeriod;
+	constants.Look3[ 0 ] = ReachLook::RippleSpan;
+	constants.Look3[ 1 ] = ReachLook::RippleWidth;
+	constants.Look3[ 2 ] = ReachLook::ShadeWidth;
+	constants.Look3[ 3 ] = ReachLook::ShadeAlpha;
 
 	for( size_t start = 0; start < order.size(); )
 	{

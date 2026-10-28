@@ -60,32 +60,41 @@ Real clamp01( Real value )
 	return value < 0.0f ? 0.0f : ( value > 1.0f ? 1.0f : value );
 }
 
-// The field taken bilinearly at grid coordinates (gx, gy), both inside the grid.
-Real fieldAt( const ReachOverlayField &field, Real gx, Real gy )
+// One of the field's grids (distance or hardness) taken bilinearly at grid coordinates (gx, gy), both
+// inside the grid.
+Real fieldAt( const ReachOverlayField &field, const std::vector< Real > &grid, Real gx, Real gy )
 {
 	Int i = (Int)floorf( gx ), j = (Int)floorf( gy );
 	if( i > field.width - 2 ) i = field.width - 2;
 	if( j > field.height - 2 ) j = field.height - 2;
 	const Real fx = gx - (Real)i, fy = gy - (Real)j;
-	const Real *row = &field.distance[ j * field.width + i ];
+	const Real *row = &grid[ j * field.width + i ];
 	const Real bottom = row[ 0 ] + ( row[ 1 ] - row[ 0 ] ) * fx;
 	const Real top = row[ field.width ] + ( row[ field.width + 1 ] - row[ field.width ] ) * fx;
 	return bottom + ( top - bottom ) * fy;
 }
 
-/** A baked texel at distance d inside the edge, as straight colour and alpha for a SRCALPHA blend.
-	* The lit texels start up to a texel and a half in (the nine-neighbour rule), so the line is laid
-	* from there, and at least two texels wide: at the border's own 1.5 units a coarse texel held half
-	* a line, which the filter smeared into the fade and no edge showed. */
-UnsignedInt texelAt( Real d, Real texel, const Real owner[ 3 ] )
+/** A baked texel at distance d inside the edge, as straight colour and alpha for a SRCALPHA blend,
+	* the Direct3D 11 look without the ripple.  The lit texels start up to a texel and a half in (the
+	* nine-neighbour rule), so the line is laid from there, and at least two texels wide: at the
+	* border's own 1.5 units a coarse texel held half a line, which the filter smeared into the fade and
+	* no edge showed.  hard is the field's hardness: 1 a range edge with its line, 0 a blocked edge that
+	* fades in over the soft width. */
+UnsignedInt texelAt( Real d, Real hard, Real texel, const Real owner[ 3 ] )
 {
+	hard = clamp01( hard );
 	const Real lineEnd = 1.5f * texel + ( ReachLook::BorderWidth > 2.0f * texel ? ReachLook::BorderWidth : 2.0f * texel );
-	const Real line = clamp01( ( lineEnd - d ) / texel ) * ReachLook::LineAlpha;
+	const Real line = clamp01( ( lineEnd - d ) / texel ) * ReachLook::LineAlpha
+		* ( ReachLook::SoftLine + ( 1.0f - ReachLook::SoftLine ) * hard );
+	const Real shade = ( d >= lineEnd && d < lineEnd + texel ? ReachLook::ShadeAlpha * hard : 0.0f ) * ( 1.0f - line );
+	Real soft = clamp01( d / ReachLook::SoftWidth );
+	soft = soft * soft * ( 3.0f - 2.0f * soft );
 	Real band = clamp01( 1.0f - d / ReachLook::BandWidth );
 	band *= band;
-	const Real fill = ( ReachLook::FillAlpha + ReachLook::BandAlpha * band ) * ( 1.0f - line );
-	const Real alpha = line + fill;
-	UnsignedInt result = (UnsignedInt)( alpha * 255.0f + 0.5f ) << 24;
+	const Real cover = soft + ( 1.0f - soft ) * hard;
+	const Real fill = ( ReachLook::FillAlpha + ReachLook::BandAlpha * band ) * cover * ( 1.0f - line ) * ( 1.0f - shade );
+	const Real alpha = line + shade + fill;
+	UnsignedInt result = (UnsignedInt)( clamp01( alpha ) * 255.0f + 0.5f ) << 24;
 	for( Int c = 0; c < 3; ++c )
 	{
 		const Real lineColour = owner[ c ] + ( 1.0f - owner[ c ] ) * ReachLook::LineWhite;
@@ -113,10 +122,17 @@ Bool bake( const ReachOverlayField &field, Baked &baked )
 	if( across > MaxBakedSide * 2 || down > MaxBakedSide * 2 )
 		return FALSE;	// ponytail: a field past 1024 samples a side is left out here; cut the grid if one ever comes
 
-	std::vector< Real > d( across * down );
+	std::vector< Real > d( across * down ), hard( across * down, 1.0f );
+	const Bool hasHardness = field.hardness.size() >= field.distance.size();
 	for( Int y = 0; y < down; ++y )
+	{
 		for( Int x = 0; x < across; ++x )
-			d[ y * across + x ] = fieldAt( field, (Real)x / cuts, (Real)y / cuts );
+		{
+			d[ y * across + x ] = fieldAt( field, field.distance, (Real)x / cuts, (Real)y / cuts );
+			if( hasHardness )
+				hard[ y * across + x ] = fieldAt( field, field.hardness, (Real)x / cuts, (Real)y / cuts );
+		}
+	}
 
 	baked.texel = field.step / cuts;
 	baked.side[ 0 ] = powerOfTwo( across );
@@ -135,7 +151,7 @@ Bool bake( const ReachOverlayField &field, Baked &baked )
 		( field.color & 0xff ) / 255.0f };
 	// what an unlit texel holds: no alpha and the line's colour, so the filter blends no other colour
 	// into the edge it fades out on
-	const UnsignedInt unlit = texelAt( 0.0f, baked.texel, owner ) & 0x00FFFFFF;
+	const UnsignedInt unlit = texelAt( 0.0f, 1.0f, baked.texel, owner ) & 0x00FFFFFF;
 	for( Int y = 0; y < baked.side[ 1 ]; ++y )
 	{
 		UnsignedInt *row = (UnsignedInt *)( bits + y * pitch );
@@ -145,7 +161,7 @@ Bool bake( const ReachOverlayField &field, Baked &baked )
 			for( Int dy = -1; lit && dy <= 1; ++dy )
 				for( Int dx = -1; lit && dx <= 1; ++dx )
 					lit = d[ ( y + dy ) * across + x + dx ] > InsideMargin;
-			row[ x ] = lit ? texelAt( d[ y * across + x ], baked.texel, owner ) : unlit;
+			row[ x ] = lit ? texelAt( d[ y * across + x ], hard[ y * across + x ], baked.texel, owner ) : unlit;
 		}
 	}
 	surface->Unlock();
