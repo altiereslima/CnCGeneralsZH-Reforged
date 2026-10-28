@@ -1575,12 +1575,15 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// short hull's fan into a V again; bending over the last half only spread the tips,
 			// which the taper had already thinned to nothing, so the crown stayed a hull wide.
 			// `shortHull` is 0 for an Overlord's length (half 8.7 cells) and 1 from a Crusader's (5)
-			// down, and blends the curved jets above into a cone: a short hull is nearly a point,
-			// so its jets go out straight from over its middle, up to half a radian off upright,
-			// each to about the same height (the middle one a little taller), and the cone's top is
-			// its widest part, as in the photo.  Curved jets on a short hull spread at mid height
-			// under a lone spike, and bent harder they heaped their heads into a ball on a neck.
-			const float tilt = (1 - shortHull) * 0.7f * std::pow(std::fabs(side), 1.1f) + shortHull * 0.7f * std::fabs(side)
+			// down, and blends the curved jets above into a fan of straight rays: they start spread
+			// over nine tenths of the hull's length, lean out up to half a radian, each to about the
+			// same height (the middle one a little taller), push the air a quarter as hard and the
+			// outer ones thin out sooner, so the fan rises straight off the hull and its top is its
+			// widest part, as in the photo.  Curved jets on a short hull spread at mid height under a
+			// lone spike, and bent harder they heaped their heads into a ball on a neck; rays from
+			// one point over the middle stood on a thin stem under a tulip, and at the full push
+			// they carried their own smoke up into a mushroom's cap.
+			const float tilt = (1 - shortHull) * 0.7f * std::pow(std::fabs(side), 1.1f) + shortHull * 0.55f * std::fabs(side)
 				+ 0.04f * (field(1) - 0.5f);
 			const float azimuth = (side < 0 ? 3.14159265f : 0.0f) + (field(3) - 0.5f) * 0.9f;
 			const float ca = std::cos(azimuth), cc = std::sin(azimuth);
@@ -1595,7 +1598,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// and the ends rather than crossing.  A long hull's or a tall jet's lean is cut, so a
 			// whole jet, head and push, ends inside 15 cells, where walls() has faded it by a few
 			// percent (0.78 of its height is as far as it gets).
-			const float a0 = ((0.5f - 0.1f * shortHull) * side + (field(5) - 0.5f) * (0.4f - 0.2f * shortHull)) * L,
+			const float a0 = ((0.5f + 0.4f * shortHull) * side + (field(5) - 0.5f) * (0.4f - 0.2f * shortHull)) * L,
 				c0 = (field(6) - 0.5f) * W * (0.6f - 0.3f * shortHull);
 			float straight = std::sin(tilt), crown = (1 - shortHull) * (1.5f * L + 0.5f * W) * std::pow(std::fabs(side), 0.5f);
 			const float lean = straight * 0.78f * height + crown;
@@ -1617,8 +1620,10 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// fan of jets is what widens the plume; one jet widens only a little.  Thin jets that
 			// doubled their width as they climbed stood on a thin stem under a fat top, a mushroom.
 			// Wider as it climbs, then over its last stretch the jet thins, lays less and cools, so
-			// it ends in a spiky streak and not a bright ball.  Heat 3.2 low in the middle jet and
-			// 2.8 in the outer ones, so the whole fan burns pale yellow-white (fireColour past 1.6)
+			// it ends in a spiky streak and not a bright ball.  Heat 3.7 low in the middle jet and
+			// 3.1 in the outer ones (3.1 and 2.3 on a short hull, whose fan holds more of its smoke
+			// under the lighter push and burned one white shape at the long hull's heat), so the
+			// whole fan burns blown-out yellow-white (fireColour past 1.6)
 			// while the jets run, as the photo's does, and cools through orange once they stop.  The
 			// heads keep under half of it (the taper), so the white stops short of the fan's ragged
 			// edge: at 2.3 outside the fan was a white core in an orange body, and with every jet
@@ -1629,26 +1634,29 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// shorter jets lay as much a cell as High's: laying the same smoke into half the length
 			// heaped a white ball on the hull on Low.
 			// a cone's rays stay full nearly to their heads, so its top is the widest part
-			const float taper = 1 - smoothstep01(path, 0.55f + 0.25f * shortHull, 1.0f);
+			const float taper = 1 - smoothstep01(path, 0.55f + 0.25f * shortHull * (0.4f + 0.6f * centre), 1.0f);
 			const float rate = 45.0f * (0.75f + 0.45f * centre) * reach / 36.0f * now / speed * taper;
-			const float heat = (2.8f + 0.4f * centre * centre) * (0.7f + 0.3f * std::pow(now / speed, 0.4f)) * (1 - 0.2f * path)
+			const float heat = (3.1f - 0.8f * shortHull + (0.6f + 0.2f * shortHull) * centre * centre)
+				* (0.7f + 0.3f * std::pow(now / speed, 0.4f)) * (1 - 0.2f * path)
 				* (0.45f + 0.55f * taper) * (0.7f + 0.3f * smoothstep01(path, 0.0f, 0.15f));
 			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.06f * travelled) * (0.35f + 0.65f * taper)
 				* (0.8f + 0.2f * shortHull + (0.5f - 0.2f * shortHull) * centre * centre),
-				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.08f);
+				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.08f * (1 - 0.75f * shortHull));
 		}
 		// The stem: the 24th emitter, one wide hot puff climbing at 0.4 of the middle jet's pace,
 		// so the column under the crown stays lit and the crown does not float off the hull.
-		// A short hull's stem lives to half a second, so its neck stays lit under the crown.
+		// A short hull's lives to half a second and stays low and as wide as the hull, filling the
+		// fan's foot rather than standing as a neck under it.
 		const float stemLife = 0.3f + 0.2f * (std::min)((std::max)((8.7f - L) / 3.7f, 0.0f), 1.0f);
 		if (t < stemLife) {
-			const float climbed = 0.4f * reach * (1 - std::exp(-t / 0.18f)), fade = 1 - t / stemLife;
-			onHull(0, 0, H * 0.4f + climbed, (std::max)((std::max)(W * 1.2f, L * 0.6f), 3.0f) * (1 + climbed / reach), 0, 0,
-				0.4f * reach / 0.18f * std::exp(-t / 0.18f), 25.0f * reach / 36.0f * fade, 2.8f, 10.0f * reach / 36.0f * fade, 0.05f);
+			const float stemShort = (std::min)((std::max)((8.7f - L) / 3.7f, 0.0f), 1.0f), pace = 0.4f - 0.25f * stemShort;
+			const float climbed = pace * reach * (1 - std::exp(-t / 0.18f)), fade = 1 - t / stemLife;
+			onHull(0, 0, H * 0.4f + climbed, (std::max)((std::max)(W * 1.2f, L * (0.6f + 0.4f * stemShort)), 3.0f) * (1 + climbed / reach), 0, 0,
+				pace * reach / 0.18f * std::exp(-t / 0.18f), 25.0f * reach / 36.0f * fade, 2.8f, 10.0f * reach / 36.0f * fade, 0.05f);
 		}
-		// the default 1.6 once the flare is over; a fifth of a second of white, so several tanks
-		// dying at once do not white out the view
-		soot[3] = 1.6f + 3.4f * std::exp(-t / 0.18f);
+		// the default 1.6 once the flare is over; about a third of a second of white, as long as
+		// the jets run, and no longer, so several tanks dying at once do not white out the view
+		soot[3] = 1.6f + 4.2f * std::exp(-t / 0.22f);
 		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
 		if (t < 0.9f) {
 			const float fade = 1 - t / 0.9f;
