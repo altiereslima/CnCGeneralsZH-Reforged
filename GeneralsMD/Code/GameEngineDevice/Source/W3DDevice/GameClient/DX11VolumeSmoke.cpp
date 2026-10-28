@@ -1466,7 +1466,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 20.0f);
 		// an odd count, so one jet stands straight up the middle: with fourteen the two middle ones
 		// leaned apart and notched the top into a heart
-		const unsigned jets = 13;	// with the base and the skirt, 23 of the 24 a slab holds
+		const unsigned jets = 13;	// with the base, the stem and the skirt, the 24 a slab holds
 		for (unsigned j = 0; j < jets; ++j) {
 			auto field = [&](unsigned f) { return unit(1000 + 16 * j + f); };
 			// a jet stops once it has slowed to a fifth of its speed: lingering at the top it heated a
@@ -1486,25 +1486,37 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// a jet, the more its height is left to the hash, which makes the top ragged.
 			const float u = (j + 0.5f) / jets * 2 - 1;
 			const float side = (u < 0 ? -1.0f : 1.0f) * std::pow(std::fabs(u), 1.2f), centre = 1 - std::fabs(side);
-			const float tilt = 1.15f * std::pow(std::fabs(side), 1.1f) + 0.04f * (field(1) - 0.5f);
+			// The lower third of a jet barely leans; between a third and three quarters of its path
+			// it bends out by `crown` cells, up to three quarters of the hull's length for the outer
+			// ones (side^0.5), so the base and the middle stay one mass and only the crown fans out
+			// towards one and a half hulls.  Leaning the whole jet that far from the hull top split a
+			// short hull's fan into a V again; bending over the last half only spread the tips,
+			// which the taper had already thinned to nothing, so the crown stayed a hull wide.
+			const float tilt = 0.7f * std::pow(std::fabs(side), 1.1f) + 0.04f * (field(1) - 0.5f);
 			const float azimuth = (side < 0 ? 3.14159265f : 0.0f) + (field(3) - 0.5f) * 0.9f;
-			float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth);
+			const float ca = std::cos(azimuth), cc = std::sin(azimuth);
 			const float dz = std::cos(tilt);
 			const float height = reach * (0.75f + 0.25f * centre * centre) * (1 - 0.3f * (1 - centre * centre * centre * centre) * field(4));
 			const float speed = height / slows;
 			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
+			const float path = travelled / (0.78f * height);
 			// A jet starts on the part of the hull it leans to, so the fan opens from the middle
 			// and the ends rather than crossing.  A long hull's or a tall jet's lean is cut, so a
 			// whole jet, head and push, ends inside 15 cells, where walls() has faded it by a few
 			// percent (0.78 of its height is as far as it gets).
 			const float a0 = (side * 0.5f + (field(5) - 0.5f) * 0.4f) * L, c0 = (field(6) - 0.5f) * W * 0.6f;
-			const float lean = std::sqrt(da * da + dc * dc) * 0.78f * height;
+			float straight = std::sin(tilt), crown = (1.5f * L + 0.5f * W) * std::pow(std::fabs(side), 0.5f);
+			const float lean = straight * 0.78f * height + crown;
 			if (lean > 1e-3f) {
 				const float k = (std::min)(1.0f, (std::max)(0.0f, 15.0f - std::sqrt(a0 * a0 + c0 * c0)) / lean);
-				da *= k;
-				dc *= k;
+				straight *= k;
+				crown *= k;
 			}
-			const float along = a0 + da * travelled, across = c0 + dc * travelled;
+			const float bend = smoothstep01(path, 0.3f, 0.75f), bending = path > 0.3f && path < 0.75f
+				? 6 * (path - 0.3f) / 0.45f * (1 - (path - 0.3f) / 0.45f) / 0.45f : 0.0f;
+			const float out = straight * travelled + crown * bend, outSpeed = straight * now + crown * bending * now / (0.78f * height);
+			const float along = a0 + ca * out, across = c0 + cc * out, da = ca * outSpeed / (std::max)(now, 1e-3f),
+				dc = cc * outSpeed / (std::max)(now, 1e-3f);
 			// Smoke and heat both go with the jet's speed, hottest low down; it cools once laid.
 			// Some dust, which the sun lights pale; the soot is what glows (a jet of twice as much dust
 			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.  The
@@ -1516,19 +1528,24 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// cold air round it, so the outer ones burn orange and only the middle, where the jets
 			// overlap, stays white (fireColour past 1.6): a soft white core in an orange fan.  With
 			// every jet at 3.2 or more for the first quarter second the whole fan was one white
-			// shape; at 1.2 the outer jets went out unseen.  A jet leaves the hull only a third as hot
-			// and takes its full heat over the first quarter of its path: heat is the hottest
-			// emitter's, not a sum, so a jet at full heat set the base band's thick soot alight
-			// and a white ball sat on the hull for half a second.  The rate goes with the reach, so Low's
+			// shape; at 1.2 the outer jets went out unseen.  A jet leaves the hull at 0.7 of its heat
+			// and takes the rest over the first sixth of its path; at a third the column under the
+			// crown went dark and the crown floated off the hull.  The rate goes with the reach, so Low's
 			// shorter jets lay as much a cell as High's: laying the same smoke into half the length
 			// heaped a white ball on the hull on Low.
-			const float path = travelled / (0.78f * height);
 			const float taper = 1 - smoothstep01(path, 0.55f, 1.0f);
 			const float rate = 45.0f * (0.75f + 0.45f * centre) * reach / 36.0f * now / speed * taper;
 			const float heat = (2.3f + 0.9f * centre * centre) * (0.6f + 0.4f * std::pow(now / speed, 0.4f)) * (1 - 0.25f * path)
-				* (0.7f + 0.3f * taper) * (0.35f + 0.65f * smoothstep01(path, 0.0f, 0.25f));
+				* (0.7f + 0.3f * taper) * (0.7f + 0.3f * smoothstep01(path, 0.0f, 0.15f));
 			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.06f * travelled) * (0.35f + 0.65f * taper) * (0.8f + 0.5f * centre * centre),
 				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.08f);
+		}
+		// The stem: the 24th emitter, one wide hot puff climbing at 0.4 of the middle jet's pace,
+		// so the column under the crown stays lit and the crown does not float off the hull.
+		if (t < 0.3f) {
+			const float climbed = 0.4f * reach * (1 - std::exp(-t / 0.18f)), fade = 1 - t / 0.3f;
+			onHull(0, 0, H * 0.4f + climbed, (std::max)((std::max)(W * 1.2f, L * 0.6f), 3.0f) * (1 + climbed / reach), 0, 0,
+				0.4f * reach / 0.18f * std::exp(-t / 0.18f), 25.0f * reach / 36.0f * fade, 2.8f, 10.0f * reach / 36.0f * fade, 0.05f);
 		}
 		// the default 1.6 once the flare is over; a fifth of a second of white, so several tanks
 		// dying at once do not white out the view
