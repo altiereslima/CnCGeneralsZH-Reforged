@@ -45,6 +45,7 @@
 #include "BuildFingerprint.h"		// ZH_BUILD_FINGERPRINT, generated at build time (N1)
 #include "Common/EarlyOptions.h"	// findUserDataDirectory
 #include "Common/file.h"
+#include "Common/ArchiveFileSystem.h"
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
 #include "Common/GameLOD.h"	// STATIC_GAME_LOD_HIGH, whose step on the quality slider is the slider's default
@@ -1590,9 +1591,8 @@ GlobalData::GlobalData()
 		 whatever compiled them, and any source change still separates builds.  What it gives up: noticing
 		 a binary modified after the build.  Its four bytes go in as the platform stores them, which is the
 		 same on every platform the game builds for (little-endian).  The version and the two multiplayer
-		 scripts follow, as before. */
-	computeExeCRC();
-	m_baseExeCRC = m_exeCRC;
+		 scripts follow, as before.  Computed at the end of this constructor, once the user data folder is
+		 known (computeExeCRC hashes whether there is one). */
 
 	m_movementPenaltyDamageState = BODY_REALLYDAMAGED;
 	
@@ -1636,6 +1636,9 @@ GlobalData::GlobalData()
 
 	m_clientRetaliationModeEnabled = TRUE; //On by default.
 	m_useAlternateMouse = FALSE;
+
+	computeExeCRC();
+	m_baseExeCRC = m_exeCRC;
 
 }  // end GlobalData
 
@@ -1894,8 +1897,30 @@ void GlobalData::computeExeCRC( void )
 		fp->close();
 	}
 
+	// Two facts SidesList::prepareForMP_or_Skirmish reads that the files above may not show, hashed only
+	// when set so an ordinary machine's value is the one it always was.  With no user data folder a
+	// player's own map reads as one of the game's and gets the fork's AI; and a mod can ship a copy of
+	// the fork's SkirmishScripts.scb byte for byte, which keeps EA's off a player's own map.
+	const Bool noUserDataDir = m_userDataDir.isEmpty();
+	if (noUserDataDir)
+	{
+		const UnsignedInt noUserData = 0x4E4F5544;	// "NOUD"
+		exeCRC.computeCRC( &noUserData, sizeof( noUserData ) );
+	}
+	Bool modScripts = FALSE;
+	if (TheFileSystem && TheArchiveFileSystem)
+	{
+		Bool inModArchive = FALSE;
+		modScripts = TheFileSystem->modLooseFile( AsciiString( "data\\Scripts\\SkirmishScripts.scb" ), &inModArchive ).isNotEmpty() || inModArchive;
+		if (modScripts)
+		{
+			const UnsignedInt modScriptsMark = 0x4D4F4453;	// "MODS"
+			exeCRC.computeCRC( &modScriptsMark, sizeof( modScriptsMark ) );
+		}
+	}
+
 	m_exeCRC = exeCRC.get();
-	DEBUG_LOG(("EXE CRC: 0x%8.8X\n", m_exeCRC));
+	DEBUG_LOG(("EXE CRC: 0x%8.8X (no user data folder %d, a mod's skirmish scripts %d)\n", m_exeCRC, noUserDataDir, modScripts));
 }
 
 //-------------------------------------------------------------------------------------------------
