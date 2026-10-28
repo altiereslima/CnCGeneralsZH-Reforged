@@ -55,6 +55,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Weapon.h"
+#include "GameClient/ReachOverlay.h"
 
 #include <algorithm>
 #include <map>
@@ -253,6 +254,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_GIVEMONEY;
 	else if (token == "rank")
 		*action = SCENARIO_ACTION_RANK;
+	else if (token == "reachproof")
+		*action = SCENARIO_ACTION_REACHPROOF;
 	else
 		return FALSE;
 
@@ -354,6 +357,7 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_REPEAT:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_GIVEMONEY:		return SCENARIO_TOKENS_STANCE;
 		case SCENARIO_ACTION_RANK:				return SCENARIO_TOKENS_STANCE;
+		case SCENARIO_ACTION_REACHPROOF:	return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_CLICKSTOP:		return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_TALLY:				return SCENARIO_TOKENS_STOP;
@@ -470,6 +474,17 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 			action->targetSelector = tokens[ 5 ];
 			if (actionType == SCENARIO_ACTION_SHIFTPOWER)
 				action->name = tokens[ SCENARIO_SHIFTPOWER_NAME_TOKEN ];
+			break;
+		}
+
+		case SCENARIO_ACTION_REACHPROOF:
+		{
+			if (!parseWholeNumber( tokens[ 4 ], &action->targetSlot ))
+				return SCENARIO_PARSE_BAD_SLOT;
+			action->targetSelector = tokens[ 5 ];
+			action->count = 400;		// sample points of each kind
+			if (count > 6 && (!parseWholeNumber( tokens[ 6 ], &action->count ) || action->count < 1))
+				return SCENARIO_PARSE_BAD_COUNT;
 			break;
 		}
 
@@ -1921,12 +1936,50 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_GIVEMONEY:
 		case SCENARIO_ACTION_TALLY:
 		case SCENARIO_ACTION_RESPOND:
+		case SCENARIO_ACTION_REACHPROOF:
 			ordered = FALSE;		// handled before the group is built
 			break;
 	}
 
 	TheAI->destroyGroup( group );
 	return ordered;
+}
+
+/** Every matching defence of the seat put through ReachOverlay_prove against the first matching unit
+	  of the target seat, which is moved about for it and put back. */
+static Bool executeReachProof( const ScenarioAction &action, Player *player )
+{
+	Player *targetPlayer = findPlayerForSlot( action.targetSlot );
+	Object *probe = NULL;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj && targetPlayer; obj = obj->getNextObject() )
+	{
+		if (obj->getControllingPlayer() == targetPlayer && !obj->isEffectivelyDead() && obj->getContainedBy() == NULL
+				&& selectorMatches( action.targetSelector, obj ))
+		{
+			probe = obj;
+			break;
+		}
+	}
+	if (probe == NULL)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d reachproof slot %d: no '%s' of slot %d to stand in\n",
+							 action.frame, action.slot, action.targetSelector.str(), action.targetSlot));
+		return FALSE;
+	}
+
+	Int proven = 0;
+	Int passed = 0;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if (obj->getControllingPlayer() != player || obj->isEffectivelyDead() || !selectorMatches( action.selector, obj ))
+			continue;
+		++proven;
+		if (ReachOverlay_prove( obj, probe, action.count ))
+			++passed;
+	}
+	DEBUG_LOG(("SCENARIO: frame %d reachproof slot %d '%s' against '%s': %d of %d passed\n",
+						 action.frame, action.slot, action.selector.str(), probe->getTemplate()->getName().str(), passed, proven));
+	return proven > 0 && passed == proven;
 }
 
 /** A placement click, as PlaceEventTranslator sends it: one MSG_DOZER_CONSTRUCT onto the message
@@ -2037,6 +2090,9 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_TALLY)
 		return executeTally( action, player );
+
+	if (action.action == SCENARIO_ACTION_REACHPROOF)
+		return executeReachProof( action, player );
 
 	if (action.action == SCENARIO_ACTION_PURCHASE)
 		return executePurchase( action, player );

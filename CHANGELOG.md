@@ -8,6 +8,13 @@ found and fixed, EA's own, not port damage.**
 
 ---
 
+## The ground a defence can hit
+
+- Click one of your defences, or put a new one on the cursor, and the ground it fires on is painted on the terrain in your colour: a quiet wash with a sharp line round its edge, lying over the hills and down the slopes, under your units and buildings. While a building is on the cursor every defence of yours and your allies' shows its ground as well, so the gap between two Patriot batteries is something you see before you pay for a third. The enemy's defences show nothing. This came back after the one-interface change took the old range ring away with the Reforged interface.
+- Only ground the defence really hits is painted. Every spot is put to the same questions the game asks before a defence fires on its own: is the target in reach, with the extra reach high ground gives; does a hill or a building stand in the line of the shot; can you see the spot at all; is it too close, the way the patch under a Fire Base's walls is. A spot is painted only if the answer is yes for the lowest raider and the widest tank in the game, and for every gun the defence might pick for it. Where the edge steps round the corner of a building or along the brow of a hill, that is the game's own grid: the shot is decided square by square there, and a smoother line would paint ground the defence cannot hit. The old ring was drawn flat on the screen, over the units, and for weeks it ringed a Patriot at its 450 assist missile when it shoots tanks out to 225.
+- A Patriot battery shows where it shoots ground targets by itself. The long missile it fires only when another Patriot calls for help is left out, so is its anti-aircraft missile, and so is anything in the air. A defence with no power, or one that has been hacked or hit by an EMP, shows nothing, because it fires at nothing.
+- Checked against the game itself. On Twilight Flame's hilly south-west plateau a Patriot, a Fire Base and a Gattling Cannon had their painted ground sampled at 3,490 random spots, with a Combat Cycle, a Rebel or an Overlord standing on each and the game asked whether the defence would fire: it would, on all 3,490. Leave the hill test out of the painting and the same check finds 51 to 338 painted spots per run the Patriot never shoots at.
+
 ## What a rank gives
 
 - America, China and GLA units now get what their rank ladder on the website promises. Rank has always raised a unit's stats; now certain grades also add a perk of their own, and the officers and leaders further up the ladder carry an aura that helps friendly units around them.

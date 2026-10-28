@@ -1544,6 +1544,9 @@ if(ZH_PLATFORM_POSIX)
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11GpuParticles\\.cpp$")
   # The -volsmoke smoke volumes are Direct3D 11's alone; W3DParticleSys calls them only on Windows.
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11VolumeSmoke\\.cpp$")
+  # The reach overlay's Direct3D 11 pass; W3DReachOverlay.cpp calls it only on Windows and draws the
+  # fixed-function sheet without it.
+  list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11ReachOverlay\\.cpp$")
 
   # ---- the movies (V1): Windows' Bink player and its Bink API on FFmpeg, the same two files -------------
   # FFmpeg is built from the tarball Tools/vendor.sh keeps, into the build tree, with the Bink demuxer

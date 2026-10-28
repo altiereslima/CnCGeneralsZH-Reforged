@@ -140,6 +140,7 @@ Data/Cinema/rankaurasnow.txt
 Data/Cinema/rankladder.txt
 Data/Cinema/rankringsall.txt
 Data/Cinema/rankzero.txt
+Data/Cinema/reachhills.txt
 Data/Cinema/readme_water.txt
 Data/Cinema/rf_ai.txt
 Data/Cinema/rf_ai_wave.txt
@@ -386,6 +387,8 @@ Data/Scenarios/rankaurawiki.txt
 Data/Scenarios/rankladder.txt
 Data/Scenarios/rankringsall.txt
 Data/Scenarios/rankzero.txt
+Data/Scenarios/reachhills.txt
+Data/Scenarios/reachproof.txt
 Data/Scenarios/reachshot.txt
 Data/Scenarios/readme_hud.txt
 Data/Scenarios/readme_water.txt
@@ -749,6 +752,7 @@ GameEngine/Include/GameClient/PlayerColorScheme.h
 GameEngine/Include/GameClient/ProcessAnimateWindow.h
 GameEngine/Include/GameClient/RadiusDecal.h
 GameEngine/Include/GameClient/RayEffect.h
+GameEngine/Include/GameClient/ReachOverlay.h
 GameEngine/Include/GameClient/SelectionInfo.h
 GameEngine/Include/GameClient/SelectionPriority.h
 GameEngine/Include/GameClient/SelectionXlat.h
@@ -1399,6 +1403,7 @@ GameEngine/Source/GameClient/ObserverCamera.cpp
 GameEngine/Source/GameClient/ParabolicEase.cpp
 GameEngine/Source/GameClient/PlayerColorScheme.cpp
 GameEngine/Source/GameClient/RadiusDecal.cpp
+GameEngine/Source/GameClient/ReachOverlay.cpp
 GameEngine/Source/GameClient/SelectionInfo.cpp
 GameEngine/Source/GameClient/Snow.cpp
 GameEngine/Source/GameClient/Statistics.cpp
@@ -1823,6 +1828,7 @@ GameEngineDevice/Include/W3DDevice/GameClient/W3DParticleSys.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DPoly.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DProjectedShadow.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DPropBuffer.h
+GameEngineDevice/Include/W3DDevice/GameClient/W3DReachOverlay.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DRoadBuffer.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DScene.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DShaderManager.h
@@ -1922,6 +1928,7 @@ GameEngineDevice/Source/W3DDevice/Common/W3DConvert.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/BaseHeightMap.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/DX11GpuParticles.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/DX11HazardCloud.cpp
+GameEngineDevice/Source/W3DDevice/GameClient/DX11ReachOverlay.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/DX11VolumeSmoke.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DDebrisDraw.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DDefaultDraw.cpp
@@ -2006,6 +2013,7 @@ GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/W3DParticleSys.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/W3DPoly.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/W3DPropBuffer.cpp
+GameEngineDevice/Source/W3DDevice/GameClient/W3DReachOverlay.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/W3DRoadBuffer.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/W3DScene.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/W3DShaderManager.cpp

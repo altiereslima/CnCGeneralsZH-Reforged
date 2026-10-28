@@ -80,6 +80,7 @@
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
 #include "W3DDevice/GameClient/W3DScene.h"
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
+#include "W3DDevice/GameClient/W3DReachOverlay.h"
 #include "W3DDevice/GameClient/W3DBibBuffer.h"
 #include "W3DDevice/GameClient/W3DTreeBuffer.h"
 #include "W3DDevice/GameClient/W3DPropBuffer.h"
@@ -1108,6 +1109,7 @@ Int HeightMapRenderObjClass::updateBlock(Int x0, Int y0, Int x1, Int y1,  WorldH
 //=============================================================================
 HeightMapRenderObjClass::~HeightMapRenderObjClass(void)
 {
+	W3DReachOverlay_Release();
 	freeMapResources();
 	if (m_extraBlendTilePositions) {
 		delete [] m_extraBlendTilePositions;
@@ -1222,6 +1224,7 @@ void HeightMapRenderObjClass::adjustTerrainLOD(Int adj)
 //=============================================================================
 void HeightMapRenderObjClass::ReleaseResources(void)
 {
+	W3DReachOverlay_Release();
 	BaseHeightMapRenderObjClass::ReleaseResources();
 }
 
@@ -2218,6 +2221,12 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 			}
 		}
 	#endif
+		// A defence's hittable ground goes on the bare ground and its roads, read back from their depth
+		// on Direct3D 11: so before the props and the bridges, which stand on it, and before the shroud,
+		// which darkens it with the ground.  Every model is drawn over it.  Not into a mirror.
+		if (!ShaderClass::Is_Backface_Culling_Inverted())
+			W3DReachOverlay_Draw(rinfo.Camera);
+
 	if (m_propBuffer) {
 		m_propBuffer->drawProps(rinfo);
 	}

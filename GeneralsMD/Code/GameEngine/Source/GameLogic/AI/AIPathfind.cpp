@@ -11430,6 +11430,7 @@ struct ViewAttackBlockedStruct
 	const Object *victim;
 	const PathfindCell *victimCell;
 	Int		skipCount;
+	ObjectID standingIn;	///< with no obj: a building whose cells the shooter would stand in, not in its way
 };
 
 /*static*/ Int Pathfinder::attackBlockedByObstacleCallback(Pathfinder* pathfinder, PathfindCell* from, PathfindCell* to, Int to_x, Int to_y, void* userData)
@@ -11442,8 +11443,11 @@ struct ViewAttackBlockedStruct
 	}
 	if (to != NULL && (to->getType() == PathfindCell::CELL_OBSTACLE))
 	{
-		// we never block our own view!
-		if (to->isObstaclePresent(d->obj->getID()))
+		// we never block our own view!  No obj is a shooter not standing yet (isGroundViewBlockedByObstacle),
+		// which has no cells, container or slaver of its own.
+		if (d->obj && to->isObstaclePresent(d->obj->getID()))
+			return 0;
+		if (!d->obj && d->standingIn != INVALID_ID && to->isObstaclePresent(d->standingIn))
 			return 0;
 
 		if (d->victim) {
@@ -11462,7 +11466,7 @@ struct ViewAttackBlockedStruct
 		// @todo: if the obstacle is objOther's container, AND it's a "visible" container, ignore it.
 
 		// if the obstacle is the item to which we are slaved, ignore it as an obstacle.
-		if (to->isObstaclePresent(getSlaverID(d->obj)))
+		if (d->obj && to->isObstaclePresent(getSlaverID(d->obj)))
 			return 0;
 
 		if (to->isObstacleTransparent())
@@ -11581,9 +11585,10 @@ Bool Pathfinder::isAttackViewBlockedByObstacle(const Object* attacker, const Coo
 		layer = victim->getLayer();
 	}
 	info.victimCell = getCell(layer, &victimPos);
-	
+	info.standingIn = INVALID_ID;
+
 	info.skipCount = 0;
-	if (attacker->getLayer() != LAYER_GROUND) 
+	if (attacker->getLayer() != LAYER_GROUND)
 	{
 		info.skipCount = 3;	/// srj -- someone wanna tell me what this magic number means?
 												/// jba - Yes, it means that if someone is on a bridge, or rooftop, they can see 
@@ -11597,6 +11602,23 @@ Bool Pathfinder::isAttackViewBlockedByObstacle(const Object* attacker, const Coo
 	Int ret = iterateCellsAlongLine(attackerPos, victimPos, layer, attackBlockedByObstacleCallback, &info);
 	//CRCDEBUG_LOG(("Pathfinder::isAttackViewBlockedByObstacle() 4\n"));
 	return ret != 0;
+}
+
+//-----------------------------------------------------------------------------
+/** The structure walk of isAttackViewBlockedByObstacle for a ground shooter that does not stand yet
+	* (a defence on the placement cursor) and a ground target with no Object: the same cells, the same
+	* callback.  standingIn is a building the shooter would stand in, whose cells are no more in its way
+	* than a standing defence's own are (the reach proof puts the cursor's twin on a built defence).
+	* Only the client's reach overlay asks; nothing in the simulation does. */
+Bool Pathfinder::isGroundViewBlockedByObstacle(const Coord3D& attackerPos, const Coord3D& victimPos, ObjectID standingIn)
+{
+	ViewAttackBlockedStruct info;
+	info.obj = NULL;
+	info.victim = NULL;
+	info.victimCell = getCell(LAYER_GROUND, &victimPos);
+	info.skipCount = 0;
+	info.standingIn = standingIn;
+	return iterateCellsAlongLine(attackerPos, victimPos, LAYER_GROUND, attackBlockedByObstacleCallback, &info) != 0;
 }
 
 static void computeNormalRadialOffset(const Coord3D& from,	Coord3D& insert, const Coord3D& to, 

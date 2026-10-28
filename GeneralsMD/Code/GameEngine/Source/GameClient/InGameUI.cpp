@@ -101,6 +101,7 @@
 #include "GameClient/WindowLayout.h"
 #include "GameClient/LookAtXlat.h"
 #include "GameClient/ParticleSys.h"
+#include "GameClient/ReachOverlay.h"
 #include "GameClient/SelectionXlat.h"
 #include "GameClient/Shadow.h"
 #include "GameClient/GlobalLanguage.h"
@@ -2564,6 +2565,7 @@ void InGameUI::update( void )
 	if( TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() )
 		watchDozers();
 	updateSignalMarks();
+	ReachOverlay_update();		// the ground a selected or sited defence hits, drawn on the terrain
 	UnsignedByte r, g, b, a;
 	Int amount;
 
