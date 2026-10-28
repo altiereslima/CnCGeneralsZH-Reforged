@@ -856,7 +856,7 @@ bool upload(ID3D11DeviceContext *context, ID3D11Buffer *buffer, const void *data
 // and artillery barrage puffs, the Scud's arms and the Nuke Cannon's stem; a nuclear blast's the
 // mushroom of the missile, the GLA's and the MOAB.  Unknown templates, mods' included, are left
 // alone.
-const bool ShellsOn = true, NuclearOn = false;		// the kinds that are done
+const bool ShellsOn = true, NuclearOn = true;		// the kinds that are done
 
 TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSystem *system)
 {
