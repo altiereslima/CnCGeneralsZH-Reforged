@@ -51,6 +51,7 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/ThingTemplate.h"
+#include "GameClient/Display.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/ObserverCamera.h"
@@ -207,7 +208,7 @@ struct DrawConstants {
 	float Extra[4];			// the collar's radius in cells, the flash's height over its width, its radius in cells, the collar's height in cells
 	float ClipLow[4];		// the world box the march keeps to: the grid's, or for the air where smoke is
 	float ClipHigh[4];
-	float Look[4];			// the light the shade side keeps, the fine billows' depth, the sun's share, unused
+	float Look[4];			// the light the shade side keeps, the fine billows' depth, the sun's share, how far thin smoke is spared
 };
 
 // What every program starts with, after the tier's GX, GY, GZ and SLABS: the fade that keeps smoke
@@ -605,12 +606,15 @@ const char *const MushroomPass = R"HLSL(
         float stemR = stem.y * (1 + 0.8 * exp(-overGround / 2)) * (0.8 + 0.4 * lumps);
         float inStem = (1 - smoothstep(0.6, 1.0, rho / stemR)) * (1 - smoothstep(stem.z - 2, stem.z + 1, cell.z));
         float rate = saturate(stem.w * dt);
-        float soot = cap.x * inCap, dust = stem.x * inStem;
+        // no soot laid on the ground itself: the skirt carried the fireball's foot out over the
+        // terrain as a brown wash
+        float soot = cap.x * inCap * smoothstep(0.5, 2.5, overGround), dust = stem.x * inStem;
         if (soot > d.x) d.x += (soot - d.x) * rate;
         if (dust > d.y) d.y += (dust - d.y) * rate;
         d.x *= lerp(Keep.w, 1, saturate((1.3 - surface) * 3));
         d.y *= lerp(Keep.w, 1, saturate(inStem * 3));
-        vt.w = max(vt.w, power.z * inCap * (1 - 0.45 * saturate(e)) * (0.7 + 0.6 * lumps));
+        // white-yellow in the middle, orange-red at the rim, the lumps hotter than the folds between
+        vt.w = max(vt.w, power.z * inCap * (1 - 0.6 * saturate(e)) * (0.5 + 1.0 * lumps));
         vt.z = lerp(vt.z, shape.w, 0.15 * inStem);
     } else if (cap.x > 0) d *= Keep.w;
 )HLSL";
@@ -802,7 +806,7 @@ cbuffer Draw : register(b0)
     float4 Extra;
     float4 ClipLow;		// the world box the march keeps to, inside the grid's: where the smoke can be
     float4 ClipHigh;
-    float4 Look;		// the light the shade side keeps, the fine billows' depth, the sun's share
+    float4 Look;		// the light the shade side keeps, the fine billows' depth, the sun's share, how far thin smoke is spared
 };
 float3 worldAt(float2 pixel, float depth)
 {
@@ -902,6 +906,9 @@ float4 main(float4 position : SV_Position) : SV_Target
         float eroded = total * saturate(0.35 + 1.1 * n);	// the air's smoke is thin: the noise shapes it, it does not eat it
 #else
         float eroded = max(total - (1 - n) * 0.45 * (1 - saturate(total * 1.2)), 0);
+        // a nuclear fireball is thin on purpose, so its middle shows: the noise shapes it into
+        // lumps rather than eating it (taken away, it was gone at two seconds)
+        if (Look.w > 0) eroded = lerp(eroded, total * saturate(0.3 + 1.2 * n), Look.w);
         // a nuclear cap's cauliflower: a hard surface where its smoke passes a threshold, the
         // threshold pushed about by finer billows, ten units across, than its cells can hold.  Eaten
         // softly, the cap was a blurred beige ball lit the same all over.
@@ -1345,7 +1352,9 @@ TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSyste
 	const char *name = tmplate->getName().str();
 	TemplateKind kind = { false, Shell, 1.0f };
 	const bool alpha = system->getShaderType() == ParticleSystemInfo::ALPHA && !tmplate->isEmissive();
-	if (std::strstr(name, "Mushroom") && !std::strstr(name, "NukeCannon") && !std::strstr(name, "Chemical"))
+	// the flare starts it too: it goes off at the impact, the mushroom's first system 0.2 s later
+	if ((std::strstr(name, "Mushroom") && !std::strstr(name, "NukeCannon") && !std::strstr(name, "Chemical"))
+			|| !std::strcmp(name, "NukeFlare") || !std::strcmp(name, "NukeGLAFlare"))
 		kind = { true, Nuclear, 1.0f };
 	else if (std::strstr(name, "NukeCannonMushroomStem"))
 		kind = { true, Shell, 3.0f };
@@ -1422,7 +1431,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 	shape[2] = 1000.0f;		// no ceiling
 	unsigned count = 0;
 	float flash = 0, shellRadius = 0, shellOpacity = 0, flashTall = 1.0f, flashWide = 3.0f;
-	float collarOpacity = 0, collarRadius = 0, collarHeight = 0, shade = ShadeLight, billows = 0, sunShare = SunShare;
+	float collarOpacity = 0, collarRadius = 0, collarHeight = 0, shade = ShadeLight, billows = 0, sunShare = SunShare, spared = 0;
 	float soot[4] = { 0.06f, 0.055f, 0.05f, 1.6f }, dust[3] = { 0.52f, 0.43f, 0.31f };
 	const float bx = volume.blast[0], by = volume.blast[1], bz = volume.blast[2];
 
@@ -1627,8 +1636,10 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			+ 0.04f * (std::max)(t - 20.0f, 0.0f), 16.0f);
 		const float capH = capR * (0.95f - 0.57f * smoothstep01(t, 1.0f, 9.0f));
 		const float fade = 1 - smoothstep01(t, 50.0f, 85.0f);
-		// thin while it is fire, so the glow shows from inside it; thick smoke once it has cooled
-		cap[0] = (0.35f + 0.85f * smoothstep01(t, 3.0f, 10.0f)) * fade;
+		// thin while it is fire, so its hot middle shows through the cooler rim; thick smoke once it
+		// has cooled.  At 0.35 the eye saw only the rim's outer cells, and at its first heat those
+		// burned the whole ball one flat white
+		cap[0] = (0.2f + 1.0f * smoothstep01(t, 1.0f, 10.0f)) * fade;
 		cap[1] = capZ;
 		cap[2] = (std::max)(capR, 1.0f);
 		cap[3] = (std::max)(capH, 1.0f);
@@ -1639,11 +1650,14 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		stem[3] = 4.0f + 20.0f * std::exp(-t / 0.3f);	// the fireball is there at once, the rest follows
 		blast[3] = (std::max)(capR, 3.5f);		// the skirt's footprint
 		motion[0] = 20.0f / 3.2f * std::exp(-t / 3.2f);	// the cap's rise, which the ring carries
-		flash = t < 0.06f ? 40.0f : 40.0f * std::exp(-(t - 0.06f) / 0.15f);
-		flashWide = (std::max)(capR, 4.0f) * 1.5f;
+		// the flash is light thrown on the scene (Takes starts a pulse of the game's own dynamic
+		// light); this glow round the fireball lasts a tenth of a second.  At 40 over 0.15 s it drew
+		// an opaque white disc across the frame for most of a second
+		flash = 3.0f * std::exp(-t / 0.04f);
+		flashWide = (std::max)(capR, 4.0f);
 		flashTall = 1.2f;
-		// the cap's heat: white for half a second, yellow-orange at two, red embers by ten
-		power[2] = 2.0f * std::exp(-t / 0.9f) + 1.6f * std::exp(-t / 9.0f);
+		// the cap's heat: a white-yellow middle for the first second, yellow-orange at two, red embers by ten
+		power[2] = 1.2f * std::exp(-t / 0.6f) + 1.9f * std::exp(-t / 9.0f);
 		if (t < 1.0f) { power[0] = 70.0f * std::exp(-t / 0.5f); power[3] = 0.3f; }
 		// the base surge: a ring front of dust racing out along the ground, far past the fireball,
 		// slowing as it goes, 42 cells (420 units) out over a 1.6 s constant.  It drops dust all
@@ -1654,9 +1668,12 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			motion[3] = 0.22f * (1 - t / 7.0f);
 		}
 		// the Wilson cloud: a white dome running out with the shock front, centred on the ground
-		if (t > 0.12f && t < 1.8f) {
-			shellRadius = 7.0f + 20.0f * smoothstep01(t, 0.12f, 1.5f);
-			shellOpacity = 1.4f * std::sin((t - 0.12f) / 1.68f * 3.14159265f);
+		// (thin enough that the fireball and the ground show through it face on, white where the
+		// eye looks along it at the rim; at 0.8 and more it was an opaque cream disc over the frame)
+		// At 27 cells it wrapped the pulled-back camera and hazed the whole frame cream.
+		if (t > 0.1f && t < 1.5f) {
+			shellRadius = 7.0f + 11.0f * smoothstep01(t, 0.1f, 1.3f);
+			shellOpacity = 0.06f * std::sin((t - 0.1f) / 1.4f * 3.14159265f);
 		}
 		// the condensation collar, round the stem just under the cap
 		if (t > 2.5f && t < 8.5f) {
@@ -1673,12 +1690,15 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// take, where at 0.26 and 0.75 the cooled cap read as one flat grey-brown
 		shade = 0.34f;
 		sunShare = 1.0f;
-		billows = smoothstep01(t, 2.0f, 6.0f);	// once it is thick smoke: the thin fireball keeps its soft glow
+		billows = smoothstep01(t, 5.0f, 9.0f);	// once it is thick smoke: the thin fireball keeps its soft glow
+		spared = 1 - smoothstep01(t, 4.0f, 8.0f);
 		// dark smoke round the fire at first, cream once it is lit only by the sun, greyer late
 		const float cream = smoothstep01(t, 3.0f, 12.0f), grey = smoothstep01(t, 20.0f, 50.0f);
 		const float early[3] = { 0.32f, 0.22f, 0.16f }, lit[3] = { 0.88f, 0.84f, 0.78f }, late[3] = { 0.80f, 0.79f, 0.78f };
 		for (unsigned i = 0; i < 3; ++i) soot[i] = early[i] + (lit[i] - early[i]) * cream + (late[i] - lit[i]) * grey;
-		soot[3] = 2.2f;
+		// the fire's gain low while the fireball is hottest, so its lumps and its cooler rim show
+		// rather than one burned-out white; full once it has cooled to embers in smoke
+		soot[3] = 0.9f + 1.3f * smoothstep01(t, 1.0f, 4.0f);
 		dust[0] = 0.55f; dust[1] = 0.48f; dust[2] = 0.41f;	// the stem and the surge, grey-brown
 	}
 	sim.Volumes[slab][1] = (float)count;
@@ -1697,7 +1717,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		draw->Look[0] = shade;
 		draw->Look[1] = billows;
 		draw->Look[2] = sunShare;
-		draw->Look[3] = 0;
+		draw->Look[3] = spared;
 	}
 }
 
@@ -2407,7 +2427,11 @@ bool Takes(ParticleSystem *system)
 		&& system->getAttachedObject() == INVALID_ID && system->getAttachedDrawable() == INVALID_DRAWABLE_ID
 		&& system->getPriority() != AREA_EFFECT;
 	const bool flat = loose && !system->shouldBillboard();
-	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION)) return takeAir(system);
+	// and a nuke's own flat rings (NukeRing's orange fire disc on the ground, its blast wave) as
+	// far as its blast: under the volume's fireball the ring lay round it as a flat orange plate
+	const char *own = system->getTemplate()->getName().str();
+	const bool nukeFlat = flat && std::strstr(own, "Nuke") && !std::strstr(own, "NukeCannon");
+	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION && !nukeFlat)) return takeAir(system);
 	// flying bits stay the game's own here too: a blast that took them drew nothing in their place
 	if (airLookOf(system->getTemplate(), system).scrap) return false;
 	const int now = (int)TheGameLogic->getFrame();
@@ -2425,8 +2449,8 @@ bool Takes(ParticleSystem *system)
 	const TemplateKind kind = kindOfTemplate(system->getTemplate(), system);
 	const bool alpha = system->getShaderType() == ParticleSystemInfo::ALPHA && !system->getTemplate()->isEmissive();
 	for (const Volume &volume : volumes) {
-		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 120 : volume.kind == TankDeath ? 90 : 30)) continue;
-		if (flat && volume.kind != TankDeath) continue;
+		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 180 : volume.kind == TankDeath ? 90 : 30)) continue;	// a nuke's stem comes 2 s after its flare
+		if (flat && !(volume.kind == TankDeath && system->getPriority() == DEATH_EXPLOSION) && !(nukeFlat && volume.kind == Nuclear)) continue;
 		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
 		const char *joiner = system->getTemplate()->getName().str();
@@ -2525,7 +2549,19 @@ bool Takes(ParticleSystem *system)
 	// its front through the air round it, in world units a second.  A tank's has none: a sphere
 	// pushing out from the hull's middle blew its own fire into a dome and the dust round it into
 	// rings, where a real one bursts out along the hull and up (schedule).
-	if (type == Nuclear) addShock(where, 420.0f, 220.0f, 2.5f, now);
+	if (type == Nuclear) {
+		addShock(where, 420.0f, 220.0f, 2.5f, now);
+		// The flash: a pulse of the game's own dynamic light, so the ground, the buildings and the
+		// smoke round the blast light up white and fall back over 0.3 s.  A
+		// display light, like an FX list's LightPulse: nothing of it reaches the logic.  Not for the
+		// MOAB, a fuel-air bomb, whose volume starts on its stem half a second after its blast.
+		if (TheDisplay && !std::strstr(own, "MOAB")) {
+			const Coord3D at = { where.x, where.y, (Real)ground + 60.0f };
+			// well over 1, so it still shows on sunlit ground, where the light is clamped
+			const RGBColor white = { 2.0f, 1.9f, 1.7f };
+			TheDisplay->createLightPulse(&at, &white, 250.0f, 450.0f, 0, LOGICFRAMES_PER_SECOND * 3 / 10);
+		}
+	}
 	else if (type != TankDeath) addShock(where, 160.0f * kind.scale, 70.0f * kind.scale, 1.0f, now);
 	pruneSets();
 	takenSystems.insert(id);
