@@ -79,7 +79,8 @@
 namespace {
 
 // Two atlases: the small one for tanks and shells, the big one for nuclear blasts.  The slab
-// counts are the setting's (Quality below); a change of setting builds the atlases again.
+// counts and the small one's height are the setting's (Quality below); a change of setting builds
+// the atlases again.
 struct TierShape { unsigned gx, gy, gz, slabs, first; };
 TierShape TierShapes[2] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 } };
 const unsigned MaxVolumes = 26;		// both tiers' slabs at High, the small tier's first
@@ -93,8 +94,10 @@ const unsigned NoiseSide = 32;
 // volumes at once, 8 pressure sweeps for 14, a march step half as long again.
 // ponytail: a coarser Low grid needs the timelines' cell constants scaled with it; do that if
 // Low still costs too much on a weak card.
-struct Quality { unsigned slabs[2]; unsigned sweeps; float stepCells; };
-const Quality Qualities[3] = { { { 0, 0 }, 0, 0.0f }, { { 12, 1 }, 8, 0.9f }, { { 24, 2 }, 14, 0.6f } };	// sweeps even, so the pressure ends where it started
+// High's small grid is 56 cells tall where Low's is 40, so a tank's plume has room to climb to
+// twice its base's width under the grid's top (Low keeps the shorter plume and the cheaper grid).
+struct Quality { unsigned slabs[2]; unsigned sweeps; float stepCells; unsigned smallHeight; };
+const Quality Qualities[3] = { { { 0, 0 }, 0, 0.0f, 40 }, { { 12, 1 }, 8, 0.9f, 40 }, { { 24, 2 }, 14, 0.6f, 56 } };	// sweeps even, so the pressure ends where it started
 int level = 0;		// the setting the atlases were last made for
 
 // The world, in game units (a tank is about 30, 7 m: a unit is about 0.23 m).
@@ -803,6 +806,19 @@ float4 main(float4 position : SV_Position) : SV_Target
 #endif
             continue;
         }
+#ifndef AIR
+        // Where a plume is two or three cells across, the trilinear cells came out as a staircase,
+        // flat-topped blocks with square notches.  The lookup is pushed about by up to a cell along
+        // noise that drifts upwards, so an edge breaks into ragged, flickering tongues instead.
+        {
+            float3 q = cell / 6 + float3(Slab.x * 0.37, 0, -Camera.w * 0.6);
+            float3 warp = float3(Noise.SampleLevel(Wrap, q, 0), Noise.SampleLevel(Wrap, q + 0.31, 0),
+                Noise.SampleLevel(Wrap, q + 0.67, 0)) - 0.5;
+            clamped = clamp(cell + warp * 2, float3(0, 0, 0), float3(GX - 1, GY - 1, GZ - 1));
+            uvw = float3((clamped.x + 0.5) / GX, (clamped.y + 0.5) / GY, (clamped.z + 0.5 + slabBase) / (GZ * SLABS));
+            dd = Den.SampleLevel(Linear, uvw, 0);
+        }
+#endif
         float n = Noise.SampleLevel(Wrap, cell / 9 + float3(Slab.x * 0.37, 0, -Camera.w * 0.04), 0);
         // the condensation shell: white, thin, over the upper half, for a second or two
         float shell = 0;
@@ -981,6 +997,7 @@ bool requested()
 		lastReport = 0;
 		level = want;
 		TierShapes[0].slabs = Qualities[level].slabs[0];
+		TierShapes[0].gz = Qualities[level].smallHeight;
 		TierShapes[1].slabs = Qualities[level].slabs[1];
 		TierShapes[1].first = TierShapes[0].slabs;
 		DEBUG_LOG(("VOLSMOKE: setting %s\n", level == 0 ? "Off" : level == 1 ? "Low" : "High"));
@@ -1215,8 +1232,8 @@ bool makeState(DX11BackendClass *backend, ID3D11Device *device)
 		state.refused = true;
 		return false;
 	}
-	DEBUG_LOG(("VOLSMOKE: programs, %u + %u volumes and a %ux%ux%u air at %.1f units a cell made in %.1f ms\n",
-		TierShapes[0].slabs, TierShapes[1].slabs, air.gx, air.gy, air.gz, air.cell, DX11Resource_Milliseconds_Now() - started));
+	DEBUG_LOG(("VOLSMOKE: programs, %u + %u volumes (the small %u cells tall) and a %ux%ux%u air at %.1f units a cell made in %.1f ms\n",
+		TierShapes[0].slabs, TierShapes[1].slabs, TierShapes[0].gz, air.gx, air.gy, air.gz, air.cell, DX11Resource_Milliseconds_Now() - started));
 	return true;
 }
 
@@ -1348,17 +1365,17 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		}
 		// The plume, the photo's tallest part: ten to twelve thin jets of white-hot fire and dust
 		// shot up out of the hull top in the first half second, each to its own height, fanning out
-		// as they climb, so the flare is ragged and opens upwards.  A jet's path is at most 24 cells
-		// long and its head never more than 12 cells off the blast's axis, where the grid's round
-		// sides start to fade the smoke out.  The tallest heads, lifted on by the heat still in them,
-		// do reach the fade under the grid's top, which softens them; at 20 the plume stood only
-		// half again as high as the hull's top, too low for the photo.  Each lays
+		// as they climb, so the flare is ragged and opens upwards.  The tallest is set for about
+		// twice the base band's length once the heat has lifted it on, sixteen cells short of the
+		// grid's top (24 on Low's 40, 40 on High's 56), and no head goes more than 15 cells off the
+		// blast's axis, where the grid's round sides fade the smoke out by a few percent.  With 12 a
+		// High plume, twice as tall, came out a narrow pillar.  Each lays
 		// down thin smoke at a rate that goes with its speed, the same a cell along the whole jet,
 		// and pushes the air only lightly.  A thick jet, a hard push or a fixed rate carried the
 		// smoke along with the head and left a round ball at the top with nothing under it.  The
 		// fire burns brighter for the first second (soot[3] below), so the plume flares white and
 		// then hangs as grey-brown smoke and dust.
-		const float reach = (std::min)((std::max)(2.3f * L + 1.7f * W, 12.0f), 24.0f);
+		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 16.0f);
 		const unsigned jets = 10 + unsigned(unit(850) * 2.99f);
 		for (unsigned j = 0; j < jets; ++j) {
 			auto field = [&](unsigned f) { return unit(1000 + 16 * j + f); };
@@ -1366,19 +1383,19 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// round ball there
 			const float age = t - 0.15f * field(0), slows = 0.18f;
 			if (age < 0 || age > 1.5f * slows) continue;
-			const float tilt = 0.05f + 0.65f * field(1);
+			const float tilt = 0.05f + 0.75f * field(1);
 			const float end = field(2) < 0.5f ? 0.0f : 3.14159265f;
 			const float azimuth = end + (field(3) - 0.5f) * 2.4f;
 			float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth);
 			const float dz = std::cos(tilt);
 			const float height = reach * (0.6f + 0.4f * field(4)), speed = height / slows;
 			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
-			// A long hull's outer jets lean less, so a whole jet, head and push, ends inside 12 cells
-			// (0.78 of its height is as far as it gets before it stops).
+			// A long hull's or a tall jet's lean is cut, so a whole jet, head and push, ends inside 15
+			// cells (0.78 of its height is as far as it gets before it stops).
 			const float a0 = (field(5) - 0.5f) * L * 1.2f, c0 = (field(6) - 0.5f) * W * 0.6f;
 			const float lean = std::sqrt(da * da + dc * dc) * 0.78f * height;
 			if (lean > 1e-3f) {
-				const float k = (std::min)(1.0f, (std::max)(0.0f, 12.0f - std::sqrt(a0 * a0 + c0 * c0)) / lean);
+				const float k = (std::min)(1.0f, (std::max)(0.0f, 15.0f - std::sqrt(a0 * a0 + c0 * c0)) / lean);
 				da *= k;
 				dc *= k;
 			}
