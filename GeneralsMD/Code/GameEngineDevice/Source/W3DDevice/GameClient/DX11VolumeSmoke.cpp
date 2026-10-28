@@ -1288,6 +1288,12 @@ TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSyste
 	return kind;
 }
 
+float smoothstep01(float x, float low, float high)
+{
+	const float u = (std::min)((std::max)((x - low) / (high - low), 0.0f), 1.0f);
+	return u * u * (3 - 2 * u);
+}
+
 float hashUnit(unsigned seed, unsigned salt)
 {
 	unsigned h = seed * 2654435761u ^ salt * 2246822519u;
@@ -1379,16 +1385,19 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// fire burns brighter for the first second (soot[3] below), so the plume flares white and
 		// then hangs as grey-brown smoke and dust.
 		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 20.0f);
-		const unsigned jets = 12 + unsigned(unit(850) * 2.99f);	// with the base and the skirt, the 24 a slab holds
+		const unsigned jets = 14;	// with the base and the skirt, the 24 a slab holds
 		for (unsigned j = 0; j < jets; ++j) {
 			auto field = [&](unsigned f) { return unit(1000 + 16 * j + f); };
 			// a jet stops once it has slowed to a fifth of its speed: lingering at the top it heated a
 			// round ball there
-			const float age = t - 0.15f * field(0), slows = 0.18f;
+			const float age = t - 0.06f * field(0), slows = 0.18f;
 			if (age < 0 || age > 1.5f * slows) continue;
-			const float tilt = 0.25f + 0.8f * std::sqrt(field(1));	// more of them at the outer angles: a fan wide at the top
-			const float end = field(2) < 0.5f ? 0.0f : 3.14159265f;
-			const float azimuth = end + (field(3) - 0.5f) * 2.4f;
+			// Spread evenly over the fan, one end of the hull to the other, with a little hash on
+			// top, so the gaps between them fill into one widening wedge: drawn at random they
+			// bunched into four or five fingers with a ball on each.
+			const float side = (j + 0.5f) / jets * 2 - 1;
+			const float tilt = 0.12f + 0.9f * std::fabs(side) + 0.08f * (field(1) - 0.5f);
+			const float azimuth = (side < 0 ? 3.14159265f : 0.0f) + (field(3) - 0.5f) * 0.9f;
 			float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth);
 			const float dz = std::cos(tilt);
 			const float height = reach * (0.6f + 0.4f * field(4)), speed = height / slows;
@@ -1410,18 +1419,19 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// enough low down to burn near-white (fireColour past 1.6).  The fan of jets is what
 			// widens the plume; one jet widens only a little.  Thin jets that doubled their width as
 			// they climbed stood on a thin stem under a fat top, a mushroom.
-			// thick enough at the top that the fire's glow outshines the sunlit smoke there, which
-			// read orange-brown at 36
-			const float rate = 60.0f * now / speed;
-			// a little wider as it climbs: the advection smears a two-cell jet's heat into the cold air
-			// round it, which cooled the fan's top half to orange however hot the head was
-			onHull(along, across, H * 0.4f + dz * travelled, 2.0f + 0.05f * travelled, da * now, dc * now, dz * now, rate,
-				// never under 3.2 while it runs (the jets are done by 0.42 s), so the heads, falloff and
-				// all, stay past the near-white end and the whole fan flares pale, as the photo's does;
-				// at 2.4 the upper half was already orange
-				(std::max)(4.6f * std::pow(now / speed, 0.4f), 3.2f), rate * 0.4f, 0.15f);
+			// Wider as it climbs (the advection smears a two-cell jet's heat into the cold air round
+			// it, which cooled the fan's top to orange), then over its last stretch the jet thins,
+			// lays less and cools, so it ends in a spiky streak and not a bright ball.  Heat never
+			// under 3.2 in the first quarter second, so the fan burns pale, as the photo's does.
+			const float taper = 1 - smoothstep01(travelled / (0.78f * height), 0.55f, 1.0f);
+			const float rate = 45.0f * now / speed * taper;
+			const float heat = (std::max)(4.6f * std::pow(now / speed, 0.4f), t < 0.25f ? 3.2f : 0.0f) * (0.5f + 0.5f * taper);
+			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.04f * travelled) * (0.35f + 0.65f * taper),
+				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.15f);
 		}
-		soot[3] = 1.6f + 4.6f * std::exp(-t / 0.3f);	// the default 1.6 once the flare is over
+		// the default 1.6 once the flare is over; a fifth of a second of white, so several tanks
+		// dying at once do not white out the view
+		soot[3] = 1.6f + 4.6f * std::exp(-t / 0.2f);
 		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
 		if (t < 0.9f) {
 			const float fade = 1 - t / 0.9f;
