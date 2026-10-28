@@ -478,7 +478,10 @@ public:
 		// one whose airfield is gone, and that jet, still carrying a bomb, used to be punted out here
 		// too: idle, back ten seconds later, punted again, never burning and never landing, a damaged
 		// Aurora orbiting a full base for the rest of the match. It circles the ruin with the rest now.
-		if (!jetAI->isOutOfSpecialReloadAmmo() && jet->getProducerID() == INVALID_ID && !jetAI->friend_hadAirfield())
+		// One with no fuel to burn (a Comanche, a Chinook) would hang over the ruin for good, so that
+		// one still goes back to idle as EA had it.
+		if (!jetAI->isOutOfSpecialReloadAmmo() && jet->getProducerID() == INVALID_ID &&
+				(!jetAI->friend_hadAirfield() || jetAI->friend_getOutOfAmmoDamagePerSecond() <= 0.0f))
 		{
 			return STATE_FAILURE;
 		}
@@ -1923,7 +1926,9 @@ JetAIStateMachine::JetAIStateMachine(Object *owner, AsciiString name) : AIStateM
 	defineState( ORIENT_FOR_PARKING_PLACE, newInstance(JetOrHeliParkOrientState)( this ), RELOAD_AMMO, AI_IDLE );
 	defineState( RELOAD_AMMO, newInstance(JetOrHeliReloadAmmoState)( this ), AI_IDLE, AI_IDLE );
 	defineState( RETURN_TO_DEAD_AIRFIELD, newInstance(JetOrHeliReturningToDeadAirfieldState)( this ), CIRCLING_DEAD_AIRFIELD, RETURN_TO_DEAD_AIRFIELD );
-	defineState( CIRCLING_DEAD_AIRFIELD, newInstance(JetOrHeliCirclingDeadAirfieldState)( this ), AI_IDLE, AI_IDLE );
+	// a free space found goes straight to landing on it: through idle, a jet still armed waited out
+	// ReturnToBaseIdleTime holding the space, and one with no such time never came down at all
+	defineState( CIRCLING_DEAD_AIRFIELD, newInstance(JetOrHeliCirclingDeadAirfieldState)( this ), RETURNING_FOR_LANDING, AI_IDLE );
 }
 
 //-------------------------------------------------------------------------------------------------
