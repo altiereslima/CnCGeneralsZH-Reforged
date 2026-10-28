@@ -657,7 +657,16 @@ const char *const AdvectPassEnd = R"HLSL(
     }
 #endif
     applyMovers(vt, d, cell, slab, dt);
+#ifdef AIR
+    // A missile's trail is a cell or two across, so its density is several times a puff's for the
+    // same opacity; held to 4 like a blast's, a Scud's trail coming down could not be seen.  The
+    // brightness channels are held by the same factor, or a capped cell lost its trail's white.
+    float2 held = min(d.xy, 8);
+    d.zw *= held / max(d.xy, 1e-4);
+    d.xy = held;
+#else
     d = min(d, 4);
+#endif
     d *= lerp(0.92, 1, walls(cell));	// smoke that drifts to the walls thins out there
     // Open sides and top: what reaches them is gone.  The ground lets nothing through and keeps
     // a little of the dust that lands on it.
@@ -958,7 +967,23 @@ const float AirCoverage = 0.7f;			// a billboard's opacity at its centre, agains
 // A sphere's falloff, the trilinear blur of a few cells and the noise take most of the opacity a
 // particle's density was worked out for; this gives it back (by eye, on volair's dust and smoke).
 const float AirGain = 4.0f;
-const float AirTrailOver = 150.0f;		// units over the box's top: a system with a particle that high keeps its billboards
+// and a missile's ribbon of jet smoke, a cell or two wide: a little less in the air, where a Rocket
+// Buggy salvo's twenty trails stood as a white wall at 1.8, and more in the tall air, where one trail
+// coming down alone is seen across and its cells are half again as wide
+const float StreakGain[2] = { 0.7f, 1.8f };
+// A missile's white jet smoke against a cloud's grey puff: the billboard is the texture's white times
+// the particle's colour, unlit, so a sunlit cell needs about twice the puff's albedo to match it.  At
+// 1.8 a Scud's trail came down mid grey over sunlit tan ground and could not be seen.
+const float TrailBright = 2.4f;
+// The tall air: a second grid round the camera, as wide as the air's and a thousand units tall at
+// twice its cell, for the systems that climb out of the air's top, a nuclear missile's or a Scud
+// Storm's trail coming down from high up, a Scud's arc.  It runs only while one of them is in it.
+// The air's 30 or 40 cells hold a column to about 200 units over the ground; a trail that reached
+// past that kept its billboards whole and, nearer the line, lost the part over the top.
+const AirShape TallShapes[3] = { { 8, 8, 8, 1.0f, 0, 0, 1.0f }, { 48, 48, 48, 24.0f, 2048, 6, 1.5f },
+	{ 96, 96, 96, 12.0f, 4096, 8, 1.25f } };
+const float AirTallOver = 30.0f;		// units over the air's top less its rim: a trail with a particle that high goes to the tall air
+const float AirTrailOver = 150.0f;		// units over the top: any other system with a particle that high keeps its billboards
 
 struct Volume {
 	bool live = false;
@@ -994,10 +1019,12 @@ struct Tier {
 struct State {
 	ID3D11Device *device = nullptr;
 	bool refused = false;
+	bool tallRefused = false;	// the device would not make the tall air: what climbs out of the air keeps its billboards
 	Tier tiers[2];
-	Tier air;
-	ID3D11Buffer *sources = nullptr, *tileRange = nullptr, *tileIndex = nullptr;	// the air's particles and tile lists
-	ID3D11ShaderResourceView *sourcesView = nullptr, *tileRangeView = nullptr, *tileIndexView = nullptr;
+	Tier air, tall;
+	// the particles and tile lists of the air ([0]) and the tall air ([1])
+	ID3D11Buffer *sources[2] = {}, *tileRange[2] = {}, *tileIndex[2] = {};
+	ID3D11ShaderResourceView *sourcesView[2] = {}, *tileRangeView[2] = {}, *tileIndexView[2] = {};
 	ID3D11VertexShader *fullscreen = nullptr;
 	ID3D11SamplerState *linear = nullptr, *wrap = nullptr;
 	ID3D11BlendState *premultiplied = nullptr;
@@ -1024,11 +1051,12 @@ int lastReport = 0;
 // for the last twenty, so the march keeps to the smoke and not the whole grid.
 std::unordered_set<int> airSystems;
 std::unordered_set<int> airOutside;		// air systems with no particle in the box this step: billboards
+std::unordered_set<int> tallSystems;	// air systems that climbed out of the air's top: the tall air draws them, for good
 struct AirLook { bool smoke; bool dust; bool scrap; };
 std::unordered_map<const ParticleSystemTemplate *, AirLook> airLooks;
-Volume airVolume;
+Volume airVolume, tallVolume;
 struct WorldBox { float low[3], high[3]; int frame; };
-std::vector<WorldBox> airBoxes;
+std::vector<WorldBox> airBoxes, tallBoxes;
 unsigned airFed = 0, airLeftOut = 0;
 // The units pushing the air this logic frame, nearest the camera first (MoverPass), and the blast
 // fronts still running out.
@@ -1072,6 +1100,7 @@ bool requested()
 		firstSeen.clear();
 		airSystems.clear();
 		airOutside.clear();
+		tallSystems.clear();
 		movers.clear();
 		shocks.clear();
 		hulls.clear();
@@ -1089,24 +1118,42 @@ bool requested()
 	return level > 0;
 }
 
+void dropTier(Tier &tier)
+{
+	for (ID3D11ComputeShader *&program : tier.compute) drop(program);
+	drop(tier.march);
+	drop(tier.simConstants);
+	for (unsigned i = 0; i < 2; ++i) {
+		drop(tier.velocity[i]);
+		drop(tier.density[i]);
+		drop(tier.pressure[i]);
+	}
+	drop(tier.curl);
+	drop(tier.divergence);
+	drop(tier.light);
+	drop(tier.floorView);
+	drop(tier.floor);
+	tier = Tier();
+}
+
+// the air's (g 0) or the tall air's (g 1) grid and particle lists
+void releaseAir(unsigned g)
+{
+	dropTier(g ? state.tall : state.air);
+	drop(state.sourcesView[g]);
+	drop(state.tileRangeView[g]);
+	drop(state.tileIndexView[g]);
+	drop(state.sources[g]);
+	drop(state.tileRange[g]);
+	drop(state.tileIndex[g]);
+}
+
 void releaseState()
 {
-	for (Tier *each : { &state.tiers[0], &state.tiers[1], &state.air }) {
-		Tier &tier = *each;
-		for (ID3D11ComputeShader *&program : tier.compute) drop(program);
-		drop(tier.march);
-		drop(tier.simConstants);
-		for (unsigned i = 0; i < 2; ++i) {
-			drop(tier.velocity[i]);
-			drop(tier.density[i]);
-			drop(tier.pressure[i]);
-		}
-		drop(tier.curl);
-		drop(tier.divergence);
-		drop(tier.light);
-		drop(tier.floorView);
-		drop(tier.floor);
-	}
+	dropTier(state.tiers[0]);
+	dropTier(state.tiers[1]);
+	releaseAir(0);
+	releaseAir(1);
 	drop(state.fullscreen);
 	drop(state.linear);
 	drop(state.wrap);
@@ -1115,16 +1162,12 @@ void releaseState()
 	drop(state.drawConstants);
 	drop(state.noiseView);
 	drop(state.noise);
-	drop(state.sourcesView);
-	drop(state.tileRangeView);
-	drop(state.tileIndexView);
-	drop(state.sources);
-	drop(state.tileRange);
-	drop(state.tileIndex);
 	state = State();
 	for (Volume &volume : volumes) volume = Volume();
 	airVolume = Volume();
+	tallVolume = Volume();
 	airBoxes.clear();
+	tallBoxes.clear();
 }
 
 bool compile(DX11BackendClass *backend, const std::string &source, const char *name, const char *profile,
@@ -1256,10 +1299,20 @@ bool makeState(DX11BackendClass *backend, ID3D11Device *device)
 	bool made = device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0 && formatsTaken(device);
 	for (unsigned t = 0; made && t < 2; ++t) made = makeTier(backend, device, state.tiers[t], TierShapes[t], false);
 	const AirShape &air = AirShapes[level];
-	made = made && makeTier(backend, device, state.air, { air.gx, air.gy, air.gz, 1, 0 }, true)
-		&& makeStructured(device, air.particles * 2, 16, state.sources, state.sourcesView)
-		&& makeStructured(device, (air.gx / 8) * (air.gy / 8) * (air.gz / 8), 8, state.tileRange, state.tileRangeView)
-		&& makeStructured(device, air.particles * AirTileEntries, 4, state.tileIndex, state.tileIndexView);
+	auto makeAir = [&](unsigned g) {
+		const AirShape &grid = g ? TallShapes[level] : air;
+		return makeTier(backend, device, g ? state.tall : state.air, { grid.gx, grid.gy, grid.gz, 1, 0 }, true)
+			&& makeStructured(device, grid.particles * 2, 16, state.sources[g], state.sourcesView[g])
+			&& makeStructured(device, (grid.gx / 8) * (grid.gy / 8) * (grid.gz / 8), 8, state.tileRange[g], state.tileRangeView[g])
+			&& makeStructured(device, grid.particles * AirTileEntries, 4, state.tileIndex[g], state.tileIndexView[g]);
+	};
+	made = made && makeAir(0);
+	// the tall air is a nicety: a device short of its 45 MB keeps the rest
+	if (made && !makeAir(1)) {
+		releaseAir(1);
+		state.tallRefused = true;
+		DEBUG_LOG(("VOLSMOKE: the device refused the tall air; trails that climb out of the air keep their billboards\n"));
+	}
 	std::vector<unsigned char> code;
 	made = made && compile(backend, HazardCloud::vertexShader(), "volsmoke fullscreen", "vs_5_0", code)
 		&& SUCCEEDED(device->CreateVertexShader(code.data(), code.size(), nullptr, &state.fullscreen));
@@ -1316,8 +1369,10 @@ bool makeState(DX11BackendClass *backend, ID3D11Device *device)
 		state.refused = true;
 		return false;
 	}
-	DEBUG_LOG(("VOLSMOKE: programs, %u + %u volumes (the small %u cells tall) and a %ux%ux%u air at %.1f units a cell made in %.1f ms\n",
-		TierShapes[0].slabs, TierShapes[1].slabs, TierShapes[0].gz, air.gx, air.gy, air.gz, air.cell, DX11Resource_Milliseconds_Now() - started));
+	DEBUG_LOG(("VOLSMOKE: programs, %u + %u volumes (the small %u cells tall), a %ux%ux%u air at %.1f units a cell and %s made in %.1f ms\n",
+		TierShapes[0].slabs, TierShapes[1].slabs, TierShapes[0].gz, air.gx, air.gy, air.gz, air.cell,
+		state.tallRefused ? "no tall air" : level == 2 ? "a 96 cell tall air at 12" : "a 48 cell tall air at 24",
+		DX11Resource_Milliseconds_Now() - started));
 	return true;
 }
 
@@ -1896,6 +1951,9 @@ bool takeAir(ParticleSystem *system)
 {
 	const AirLook look = airLookOf(system->getTemplate(), system);
 	if (!look.smoke || look.scrap || !usable()) return false;
+	static std::unordered_set<const ParticleSystemTemplate *> logged;
+	if (logged.size() < 64 && logged.insert(system->getTemplate()).second)
+		DEBUG_LOG(("VOLSMOKE: the air takes '%s'%s\n", system->getTemplate()->getName().str(), system->isUsingStreak() ? ", a streak" : ""));
 	// an explosion's smoke that started no blast of its own still pushes the air round it
 	if (system->getPriority() == DEATH_EXPLOSION && !system->isSystemForever() && TheGameLogic) {
 		Coord3D where;
@@ -1910,12 +1968,12 @@ bool takeAir(ParticleSystem *system)
 
 // The air's box: where the smoke of the last twenty seconds can be, inside the grid.  False when
 // there is none.
-bool airClip(int now, float low[3], float high[3])
+bool airClip(const Volume &volume, const Tier &tier, const std::vector<WorldBox> &boxes, int now, float low[3], float high[3])
 {
 	float gridLow[3], gridHigh[3];
-	boxOf(airVolume, state.air.shape, gridLow, gridHigh);
+	boxOf(volume, tier.shape, gridLow, gridHigh);
 	bool any = false;
-	for (const WorldBox &box : airBoxes) {
+	for (const WorldBox &box : boxes) {
 		// what the wind and the flow carried it since, at most: the wind is 6 units a second, and
 		// the air's smoke has no heat to rise with
 		const float age = (float)(now - box.frame) / LOGICFRAMES_PER_SECOND;
@@ -2068,7 +2126,7 @@ void gatherSolids(int now)
 	const Int seer = TheObserverCamera.getShroudPlayerIndex();
 	// every grid lays its floor again from the new list
 	for (Volume &volume : volumes) volume.floorFrame = -100000;
-	airVolume.floorFrame = -100000;
+	airVolume.floorFrame = tallVolume.floorFrame = -100000;
 	for (Object *object = TheGameLogic->getFirstObject(); object; object = object->getNextObject()) {
 		if (!object->isKindOf(KINDOF_STRUCTURE)) continue;
 		if (seer >= 0 && object->getShroudedStatus(seer) == OBJECTSHROUD_SHROUDED) continue;
@@ -2085,14 +2143,18 @@ void fillMovers()
 	for (size_t i = 0; i < movers.size(); ++i) std::memcpy(sim.Movers[i * 4], movers[i].m, sizeof(movers[i].m));
 }
 
-// One logic frame of the air: it follows the camera, takes the particles of every system it holds
-// (the nearest the camera first, up to the setting's count), and runs the same passes as a blast.
-void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, const float sunToward[3])
+// One logic frame of the air (g 0) or the tall air (g 1): it follows the camera, takes the particles
+// of every system it holds (the nearest the camera first, up to the setting's count), and runs the
+// same passes as a blast.  The air runs first and hands the tall air what climbed out of its top.
+void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float seconds, const float sunToward[3])
 {
-	Tier &tier = state.air;
-	const AirShape &air = AirShapes[level];
+	const bool tall = g == 1;
+	Tier &tier = tall ? state.tall : state.air;
+	const AirShape &air = tall ? TallShapes[level] : AirShapes[level];
 	const TierShape &shape = tier.shape;
-	Volume &volume = airVolume;
+	Volume &volume = tall ? tallVolume : airVolume;
+	std::vector<WorldBox> &smokeBoxes = tall ? tallBoxes : airBoxes;
+	std::unordered_set<int> &systems = tall ? tallSystems : airSystems;
 	if (!volume.live) {
 		volume = Volume();
 		volume.live = volume.reset = true;
@@ -2101,11 +2163,12 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 	}
 	const float cell = volume.cell;
 
-	// Where the camera looks, the box's middle, its floor eight cells under the ground there.
+	// Where the camera looks, the box's middle, its floor eight cells under the ground there (the
+	// tall air's four, at twice the cell).
 	Coord3D look = {};
 	if (TheTacticalView) TheTacticalView->getPosition(&look);
 	const float ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(look.x, look.y, NULL) : 0.0f;
-	const float want[3] = { look.x - shape.gx * cell * 0.5f, look.y - shape.gy * cell * 0.5f, ground - 8.0f * cell };
+	const float want[3] = { look.x - shape.gx * cell * 0.5f, look.y - shape.gy * cell * 0.5f, ground - (tall ? 4.0f : 8.0f) * cell };
 	float shift[3] = {};
 	bool moved = false;
 	for (unsigned i = 0; i < 3; ++i) {
@@ -2145,53 +2208,94 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 	found.clear();
 	float low[3], high[3];
 	boxOf(volume, shape, low, high);
-	for (auto it = airSystems.begin(); it != airSystems.end();) {
-		ParticleSystem *system = TheParticleSystemManager->findParticleSystem((ParticleSystemID)*it);
+	for (auto it = systems.begin(); it != systems.end();) {
+		const int id = *it;
+		ParticleSystem *system = TheParticleSystemManager->findParticleSystem((ParticleSystemID)id);
 		if (!system) {
-			takenSystems.erase(*it);
-			it = airSystems.erase(it);
+			it = systems.erase(it);
+			takenSystems.erase(id);
+			airSystems.erase(id);
+			tallSystems.erase(id);
+			airOutside.erase(id);
 			continue;
 		}
-		const int id = *it;
 		++it;
+		if (!tall && tallSystems.count(id)) continue;	// the tall air's now
 		const bool dusty = airLookOf(system->getTemplate(), system).dust;
 		const float fade = system->getStealthFade();
 		unsigned inside = 0, outside = 0;
 		bool above = false;
 		const size_t start = found.size();
+		// A missile's smoke trail (a streak) is a ribbon through its particles in order, one laid a
+		// frame, so a fast missile leaves them twenty units apart: as spheres they stood as a dotted
+		// line of blobs.  Spheres are laid along each link as well, and the ribbon's bright jet smoke
+		// is taken thicker and paler than a cloud's puff, or it read as a faint brown haze.
+		const bool streak = system->isUsingStreak();
+		// a missile's trail (the nuclear missile's is puffs) and its launch cloud, both white
+		const char *named = system->getTemplate()->getName().str();
+		const bool trail = streak || system->getPriority() == WEAPON_TRAIL || ((std::strstr(named, "Missile") || std::strstr(named, "Missle")
+			|| std::strstr(named, "Ignition")) && !std::strstr(named, "Explosion"));
+		bool chained = false;
 		for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) {
 			const float alpha = (std::min)(p->getAlpha() * fade * AirCoverage, 0.95f);
-			if (alpha < 0.02f) continue;
+			if (alpha < 0.02f) { chained = false; continue; }
 			const Coord3D *at = p->getPosition();
 			// at most 8 cells, so a sphere reaches 27 bricks at most (AirTileEntries)
-			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * 0.8f), cell * 8.0f);
+			// (a ribbon's spheres are laid along its links too, so it may go thinner without breaking up)
+			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * (streak ? 0.6f : 0.8f)), cell * 8.0f);
 			// inside the box less its faded rim
 			const float rim = 4.0f * cell;
 			if (at->x < low[0] + rim || at->x > high[0] - rim || at->y < low[1] + rim || at->y > high[1] - rim
 					|| at->z < low[2] || at->z > high[2] - rim) {
 				++outside;
-				above = above || at->z > high[2] + AirTrailOver;
+				// a trail climbing out of the top goes to the tall air; anything else only once well
+				// over it keeps its billboards, so a burning building's column that tops the box by a
+				// little stays in the air as the box steps with the camera
+				above = above || at->z > high[2] + (trail && !state.tallRefused ? AirTallOver - rim : AirTrailOver);
+				chained = false;
 				continue;
 			}
 			++inside;
 			// the density whose optical depth through the sphere's middle is the particle's opacity
-			const float density = AirGain * -std::log(1.0f - alpha) / (2.0f * radius * AirExtinction);
+			const float density = AirGain * (streak ? StreakGain[g] : 1.0f) * -std::log(1.0f - alpha) / (2.0f * radius * AirExtinction);
 			const RGBColor *colour = p->getColor();
-			const float grey = (std::min)(1.0f, 0.3f * colour->red + 0.59f * colour->green + 0.11f * colour->blue);
+			const float grey = (std::min)(1.0f, 0.3f * colour->red + 0.59f * colour->green + 0.11f * colour->blue) * (trail ? TrailBright : 1.0f);
 			const float dx = at->x - look.x, dy = at->y - look.y;
-			found.push_back({ (at->x - low[0]) / cell - 0.5f, (at->y - low[1]) / cell - 0.5f, (at->z - low[2]) / cell - 0.5f,
-				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy });
+			const Source here = { (at->x - low[0]) / cell - 0.5f, (at->y - low[1]) / cell - 0.5f, (at->z - low[2]) / cell - 0.5f,
+				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy };
+			if (chained) {
+				const Source &last = found.back();
+				const float gap = std::sqrt((here.x - last.x) * (here.x - last.x) + (here.y - last.y) * (here.y - last.y)
+					+ (here.z - last.z) * (here.z - last.z));
+				const unsigned links = (std::min)(unsigned(gap / (0.6f * (std::min)(here.r, last.r))), 12u);
+				const Source from = last;
+				for (unsigned k = 1; k < links; ++k) {
+					const float u = (float)k / links;
+					found.push_back({ from.x + (here.x - from.x) * u, from.y + (here.y - from.y) * u, from.z + (here.z - from.z) * u,
+						from.r + (here.r - from.r) * u, from.soot + (here.soot - from.soot) * u, from.dust + (here.dust - from.dust) * u,
+						from.bright + (here.bright - from.bright) * u, from.distance + (here.distance - from.distance) * u });
+				}
+			}
+			found.push_back(here);
+			chained = streak;
 		}
-		// a system with no particle in the box (a plume past the screen's edge zoomed out, a column
+		// A system with no particle in the box (a plume past the screen's edge zoomed out, a column
 		// over a cliff) keeps its billboards until the box comes to it: nothing else would draw it.
-		// One that reaches well over the box's top keeps them all, its part inside too: a nuclear
-		// missile's trail coming down from a thousand units up drew as a short stub under nothing,
-		// where Off draws a thick grey column all the way up.  Well over, so a burning building's
-		// column that tops the box by a little stays in the air as the box steps with the camera.
-		// ponytail: no hysteresis; a plume that straddles the line flips, add a second's hold if one does
-		if (above) {
+		// One that climbs out of the air's top goes to the tall air whole, its part inside too, and
+		// stays there: a nuclear missile's trail coming down from a thousand units up drew in the
+		// air as a short stub under nothing, a Scud's arc lost its top.  Past the tall air's own top
+		// a trail's highest part is left out (the play camera looks down on it from under there).
+		if (above && !tall && !(trail && !state.tallRefused)) {
 			found.resize(start);
 			airOutside.insert(id);
+		} else if (above && !tall) {
+			found.resize(start);
+			tallSystems.insert(id);
+			airOutside.erase(id);
+			static unsigned tallLogged = 0;
+			if (tallLogged++ < 24)
+				DEBUG_LOG(("VOLSMOKE: frame %d, '%s' climbed out of the air: the tall air takes it\n", now,
+					system->getTemplate()->getName().str()));
 		} else if (outside && !inside) airOutside.insert(id);
 		else airOutside.erase(id);
 	}
@@ -2240,20 +2344,20 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 		const float values[8] = { s.x, s.y, s.z, s.r, s.soot, s.dust, s.bright, 0 };
 		std::memcpy(&packed[n * 8], values, sizeof(values));
 	}
-	upload(context, state.sources, packed.data(), packed.size() * sizeof(float));
-	upload(context, state.tileRange, ranges.data(), ranges.size() * sizeof(unsigned));
-	upload(context, state.tileIndex, index.data(), index.size() * sizeof(unsigned));
+	upload(context, state.sources[g], packed.data(), packed.size() * sizeof(float));
+	upload(context, state.tileRange[g], ranges.data(), ranges.size() * sizeof(unsigned));
+	upload(context, state.tileIndex[g], index.data(), index.size() * sizeof(unsigned));
 
 	// Where its smoke is, a box a second: the particles, and what the rotors lift and the blast
 	// fronts push out of them.
 	auto grow = [&](const float a[3], const float b[3]) {
-		if (airBoxes.empty() || now - airBoxes.back().frame >= LOGICFRAMES_PER_SECOND) {
+		if (smokeBoxes.empty() || now - smokeBoxes.back().frame >= LOGICFRAMES_PER_SECOND) {
 			WorldBox box;
 			for (unsigned i = 0; i < 3; ++i) { box.low[i] = 1e9f; box.high[i] = -1e9f; }
 			box.frame = now;
-			airBoxes.push_back(box);
+			smokeBoxes.push_back(box);
 		}
-		WorldBox &box = airBoxes.back();
+		WorldBox &box = smokeBoxes.back();
 		for (unsigned i = 0; i < 3; ++i) {
 			box.low[i] = (std::min)(box.low[i], a[i]);
 			box.high[i] = (std::max)(box.high[i], b[i]);
@@ -2265,7 +2369,7 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 		const float b[3] = { centre[0] + s.r * cell, centre[1] + s.r * cell, centre[2] + s.r * cell };
 		grow(a, b);
 	}
-	if (!airBoxes.empty())	// only where the air already holds smoke
+	if (!smokeBoxes.empty())	// only where the air already holds smoke
 		for (const Mover &mover : movers) {
 			const float (&m)[4][4] = mover.m;
 			const int kind = int(m[1][3] + 0.5f);
@@ -2277,8 +2381,8 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 			grow(a, b);
 		}
 	// two soot half-lives on, what is left of a box's smoke is under a quarter and fading
-	while (!airBoxes.empty() && now - airBoxes.front().frame > int(2 * AirSootHalfLife * LOGICFRAMES_PER_SECOND))
-		airBoxes.erase(airBoxes.begin());
+	while (!smokeBoxes.empty() && now - smokeBoxes.front().frame > int(2 * AirSootHalfLife * LOGICFRAMES_PER_SECOND))
+		smokeBoxes.erase(smokeBoxes.begin());
 
 	sim.Step[0] = dt;
 	sim.Step[1] = seconds;
@@ -2307,7 +2411,7 @@ void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, con
 	run(context, tier, CurlProgram, { tier.velocity[0].view }, { tier.curl.write }, 1);
 	run(context, tier, AdvectProgram, { tier.velocity[0].view, tier.density[in].view, tier.curl.view },
 		{ tier.velocity[1].write, tier.density[out].write, tier.pressure[0].write }, 1,
-		{ state.sourcesView, state.tileRangeView, state.tileIndexView });
+		{ state.sourcesView[g], state.tileRangeView[g], state.tileIndexView[g] });
 	run(context, tier, DivergenceProgram, { tier.velocity[1].view }, { tier.divergence.write }, 1);
 	for (unsigned sweep = 0; sweep < air.sweeps; ++sweep) {
 		const unsigned from = sweep & 1;
@@ -2627,13 +2731,13 @@ void Render(const HazardCloud::Camera &camera)
 		slabs[tierOf(slot)] = slabOf(slot) + 1;
 	}
 	// the air runs while it holds a system, and after, while its smoke can still be there
-	const bool airActive = !airSystems.empty() || !airBoxes.empty();
+	const bool airActive = !airSystems.empty() || !airBoxes.empty() || !tallBoxes.empty();
 	if (now - lastReport >= 10 * LOGICFRAMES_PER_SECOND && (live || claimedCount || airActive)) {
 		lastReport = now;
 		DEBUG_LOG(("VOLSMOKE: frame %d, %u volumes live, %u blasts, %u systems joined, %u dropped so far, %u draws; "
-			"air %u systems, %u particles fed, %u left out; %u units pushing, %u at most\n", now, live, claimedCount,
-			joinedCount, droppedCount, state.drawn, (unsigned)airSystems.size(), airFed, airLeftOut, (unsigned)movers.size(),
-			moverPeak));
+			"air %u systems (%u tall), %u particles fed, %u left out; %u units pushing, %u at most\n", now, live, claimedCount,
+			joinedCount, droppedCount, state.drawn, (unsigned)airSystems.size(), (unsigned)tallSystems.size(), airFed, airLeftOut,
+			(unsigned)movers.size(), moverPeak));
 	}
 	if (!live && !airActive) {
 		state.lastStepFrame = now;
@@ -2657,8 +2761,11 @@ void Render(const HazardCloud::Camera &camera)
 		const int frames = state.lastStepFrame < 0 ? 1 : (std::min)((std::max)(now - state.lastStepFrame, 1), 4);
 		for (unsigned t = 0; t < 2; ++t)
 			if (slabs[t]) step(context, t, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward, slabs[t]);
-		if (airActive) stepAir(context, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward);
+		if (airActive) stepAir(context, 0, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward);
 		else airVolume.live = false;	// the next system starts it from an empty grid
+		// after the air, which hands it what climbed out of the air's top this step
+		if (!tallSystems.empty() || !tallBoxes.empty()) stepAir(context, 1, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward);
+		else tallVolume.live = false;
 		state.lastStepFrame = now;
 	}
 
@@ -2709,13 +2816,18 @@ void Render(const HazardCloud::Camera &camera)
 		order[shown++] = slot;
 	}
 	std::sort(order, order + shown, [&](unsigned a, unsigned b) { return distance[a] > distance[b]; });
-	// the air round everything, drawn first, under the blasts in it
-	float airLow[3], airHigh[3];
-	D3D11_RECT airRect;
-	const bool airShown = airActive && airVolume.live && !airVolume.reset && airClip(now, airLow, airHigh)
-		&& screenRect(airLow, airHigh, viewProjection, camera, airRect);
+	// the air round everything, drawn first, under the blasts in it: the tall air, then the air
+	float airLow[2][3], airHigh[2][3];
+	D3D11_RECT airRect[2];
+	bool airShown[2] = {};
+	for (unsigned g = 0; g < 2; ++g) {
+		const Volume &grid = g ? tallVolume : airVolume;
+		airShown[g] = airActive && grid.live && !grid.reset
+			&& airClip(grid, g ? state.tall : state.air, g ? tallBoxes : airBoxes, now, airLow[g], airHigh[g])
+			&& screenRect(airLow[g], airHigh[g], viewProjection, camera, airRect[g]);
+	}
 
-	if (shown || airShown) {
+	if (shown || airShown[0] || airShown[1]) {
 		ID3D11DepthStencilView *sceneDepth = backend->Scene_Depth_Target();
 		backend->Resolve_Scene_Depth();
 		ID3D11ShaderResourceView *depth = device->Get_Depth_Texture();
@@ -2734,18 +2846,20 @@ void Render(const HazardCloud::Camera &camera)
 		context->PSSetConstantBuffers(0, 1, &state.drawConstants);
 		// the budget: past three volumes on screen each one is marched in longer steps
 		const float stepCells = Qualities[level].stepCells * (std::max)(1.0f, shown / 3.0f);
-		if (airShown) {
-			const Tier &tier = state.air;
+		for (unsigned g = 2; g-- > 0;) {
+			if (!airShown[g]) continue;
+			const Tier &tier = g ? state.tall : state.air;
+			const Volume &grid = g ? tallVolume : airVolume;
 			ID3D11ShaderResourceView *const views[5] = { depth, tier.density[tier.current].view, tier.light.view,
 				tier.velocity[0].view, state.noiseView };
 			context->PSSetShaderResources(0, 5, views);
 			context->PSSetShader(tier.march, nullptr, 0);
 			for (unsigned i = 0; i < 3; ++i) {
-				draw.Box[i] = airVolume.origin[i];
-				draw.ClipLow[i] = airLow[i];
-				draw.ClipHigh[i] = airHigh[i];
+				draw.Box[i] = grid.origin[i];
+				draw.ClipLow[i] = airLow[g][i];
+				draw.ClipHigh[i] = airHigh[g][i];
 			}
-			draw.Box[3] = airVolume.cell;
+			draw.Box[3] = grid.cell;
 			// the particles' own colour times what their textures average to, by eye against the billboards
 			const float soot[4] = { 0.5f, 0.49f, 0.48f, 0 }, dust[4] = { 0.8f, 0.66f, 0.48f, 0 };
 			std::memcpy(draw.Soot, soot, sizeof(soot));
@@ -2755,10 +2869,10 @@ void Render(const HazardCloud::Camera &camera)
 			std::memset(draw.Extra, 0, sizeof(draw.Extra));
 			const float look[4] = { ShadeLight, 0, SunShare, 0 };
 			std::memcpy(draw.Look, look, sizeof(look));
-			const float slab[4] = { 0, 1, AirShapes[level].stepCells, AirExtinction };
+			const float slab[4] = { 0, 1, (g ? TallShapes : AirShapes)[level].stepCells, AirExtinction };
 			std::memcpy(draw.Slab, slab, sizeof(slab));
 			upload(context, state.drawConstants, &draw, sizeof(draw));
-			context->RSSetScissorRects(1, &airRect);
+			context->RSSetScissorRects(1, &airRect[g]);
 			context->Draw(3, 0);
 			++state.drawn;
 		}
@@ -2803,9 +2917,12 @@ void Reset()
 	if (!requested()) return;
 	for (Volume &volume : volumes) volume = Volume();
 	airVolume = Volume();
+	tallVolume = Volume();
 	airBoxes.clear();
+	tallBoxes.clear();
 	airSystems.clear();
 	airOutside.clear();
+	tallSystems.clear();
 	movers.clear();
 	shocks.clear();
 	solids.clear();
