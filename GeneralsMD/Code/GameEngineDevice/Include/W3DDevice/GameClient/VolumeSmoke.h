@@ -19,8 +19,9 @@ bool Takes(ParticleSystem *system);
 bool Hides(ParticleSystem *system);
 
 // Reads what the volumes need from the drawables and the structures (the units pushing the air,
-// the buildings it flows round), once per logic frame, from W3DDisplay::draw before the logic
-// thread's window opens.  Nothing with the setting Off or no volume running.
+// the buildings it flows round, the hull a dying tank's blast is laid out on), once per logic
+// frame, from W3DDisplay::draw before the logic thread's window opens.  Nothing with the setting
+// Off.
 void Gather();
 
 // Steps every volume once per logic frame that passed and draws them into the scene, from

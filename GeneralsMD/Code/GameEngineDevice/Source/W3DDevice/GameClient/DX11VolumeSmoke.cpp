@@ -5,10 +5,12 @@
 // Three kinds of blast, each told from the particle systems its FX spawns and each played from a
 // timeline of its own, modelled on how the real thing looks:
 //
-// A tank's death is an ammunition cook-off.  A flame jet vents up through the turret ring, two to
-// four smaller pops follow over a few seconds, each an orange puff with sparks, and then the hull
-// burns: a thick black column for half a minute that rises, leans with the wind and thins, over
-// a small tan skirt of dust at the ground.
+// A tank's death is an ammunition cook-off, laid out on the dying hull's own box (its template's
+// length, width and height and its heading, read from the drawable).  Orange flame and black soot
+// burst out low along the hull and roll along the ground off both ends, a ragged white-yellow
+// plume of fire flares up out of the hull top in six to eight thin, uneven jets, two to four
+// smaller pops follow over a few seconds, and then the hull burns: a thick black column for half
+// a minute that rises from its whole length, leans with the wind and thins.
 //
 // A shell or a bomb on the ground flashes for a frame, throws a hollow cone of dirt jets ten to
 // twenty metres up that fall back inside three to six seconds, leaves a black-grey puff in the
@@ -28,14 +30,17 @@
 // the blast's forcing (the ground skirt, the vortex ring, the inflow stem, the lumpy hot core and
 // the emitters the timeline places), the divergence, 14 Jacobi sweeps, the projection and a sun
 // light march per cell.  The frame raymarches each box against the scene depth, far box first,
-// with the heat glowing from deep red to white, a flash and a condensation shell drawn from the
-// timeline, and a billowy noise eroding the surface so the cap reads as cauliflower.
+// with the heat glowing from deep red to white, a shell's or a nuke's flash and the condensation
+// shell drawn from the timeline, and a billowy noise eroding the surface so the cap reads as
+// cauliflower.
 //
 // Nothing here is read by the logic or draws a random number: every variation is an integer hash.
 // The D3D9 and SDL3 paths, -headless and every run with the setting Off keep the billboards, and
 // with it Off Takes, Hides and Render return before touching anything.  With it on, every
-// system of a blast this takes draws no billboards, its GPU overflow particles included; the tank
-// and the shell keep their additive fire and flash cards, the nuclear blast has none.
+// system of a blast this takes draws no billboards, its GPU overflow particles included; the
+// shell keeps its additive fire and flash cards, the tank and the nuclear blast have none, and
+// the tank's ground ring is taken with them.  Its scrap and the smoke trails behind the scrap
+// stay the game's own.
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
 #include "Common/LogicThread.h"
@@ -79,7 +84,6 @@ TierShape TierShapes[2] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 } };
 const unsigned MaxVolumes = 26;		// both tiers' slabs at High, the small tier's first
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
 const unsigned MaxPuffs = 24;
-const unsigned MaxStreaks = 16;
 const unsigned MaxMovers = 16;		// High's; Low takes the nearest 8
 const unsigned NoiseSide = 32;
 
@@ -185,10 +189,9 @@ struct DrawConstants {
 	float SunDir[4];		// towards the sun
 	float Blast[4];			// the core's centre and radius in cells
 	float Effects[4];		// flash, condensation shell radius in cells and opacity, unused
-	float Extra[4];			// streaks, the flash's height over its width, its radius in cells, unused
+	float Extra[4];			// unused, the flash's height over its width, its radius in cells, unused
 	float ClipLow[4];		// the world box the march keeps to: the grid's, or for the air where smoke is
 	float ClipHigh[4];
-	float Streaks[MaxStreaks * 2][4];	// a glowing fragment's trail: tail and radius, head and brightness
 };
 
 // What every program starts with, after the tier's GX, GY, GZ and SLABS: the fade that keeps smoke
@@ -740,7 +743,6 @@ cbuffer Draw : register(b0)
     float4 Extra;
     float4 ClipLow;		// the world box the march keeps to, inside the grid's: where the smoke can be
     float4 ClipHigh;
-    float4 Streaks[32];
 };
 float3 worldAt(float2 pixel, float depth)
 {
@@ -790,19 +792,6 @@ float4 main(float4 position : SV_Position) : SV_Target
             float3 f = cell - Blast.xyz - float3(0, 0, tall * 0.5);
             float falloff = (f.x * f.x + f.y * f.y) / (wide * wide) + f.z * f.z / (tall * tall);
             color += transmittance * float3(1.0, 0.9, 0.7) * Effects.x * exp(-falloff) * stepLength / Box.w;
-        }
-        // the fragments: thin bright trails, each brighter at its head
-        uint streaks = (uint)Extra.x;
-        if (streaks > 0) {
-            float glow = 0;
-            for (uint k = 0; k < streaks; ++k) {
-                float3 a = Streaks[k * 2].xyz, ab = Streaks[k * 2 + 1].xyz - a;
-                float along = saturate(dot(cell - a, ab) / max(dot(ab, ab), 1e-4));
-                float3 e = cell - a - ab * along;
-                float r = Streaks[k * 2].w;
-                glow += Streaks[k * 2 + 1].w * (0.3 + 0.7 * along) * exp(-dot(e, e) / (r * r));
-            }
-            color += transmittance * float3(1.0, 0.7, 0.35) * glow * stepLength / Box.w;
         }
         float3 clamped = clamp(cell, float3(0, 0, 0), float3(GX - 1, GY - 1, GZ - 1));
         float3 uvw = float3((clamped.x + 0.5) / GX, (clamped.y + 0.5) / GY, (clamped.z + 0.5 + slabBase) / (GZ * SLABS));
@@ -879,6 +868,9 @@ struct Volume {
 	float cell = 1;
 	float blast[3] = {};				// the detonation, in cells
 	float ground = 0;					// the terrain's height under it, in cells
+	// a tank's hull: its heading, then its half length, half width and height in cells
+	float hull[5] = { 1, 0, 5, 3.3f, 3.3f };
+	bool onHull = false;				// a shell that burst on a vehicle
 	unsigned seed = 0;
 	int born = 0;
 	int life = 0;						// logic frames
@@ -931,7 +923,7 @@ int lastReport = 0;
 // for the last twenty, so the march keeps to the smoke and not the whole grid.
 std::unordered_set<int> airSystems;
 std::unordered_set<int> airOutside;		// air systems with no particle in the box this step: billboards
-struct AirLook { bool smoke; bool dust; };
+struct AirLook { bool smoke; bool dust; bool scrap; };
 std::unordered_map<const ParticleSystemTemplate *, AirLook> airLooks;
 Volume airVolume;
 struct WorldBox { float low[3], high[3]; int frame; };
@@ -945,6 +937,10 @@ std::vector<Mover> movers;
 struct Shock { float at[3], speed, strength, seconds; int born; };
 std::vector<Shock> shocks;
 unsigned moverPeak = 0;
+// Every ground vehicle near the camera, standing or moving, this logic frame and the one before,
+// so a tank dying now finds its hull: where it stands, its heading and its template's box.
+struct Hull { float x, y, heading, major, minor, tall; };
+std::vector<Hull> hulls, lastHulls;
 // The structures the smoke flows round, read by Gather every two seconds outside the logic
 // thread's window (the render runs inside it, where walking the object list is a counted read).
 // A structure goes in once the player whose view is drawn has seen it, so smoke parting round
@@ -977,6 +973,8 @@ bool requested()
 		airOutside.clear();
 		movers.clear();
 		shocks.clear();
+		hulls.clear();
+		lastHulls.clear();
 		solids.clear();
 		solidsFrame = -100000;
 		lastReport = 0;
@@ -1318,64 +1316,72 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 	std::memset(shape, 0, 16);
 	std::memset(motion, 0, 16);
 	shape[2] = 1000.0f;		// no ceiling
-	unsigned count = 0, streaks = 0;
+	unsigned count = 0;
 	float flash = 0, shellRadius = 0, shellOpacity = 0, flashTall = 1.0f, flashWide = 3.0f;
 	float soot[4] = { 0.06f, 0.055f, 0.05f, 1.6f }, dust[3] = { 0.52f, 0.43f, 0.31f };
 	const float bx = volume.blast[0], by = volume.blast[1], bz = volume.blast[2];
-	// a glowing fragment: its trail over the last quarter second of its flight
-	auto streak = [&](const Volume &from, unsigned index, float speed, float tiltLow, float tiltHigh, float age,
-		float brightness) {
-		float head[6], tail[6];
-		if (!draw || streaks >= MaxStreaks || !jetAt(from, index, speed, tiltLow, tiltHigh, age, head)) return;
-		jetAt(from, index, speed, tiltLow, tiltHigh, (std::max)(age - 0.25f, 0.0f), tail);
-		float *a = draw->Streaks[streaks * 2], *b = draw->Streaks[streaks * 2 + 1];
-		a[0] = tail[0]; a[1] = tail[1]; a[2] = tail[2]; a[3] = 0.45f;
-		b[0] = head[0]; b[1] = head[1]; b[2] = head[2]; b[3] = brightness;
-		++streaks;
-	};
 
 	if (volume.kind == TankDeath) {
-		// The first second, after a real vehicle's: an overexposed flash several times the hull's
-		// size, standing tall over it for a few frames; thin bright fragments fanning out, mostly
-		// up, of uneven length; at the base a low, wide band of fire and black-brown soot in three
-		// to five separate lumps; a light grey dust haze along the ground.  Then the column.
-		flash = t < 0.04f ? 10.0f : 10.0f * std::exp(-(t - 0.04f) / 0.035f);
-		flashWide = 4.0f;
-		flashTall = 2.0f;
-		if (t < 0.3f) { power[0] = 14.0f * (1 - t / 0.3f); power[3] = 0.8f; }
-		dust[0] = 0.62f; dust[1] = 0.60f; dust[2] = 0.56f;
-		if (t < 0.8f)
-			for (unsigned f = 0; f < 12; ++f)
-				streak(volume, f, 45.0f, 0.0f, 0.95f, t, 3.5f * (1 - t / 0.8f));
-		const unsigned lumps = 3 + unsigned(hashUnit(volume.seed, 800) * 2.99f);
-		if (t < 0.5f)
-			for (unsigned l = 0; l < lumps; ++l) {
-				const float a = (l + 0.4f * hashUnit(volume.seed, 801 + l)) * 6.2831853f / lumps;
-				const float r = 2.0f + 2.0f * hashUnit(volume.seed, 811 + l);
-				const float ox = r * std::cos(a) * 1.4f, oy = r * std::sin(a) * 0.8f;	// longer than wide, as a hull lies
-				emit(slab, count, { bx + ox, by + oy, bz, 2.6f, ox * 3.0f, oy * 3.0f, 3.0f, 16.0f, 1.5f, 0, 0.3f });
+		// After a real vehicle's (reference/vehicle-explosion.png): no flash ball and no rays.  The
+		// light is the fire itself.  Everything is placed on the hull: `along` its length, `across`
+		// it, `up` from the ground, in cells, with the velocities in the same frame.
+		const float hx = volume.hull[0], hy = volume.hull[1], L = volume.hull[2], W = volume.hull[3], H = volume.hull[4];
+		auto onHull = [&](float along, float across, float up, float radius, float va, float vc, float vz, float sootRate,
+			float heat, float dustRate, float push) {
+			emit(slab, count, { bx + hx * along - hy * across, by + hy * along + hx * across, bz + up, radius,
+				hx * va - hy * vc, hy * va + hx * vc, vz, sootRate, heat, dustRate, push });
+		};
+		auto unit = [&](unsigned salt) { return hashUnit(volume.seed, salt); };
+		dust[0] = 0.70f; dust[1] = 0.62f; dust[2] = 0.50f;	// sunlit, fire-lit dust, warm against the tan ground
+		// The base: orange flame and black soot bursting out low along the whole hull, rolling off
+		// both ends and a little to the sides, held down by the dust in it.
+		if (t < 0.7f) {
+			const float fade = 1 - t / 0.7f;
+			for (unsigned i = 0; i < 6; ++i) {
+				const float s = i / 2.5f - 1 + (unit(800 + i) - 0.5f) * 0.2f;
+				const float across = (unit(810 + i) - 0.5f) * W * 0.7f;
+				const float radius = (std::max)(W * 0.85f, 2.2f) * (0.8f + 0.4f * unit(820 + i));
+				onHull(s * L * 1.15f, across, 0.6f + 0.6f * unit(830 + i), radius, s * (8.0f + 12.0f * unit(840 + i)) * fade,
+					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, 1.25f, 8.0f * fade, 0.35f);
 			}
-		// the cook-off pops, two to four, each an orange puff with sparks
-		const unsigned pops = 2 + unsigned(hashUnit(volume.seed, 900) * 2.99f);
+		}
+		// The plume: six to eight thin, uneven jets of white-hot fire fanning up out of the hull top,
+		// leaning out along the hull, each slowing fast and widening a little, so the flare reads as
+		// ragged streaks.  Each lays down thin smoke at a rate that goes with its speed, the same a
+		// cell along the whole jet, and pushes the air only lightly.  Thick, wide, pushing hard or at
+		// a fixed rate, a jet carried its smoke along with its head and arrived at the top as a round
+		// ball with nothing under it; with dust in it, it climbed on as a brown finger.
+		const unsigned jets = 6 + unsigned(unit(850) * 2.99f);
+		for (unsigned j = 0; j < jets; ++j) {
+			const float age = t - 0.05f * unit(851 + j), lasts = 0.15f + 0.2f * unit(860 + j);
+			if (age < 0 || age > lasts) continue;
+			const float tilt = 0.1f + 0.65f * unit(870 + j);
+			const float end = unit(880 + j) < 0.5f ? 0.0f : 3.14159265f;
+			const float azimuth = end + (unit(890 + j) - 0.5f) * 1.6f;
+			const float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth), dz = std::cos(tilt);
+			const float speed = 45.0f + 30.0f * unit(930 + j), slows = 0.2f;
+			const float travelled = speed * slows * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
+			const float a0 = (unit(940 + j) - 0.5f) * L * 1.2f, c0 = (unit(950 + j) - 0.5f) * W * 0.6f;
+			const float rate = 22.0f * now / speed;
+			// hot enough at its centre that the falloff still leaves its cells white-yellow, not orange
+			onHull(a0 + da * travelled, c0 + dc * travelled, H * 0.4f + dz * travelled, 1.3f + 2.5f * age,
+				da * now, dc * now, dz * now, rate, 3.5f, rate * 0.3f, 0.15f);
+		}
+		// the cook-off pops, two to four, each a hot orange puff out of a hatch somewhere on the hull
+		const unsigned pops = 2 + unsigned(unit(900) * 2.99f);
 		float when = 0.9f;
 		for (unsigned p = 0; p < pops; ++p) {
-			when += 0.5f + 1.0f * hashUnit(volume.seed, 901 + p);
+			when += 0.5f + 1.0f * unit(901 + p);
 			const float age = t - when;
-			if (age < 0 || age > 0.9f) continue;
-			const float ox = (hashUnit(volume.seed, 910 + p) - 0.5f) * 2.5f, oy = (hashUnit(volume.seed, 920 + p) - 0.5f) * 2.5f;
-			if (age < 0.2f) emit(slab, count, { bx + ox, by + oy, bz + 1.0f, 2.8f, 0, 0, 12.0f, 12.0f, 1.6f, 0, 0.3f });
-			if (age < 0.06f) { flash = (std::max)(flash, 8.0f); flashWide = 3.0f; flashTall = 1.5f; }
-			Volume sparks = volume;
-			sparks.seed = volume.seed + 31 * (p + 1);
-			sparks.blast[0] += ox;
-			sparks.blast[1] += oy;
-			for (unsigned s = 0; s < 4; ++s)
-				if (age < 0.6f) streak(sparks, s, 30.0f, 0.2f, 1.1f, age, 5.0f * (1 - age / 0.6f));
+			if (age >= 0 && age < 0.2f)
+				onHull((unit(910 + p) - 0.5f) * L * 1.4f, (unit(920 + p) - 0.5f) * W * 0.8f, H * 0.6f, 2.4f, 0, 0, 12.0f,
+					12.0f, 1.7f, 2.0f, 0.3f);
 		}
-		// the hull burning: a thick black column for half a minute, from when the band has spread
+		// the hull burning: a thick black column for half a minute off its whole length
 		if (t > 0.8f && t < 28.0f) {
 			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 18.0f ? 1 - (t - 18.0f) / 10.0f : 1.0f;
-			emit(slab, count, { bx, by, bz + 0.5f, 3.0f, 0, 0, 12.0f, 4.5f * rise * fall, 1.0f, 0.05f, 0.25f });
+			for (int end = -1; end <= 1; end += 2)
+				onHull(end * L * 0.45f, 0, 0.5f, (std::max)(W * 0.9f, 2.2f), 0, 0, 12.0f, 2.7f * rise * fall, 1.0f, 0.05f, 0.25f);
 		}
 	} else if (volume.kind == Shell || volume.kind == Airburst) {
 		const bool ground = volume.kind == Shell;
@@ -1389,10 +1395,11 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		dust[0] = 0.33f; dust[1] = 0.26f; dust[2] = 0.19f;
 		// the skirt along the ground, or for an airburst a patch of dust under it
 		if (ground && t < 0.3f) { power[0] = 30.0f * (1 - t / 0.3f); power[3] = 1.5f; }
-		if (!ground && t < 0.4f) emit(slab, count, { bx, by, volume.ground + 0.5f, 4.0f, 0, 0, 0, 0, 0, 6.0f, 0 });
-		// the black-grey puff in the middle, rising slowly
-		if (t < 0.2f) power[1] = 1.6f;
-		if (t < 0.3f) power[2] = 1.1f;
+		if (!ground && !volume.onHull && t < 0.4f) emit(slab, count, { bx, by, volume.ground + 0.5f, 4.0f, 0, 0, 0, 0, 0, 6.0f, 0 });
+		// the black-grey puff in the middle, rising slowly; off a hull, barely warm, so it neither
+		// glows nor climbs away as an orange ball
+		if (t < 0.2f) power[1] = volume.onHull ? 1.2f : 1.6f;
+		if (t < 0.3f) power[2] = volume.onHull ? 0.4f : 1.1f;
 		// the dirt fountain: a hollow cone of jets 10 to 20 m up, falling back in 3 to 6 s
 		if (ground && t < 6.0f) {
 			const float speed = std::sqrt(2.0f * Gravity * 50.0f * volume.scale) / volume.cell;
@@ -1467,7 +1474,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		draw->Effects[0] = flash;
 		draw->Effects[1] = shellRadius;
 		draw->Effects[2] = shellOpacity;
-		draw->Extra[0] = (float)streaks;
+		draw->Extra[0] = 0;
 		draw->Extra[1] = flashTall;
 		draw->Extra[2] = flashWide;
 	}
@@ -1612,13 +1619,20 @@ AirLook airLookOf(const ParticleSystemTemplate *tmplate, ParticleSystem *system)
 	look.smoke = system->getShaderType() == ParticleSystemInfo::ALPHA && !tmplate->isEmissive()
 		&& system->getPriority() != AREA_EFFECT && (dusty || smoky);
 	look.dust = dusty || system->getPriority() == DUST_TRAIL || std::strstr(name, "Dust") != nullptr;
+	// Flying bits and the smoke trails behind them (ReforgedDebrisTrail, ReforgedShrapnelPuff, the
+	// ReforgedBlastShardPuff sizes, TankStruckDebris, TrackDebrisDirt*): the air keeps what a
+	// particle stamped for seconds after it moved on, so a fast clod left its whole path behind as a
+	// brown tentacle and a thin streak stood as a wide pale ray.  These keep the game's own look.
+	look.scrap = system->getPriority() == DEBRIS_TRAIL || std::strstr(name, "Debris") || std::strstr(name, "Shrapnel")
+		|| std::strstr(name, "Shard");
 	airLooks[tmplate] = look;
 	return look;
 }
 
 bool takeAir(ParticleSystem *system)
 {
-	if (!airLookOf(system->getTemplate(), system).smoke || !usable()) return false;
+	const AirLook look = airLookOf(system->getTemplate(), system);
+	if (!look.smoke || look.scrap || !usable()) return false;
 	// an explosion's smoke that started no blast of its own still pushes the air round it
 	if (system->getPriority() == DEATH_EXPLOSION && !system->isSystemForever() && TheGameLogic) {
 		Coord3D where;
@@ -1684,6 +1698,8 @@ void collectMovers(int now)
 	next.clear();
 	static std::vector<Mover> found;
 	found.clear();
+	lastHulls.swap(hulls);
+	hulls.clear();
 	for (Drawable *drawable = TheGameClient->firstDrawable(); drawable; drawable = drawable->getNextDrawable()) {
 		const bool aircraft = drawable->isKindOf(KINDOF_AIRCRAFT), walker = drawable->isKindOf(KINDOF_INFANTRY);
 		if (!aircraft && !walker && !drawable->isKindOf(KINDOF_VEHICLE)) continue;
@@ -1740,6 +1756,8 @@ void collectMovers(int now)
 			m[0][3] = 8.0f;
 			m[1][3] = MoverWalker;
 		} else {
+			hulls.push_back({ at.x, at.y, drawable->getOrientation(), major,
+				geometry.getGeomType() == GEOMETRY_BOX ? minor : major * 0.7f, tall });
 			if (speed < 6.0f) continue;
 			m[0][2] = (std::min)(at.z, ground + 2.0f);
 			m[0][3] = (std::max)(major, 8.0f);
@@ -2077,6 +2095,24 @@ float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind ==
 float joinRadius(const Volume &volume) { return volume.kind == Nuclear ? 500.0f : volume.kind == TankDeath ? 60.0f : 30.0f * volume.scale; }
 int rankOf(const Volume &volume) { return volume.kind == TankDeath ? 2 : volume.scale >= 2.0f ? 1 : 0; }
 
+// The vehicle Gather saw nearest `where`, this logic frame or the one before: with `onTop`, one
+// whose box `where` is over; else one standing within its own length of it (a death FX goes
+// off at the hull's middle, give or take).  None, null.
+const Hull *hullAt(const Coord3D &where, bool onTop)
+{
+	const Hull *found = nullptr;
+	float nearest = 1e30f;
+	for (const std::vector<Hull> *list : { &hulls, &lastHulls })
+		for (const Hull &hull : *list) {
+			const float dx = where.x - hull.x, dy = where.y - hull.y, d2 = dx * dx + dy * dy;
+			const float c = std::cos(hull.heading), s = std::sin(hull.heading);
+			const bool beside = onTop ? std::fabs(dx * c + dy * s) <= hull.major + 2.0f && std::fabs(-dx * s + dy * c) <= hull.minor + 2.0f
+				: d2 < (hull.major + 8.0f) * (hull.major + 8.0f);
+			if (beside && d2 < nearest) { nearest = d2; found = &hull; }
+		}
+	return found;
+}
+
 void pruneSets()
 {
 	// ponytail: both grow until 4096, then forget the systems that are gone
@@ -2107,10 +2143,15 @@ bool Takes(ParticleSystem *system)
 	if (takenSystems.count(id)) return !airOutside.count(id);
 	// A blast is told from loose billboard systems; trails, streaks, a building's smoke and every
 	// other smoke or dust go to the air.
-	if (!system->shouldBillboard() || system->isUsingStreak() || system->getVolumeParticleDepth() > 1
-			|| system->getAttachedObject() != INVALID_ID || system->getAttachedDrawable() != INVALID_DRAWABLE_ID
-			|| system->getPriority() == AREA_EFFECT)
-		return takeAir(system);
+	// A loose ground-aligned system is let as far as a tank's blast: the stock ring a tank's death
+	// lays on the ground (MammothTankExplosionShockwave), which the photo has none of.
+	const bool loose = !system->isUsingStreak() && system->getVolumeParticleDepth() <= 1
+		&& system->getAttachedObject() == INVALID_ID && system->getAttachedDrawable() == INVALID_DRAWABLE_ID
+		&& system->getPriority() != AREA_EFFECT;
+	const bool flat = loose && !system->shouldBillboard();
+	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION)) return takeAir(system);
+	// flying bits stay the game's own here too: a blast that took them drew nothing in their place
+	if (airLookOf(system->getTemplate(), system).scrap) return false;
 	const int now = (int)TheGameLogic->getFrame();
 	const int seen = firstSeen.emplace(id, now).first->second;
 	Coord3D where;
@@ -2118,13 +2159,14 @@ bool Takes(ParticleSystem *system)
 
 	// Another system of a blast already taken: it joins it if it started beside it, at its start.
 	// A shell's takes smoke, dust and dirt and leaves the fire cards; a tank's and a nuclear
-	// blast's take everything, as the sim draws their flash and fire.  A system that starts a blast of its own joins only one of its own kind
+	// blast's take everything, as the sim draws their fire.  A system that starts a blast of its own joins only one of its own kind
 	// (the nuke's several mushroom systems, a tank's two death smokes), so a tank dying under the
 	// shell that killed it still gets a tank's smoke.
 	const TemplateKind kind = kindOfTemplate(system->getTemplate(), system);
 	const bool alpha = system->getShaderType() == ParticleSystemInfo::ALPHA && !system->getTemplate()->isEmissive();
 	for (const Volume &volume : volumes) {
 		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 120 : 30)) continue;
+		if (flat && volume.kind != TankDeath) continue;
 		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
 		const char *joiner = system->getTemplate()->getName().str();
@@ -2142,15 +2184,19 @@ bool Takes(ParticleSystem *system)
 		return true;
 	}
 
-	if (!kind.trigger || system->isSystemForever() || seen < now - 5 || !usable()) return takeAir(system);
+	if (flat || !kind.trigger || system->isSystemForever() || seen < now - 5 || !usable()) return takeAir(system);
 
 	const Real ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(where.x, where.y, NULL) : where.z;
 	Kind type = kind.kind;
-	if (type == Shell && where.z - ground > 25.0f) type = Airburst;
+	// A shell bursting high, or on a vehicle's hull rather than the ground, throws no dirt: on a
+	// tank the dirt fountain stood over it as brown fingers.
+	const bool onHull = type == Shell && hullAt(where, true);
+	if (type == Shell && (where.z - ground > 25.0f || onHull)) type = Airburst;
 	const unsigned tier = type == Nuclear ? 1 : 0;
 	const TierShape &shape = TierShapes[tier];
 	Volume fresh;
 	fresh.kind = type;
+	fresh.onHull = onHull;
 	fresh.scale = kind.scale;
 	const int rank = rankOf(fresh);
 
@@ -2197,11 +2243,30 @@ bool Takes(ParticleSystem *system)
 	volume.ground = groundCell;
 	volume.blast[2] = type == Airburst ? (where.z - volume.origin[2]) / volume.cell - 0.5f : groundCell + 0.5f;
 	volume.seed = unsigned(int(where.x) * 73856093) ^ unsigned(int(where.y) * 19349663) ^ unsigned(now * 83492791);
+	// A tank's blast lies on its hull: the vehicle standing where its death FX went off, from the
+	// list Gather read.  None found (hidden, or not a vehicle), a mid-sized tank at a hashed heading.
+	if (type == TankDeath) {
+		const Hull *found = hullAt(where, false);
+		const float heading = found ? found->heading : hashUnit(volume.seed, 7) * 6.2831853f;
+		const float cell = volume.cell;
+		volume.hull[0] = std::cos(heading);
+		volume.hull[1] = std::sin(heading);
+		// kept inside what the 48-cell grid holds once the flame has rolled off the ends
+		volume.hull[2] = (std::min)((std::max)((found ? found->major : 15.0f) / cell, 2.0f), 12.0f);
+		volume.hull[3] = (std::min)((std::max)((found ? found->minor : 10.0f) / cell, 1.5f), 8.0f);
+		volume.hull[4] = (std::min)((std::max)((found ? found->tall : 10.0f) / cell, 1.5f), 8.0f);
+		static unsigned hullsLogged = 0;
+		if (hullsLogged++ < 8)
+			DEBUG_LOG(("VOLSMOKE: frame %d, tank hull %s, %.0f by %.0f by %.0f units, heading %.2f\n", now,
+				found ? "found" : "not found", volume.hull[2] * 2 * cell, volume.hull[3] * 2 * cell, volume.hull[4] * cell, heading));
+	}
 	volume.born = now;
 	volume.life = int(lifeOf(type) * LOGICFRAMES_PER_SECOND);
-	// its front through the air round it, in world units a second
+	// its front through the air round it, in world units a second.  A tank's has none: a sphere
+	// pushing out from the hull's middle blew its own fire into a dome and the dust round it into
+	// rings, where a real one bursts out along the hull and up (schedule).
 	if (type == Nuclear) addShock(where, 420.0f, 220.0f, 2.5f, now);
-	else addShock(where, type == TankDeath ? 130.0f : 160.0f * kind.scale, type == TankDeath ? 60.0f : 70.0f * kind.scale, 1.0f, now);
+	else if (type != TankDeath) addShock(where, 160.0f * kind.scale, 70.0f * kind.scale, 1.0f, now);
 	pruneSets();
 	takenSystems.insert(id);
 	if (claimedCount++ < 8)
@@ -2214,14 +2279,13 @@ bool Takes(ParticleSystem *system)
 void Gather()
 {
 	if (!requested() || !TheGameLogic || TheGlobalData->m_classicGraphics || LogicThread::isInsideWindow()) return;
-	bool running = !airSystems.empty() || !airBoxes.empty();
-	for (const Volume &volume : volumes) running = running || volume.live;
 	const int now = (int)TheGameLogic->getFrame();
 	static int gathered = -1;
 	if (gathered == now) return;
 	gathered = now;
 	gatherSolids(now);	// every two seconds, so a blast that starts finds its buildings
-	if (running) collectMovers(now);
+	// every frame, idle or not, so a tank that dies now finds its hull; never where no volume can be
+	if (Direct3D11_Present_Is_Enabled()) collectMovers(now);
 }
 
 void Render(const HazardCloud::Camera &camera)
