@@ -1505,7 +1505,13 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float azimuth = (side < 0 ? 3.14159265f : 0.0f) + (field(3) - 0.5f) * 0.9f;
 			const float ca = std::cos(azimuth), cc = std::sin(azimuth);
 			const float dz = std::cos(tilt);
-			const float height = reach * (0.75f + 0.25f * centre * centre) * (1 - 0.3f * (1 - centre * centre * centre * centre) * field(4));
+			// `shortHull` is 0 for an Overlord's length (half 8.7 cells) and 1 from a Crusader's (5)
+			// down: there the outer jets climb nearly as high as the middle one and bend later, so
+			// the crown is widest at the top.  With the Overlord's profile a short hull's outer jets
+			// stopped and spread at mid height, broad shoulders under a lone middle spike.
+			const float shortHull = (std::min)((std::max)((8.7f - L) / 3.7f, 0.0f), 1.0f);
+			const float height = reach * (0.75f + 0.07f * shortHull + (0.25f - 0.07f * shortHull) * centre * centre)
+				* (1 - 0.3f * (1 - centre * centre * centre * centre) * field(4));
 			const float speed = height / slows;
 			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
 			const float path = travelled / (0.78f * height);
@@ -1521,8 +1527,10 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 				straight *= k;
 				crown *= k;
 			}
-			const float bend = smoothstep01(path, 0.3f, 0.75f), bending = path > 0.3f && path < 0.75f
-				? 6 * (path - 0.3f) / 0.45f * (1 - (path - 0.3f) / 0.45f) / 0.45f : 0.0f;
+			const float bendLow = 0.3f + 0.12f * shortHull, bendSpan = 0.45f;
+			const float bendU = (path - bendLow) / bendSpan;
+			const float bend = smoothstep01(path, bendLow, bendLow + bendSpan),
+				bending = bendU > 0 && bendU < 1 ? 6 * bendU * (1 - bendU) / bendSpan : 0.0f;
 			const float out = straight * travelled + crown * bend, outSpeed = straight * now + crown * bending * now / (0.78f * height);
 			const float along = a0 + ca * out, across = c0 + cc * out, da = ca * outSpeed / (std::max)(now, 1e-3f),
 				dc = cc * outSpeed / (std::max)(now, 1e-3f);
@@ -1533,26 +1541,29 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// doubled their width as they climbed stood on a thin stem under a fat top, a mushroom.
 			// Wider as it climbs, then over its last stretch the jet thins, lays less and cools, so
 			// it ends in a spiky streak and not a bright ball.  Heat 3.2 low in the middle jet and
-			// 2.3 in the outer ones, every jet cooler as it climbs.  A thin jet's heat smears into the
-			// cold air round it, so the outer ones burn orange and only the middle, where the jets
-			// overlap, stays white (fireColour past 1.6): a soft white core in an orange fan.  With
-			// every jet at 3.2 or more for the first quarter second the whole fan was one white
-			// shape; at 1.2 the outer jets went out unseen.  A jet leaves the hull at 0.7 of its heat
+			// 2.8 in the outer ones, so the whole fan burns pale yellow-white (fireColour past 1.6)
+			// while the jets run, as the photo's does, and cools through orange once they stop.  The
+			// heads keep under half of it (the taper), so the white stops short of the fan's ragged
+			// edge: at 2.3 outside the fan was a white core in an orange body, and with every jet
+			// at 3.2 or more to its tip whatever its taper the whole fan was one white shape, a
+			// heart from the play camera.  At 1.2 the outer jets went out unseen.  A jet leaves the hull at 0.7 of its heat
 			// and takes the rest over the first sixth of its path; at a third the column under the
 			// crown went dark and the crown floated off the hull.  The rate goes with the reach, so Low's
 			// shorter jets lay as much a cell as High's: laying the same smoke into half the length
 			// heaped a white ball on the hull on Low.
-			const float taper = 1 - smoothstep01(path, 0.55f, 1.0f);
+			const float taper = 1 - smoothstep01(path, 0.55f + 0.08f * shortHull, 1.0f);
 			const float rate = 45.0f * (0.75f + 0.45f * centre) * reach / 36.0f * now / speed * taper;
-			const float heat = (2.3f + 0.9f * centre * centre) * (0.6f + 0.4f * std::pow(now / speed, 0.4f)) * (1 - 0.25f * path)
-				* (0.7f + 0.3f * taper) * (0.7f + 0.3f * smoothstep01(path, 0.0f, 0.15f));
+			const float heat = (2.8f + 0.4f * centre * centre) * (0.7f + 0.3f * std::pow(now / speed, 0.4f)) * (1 - 0.2f * path)
+				* (0.45f + 0.55f * taper) * (0.7f + 0.3f * smoothstep01(path, 0.0f, 0.15f));
 			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.06f * travelled) * (0.35f + 0.65f * taper) * (0.8f + 0.5f * centre * centre),
 				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.08f);
 		}
 		// The stem: the 24th emitter, one wide hot puff climbing at 0.4 of the middle jet's pace,
 		// so the column under the crown stays lit and the crown does not float off the hull.
-		if (t < 0.3f) {
-			const float climbed = 0.4f * reach * (1 - std::exp(-t / 0.18f)), fade = 1 - t / 0.3f;
+		// A short hull's stem lives to half a second, so its neck stays lit under the crown.
+		const float stemLife = 0.3f + 0.2f * (std::min)((std::max)((8.7f - L) / 3.7f, 0.0f), 1.0f);
+		if (t < stemLife) {
+			const float climbed = 0.4f * reach * (1 - std::exp(-t / 0.18f)), fade = 1 - t / stemLife;
 			onHull(0, 0, H * 0.4f + climbed, (std::max)((std::max)(W * 1.2f, L * 0.6f), 3.0f) * (1 + climbed / reach), 0, 0,
 				0.4f * reach / 0.18f * std::exp(-t / 0.18f), 25.0f * reach / 36.0f * fade, 2.8f, 10.0f * reach / 36.0f * fade, 0.05f);
 		}
