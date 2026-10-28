@@ -39,7 +39,14 @@
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
 #include "Common/LogicThread.h"
+#include "Common/Player.h"
+#include "Common/PlayerList.h"
+#include "Common/ThingTemplate.h"
+#include "GameClient/Drawable.h"
+#include "GameClient/GameClient.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
+#include "GameClient/View.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "Common/Geometry.h"
@@ -73,6 +80,7 @@ const unsigned MaxVolumes = 26;		// both tiers' slabs at High, the small tier's 
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
 const unsigned MaxPuffs = 24;
 const unsigned MaxStreaks = 16;
+const unsigned MaxMovers = 16;		// High's; Low takes the nearest 8
 const unsigned NoiseSide = 32;
 
 // The VolumeSmoke setting, Low and High (Off draws nothing).  Low keeps High's grids, since every
@@ -102,7 +110,7 @@ const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/
 const DXGI_FORMAT DensityFormat = DXGI_FORMAT_R16G16_FLOAT;			// soot, dust
 const DXGI_FORMAT ScalarFormat = DXGI_FORMAT_R16_FLOAT;
 
-enum Kind { TankDeath, Shell, Airburst, Nuclear };
+enum Kind { TankDeath, Shell, Airburst, Nuclear, Air };
 
 template <class T> void drop(T *&object)
 {
@@ -159,6 +167,9 @@ struct SimConstants {
 	float Shape[MaxSlabs][4];
 	float Motion[MaxSlabs][4];
 	float Puffs[MaxSlabs * MaxPuffs * 3][4];
+	float Origins[MaxSlabs][4];		// each slab's world corner, for the movers below
+	float MoverCount[4];
+	float Movers[MaxMovers * 4][4];	// the units that push the air this step, in world units (Mover)
 };
 
 struct DrawConstants {
@@ -175,6 +186,8 @@ struct DrawConstants {
 	float Blast[4];			// the core's centre and radius in cells
 	float Effects[4];		// flash, condensation shell radius in cells and opacity, unused
 	float Extra[4];			// streaks, the flash's height over its width, its radius in cells, unused
+	float ClipLow[4];		// the world box the march keeps to: the grid's, or for the air where smoke is
+	float ClipHigh[4];
 	float Streaks[MaxStreaks * 2][4];	// a glowing fragment's trail: tail and radius, head and brightness
 };
 
@@ -238,6 +251,9 @@ cbuffer Sim : register(b0)
     float4 Shape[VOLS];
     float4 Motion[VOLS];
     float4 Puffs[VOLS * PUFFS * 3];
+    float4 Origins[VOLS];
+    float4 MoverCount;
+    float4 Movers[16 * 4];
 };
 SamplerState Linear : register(s0);
 float3 uvwOf(float3 cell, uint slab)
@@ -316,6 +332,112 @@ void main(uint3 id : SV_DispatchThreadID)
 }
 )HLSL";
 
+// The units that push the air, read from the client's drawables once a logic frame (Mover in the
+// C++).  Four float4 a unit, world units: where it is and its size; its velocity a second and its
+// kind; its heading, and a width or a height; a spin sign and a strength.  Each kind pulls the
+// flow towards what a real one makes, never the density: the smoke moves because the air does.
+const char *const MoverPass = R"HLSL(
+#define VEHICLE 0
+#define JET 1
+#define ROTOR 2
+#define WALKER 3
+#define SHOCK 4
+float3 pullTowards(float3 v, float3 target, float k) { return lerp(v, target, saturate(k)); }
+void applyMovers(inout float4 vt, inout DEN d, float3 cell, uint slab, float dt)
+{
+    uint count = (uint)MoverCount.x;
+    float size = Volumes[slab].z;
+    float3 world = Origins[slab].xyz + (cell + 0.5) * size;
+    float floorZ = Origins[slab].z + groundAt((int2)cell.xy, slab) * size;	// the ground or roof under this cell
+    float overGround = world.z - floorZ;
+    for (uint i = 0; i < count; ++i) {
+        float4 a = Movers[i * 4], b = Movers[i * 4 + 1], e = Movers[i * 4 + 2], f = Movers[i * 4 + 3];
+        uint kind = (uint)(b.w + 0.5);
+        float3 off = world - a.xyz;
+        float3 v = b.xyz / size;	// cells a second
+        if (kind == VEHICLE) {
+            // The hull carries the air with it; behind it a wake runs at 0.6 of its speed and turns.
+            float2 h = e.xy, side = float2(-h.y, h.x);
+            float along = dot(off.xy, h), across = dot(off.xy, side), up = world.z - a.z;
+            float L = a.w, W = e.z, H = e.w;
+            if (up < -size || up > H * 2.5 || abs(across) > W * 2 + size || along > L + size || along < -L * 5) continue;
+            if (abs(along) < L && abs(across) < W && up < H) { vt.xyz = pullTowards(vt.xyz, v, 0.8); continue; }
+            if (along < -L * 0.5) {
+                float behind = saturate((-along - L) / (L * 4));
+                float k = (1 - behind) * (1 - saturate(abs(across) / (W * 1.8))) * (1 - saturate(up / (H * 2.2)));
+                float3 spin = float3(side * (H * 0.6 - up), across) * (f.x * f.y * 0.8 / max(W, 1));
+                vt.xyz = pullTowards(vt.xyz, v * 0.6 + spin / size, 0.35 * k);
+            }
+        } else if (kind == JET) {
+            // A body of air dragged along its last 0.3 s, two counter-rotating vortices off the wing
+            // tips over its last 1.5 s with the downwash between them, all fading with its height.
+            float3 path = b.xyz * 1.5;		// from the nose back over 1.5 s
+            float along = dot(-off, path) / max(dot(path, path), 1e-3);
+            if (along < -0.05 || along > 1.05) continue;
+            float s = saturate(along);
+            float3 r = world - (a.xyz - path * s);
+            float span = a.w;
+            float2 side = normalize(float2(-path.y, path.x) + float2(1e-4, 0));
+            float lateral = dot(r.xy, side);
+            if (abs(lateral) > span * 3 || r.z > span * 3) continue;
+            float fade = exp(-e.z / 150) * (1 - s);
+            if (s < 0.2 && dot(r, r) < span * span) vt.xyz = pullTowards(vt.xyz, v * 0.5, 0.4 * fade);
+            float strength = length(b.xyz) * 0.12 / size * f.y;
+            for (int tip = -1; tip <= 1; tip += 2) {
+                float2 rr = float2(lateral - tip * span, r.z);
+                float rho = max(length(rr), span * 0.25);
+                float swirl = strength * span * 0.5 / rho * exp(-rho * rho / (span * span * 2.5));
+                float2 t = float2(-rr.y, rr.x) / rho * tip;
+                vt.xyz = pullTowards(vt.xyz, vt.xyz + (float3(side * t.x, t.y) * swirl), 0.5 * fade);
+            }
+            // the sheet pushed down between the tips, reaching the ground under a low pass
+            if (abs(lateral) < span && r.z < 0)
+                vt.z = lerp(vt.z, -strength * 0.6, saturate(0.4 * fade * exp(r.z / 90)));
+        } else if (kind == ROTOR) {
+            // A rotor's downwash: a column 1.2 radii wide under the disc, as strong as the ground is
+            // close; at the ground it turns into a thin sheet running outwards and lifts a ring of
+            // dust about two radii out.
+            float R = a.w, height = e.z, close = f.y;
+            float2 flat = off.xy;
+            float rho = length(flat);
+            float below = a.z - world.z;
+            if (rho > R * 5 || below < -R) continue;
+            float wash = 45.0 / size * close;
+            float columnR = R * 1.2 + max(below, 0) * 0.15;
+            if (below > -R * 0.5 && rho < columnR && overGround > size * 1.5) {
+                float k = (1 - rho / columnR) * (below < 0 ? 0.3 : 1);
+                vt.xyz = pullTowards(vt.xyz, float3(vt.xy * 0.5, -wash), 0.6 * k);
+            }
+            float sheet = 1 - smoothstep(size, size * 3 + 8, overGround);
+            if (sheet > 0 && rho > R * 0.3) {
+                float2 outwards = flat / rho * wash * min(1.6, R * 1.2 / rho);
+                float reach = 1 - smoothstep(R * 3, R * 5, rho);
+                vt.xyz = pullTowards(vt.xyz, float3(outwards, 0), 0.6 * sheet * reach);
+            }
+            // the dust it lifts: a thin band, topped up only while thinner than a light haze
+            float ring = exp(-pow((rho - R * 2) / (R * 0.5), 2)) * (1 - smoothstep(size, size * 3 + 8, overGround));
+            if (ring > 0.05) {
+                vt.z = max(vt.z, wash * 0.25 * ring);
+                float lift = 0.5 * ring * close * dt * saturate(1 - d.y / 0.6);
+                d.y += lift;
+#ifdef AIR
+                d.w += lift * 0.8;
+#endif
+            }
+        } else if (kind == WALKER) {
+            float k = 1 - saturate(length(off) / (a.w * 2 + size));
+            vt.xyz = pullTowards(vt.xyz, v, 0.4 * k);
+        } else {
+            // a blast's front: a shell racing outwards, pushing what it passes
+            float r = length(off);
+            float shell = exp(-pow((r - a.w) / max(e.w, size), 2));
+            if (shell < 0.02) continue;
+            vt.xyz += off / max(r, 1e-3) * (f.y / size) * shell * saturate(dt * 12);
+        }
+    }
+}
+)HLSL";
+
 // The literal is cut in two: MSVC refuses one longer than 16 KB (C2026).
 const char *const AdvectPass = R"HLSL(
 Texture3D<float4> Vel : register(t0);
@@ -326,7 +448,7 @@ RWTexture3D<DEN> DenOut : register(u1);
 RWTexture3D<float> PresOut : register(u2);
 #ifdef AIR
 // The particles of every smoke system the air took, as spheres in cells: centre and radius, then
-// the soot and the dust they stand for and their brightness.  Each 8 by 8 column of cells has its
+// the soot and the dust they stand for and their brightness.  Each 8 by 8 by 8 brick of cells has its
 // list of the spheres that reach it.
 StructuredBuffer<float4> Sources : register(t5);
 StructuredBuffer<uint2> TileRange : register(t6);
@@ -453,7 +575,7 @@ const char *const AdvectPassEnd = R"HLSL(
     // the volume follows the particles without being pinned to them: what a wake pushes out of a
     // puff comes back over a fraction of a second, not on the next step.
     {
-        uint2 range = TileRange[(c.y / 8) * (GX / 8) + c.x / 8];
+        uint2 range = TileRange[((c.z / 8) * (GY / 8) + c.y / 8) * (GX / 8) + c.x / 8];
         float rate = saturate(Step.w * dt);
         for (uint j = range.x; j < range.x + range.y; ++j) {
             uint index = TileIndex[j];
@@ -468,6 +590,7 @@ const char *const AdvectPassEnd = R"HLSL(
         }
     }
 #endif
+    applyMovers(vt, d, cell, slab, dt);
     d = min(d, 4);
     d *= lerp(0.92, 1, walls(cell));	// smoke that drifts to the walls thins out there
     // Open sides and top: what reaches them is gone.  The ground lets nothing through and keeps
@@ -554,6 +677,23 @@ void main(uint3 id : SV_DispatchThreadID)
 }
 )HLSL";
 
+// The air's box follows the camera in whole cells: what it held moves the other way by Motion[0]
+// cells, and what comes in at the far side is empty.
+const char *const ScrollPass = R"HLSL(
+Texture3D<float4> Vel : register(t0);
+Texture3D<DEN> Den : register(t1);
+RWTexture3D<float4> VelOut : register(u0);
+RWTexture3D<DEN> DenOut : register(u1);
+[numthreads(8, 8, 8)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+    int3 from = int3(id) + (int3)Motion[0].xyz;
+    bool inside = all(from >= int3(0, 0, 0)) && all(from < int3(GX, GY, GZ));
+    VelOut[id] = inside ? Vel.Load(int4(from, 0)) : 0;
+    DenOut[id] = inside ? Den.Load(int4(from, 0)) : 0;
+}
+)HLSL";
+
 // Sunlight reaching each cell through the soot and dust between it and the sun, with a share that
 // went through more thinly, for the light scattered more than once.
 const char *const LightPass = R"HLSL(
@@ -577,7 +717,7 @@ void main(uint3 id : SV_DispatchThreadID)
 
 const char *const MarchPass = R"HLSL(
 Texture2D<float> SceneDepth : register(t0);
-Texture3D<float2> Den : register(t1);
+Texture3D<DEN> Den : register(t1);
 Texture3D<float> Light : register(t2);
 Texture3D<float4> Vel : register(t3);
 Texture3D<float> Noise : register(t4);
@@ -598,6 +738,8 @@ cbuffer Draw : register(b0)
     float4 Blast;
     float4 Effects;
     float4 Extra;
+    float4 ClipLow;		// the world box the march keeps to, inside the grid's: where the smoke can be
+    float4 ClipHigh;
     float4 Streaks[32];
 };
 float3 worldAt(float2 pixel, float depth)
@@ -620,9 +762,8 @@ float4 main(float4 position : SV_Position) : SV_Target
     float3 ray = worldAt(position.xy, SceneDepth.Load(int3(position.xy, 0))) - eye;
     float sceneDistance = length(ray);
     ray /= max(sceneDistance, 0.0001);
-    float3 size = float3(GX, GY, GZ) * Box.w;
     float3 inverse = 1 / (abs(ray) > 1e-6 ? ray : 1e-6);
-    float3 t0 = (Box.xyz - eye) * inverse, t1 = (Box.xyz + size - eye) * inverse;
+    float3 t0 = (ClipLow.xyz - eye) * inverse, t1 = (ClipHigh.xyz - eye) * inverse;
     float3 nearest = min(t0, t1), farthest = max(t0, t1);
     float enter = max(max(nearest.x, nearest.y), max(nearest.z, 0));
     float leave = min(min(min(farthest.x, farthest.y), farthest.z), sceneDistance);
@@ -665,7 +806,13 @@ float4 main(float4 position : SV_Position) : SV_Target
         }
         float3 clamped = clamp(cell, float3(0, 0, 0), float3(GX - 1, GY - 1, GZ - 1));
         float3 uvw = float3((clamped.x + 0.5) / GX, (clamped.y + 0.5) / GY, (clamped.z + 0.5 + slabBase) / (GZ * SLABS));
-        float2 dd = Den.SampleLevel(Linear, uvw, 0);
+        DEN dd = Den.SampleLevel(Linear, uvw, 0);
+        if (dd.x + dd.y < 0.004 && Effects.z <= 0) {	// empty air costs one sample
+#ifdef AIR
+            ++i;	// and the air's, most of its box, is crossed two steps at a time
+#endif
+            continue;
+        }
         float n = Noise.SampleLevel(Wrap, cell / 9 + float3(Slab.x * 0.37, 0, -Camera.w * 0.04), 0);
         // the condensation shell: white, thin, over the upper half, for a second or two
         float shell = 0;
@@ -677,13 +824,22 @@ float4 main(float4 position : SV_Position) : SV_Target
         float total = dd.x + dd.y + shell;
         if (total < 0.004) continue;
         // billows: the surface is eroded by the noise, the inside left whole
+#ifdef AIR
+        float eroded = total * saturate(0.35 + 1.1 * n);	// the air's smoke is thin: the noise shapes it, it does not eat it
+#else
         float eroded = max(total - (1 - n) * 0.45 * (1 - saturate(total * 1.2)), 0);
+#endif
         float sigma = eroded * walls(cell) * Slab.y * Slab.w;
         if (sigma <= 0) continue;
         float sun = Light.SampleLevel(Linear, uvw, 0);
         float heat = Vel.SampleLevel(Linear, uvw, 0).w;
         float height = saturate(cell.z / 24);
+#ifdef AIR
+        // each cell's own grey, carried with its soot from the particles that made it
+        float3 albedo = (Soot.rgb * dd.z + Dust.rgb * dd.w) / total;
+#else
         float3 albedo = (Soot.rgb * dd.x + Dust.rgb * dd.y + float3(0.92, 0.93, 0.95) * shell) / total;
+#endif
         float3 lit = albedo * tint * (0.26 + 0.12 * height + 0.75 * sun * phase);
         float3 source = (lit + fireColour(heat) * Soot.w * (dd.x / total)) * sigma;
         float through = exp(-sigma * stepLength);
@@ -695,7 +851,24 @@ float4 main(float4 position : SV_Position) : SV_Target
 }
 )HLSL";
 
-enum Pass { CurlProgram, AdvectProgram, DivergenceProgram, JacobiProgram, ProjectProgram, LightProgram, ProgramCount };
+enum Pass { CurlProgram, AdvectProgram, DivergenceProgram, JacobiProgram, ProjectProgram, LightProgram, ScrollProgram,
+	ProgramCount };
+
+// The air round the camera: every smoke and dust system no blast took, its particles drawn into one
+// grid that follows the view.  Its grid and how many particles it takes a step are the setting's;
+// past that the particles farthest from the camera are left out, never drawn as billboards.
+// The air's pressure needs fewer sweeps than a blast's: nothing in it is pushed as hard.
+struct AirShape { unsigned gx, gy, gz; float cell; unsigned particles; unsigned sweeps; float stepCells; };
+const AirShape AirShapes[3] = { { 8, 8, 8, 1.0f, 0, 0, 1.0f }, { 96, 96, 24, 12.0f, 4096, 6, 1.5f },
+	{ 160, 160, 40, 7.2f, 12288, 8, 1.25f } };
+const unsigned AirTileEntries = 27;		// brick list room a particle: a sphere of at most 8 cells reaches 27
+const float AirExtinction = 0.04f;		// per world unit at density 1: the air's smoke is thinner than a blast's
+const float AirSootHalfLife = 7.0f;		// seconds, once no particle holds it up
+const float AirTakeUp = 8.0f;			// a second: how fast the cells under a particle reach its smoke
+const float AirCoverage = 0.7f;			// a billboard's opacity at its centre, against its alpha
+// A sphere's falloff, the trilinear blur of a few cells and the noise take most of the opacity a
+// particle's density was worked out for; this gives it back (by eye, on volair's dust and smoke).
+const float AirGain = 4.0f;
 
 struct Volume {
 	bool live = false;
@@ -715,6 +888,7 @@ struct Volume {
 
 struct Tier {
 	TierShape shape = {};
+	bool air = false;
 	ID3D11ComputeShader *compute[ProgramCount] = {};
 	ID3D11PixelShader *march = nullptr;
 	ID3D11Buffer *simConstants = nullptr;
@@ -728,6 +902,9 @@ struct State {
 	ID3D11Device *device = nullptr;
 	bool refused = false;
 	Tier tiers[2];
+	Tier air;
+	ID3D11Buffer *sources = nullptr, *tileRange = nullptr, *tileIndex = nullptr;	// the air's particles and tile lists
+	ID3D11ShaderResourceView *sourcesView = nullptr, *tileRangeView = nullptr, *tileIndexView = nullptr;
 	ID3D11VertexShader *fullscreen = nullptr;
 	ID3D11SamplerState *linear = nullptr, *wrap = nullptr;
 	ID3D11BlendState *premultiplied = nullptr;
@@ -750,11 +927,40 @@ struct TemplateKind { bool trigger; Kind kind; float scale; };
 std::unordered_map<const ParticleSystemTemplate *, TemplateKind> templateKinds;
 unsigned claimedCount = 0, joinedCount = 0, droppedCount = 0;
 int lastReport = 0;
+// The air: the systems it took, its box, and where in the world its smoke can be, a box a second
+// for the last twenty, so the march keeps to the smoke and not the whole grid.
+std::unordered_set<int> airSystems;
+std::unordered_set<int> airOutside;		// air systems with no particle in the box this step: billboards
+struct AirLook { bool smoke; bool dust; };
+std::unordered_map<const ParticleSystemTemplate *, AirLook> airLooks;
+Volume airVolume;
+struct WorldBox { float low[3], high[3]; int frame; };
+std::vector<WorldBox> airBoxes;
+unsigned airFed = 0, airLeftOut = 0;
+// The units pushing the air this logic frame, nearest the camera first (MoverPass), and the blast
+// fronts still running out.
+enum MoverKind { MoverVehicle, MoverJet, MoverRotor, MoverWalker, MoverShock };
+struct Mover { float m[4][4]; float distance; };
+std::vector<Mover> movers;
+struct Shock { float at[3], speed, strength, seconds; int born; };
+std::vector<Shock> shocks;
+unsigned moverPeak = 0;
+// The structures the smoke flows round, read by Gather every two seconds outside the logic
+// thread's window (the render runs inside it, where walking the object list is a counted read).
+// A structure goes in once the player whose view is drawn has seen it, so smoke parting round
+// nothing does not give away an unscouted base.
+struct Solid { float x, y, top, major, minor, angle; bool box; };
+std::vector<Solid> solids;
+int solidsFrame = -100000;
 
 unsigned tierOf(unsigned slot) { return slot >= TierShapes[1].first ? 1 : 0; }
 unsigned slabOf(unsigned slot) { return slot - TierShapes[tierOf(slot)].first; }
 
 void releaseState();
+void pruneSets();
+void boxOf(const Volume &volume, const TierShape &shape, float low[3], float high[3]);
+void addShock(const Coord3D &where, float speed, float strength, float seconds, int now);
+void fillMovers();
 
 // The setting, read every time: Off, Low or High from the options menu, or -volsmoke for the run.
 // A change drops every volume, program and texture, and forgets every system taken, so with Off
@@ -767,6 +973,12 @@ bool requested()
 		releaseState();
 		takenSystems.clear();
 		firstSeen.clear();
+		airSystems.clear();
+		airOutside.clear();
+		movers.clear();
+		shocks.clear();
+		solids.clear();
+		solidsFrame = -100000;
 		lastReport = 0;
 		level = want;
 		TierShapes[0].slabs = Qualities[level].slabs[0];
@@ -779,7 +991,8 @@ bool requested()
 
 void releaseState()
 {
-	for (Tier &tier : state.tiers) {
+	for (Tier *each : { &state.tiers[0], &state.tiers[1], &state.air }) {
+		Tier &tier = *each;
 		for (ID3D11ComputeShader *&program : tier.compute) drop(program);
 		drop(tier.march);
 		drop(tier.simConstants);
@@ -802,8 +1015,16 @@ void releaseState()
 	drop(state.drawConstants);
 	drop(state.noiseView);
 	drop(state.noise);
+	drop(state.sourcesView);
+	drop(state.tileRangeView);
+	drop(state.tileIndexView);
+	drop(state.sources);
+	drop(state.tileRange);
+	drop(state.tileIndex);
 	state = State();
 	for (Volume &volume : volumes) volume = Volume();
+	airVolume = Volume();
+	airBoxes.clear();
 }
 
 bool compile(DX11BackendClass *backend, const std::string &source, const char *name, const char *profile,
@@ -861,26 +1082,50 @@ bool formatsTaken(ID3D11Device *device)
 	return true;
 }
 
-bool makeTier(DX11BackendClass *backend, ID3D11Device *device, Tier &tier, const TierShape &shape)
+// A buffer of `count` structures the CPU rewrites every step, and its view.
+bool makeStructured(ID3D11Device *device, unsigned count, unsigned stride, ID3D11Buffer *&buffer,
+	ID3D11ShaderResourceView *&view)
+{
+	D3D11_BUFFER_DESC description = {};
+	description.ByteWidth = count * stride;
+	description.Usage = D3D11_USAGE_DYNAMIC;
+	description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	description.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	description.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+	description.StructureByteStride = stride;
+	D3D11_SHADER_RESOURCE_VIEW_DESC shown = {};
+	shown.Format = DXGI_FORMAT_UNKNOWN;
+	shown.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+	shown.Buffer.NumElements = count;
+	return SUCCEEDED(device->CreateBuffer(&description, nullptr, &buffer))
+		&& SUCCEEDED(device->CreateShaderResourceView(buffer, &shown, &view));
+}
+
+bool makeTier(DX11BackendClass *backend, ID3D11Device *device, Tier &tier, const TierShape &shape, bool air)
 {
 	tier.shape = shape;
-	const std::string header = "#define GX " + std::to_string(shape.gx) + "\n#define GY " + std::to_string(shape.gy)
-		+ "\n#define GZ " + std::to_string(shape.gz) + "\n#define SLABS " + std::to_string(shape.slabs) + "\n" + Grid;
+	tier.air = air;
+	const std::string header = std::string(air ? "#define AIR 1\n" : "") + "#define GX " + std::to_string(shape.gx)
+		+ "\n#define GY " + std::to_string(shape.gy) + "\n#define GZ " + std::to_string(shape.gz) + "\n#define SLABS "
+		+ std::to_string(shape.slabs) + "\n" + Grid;
 	const std::string prelude = header + Prelude;
 	static const char *const names[ProgramCount] = { "volsmoke curl", "volsmoke advect", "volsmoke divergence",
-		"volsmoke jacobi", "volsmoke project", "volsmoke light" };
+		"volsmoke jacobi", "volsmoke project", "volsmoke light", "volsmoke scroll" };
 	const std::string sources[ProgramCount] = {
-		prelude + CurlPass, prelude + AdvectPass + AdvectPassEnd, prelude + DivergencePass,
-		prelude + PressureHelpers + JacobiPass, prelude + PressureHelpers + ProjectPass, prelude + LightPass };
+		prelude + CurlPass, prelude + MoverPass + AdvectPass + AdvectPassEnd, prelude + DivergencePass,
+		prelude + PressureHelpers + JacobiPass, prelude + PressureHelpers + ProjectPass, prelude + LightPass,
+		prelude + ScrollPass };
 	std::vector<unsigned char> code;
 	bool made = true;
 	for (unsigned pass = 0; made && pass < ProgramCount; ++pass)
-		made = compile(backend, sources[pass], names[pass], "cs_5_0", code)
-			&& SUCCEEDED(device->CreateComputeShader(code.data(), code.size(), nullptr, &tier.compute[pass]));
+		if (pass != ScrollProgram || air)	// only the air moves with the camera
+			made = compile(backend, sources[pass], names[pass], "cs_5_0", code)
+				&& SUCCEEDED(device->CreateComputeShader(code.data(), code.size(), nullptr, &tier.compute[pass]));
 	made = made && compile(backend, header + MarchPass, "volsmoke march", "ps_5_0", code)
 		&& SUCCEEDED(device->CreatePixelShader(code.data(), code.size(), nullptr, &tier.march));
+	const DXGI_FORMAT density = air ? VelocityFormat : DensityFormat;	// the air's four channels
 	for (unsigned i = 0; made && i < 2; ++i)
-		made = make(device, tier.velocity[i], VelocityFormat, shape) && make(device, tier.density[i], DensityFormat, shape)
+		made = make(device, tier.velocity[i], VelocityFormat, shape) && make(device, tier.density[i], density, shape)
 			&& make(device, tier.pressure[i], ScalarFormat, shape);
 	made = made && make(device, tier.curl, VelocityFormat, shape) && make(device, tier.divergence, ScalarFormat, shape)
 		&& make(device, tier.light, ScalarFormat, shape);
@@ -909,7 +1154,12 @@ bool makeState(DX11BackendClass *backend, ID3D11Device *device)
 	releaseState();
 	state.device = device;
 	bool made = device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0 && formatsTaken(device);
-	for (unsigned t = 0; made && t < 2; ++t) made = makeTier(backend, device, state.tiers[t], TierShapes[t]);
+	for (unsigned t = 0; made && t < 2; ++t) made = makeTier(backend, device, state.tiers[t], TierShapes[t], false);
+	const AirShape &air = AirShapes[level];
+	made = made && makeTier(backend, device, state.air, { air.gx, air.gy, air.gz, 1, 0 }, true)
+		&& makeStructured(device, air.particles * 2, 16, state.sources, state.sourcesView)
+		&& makeStructured(device, (air.gx / 8) * (air.gy / 8) * (air.gz / 8), 8, state.tileRange, state.tileRangeView)
+		&& makeStructured(device, air.particles * AirTileEntries, 4, state.tileIndex, state.tileIndexView);
 	std::vector<unsigned char> code;
 	made = made && compile(backend, HazardCloud::vertexShader(), "volsmoke fullscreen", "vs_5_0", code)
 		&& SUCCEEDED(device->CreateVertexShader(code.data(), code.size(), nullptr, &state.fullscreen));
@@ -966,8 +1216,8 @@ bool makeState(DX11BackendClass *backend, ID3D11Device *device)
 		state.refused = true;
 		return false;
 	}
-	DEBUG_LOG(("VOLSMOKE: programs and %u + %u volumes made in %.1f ms\n", TierShapes[0].slabs, TierShapes[1].slabs,
-		DX11Resource_Milliseconds_Now() - started));
+	DEBUG_LOG(("VOLSMOKE: programs, %u + %u volumes and a %ux%ux%u air at %.1f units a cell made in %.1f ms\n",
+		TierShapes[0].slabs, TierShapes[1].slabs, air.gx, air.gy, air.gz, air.cell, DX11Resource_Milliseconds_Now() - started));
 	return true;
 }
 
@@ -1225,18 +1475,21 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 
 void unbindCompute(ID3D11DeviceContext *context)
 {
-	ID3D11ShaderResourceView *const views[5] = {};
+	ID3D11ShaderResourceView *const views[8] = {};
 	ID3D11UnorderedAccessView *const writes[3] = {};
-	context->CSSetShaderResources(0, 5, views);
+	context->CSSetShaderResources(0, 8, views);
 	context->CSSetUnorderedAccessViews(0, 3, writes, nullptr);
 }
 
+// One pass over the first `slabs` slabs; `extra` goes in from t5 (the air's particle lists).
 void run(ID3D11DeviceContext *context, const Tier &tier, Pass pass, std::initializer_list<ID3D11ShaderResourceView *> reads,
-	std::initializer_list<ID3D11UnorderedAccessView *> writes, unsigned slabs)
+	std::initializer_list<ID3D11UnorderedAccessView *> writes, unsigned slabs,
+	std::initializer_list<ID3D11ShaderResourceView *> extra = {})
 {
 	unbindCompute(context);
 	context->CSSetShaderResources(0, (UINT)reads.size(), reads.begin());
 	context->CSSetShaderResources(4, 1, &tier.floorView);
+	if (extra.size()) context->CSSetShaderResources(5, (UINT)extra.size(), extra.begin());
 	context->CSSetUnorderedAccessViews(0, (UINT)writes.size(), writes.begin(), nullptr);
 	context->CSSetShader(tier.compute[pass], nullptr, 0);
 	context->Dispatch(tier.shape.gx / 8, tier.shape.gy / 8, slabs * tier.shape.gz / 8);
@@ -1262,31 +1515,24 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 			heights[y * shape.gx + x] = (ground - volume.origin[2]) / cell;
 		}
 	const float right = volume.origin[0] + shape.gx * cell, top = volume.origin[1] + shape.gy * cell;
-	// ponytail: beside an overlapped logic tick the object list is not safe to walk, so the
-	// buildings wait for a pass outside it; every structure goes in, seen or not, at full height
-	const bool walk = TheGameLogic && !LogicThread::isInsideWindow();
-	for (Object *object = walk ? TheGameLogic->getFirstObject() : nullptr; object; object = object->getNextObject()) {
-		if (!object->isKindOf(KINDOF_STRUCTURE)) continue;
-		const Coord3D *at = object->getPosition();
-		const GeometryInfo &geometry = object->getGeometryInfo();
-		const float major = geometry.getMajorRadius(), minor = geometry.getMinorRadius();
+	// the structures Gather read outside the logic thread's window, every two seconds
+	for (const Solid &solid : solids) {
+		const float major = solid.major, minor = solid.minor;
 		const float reach = std::sqrt(major * major + minor * minor);
-		if (at->x + reach < volume.origin[0] || at->x - reach > right || at->y + reach < volume.origin[1] || at->y - reach > top)
+		if (solid.x + reach < volume.origin[0] || solid.x - reach > right || solid.y + reach < volume.origin[1] || solid.y - reach > top)
 			continue;
-		const float roof = (at->z + geometry.getMaxHeightAbovePosition() - volume.origin[2]) / cell;
-		const float c = std::cos(object->getOrientation()), s = std::sin(object->getOrientation());
-		const bool box = geometry.getGeomType() == GEOMETRY_BOX;
-		const int x0 = (std::max)(0, int((at->x - reach - volume.origin[0]) / cell)), x1 = (std::min)(int(shape.gx) - 1, int((at->x + reach - volume.origin[0]) / cell));
-		const int y0 = (std::max)(0, int((at->y - reach - volume.origin[1]) / cell)), y1 = (std::min)(int(shape.gy) - 1, int((at->y + reach - volume.origin[1]) / cell));
+		const float roof = (solid.top - volume.origin[2]) / cell;
+		const float c = std::cos(solid.angle), s = std::sin(solid.angle);
+		const int x0 = (std::max)(0, int((solid.x - reach - volume.origin[0]) / cell)), x1 = (std::min)(int(shape.gx) - 1, int((solid.x + reach - volume.origin[0]) / cell));
+		const int y0 = (std::max)(0, int((solid.y - reach - volume.origin[1]) / cell)), y1 = (std::min)(int(shape.gy) - 1, int((solid.y + reach - volume.origin[1]) / cell));
 		for (int y = y0; y <= y1; ++y)
 			for (int x = x0; x <= x1; ++x) {
-				const float dx = volume.origin[0] + (x + 0.5f) * cell - at->x, dy = volume.origin[1] + (y + 0.5f) * cell - at->y;
+				const float dx = volume.origin[0] + (x + 0.5f) * cell - solid.x, dy = volume.origin[1] + (y + 0.5f) * cell - solid.y;
 				const float along = dx * c + dy * s, side = -dx * s + dy * c;
-				const bool inside = box ? std::fabs(along) <= major && std::fabs(side) <= minor : dx * dx + dy * dy <= major * major;
+				const bool inside = solid.box ? std::fabs(along) <= major && std::fabs(side) <= minor : dx * dx + dy * dy <= major * major;
 				if (inside) heights[y * shape.gx + x] = (std::max)(heights[y * shape.gx + x], roof);
 			}
 	}
-	if (!walk) volume.floorFrame = now - 2 * LOGICFRAMES_PER_SECOND;	// again on the next pass
 	// a blast on a building goes off on its roof, not inside it
 	if (volume.reset && volume.kind != Airburst) {
 		const unsigned column = unsigned(volume.blast[1]) * shape.gx + unsigned(volume.blast[0]);
@@ -1319,12 +1565,14 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		sim.Volumes[slab][1] = 0;
 		sim.Volumes[slab][2] = volume.cell;
 		sim.Volumes[slab][3] = volume.reset ? 1.0f : 0.0f;
+		for (unsigned i = 0; i < 3; ++i) sim.Origins[slab][i] = volume.origin[i];
 		if (!volume.live) continue;
 		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
 		schedule(volume, slab, secondsSince(volume, now), nullptr);
 		settle = DustSettle / volume.cell;	// ponytail: one settling speed a tier, its last volume's cell
 	}
 	sim.Step[2] = settle;
+	fillMovers();
 	upload(context, tier.simConstants, &sim, sizeof(sim));
 	context->CSSetConstantBuffers(0, 1, &tier.simConstants);
 	context->CSSetSamplers(0, 1, &state.linear);
@@ -1345,16 +1593,460 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 	for (unsigned slab = 0; slab < tier.shape.slabs; ++slab) volumes[tier.shape.first + slab].reset = false;
 }
 
-// The box's pixels in the camera's viewport, false when none of it is in front of the camera.
-bool screenRect(const Volume &volume, const TierShape &shape, const float viewProjection[16],
+// Whether the air takes a template's systems, and as soot or dust.  Smoke and dust are the
+// see-through, unlit systems drawn with a smoke, cloud, dirt or contrail texture (501 of the
+// shipped systems are see-through and unlit; snow, water, leaves and debris use other textures).
+// Hazard fields keep their own look.
+AirLook airLookOf(const ParticleSystemTemplate *tmplate, ParticleSystem *system)
+{
+	auto known = airLooks.find(tmplate);
+	if (known != airLooks.end()) return known->second;
+	std::string texture = system->getParticleTypeName().str();
+	for (char &c : texture) c = (char)std::toupper((unsigned char)c);
+	const bool dusty = texture.find("DRTEXP") != std::string::npos || texture.find("AVALANCHE") != std::string::npos
+		|| texture.find("DUST") != std::string::npos;
+	const bool smoky = texture.find("SMOK") != std::string::npos || texture.find("CLOUD") != std::string::npos
+		|| texture.find("CONTRAIL") != std::string::npos;
+	const char *name = tmplate->getName().str();
+	AirLook look;
+	look.smoke = system->getShaderType() == ParticleSystemInfo::ALPHA && !tmplate->isEmissive()
+		&& system->getPriority() != AREA_EFFECT && (dusty || smoky);
+	look.dust = dusty || system->getPriority() == DUST_TRAIL || std::strstr(name, "Dust") != nullptr;
+	airLooks[tmplate] = look;
+	return look;
+}
+
+bool takeAir(ParticleSystem *system)
+{
+	if (!airLookOf(system->getTemplate(), system).smoke || !usable()) return false;
+	// an explosion's smoke that started no blast of its own still pushes the air round it
+	if (system->getPriority() == DEATH_EXPLOSION && !system->isSystemForever() && TheGameLogic) {
+		Coord3D where;
+		system->getPosition(&where);
+		addShock(where, 110.0f, 40.0f, 0.8f, (int)TheGameLogic->getFrame());
+	}
+	pruneSets();
+	takenSystems.insert((int)system->getSystemID());
+	airSystems.insert((int)system->getSystemID());
+	return true;
+}
+
+// The air's box: where the smoke of the last twenty seconds can be, inside the grid.  False when
+// there is none.
+bool airClip(int now, float low[3], float high[3])
+{
+	float gridLow[3], gridHigh[3];
+	boxOf(airVolume, state.air.shape, gridLow, gridHigh);
+	bool any = false;
+	for (const WorldBox &box : airBoxes) {
+		// what the wind and the flow carried it since, at most: the wind is 6 units a second, and
+		// the air's smoke has no heat to rise with
+		const float age = (float)(now - box.frame) / LOGICFRAMES_PER_SECOND;
+		const float drift = 15.0f + 6.0f * age;
+		for (unsigned i = 0; i < 3; ++i) {
+			const float a = box.low[i] - (i == 2 ? 10.0f : drift), b = box.high[i] + (i == 2 ? 15.0f + 4.0f * age : drift);
+			low[i] = any ? (std::min)(low[i], a) : a;
+			high[i] = any ? (std::max)(high[i], b) : b;
+		}
+		any = true;
+	}
+	if (!any) return false;
+	for (unsigned i = 0; i < 3; ++i) {
+		low[i] = (std::max)(low[i], gridLow[i]);
+		high[i] = (std::min)(high[i], gridHigh[i]);
+		if (high[i] <= low[i]) return false;
+	}
+	return true;
+}
+
+// A blast front, from a blast this took: it runs out at `speed` and pushes for `seconds`.  One a
+// place: a blast's many systems start one front.
+void addShock(const Coord3D &where, float speed, float strength, float seconds, int now)
+{
+	for (const Shock &shock : shocks) {
+		const float dx = shock.at[0] - where.x, dy = shock.at[1] - where.y;
+		if (now - shock.born < 6 && dx * dx + dy * dy < 60.0f * 60.0f) return;
+	}
+	if (shocks.size() >= 8) shocks.erase(shocks.begin());
+	shocks.push_back({ { where.x, where.y, where.z }, speed, strength, seconds, now });
+}
+
+// The units that push the air, read from the client's drawables once a logic frame: where each
+// stands, its velocity from where it stood the frame before, its kind and its template's size.
+// A unit hidden by stealth or the shroud pushes nothing, or its wake would give it away.  Nothing
+// here goes back to the logic.  Beside an overlapped logic tick the list stays last frame's.
+void collectMovers(int now)
+{
+	if (LogicThread::isInsideWindow() || !TheGameClient || !TheTacticalView) return;
+	Coord3D look;
+	TheTacticalView->getPosition(&look);
+	static std::unordered_map<DrawableID, std::pair<Coord3D, int>> seen, next;
+	next.clear();
+	static std::vector<Mover> found;
+	found.clear();
+	for (Drawable *drawable = TheGameClient->firstDrawable(); drawable; drawable = drawable->getNextDrawable()) {
+		const bool aircraft = drawable->isKindOf(KINDOF_AIRCRAFT), walker = drawable->isKindOf(KINDOF_INFANTRY);
+		if (!aircraft && !walker && !drawable->isKindOf(KINDOF_VEHICLE)) continue;
+		if (drawable->isDrawableEffectivelyHidden() || drawable->getFullyObscuredByShroud()) continue;
+		const Coord3D at = *drawable->getPosition();
+		const DrawableID id = drawable->getID();
+		float vel[3] = {};
+		const auto last = seen.find(id);
+		if (last != seen.end() && now > last->second.second && now - last->second.second <= 4) {
+			const float perSecond = (float)LOGICFRAMES_PER_SECOND / (now - last->second.second);
+			vel[0] = (at.x - last->second.first.x) * perSecond;
+			vel[1] = (at.y - last->second.first.y) * perSecond;
+			vel[2] = (at.z - last->second.first.z) * perSecond;
+		}
+		next[id] = { at, now };
+		const float dx = at.x - look.x, dy = at.y - look.y;
+		if (dx * dx + dy * dy > 900.0f * 900.0f) continue;
+		const float speed = std::sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]);
+		const float ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(at.x, at.y, NULL) : 0.0f;
+		const GeometryInfo &geometry = drawable->getTemplate()->getTemplateGeometryInfo();
+		const float major = geometry.getMajorRadius(), minor = geometry.getMinorRadius();
+		const float tall = geometry.getMaxHeightAbovePosition();
+		const float hx = std::cos(drawable->getOrientation()), hy = std::sin(drawable->getOrientation());
+		Mover mover = {};
+		float (&m)[4][4] = mover.m;
+		for (unsigned i = 0; i < 3; ++i) m[1][i] = vel[i];
+		m[0][0] = at.x;
+		m[0][1] = at.y;
+		m[0][2] = at.z;
+		float priority = 1.0f;
+		if (aircraft) {
+			const float height = at.z - ground;
+			if (height < 3.0f) continue;	// on the pad or the runway
+			// ponytail: a helicopter is told by the Comanche's helipad flag or by flying slowly; a
+			// rotor bone would give the real disc
+			if (drawable->isKindOf(KINDOF_PRODUCED_AT_HELIPAD) || speed < 60.0f) {
+				const float radius = (std::max)(major, 15.0f) * 1.1f;
+				const float close = (std::min)(1.0f, 1.6f - height / (6.0f * radius));
+				if (close <= 0.0f) continue;
+				m[0][2] = at.z + tall * 0.8f;
+				m[0][3] = radius;
+				m[1][3] = MoverRotor;
+				m[2][2] = height;
+				m[3][1] = close;
+				priority = 0.25f;	// the one that shows most: kept before the rest
+			} else {
+				m[0][3] = (std::max)(major * 0.8f, 12.0f);
+				m[1][3] = MoverJet;
+				m[2][2] = height;
+				m[3][1] = 1.0f;
+			}
+		} else if (walker) {
+			if (speed < 8.0f) continue;
+			m[0][3] = 8.0f;
+			m[1][3] = MoverWalker;
+		} else {
+			if (speed < 6.0f) continue;
+			m[0][2] = (std::min)(at.z, ground + 2.0f);
+			m[0][3] = (std::max)(major, 8.0f);
+			m[1][3] = MoverVehicle;
+			m[2][0] = hx;
+			m[2][1] = hy;
+			m[2][2] = (std::max)(geometry.getGeomType() == GEOMETRY_BOX ? minor : major * 0.7f, 6.0f);
+			m[2][3] = (std::max)(tall, 8.0f);
+			m[3][0] = (id & 1) ? 1.0f : -1.0f;	// which way its wake turns, the same every frame
+			m[3][1] = speed;
+		}
+		mover.distance = (dx * dx + dy * dy) * priority;
+		found.push_back(mover);
+	}
+	seen.swap(next);
+	for (auto it = shocks.begin(); it != shocks.end();) {
+		const float age = (float)(now - it->born) / LOGICFRAMES_PER_SECOND;
+		if (age > it->seconds) { it = shocks.erase(it); continue; }
+		Mover mover = {};
+		float (&m)[4][4] = mover.m;
+		const float radius = it->speed * age;
+		for (unsigned i = 0; i < 3; ++i) m[0][i] = it->at[i];
+		m[0][3] = radius;
+		m[1][3] = MoverShock;
+		m[2][3] = 10.0f + 0.15f * radius;
+		m[3][1] = it->strength * std::exp(-age / (it->seconds * 0.4f));
+		mover.distance = 0;	// fronts first: they are few and short
+		found.push_back(mover);
+		++it;
+	}
+	const size_t cap = level == 2 ? MaxMovers : MaxMovers / 2;
+	if (found.size() > cap)
+		std::nth_element(found.begin(), found.begin() + cap, found.end(),
+			[](const Mover &a, const Mover &b) { return a.distance < b.distance; });
+	movers.assign(found.begin(), found.begin() + (std::min)(found.size(), cap));
+	moverPeak = (std::max)(moverPeak, (unsigned)movers.size());
+}
+
+void gatherSolids(int now)
+{
+	if (now - solidsFrame < 2 * LOGICFRAMES_PER_SECOND && now >= solidsFrame) return;
+	solidsFrame = now;
+	solids.clear();
+	// the player whose fog is drawn: an observer may be watching through someone
+	const Int seer = TheObserverCamera.getShroudPlayerIndex();
+	// every grid lays its floor again from the new list
+	for (Volume &volume : volumes) volume.floorFrame = -100000;
+	airVolume.floorFrame = -100000;
+	for (Object *object = TheGameLogic->getFirstObject(); object; object = object->getNextObject()) {
+		if (!object->isKindOf(KINDOF_STRUCTURE)) continue;
+		if (seer >= 0 && object->getShroudedStatus(seer) == OBJECTSHROUD_SHROUDED) continue;
+		const Coord3D *at = object->getPosition();
+		const GeometryInfo &geometry = object->getGeometryInfo();
+		solids.push_back({ at->x, at->y, at->z + geometry.getMaxHeightAbovePosition(), geometry.getMajorRadius(),
+			geometry.getMinorRadius(), object->getOrientation(), geometry.getGeomType() == GEOMETRY_BOX });
+	}
+}
+
+void fillMovers()
+{
+	sim.MoverCount[0] = (float)movers.size();
+	for (size_t i = 0; i < movers.size(); ++i) std::memcpy(sim.Movers[i * 4], movers[i].m, sizeof(movers[i].m));
+}
+
+// One logic frame of the air: it follows the camera, takes the particles of every system it holds
+// (the nearest the camera first, up to the setting's count), and runs the same passes as a blast.
+void stepAir(ID3D11DeviceContext *context, int now, float dt, float seconds, const float sunToward[3])
+{
+	Tier &tier = state.air;
+	const AirShape &air = AirShapes[level];
+	const TierShape &shape = tier.shape;
+	Volume &volume = airVolume;
+	if (!volume.live) {
+		volume = Volume();
+		volume.live = volume.reset = true;
+		volume.kind = Air;
+		volume.cell = air.cell;
+	}
+	const float cell = volume.cell;
+
+	// Where the camera looks, the box's middle, its floor eight cells under the ground there.
+	Coord3D look = {};
+	if (TheTacticalView) TheTacticalView->getPosition(&look);
+	const float ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(look.x, look.y, NULL) : 0.0f;
+	const float want[3] = { look.x - shape.gx * cell * 0.5f, look.y - shape.gy * cell * 0.5f, ground - 8.0f * cell };
+	float shift[3] = {};
+	bool moved = false;
+	for (unsigned i = 0; i < 3; ++i) {
+		const float cells = std::floor((want[i] - volume.origin[i]) / cell + 0.5f);
+		if (volume.reset) volume.origin[i] = want[i];
+		else if (std::fabs(cells) >= (i == 2 ? 3.0f : 4.0f)) {	// in steps, so it is not moved every frame
+			shift[i] = cells;
+			volume.origin[i] += cells * cell;
+			moved = true;
+		}
+	}
+	std::memset(&sim, 0, sizeof(sim));
+	sim.Volumes[0][0] = 1;
+	sim.Volumes[0][2] = cell;
+	sim.Volumes[0][3] = volume.reset ? 1.0f : 0.0f;
+	if (moved) {
+		for (unsigned i = 0; i < 3; ++i) sim.Motion[0][i] = shift[i];
+		upload(context, tier.simConstants, &sim, sizeof(sim));
+		context->CSSetConstantBuffers(0, 1, &tier.simConstants);
+		const unsigned in = tier.current, out = 1 - tier.current;
+		run(context, tier, ScrollProgram, { tier.velocity[0].view, tier.density[in].view },
+			{ tier.velocity[1].write, tier.density[out].write }, 1);
+		unbindCompute(context);
+		context->CopyResource(tier.velocity[0].texture, tier.velocity[1].texture);
+		// the pressure the sweeps start from belongs to the old place: start this step's from nothing
+		const float zero[4] = {};
+		context->ClearUnorderedAccessViewFloat(tier.pressure[0].write, zero);
+		tier.current = out;
+		volume.floorFrame = -100000;	// the ground under it moved
+		for (unsigned i = 0; i < 3; ++i) sim.Motion[0][i] = 0;
+	}
+	layFloor(context, tier, 0, volume, now);
+
+	// The particles, as spheres in cells.
+	struct Source { float x, y, z, r, soot, dust, bright, distance; };
+	static std::vector<Source> found;
+	found.clear();
+	float low[3], high[3];
+	boxOf(volume, shape, low, high);
+	for (auto it = airSystems.begin(); it != airSystems.end();) {
+		ParticleSystem *system = TheParticleSystemManager->findParticleSystem((ParticleSystemID)*it);
+		if (!system) {
+			takenSystems.erase(*it);
+			it = airSystems.erase(it);
+			continue;
+		}
+		const int id = *it;
+		++it;
+		const bool dusty = airLookOf(system->getTemplate(), system).dust;
+		const float fade = system->getStealthFade();
+		unsigned inside = 0, outside = 0;
+		for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) {
+			const float alpha = (std::min)(p->getAlpha() * fade * AirCoverage, 0.95f);
+			if (alpha < 0.02f) continue;
+			const Coord3D *at = p->getPosition();
+			// at most 8 cells, so a sphere reaches 27 bricks at most (AirTileEntries)
+			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * 0.8f), cell * 8.0f);
+			// inside the box less its faded rim
+			const float rim = 4.0f * cell;
+			if (at->x < low[0] + rim || at->x > high[0] - rim || at->y < low[1] + rim || at->y > high[1] - rim
+					|| at->z < low[2] || at->z > high[2] - rim) {
+				++outside;
+				continue;
+			}
+			++inside;
+			// the density whose optical depth through the sphere's middle is the particle's opacity
+			const float density = AirGain * -std::log(1.0f - alpha) / (2.0f * radius * AirExtinction);
+			const RGBColor *colour = p->getColor();
+			const float grey = (std::min)(1.0f, 0.3f * colour->red + 0.59f * colour->green + 0.11f * colour->blue);
+			const float dx = at->x - look.x, dy = at->y - look.y;
+			found.push_back({ (at->x - low[0]) / cell - 0.5f, (at->y - low[1]) / cell - 0.5f, (at->z - low[2]) / cell - 0.5f,
+				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy });
+		}
+		// a system with no particle in the box (a plume past the screen's edge zoomed out, a column
+		// over a cliff) keeps its billboards until the box comes to it: nothing else would draw it
+		if (outside && !inside) airOutside.insert(id);
+		else airOutside.erase(id);
+	}
+	const size_t cap = air.particles;
+	if (found.size() > cap) {
+		airLeftOut += unsigned(found.size() - cap);
+		std::nth_element(found.begin(), found.begin() + cap, found.end(),
+			[](const Source &a, const Source &b) { return a.distance < b.distance; });
+		found.resize(cap);
+	}
+	airFed += unsigned(found.size());
+
+	// Each 8-cell brick's list of the spheres that reach it, counted, then filled.
+	const unsigned tilesX = shape.gx / 8, tilesY = shape.gy / 8, tilesZ = shape.gz / 8, tiles = tilesX * tilesY * tilesZ;
+	const unsigned room = air.particles * AirTileEntries;
+	static std::vector<unsigned> ranges, index, fill;
+	ranges.assign(tiles * 2, 0);
+	auto each = [&](const Source &s, auto &&visit) {
+		auto span = [](float at, float r, unsigned count, unsigned &a, unsigned &b) {
+			a = (unsigned)(std::max)(0, int((at - r) / 8)); b = (unsigned)(std::min)(int(count) - 1, int((at + r) / 8));
+		};
+		unsigned x0, x1, y0, y1, z0, z1;
+		span(s.x, s.r, tilesX, x0, x1);
+		span(s.y, s.r, tilesY, y0, y1);
+		span(s.z, s.r, tilesZ, z0, z1);
+		for (unsigned z = z0; z <= z1; ++z)
+			for (unsigned y = y0; y <= y1; ++y)
+				for (unsigned x = x0; x <= x1; ++x) visit((z * tilesY + y) * tilesX + x);
+	};
+	unsigned entries = 0;
+	for (const Source &s : found) each(s, [&](unsigned t) { ++ranges[t * 2 + 1]; });
+	for (unsigned t = 0; t < tiles; ++t) {
+		const unsigned count = (std::min)(ranges[t * 2 + 1], room - (std::min)(entries, room));
+		ranges[t * 2] = entries;
+		ranges[t * 2 + 1] = count;
+		entries += count;
+	}
+	index.assign((std::max)(entries, 1u), 0);
+	fill.assign(tiles, 0);
+	for (unsigned n = 0; n < found.size(); ++n)
+		each(found[n], [&](unsigned t) { if (fill[t] < ranges[t * 2 + 1]) index[ranges[t * 2] + fill[t]++] = n; });
+	static std::vector<float> packed;
+	packed.assign((std::max)(found.size(), (size_t)1) * 8, 0.0f);
+	for (size_t n = 0; n < found.size(); ++n) {
+		const Source &s = found[n];
+		const float values[8] = { s.x, s.y, s.z, s.r, s.soot, s.dust, s.bright, 0 };
+		std::memcpy(&packed[n * 8], values, sizeof(values));
+	}
+	upload(context, state.sources, packed.data(), packed.size() * sizeof(float));
+	upload(context, state.tileRange, ranges.data(), ranges.size() * sizeof(unsigned));
+	upload(context, state.tileIndex, index.data(), index.size() * sizeof(unsigned));
+
+	// Where its smoke is, a box a second: the particles, and what the rotors lift and the blast
+	// fronts push out of them.
+	auto grow = [&](const float a[3], const float b[3]) {
+		if (airBoxes.empty() || now - airBoxes.back().frame >= LOGICFRAMES_PER_SECOND) {
+			WorldBox box;
+			for (unsigned i = 0; i < 3; ++i) { box.low[i] = 1e9f; box.high[i] = -1e9f; }
+			box.frame = now;
+			airBoxes.push_back(box);
+		}
+		WorldBox &box = airBoxes.back();
+		for (unsigned i = 0; i < 3; ++i) {
+			box.low[i] = (std::min)(box.low[i], a[i]);
+			box.high[i] = (std::max)(box.high[i], b[i]);
+		}
+	};
+	for (const Source &s : found) {
+		const float centre[3] = { low[0] + (s.x + 0.5f) * cell, low[1] + (s.y + 0.5f) * cell, low[2] + (s.z + 0.5f) * cell };
+		const float a[3] = { centre[0] - s.r * cell, centre[1] - s.r * cell, centre[2] - s.r * cell };
+		const float b[3] = { centre[0] + s.r * cell, centre[1] + s.r * cell, centre[2] + s.r * cell };
+		grow(a, b);
+	}
+	if (!airBoxes.empty())	// only where the air already holds smoke
+		for (const Mover &mover : movers) {
+			const float (&m)[4][4] = mover.m;
+			const int kind = int(m[1][3] + 0.5f);
+			if (kind != MoverRotor && kind != MoverShock) continue;
+			const float reach = kind == MoverRotor ? m[0][3] * 3.0f : m[0][3] + 20.0f;
+			const float bottom = kind == MoverRotor ? m[0][2] - m[2][2] : m[0][2] - 20.0f;
+			const float a[3] = { m[0][0] - reach, m[0][1] - reach, bottom };
+			const float b[3] = { m[0][0] + reach, m[0][1] + reach, m[0][2] + 20.0f };
+			grow(a, b);
+		}
+	// two soot half-lives on, what is left of a box's smoke is under a quarter and fading
+	while (!airBoxes.empty() && now - airBoxes.front().frame > int(2 * AirSootHalfLife * LOGICFRAMES_PER_SECOND))
+		airBoxes.erase(airBoxes.begin());
+
+	sim.Step[0] = dt;
+	sim.Step[1] = seconds;
+	sim.Step[2] = DustSettle / cell;
+	sim.Step[3] = AirTakeUp;
+	sim.Forces[0] = Buoyancy;
+	sim.Forces[1] = Weight;
+	sim.Forces[2] = Vorticity;
+	sim.Forces[3] = Drag;
+	sim.Keep[0] = std::pow(0.5f, dt / HeatHalfLife);
+	sim.Keep[1] = std::pow(0.5f, dt / VelocityHalfLife);
+	sim.Keep[2] = std::pow(0.5f, dt / DustHalfLife);
+	sim.Keep[3] = std::pow(0.5f, dt / AirSootHalfLife);
+	for (unsigned i = 0; i < 3; ++i) sim.Sun[i] = sunToward[i];
+	sim.Sun[3] = AirExtinction;
+	sim.Wind[0] = WindX;
+	sim.Wind[1] = WindY;
+	sim.Shape[0][2] = 1000.0f;	// no ceiling
+	for (unsigned i = 0; i < 3; ++i) sim.Origins[0][i] = volume.origin[i];
+	fillMovers();
+	upload(context, tier.simConstants, &sim, sizeof(sim));
+	context->CSSetConstantBuffers(0, 1, &tier.simConstants);
+	context->CSSetSamplers(0, 1, &state.linear);
+
+	const unsigned in = tier.current, out = 1 - tier.current;
+	run(context, tier, CurlProgram, { tier.velocity[0].view }, { tier.curl.write }, 1);
+	run(context, tier, AdvectProgram, { tier.velocity[0].view, tier.density[in].view, tier.curl.view },
+		{ tier.velocity[1].write, tier.density[out].write, tier.pressure[0].write }, 1,
+		{ state.sourcesView, state.tileRangeView, state.tileIndexView });
+	run(context, tier, DivergenceProgram, { tier.velocity[1].view }, { tier.divergence.write }, 1);
+	for (unsigned sweep = 0; sweep < air.sweeps; ++sweep) {
+		const unsigned from = sweep & 1;
+		run(context, tier, JacobiProgram, { tier.pressure[from].view, tier.divergence.view }, { tier.pressure[1 - from].write }, 1);
+	}
+	run(context, tier, ProjectProgram, { tier.pressure[0].view, tier.velocity[1].view }, { tier.velocity[0].write }, 1);
+	run(context, tier, LightProgram, { tier.density[out].view }, { tier.light.write }, 1);
+	unbindCompute(context);
+	tier.current = out;
+	volume.reset = false;
+}
+
+// A volume's world box, its whole grid.
+void boxOf(const Volume &volume, const TierShape &shape, float low[3], float high[3])
+{
+	const unsigned sides[3] = { shape.gx, shape.gy, shape.gz };
+	for (unsigned i = 0; i < 3; ++i) {
+		low[i] = volume.origin[i];
+		high[i] = volume.origin[i] + sides[i] * volume.cell;
+	}
+}
+
+// A world box's pixels in the camera's viewport, false when none of it is in front of the camera.
+bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewProjection[16],
 	const HazardCloud::Camera &camera, D3D11_RECT &rect)
 {
 	float low[2] = { 1e9f, 1e9f }, high[2] = { -1e9f, -1e9f };
 	bool behind = false;
 	for (unsigned corner = 0; corner < 8; ++corner) {
-		const float world[4] = { volume.origin[0] + ((corner & 1) ? shape.gx : 0) * volume.cell,
-			volume.origin[1] + ((corner & 2) ? shape.gy : 0) * volume.cell,
-			volume.origin[2] + ((corner & 4) ? shape.gz : 0) * volume.cell, 1 };
+		const float world[4] = { (corner & 1) ? boxHigh[0] : boxLow[0], (corner & 2) ? boxHigh[1] : boxLow[1],
+			(corner & 4) ? boxHigh[2] : boxLow[2], 1 };
 		float clip[4] = {};
 		for (unsigned column = 0; column < 4; ++column)
 			for (unsigned k = 0; k < 4; ++k) clip[column] += world[k] * viewProjection[k * 4 + column];
@@ -1403,18 +2095,22 @@ namespace VolumeSmoke {
 bool Hides(ParticleSystem *system)
 {
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
-	return takenSystems.count((int)system->getSystemID()) != 0;
+	// the air reads only the CPU's particles, so an air system's GPU overflow keeps drawing
+	const int id = (int)system->getSystemID();
+	return takenSystems.count(id) != 0 && !airSystems.count(id);
 }
 
 bool Takes(ParticleSystem *system)
 {
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
 	const int id = (int)system->getSystemID();
-	if (takenSystems.count(id)) return true;
+	if (takenSystems.count(id)) return !airOutside.count(id);
+	// A blast is told from loose billboard systems; trails, streaks, a building's smoke and every
+	// other smoke or dust go to the air.
 	if (!system->shouldBillboard() || system->isUsingStreak() || system->getVolumeParticleDepth() > 1
 			|| system->getAttachedObject() != INVALID_ID || system->getAttachedDrawable() != INVALID_DRAWABLE_ID
 			|| system->getPriority() == AREA_EFFECT)
-		return false;
+		return takeAir(system);
 	const int now = (int)TheGameLogic->getFrame();
 	const int seen = firstSeen.emplace(id, now).first->second;
 	Coord3D where;
@@ -1446,7 +2142,7 @@ bool Takes(ParticleSystem *system)
 		return true;
 	}
 
-	if (!kind.trigger || system->isSystemForever() || seen < now - 5 || !usable()) return false;
+	if (!kind.trigger || system->isSystemForever() || seen < now - 5 || !usable()) return takeAir(system);
 
 	const Real ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(where.x, where.y, NULL) : where.z;
 	Kind type = kind.kind;
@@ -1503,6 +2199,9 @@ bool Takes(ParticleSystem *system)
 	volume.seed = unsigned(int(where.x) * 73856093) ^ unsigned(int(where.y) * 19349663) ^ unsigned(now * 83492791);
 	volume.born = now;
 	volume.life = int(lifeOf(type) * LOGICFRAMES_PER_SECOND);
+	// its front through the air round it, in world units a second
+	if (type == Nuclear) addShock(where, 420.0f, 220.0f, 2.5f, now);
+	else addShock(where, type == TankDeath ? 130.0f : 160.0f * kind.scale, type == TankDeath ? 60.0f : 70.0f * kind.scale, 1.0f, now);
 	pruneSets();
 	takenSystems.insert(id);
 	if (claimedCount++ < 8)
@@ -1510,6 +2209,19 @@ bool Takes(ParticleSystem *system)
 			type == TankDeath ? "tank" : type == Shell ? "shell" : type == Airburst ? "airburst" : "nuclear", slot,
 			system->getTemplate()->getName().str(), where.x, where.y, where.z, sideX));
 	return true;
+}
+
+void Gather()
+{
+	if (!requested() || !TheGameLogic || TheGlobalData->m_classicGraphics || LogicThread::isInsideWindow()) return;
+	bool running = !airSystems.empty() || !airBoxes.empty();
+	for (const Volume &volume : volumes) running = running || volume.live;
+	const int now = (int)TheGameLogic->getFrame();
+	static int gathered = -1;
+	if (gathered == now) return;
+	gathered = now;
+	gatherSolids(now);	// every two seconds, so a blast that starts finds its buildings
+	if (running) collectMovers(now);
 }
 
 void Render(const HazardCloud::Camera &camera)
@@ -1536,12 +2248,16 @@ void Render(const HazardCloud::Camera &camera)
 		++live;
 		slabs[tierOf(slot)] = slabOf(slot) + 1;
 	}
-	if (now - lastReport >= 10 * LOGICFRAMES_PER_SECOND && (live || claimedCount)) {
+	// the air runs while it holds a system, and after, while its smoke can still be there
+	const bool airActive = !airSystems.empty() || !airBoxes.empty();
+	if (now - lastReport >= 10 * LOGICFRAMES_PER_SECOND && (live || claimedCount || airActive)) {
 		lastReport = now;
-		DEBUG_LOG(("VOLSMOKE: frame %d, %u volumes live, %u blasts, %u systems joined, %u dropped so far, %u draws\n",
-			now, live, claimedCount, joinedCount, droppedCount, state.drawn));
+		DEBUG_LOG(("VOLSMOKE: frame %d, %u volumes live, %u blasts, %u systems joined, %u dropped so far, %u draws; "
+			"air %u systems, %u particles fed, %u left out; %u units pushing, %u at most\n", now, live, claimedCount,
+			joinedCount, droppedCount, state.drawn, (unsigned)airSystems.size(), airFed, airLeftOut, (unsigned)movers.size(),
+			moverPeak));
 	}
-	if (!live) {
+	if (!live && !airActive) {
 		state.lastStepFrame = now;
 		return;
 	}
@@ -1563,6 +2279,8 @@ void Render(const HazardCloud::Camera &camera)
 		const int frames = state.lastStepFrame < 0 ? 1 : (std::min)((std::max)(now - state.lastStepFrame, 1), 4);
 		for (unsigned t = 0; t < 2; ++t)
 			if (slabs[t]) step(context, t, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward, slabs[t]);
+		if (airActive) stepAir(context, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward);
+		else airVolume.live = false;	// the next system starts it from an empty grid
 		state.lastStepFrame = now;
 	}
 
@@ -1599,7 +2317,10 @@ void Render(const HazardCloud::Camera &camera)
 		const Volume &volume = volumes[slot];
 		const TierShape &shape = TierShapes[tierOf(slot)];
 		// a slab claimed after this frame's step still holds its last tenant
-		if (!volume.live || volume.reset || !screenRect(volume, shape, viewProjection, camera, rects[slot])) continue;
+		if (!volume.live || volume.reset) continue;
+		float low[3], high[3];
+		boxOf(volume, shape, low, high);
+		if (!screenRect(low, high, viewProjection, camera, rects[slot])) continue;
 		float squared = 0;
 		const unsigned sides[3] = { shape.gx, shape.gy, shape.gz };
 		for (unsigned i = 0; i < 3; ++i) {
@@ -1610,8 +2331,13 @@ void Render(const HazardCloud::Camera &camera)
 		order[shown++] = slot;
 	}
 	std::sort(order, order + shown, [&](unsigned a, unsigned b) { return distance[a] > distance[b]; });
+	// the air round everything, drawn first, under the blasts in it
+	float airLow[3], airHigh[3];
+	D3D11_RECT airRect;
+	const bool airShown = airActive && airVolume.live && !airVolume.reset && airClip(now, airLow, airHigh)
+		&& screenRect(airLow, airHigh, viewProjection, camera, airRect);
 
-	if (shown) {
+	if (shown || airShown) {
 		ID3D11DepthStencilView *sceneDepth = backend->Scene_Depth_Target();
 		backend->Resolve_Scene_Depth();
 		ID3D11ShaderResourceView *depth = device->Get_Depth_Texture();
@@ -1630,6 +2356,32 @@ void Render(const HazardCloud::Camera &camera)
 		context->PSSetConstantBuffers(0, 1, &state.drawConstants);
 		// the budget: past three volumes on screen each one is marched in longer steps
 		const float stepCells = Qualities[level].stepCells * (std::max)(1.0f, shown / 3.0f);
+		if (airShown) {
+			const Tier &tier = state.air;
+			ID3D11ShaderResourceView *const views[5] = { depth, tier.density[tier.current].view, tier.light.view,
+				tier.velocity[0].view, state.noiseView };
+			context->PSSetShaderResources(0, 5, views);
+			context->PSSetShader(tier.march, nullptr, 0);
+			for (unsigned i = 0; i < 3; ++i) {
+				draw.Box[i] = airVolume.origin[i];
+				draw.ClipLow[i] = airLow[i];
+				draw.ClipHigh[i] = airHigh[i];
+			}
+			draw.Box[3] = airVolume.cell;
+			// the particles' own colour times what their textures average to, by eye against the billboards
+			const float soot[4] = { 0.5f, 0.49f, 0.48f, 0 }, dust[4] = { 0.8f, 0.66f, 0.48f, 0 };
+			std::memcpy(draw.Soot, soot, sizeof(soot));
+			std::memcpy(draw.Dust, dust, sizeof(dust));
+			std::memset(draw.Blast, 0, sizeof(draw.Blast));
+			std::memset(draw.Effects, 0, sizeof(draw.Effects));
+			std::memset(draw.Extra, 0, sizeof(draw.Extra));
+			const float slab[4] = { 0, 1, AirShapes[level].stepCells, AirExtinction };
+			std::memcpy(draw.Slab, slab, sizeof(slab));
+			upload(context, state.drawConstants, &draw, sizeof(draw));
+			context->RSSetScissorRects(1, &airRect);
+			context->Draw(3, 0);
+			++state.drawn;
+		}
 		int boundTier = -1;
 		for (unsigned n = 0; n < shown; ++n) {
 			const unsigned slot = order[n];
@@ -1643,6 +2395,7 @@ void Render(const HazardCloud::Camera &camera)
 				context->PSSetShader(tier.march, nullptr, 0);
 				boundTier = t;
 			}
+			boxOf(volume, TierShapes[t], draw.ClipLow, draw.ClipHigh);
 			for (unsigned i = 0; i < 3; ++i) draw.Box[i] = volume.origin[i];
 			draw.Box[3] = volume.cell;
 			const float t0 = secondsSince(volume, now);
@@ -1669,6 +2422,14 @@ void Reset()
 {
 	if (!requested()) return;
 	for (Volume &volume : volumes) volume = Volume();
+	airVolume = Volume();
+	airBoxes.clear();
+	airSystems.clear();
+	airOutside.clear();
+	movers.clear();
+	shocks.clear();
+	solids.clear();
+	solidsFrame = -100000;
 	takenSystems.clear();
 	firstSeen.clear();
 	state.lastStepFrame = -1;

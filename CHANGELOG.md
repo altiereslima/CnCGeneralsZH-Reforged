@@ -105,7 +105,8 @@ found and fixed, EA's own, not port damage.**
 ## Smoke simulation
 
 - Options > Effects has a Smoke Simulation box. On Low or High a tank's cook-off, a shell's dirt fountain and a nuclear mushroom are a moving body of air rather than flat sprites: the smoke rolls, rises with the heat, settles as dust and parts round the buildings in its way. Off is the default, and Off draws exactly the picture the game drew before. The box works mid-match, the next frame after you press Accept, on the default renderer; the Direct3D 9 renderer and the Classic graphics setting hide it.
-- It costs the graphics card. Three armies and three superweapons on Twilight Flame at 1920x1080, on an RTX 2060: 5.0 ms of GPU time a frame with it Off, 5.8 to 6.6 on Low and 7.7 to 7.9 on High. Low runs half as many blasts at once with a lighter solver, so a weak card should leave it Off or take Low.
+- Every other smoke goes the same way while it is on: missile and rocket trails, the dust behind a tank, a burning building's column, muzzle smoke. They are fed into one body of air round the camera instead of being drawn as sprites, and a unit moving through it pushes it. A tank's hull shoves the smoke aside and leaves a turning wake, a jet drags a sheet of it down between two wingtip vortices, and a helicopter hovering low flattens a burning column into a dark ring on the ground and lifts a band of dust round itself. A blast's front pushes the smoke already hanging round it outwards. Units you cannot see push nothing, so the smoke never gives away a stealthed tank or an unscouted base.
+- It costs the graphics card. Three armies and three superweapons on Twilight Flame at 1920x1080, on an RTX 2060: 5.2 ms of GPU time a frame with it Off, 8.6 on Low and 10.0 to 10.2 on High; the frame itself took 5.3, 5.6 and 6.9 to 7.2 ms. Low runs half as many blasts at once in a coarser body of air, so a weak card should leave it Off or take Low.
 
 ## A rank ladder for every army
 

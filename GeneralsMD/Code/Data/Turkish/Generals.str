@@ -15062,7 +15062,7 @@ GUI:VolumeSmoke2
 END
 
 TOOLTIP:VolumeSmoke
-"Duman ve toz düz resimler yerine hareket eden bir hava kütlesi olur: yuvarlanır, sıcakla yükselir, binaların etrafından dolaşır. Ekran kartına yük bindirir, zayıf kartta Kapalı bırak. Düşük, Yüksek'in yaklaşık yarısı kadar yük getirir. Kabul Et'e bastığın an uygulanır, maç ortasında da."
+"Duman ve toz düz resimler yerine hareket eden bir hava kütlesi olur: yuvarlanır, sıcakla yükselir, binaların etrafından dolaşır, geçen tank, jet ve helikopterler onu iter. Ekran kartına yük bindirir, zayıf kartta Kapalı bırak. Düşük, Yüksek'in yaklaşık üçte ikisi kadar yük getirir. Kabul Et'e bastığın an uygulanır, maç ortasında da."
 END
 
 GUI:ParticleBounce

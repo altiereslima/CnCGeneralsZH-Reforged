@@ -18,6 +18,11 @@ bool Takes(ParticleSystem *system);
 // whose particles of a taken system are hidden as well.
 bool Hides(ParticleSystem *system);
 
+// Reads what the volumes need from the drawables and the structures (the units pushing the air,
+// the buildings it flows round), once per logic frame, from W3DDisplay::draw before the logic
+// thread's window opens.  Nothing with the setting Off or no volume running.
+void Gather();
+
 // Steps every volume once per logic frame that passed and draws them into the scene, from
 // doParticles between two of the backend's draws.  Nothing with the setting Off.
 void Render(const HazardCloud::Camera &camera);

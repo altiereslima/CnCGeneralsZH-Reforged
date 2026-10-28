@@ -156,6 +156,9 @@ extern RenderWindow ApplicationHWnd;
 W3DWindowFrameHook TheW3DWindowFrameHook = NULL;
 W3DWindowSizeHook TheW3DWindowSizeHook = NULL;
 #endif
+#ifdef _WIN32
+#include "W3DDevice/GameClient/VolumeSmoke.h"
+#endif
 #include "zhio.h"		// zh_fopen, zh_remove, zh_mkdir: the engine's Windows-spelled paths (C1)
 
 #ifdef _INTERNAL
@@ -2675,6 +2678,9 @@ AGAIN:
 	} 
 
 
+#ifdef _WIN32
+	VolumeSmoke::Gather();	// the drawables and structures the smoke volumes read, before the window
+#endif
 	// the span a logic thread could run beside, marked for LOGIC-THREAD.md phase 3's count of logic reads
 	// made inside it; opened each time round below and closed after End_Render, or after the loop when
 	// a continue skips that.  Phase 4: while the tick handed over at its opening runs on and another

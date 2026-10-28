@@ -570,7 +570,7 @@ GUI:VolumeSmoke2
 END
 
 TOOLTIP:VolumeSmoke
-"Smoke and dust as a moving body of air instead of flat sprites: it rolls, rises with the heat and parts round buildings. It costs graphics card time, so leave it Off on a weak card. Low costs about half as much as High. Applies the moment you Accept, mid-match too."
+"Smoke and dust as a moving body of air instead of flat sprites: it rolls, rises with the heat, parts round buildings and is pushed by passing tanks, jets and helicopters. It costs graphics card time, so leave it Off on a weak card. Low costs about two thirds of what High does. Applies the moment you Accept, mid-match too."
 END
 
 GUI:ParticleBounce
