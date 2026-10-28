@@ -120,6 +120,7 @@ OPTION_INT_ACCESSORS( m_msaaLevel )
 OPTION_BOOL_ACCESSORS( m_vsync )
 OPTION_INT_ACCESSORS( m_waterStyle )
 OPTION_INT_ACCESSORS( m_cloudStyle )
+OPTION_INT_ACCESSORS( m_volumeSmoke )
 OPTION_BOOL_ACCESSORS( m_classicGraphics )
 OPTION_INT_ACCESSORS( m_lightingStyle )
 OPTION_INT_ACCESSORS( m_healthBarMode )
@@ -467,6 +468,15 @@ const OptionDef TheOptionCatalog[] =
 	{ "CloudStyle", OPT_WND( "ComboBoxCloudStyle" ), "GUI:CloudStyle",
 		OPTION_ENUM, APPLY_LIVE, 0, CLOUD_STYLE_COUNT - 1,
 		get_m_cloudStyle, set_m_cloudStyle },
+
+	// Smoke and dust as a simulated volume on Direct3D 11, Off, Low or High.  The volumes read it
+	// every frame, so a change shows on the next one, mid-match too; -volsmoke picks it for one run.
+	// Off by default and kept out of the quality slider, as Modern water is: an opt-in that costs
+	// GPU time the slider's presets should not spend for a player who never asked.  On Options >
+	// Effects; the menu hides it where Direct3D 11 does not present.
+	{ "VolumeSmoke", OPT_WND( "ComboBoxVolumeSmoke" ), "GUI:VolumeSmoke",
+		OPTION_ENUM, APPLY_LIVE, 0, VOLUME_SMOKE_COUNT - 1,
+		get_m_volumeSmoke, set_m_volumeSmoke },
 
 	// Classic or Reforged.  Classic is the picture the game shipped with: its own textures, EA's
 	// ground tile, no normal maps, the stencil shadows and no post effects.  The upscaled archives

@@ -16480,6 +16480,29 @@ TEST(cloud_style_defaults_to_classic_and_preserves_an_explicit_volumetric_choice
     TheWritableGlobalData = saved;
 }
 
+TEST(volume_smoke_defaults_off_and_applies_live_at_three_levels)
+{
+    GlobalData *saved = TheWritableGlobalData;
+    GlobalData *scratch = NEW GlobalData;
+    TheWritableGlobalData = scratch;
+    const OptionDef *smoke = findOptionDef("VolumeSmoke");
+    CHECK(smoke != NULL);
+    if (smoke) {
+        CHECK_EQ(scratch->m_volumeSmoke, 0);
+        CHECK_EQ(smoke->kind, OPTION_ENUM);
+        CHECK_EQ(smoke->apply, APPLY_LIVE);
+        CHECK_EQ(smoke->lo, 0);
+        CHECK_EQ(smoke->hi, 2);
+        CHECK_STR(smoke->widgetName, "OptionsMenu.wnd:ComboBoxVolumeSmoke");
+        UserPreferences pref;
+        pref["VolumeSmoke"] = "1";
+        loadOptionsFromPreferences(pref);
+        CHECK_EQ(scratch->m_volumeSmoke, 1);
+    }
+    delete scratch;
+    TheWritableGlobalData = saved;
+}
+
 TEST(option_catalog_round_trips_every_key_through_options_ini)
 {
 	/* Every row has to survive the trip out to Options.ini and back, at both ends of its range.

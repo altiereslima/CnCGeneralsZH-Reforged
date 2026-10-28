@@ -147,6 +147,8 @@ enum { SMOKE_LEVEL_COUNT = 3 };
 enum { WATER_STYLE_COUNT = 2 };
 // Classic is the original hazard effect; Volumetric is the Linux toxin/radiation cloud.
 enum { CLOUD_STYLE_COUNT = 2 };
+// Volume smoke: Off, Low and High (DX11VolumeSmoke.cpp sizes its grids by it).
+enum { VOLUME_SMOKE_COUNT = 3 };
 
 // Shadow quality is the size of the sun's depth map, low, medium and high: 1024, 2048 and 4096
 // texels a side (W3DVolumetricShadow.cpp, renderShadowMap).  Medium is the size the map always had.

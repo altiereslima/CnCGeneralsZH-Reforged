@@ -377,6 +377,7 @@ public:
 	Bool m_smoothMotionAnyDisplay;	// -smoothmotion: the same whatever the display's refresh rate
 	Int m_waterStyle;					// "WaterStyle": 0 = Classic, 1 = Modern (SDL); applied between render frames
 	Int m_cloudStyle;					// "CloudStyle": 0 = Classic (default), 1 = Volumetric (when supported)
+	Int m_volumeSmoke;				// "VolumeSmoke": smoke as a simulated volume, 0 Off (default), 1 Low, 2 High (Direct3D 11); -volsmoke for one run
 	Bool m_explosionDebrisTrails;	// "DebrisTrails": blasts throw smoke-trailing fragments and burning shrapnel
 	Int m_shadowQuality;				// "ShadowQuality": the sun's depth map at 1024, 2048 or 4096 texels a side (Direct3D 11)
 	Int m_graphicsQuality;			// "GraphicsQuality": where the options menu's Performance / Quality slider stands; Custom takes the particle ring from the preset at or below it

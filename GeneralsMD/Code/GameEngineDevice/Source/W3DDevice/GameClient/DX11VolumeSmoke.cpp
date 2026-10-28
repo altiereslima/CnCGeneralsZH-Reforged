@@ -1,4 +1,5 @@
-// Explosion smoke as a fluid, behind -volsmoke, on the Direct3D 11 frame only.  Distributed under
+// Explosion smoke as a fluid, behind the VolumeSmoke setting (Off, Low, High; -volsmoke for one
+// run), on the Direct3D 11 frame only.  Distributed under
 // the repository's GPL-3.0 terms; see LICENSE.md.
 //
 // Three kinds of blast, each told from the particle systems its FX spawns and each played from a
@@ -31,13 +32,12 @@
 // timeline, and a billowy noise eroding the surface so the cap reads as cauliflower.
 //
 // Nothing here is read by the logic or draws a random number: every variation is an integer hash.
-// The D3D9 and SDL3 paths, -headless and every run without the switch keep the billboards, and
-// with the switch off Takes, Hides and Render return before touching anything.  With it on, every
+// The D3D9 and SDL3 paths, -headless and every run with the setting Off keep the billboards, and
+// with it Off Takes, Hides and Render return before touching anything.  With it on, every
 // system of a blast this takes draws no billboards, its GPU overflow particles included; the tank
 // and the shell keep their additive fire and flash cards, the nuclear blast has none.
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
-#include "Common/EarlyCommandLine.h"
 #include "Common/LogicThread.h"
 #include "GameClient/ParticleSys.h"
 #include "GameLogic/GameLogic.h"
@@ -65,15 +65,24 @@
 
 namespace {
 
-// Two atlases: the small one for tanks and shells, the big one for nuclear blasts.
+// Two atlases: the small one for tanks and shells, the big one for nuclear blasts.  The slab
+// counts are the setting's (Quality below); a change of setting builds the atlases again.
 struct TierShape { unsigned gx, gy, gz, slabs, first; };
-const TierShape TierShapes[2] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 } };
-const unsigned MaxVolumes = 26;		// both tiers' slabs, the small tier's first
+TierShape TierShapes[2] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 } };
+const unsigned MaxVolumes = 26;		// both tiers' slabs at High, the small tier's first
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
 const unsigned MaxPuffs = 24;
 const unsigned MaxStreaks = 16;
-const unsigned JacobiSweeps = 14;		// even, so the pressure ends where it started
 const unsigned NoiseSide = 32;
+
+// The VolumeSmoke setting, Low and High (Off draws nothing).  Low keeps High's grids, since every
+// timeline constant is written in cells, and halves what a frame pays instead: half as many
+// volumes at once, 8 pressure sweeps for 14, a march step half as long again.
+// ponytail: a coarser Low grid needs the timelines' cell constants scaled with it; do that if
+// Low still costs too much on a weak card.
+struct Quality { unsigned slabs[2]; unsigned sweeps; float stepCells; };
+const Quality Qualities[3] = { { { 0, 0 }, 0, 0.0f }, { { 12, 1 }, 8, 0.9f }, { { 24, 2 }, 14, 0.6f } };	// sweeps even, so the pressure ends where it started
+int level = 0;		// the setting the atlases were last made for
 
 // The world, in game units (a tank is about 30, 7 m: a unit is about 0.23 m).
 const float Gravity = 42.0f;			// units/s^2
@@ -88,7 +97,6 @@ const float VelocityHalfLife = 3.0f;
 const float HeatHalfLife = 1.8f;
 const float DustHalfLife = 6.0f;
 const float Extinction = 0.16f;			// per world unit at density 1
-const float StepCells = 0.6f;			// march step with up to three volumes on screen
 
 const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/s, w heat
 const DXGI_FORMAT DensityFormat = DXGI_FORMAT_R16G16_FLOAT;			// soot, dust
@@ -172,12 +180,24 @@ struct DrawConstants {
 
 // What every program starts with, after the tier's GX, GY, GZ and SLABS: the fade that keeps smoke
 // off the box's walls, round about the column's axis so no square corner shows.
+// The air's box (AIR) holds four density channels: soot, dust, and each times its brightness, so a
+// cell's grey advects with its soot.  A blast's holds two and takes its colours from the timeline.
 const char *const Grid = R"HLSL(
+#ifdef AIR
+#define DEN float4
+float walls(float3 cell)
+{
+    float2 inside = min(cell.xy, float2(GX - 1, GY - 1) - cell.xy);
+    return smoothstep(0, 4, inside.x) * smoothstep(0, 4, inside.y) * smoothstep(0, 6, GZ - 1 - cell.z);
+}
+#else
+#define DEN float2
 float walls(float3 cell)
 {
     float2 across = (cell.xy - float2(GX - 1, GY - 1) * 0.5) / (GX * 0.5 - 1);
     return (1 - smoothstep(0.6, 1.0, length(across))) * smoothstep(0, 10, GZ - 1 - cell.z);
 }
+#endif
 uint hash(uint3 v)
 {
     uint h = v.x * 73856093u ^ v.y * 19349663u ^ v.z * 83492791u;
@@ -299,11 +319,19 @@ void main(uint3 id : SV_DispatchThreadID)
 // The literal is cut in two: MSVC refuses one longer than 16 KB (C2026).
 const char *const AdvectPass = R"HLSL(
 Texture3D<float4> Vel : register(t0);
-Texture3D<float2> Den : register(t1);
+Texture3D<DEN> Den : register(t1);
 Texture3D<float4> Curl : register(t2);
 RWTexture3D<float4> VelOut : register(u0);
-RWTexture3D<float2> DenOut : register(u1);
+RWTexture3D<DEN> DenOut : register(u1);
 RWTexture3D<float> PresOut : register(u2);
+#ifdef AIR
+// The particles of every smoke system the air took, as spheres in cells: centre and radius, then
+// the soot and the dust they stand for and their brightness.  Each 8 by 8 column of cells has its
+// list of the spheres that reach it.
+StructuredBuffer<float4> Sources : register(t5);
+StructuredBuffer<uint2> TileRange : register(t6);
+StructuredBuffer<uint> TileIndex : register(t7);
+#endif
 float w(int3 c, uint slab) { return Curl.Load(at(c, slab)).w; }
 [numthreads(8, 8, 8)]
 void main(uint3 id : SV_DispatchThreadID)
@@ -315,14 +343,21 @@ void main(uint3 id : SV_DispatchThreadID)
     float4 power = Power[slab];
     float4 shape = Shape[slab];
     float4 vt = 0;
-    float2 d = 0;
+    DEN d = 0;
     if (volume.w > 0.5) {
         PresOut[id] = 0;
     } else {
         float3 back = cell - Vel.Load(int4(id, 0)).xyz * dt;
         vt = Vel.SampleLevel(Linear, uvwOf(back, slab), 0);
-        d.x = Den.SampleLevel(Linear, uvwOf(back, slab), 0).x;
-        d.y = Den.SampleLevel(Linear, uvwOf(back + float3(0, 0, Step.z * dt), slab), 0).y;	// dust settles
+        DEN carried = Den.SampleLevel(Linear, uvwOf(back, slab), 0);
+        DEN settled = Den.SampleLevel(Linear, uvwOf(back + float3(0, 0, Step.z * dt), slab), 0);	// dust settles
+        d.x = carried.x;
+        d.y = settled.y;
+#ifdef AIR
+        d.z = carried.z * Keep.w;	// soot thins out in the open air
+        d.w = settled.w * Keep.z;
+        d.x *= Keep.w;
+#endif
         // Heat lifts, fading out under the ceiling, where a rising cap stops and spreads.
         float lift = Forces.x * vt.w * saturate((shape.z - cell.z) / max(shape.z * 0.3, 1));
         vt.z += dt * (lift - Forces.y * d.y);	// soot is light; dust and dirt are what weigh
@@ -413,6 +448,26 @@ const char *const AdvectPassEnd = R"HLSL(
         vt.w = max(vt.w, heat.x * k);
         vt.xyz = lerp(vt.xyz, motion.xyz, saturate(k * heat.z));
     }
+#ifdef AIR
+    // The cells under a particle are drawn towards the smoke it stands for at Step.w a second, so
+    // the volume follows the particles without being pinned to them: what a wake pushes out of a
+    // puff comes back over a fraction of a second, not on the next step.
+    {
+        uint2 range = TileRange[(c.y / 8) * (GX / 8) + c.x / 8];
+        float rate = saturate(Step.w * dt);
+        for (uint j = range.x; j < range.x + range.y; ++j) {
+            uint index = TileIndex[j];
+            float4 where = Sources[index * 2], what = Sources[index * 2 + 1];
+            float3 away = cell - where.xyz;
+            float r2 = dot(away, away) / (where.w * where.w);
+            if (r2 >= 1) continue;
+            float k = (1 - r2) * (1 - r2);
+            float soot = what.x * k, dust = what.y * k;
+            if (soot > d.x) { d.x += (soot - d.x) * rate; d.z += (soot * what.z - d.z) * rate; }
+            if (dust > d.y) { d.y += (dust - d.y) * rate; d.w += (dust * what.z - d.w) * rate; }
+        }
+    }
+#endif
     d = min(d, 4);
     d *= lerp(0.92, 1, walls(cell));	// smoke that drifts to the walls thins out there
     // Open sides and top: what reaches them is gone.  The ground lets nothing through and keeps
@@ -502,7 +557,7 @@ void main(uint3 id : SV_DispatchThreadID)
 // Sunlight reaching each cell through the soot and dust between it and the sun, with a share that
 // went through more thinly, for the light scattered more than once.
 const char *const LightPass = R"HLSL(
-Texture3D<float2> Den : register(t0);
+Texture3D<DEN> Den : register(t0);
 RWTexture3D<float> LightOut : register(u0);
 [numthreads(8, 8, 8)]
 void main(uint3 id : SV_DispatchThreadID)
@@ -512,7 +567,7 @@ void main(uint3 id : SV_DispatchThreadID)
     [loop] for (int k = 1; k <= 16; ++k) {
         float3 q = float3(c) + SunToward.xyz * (k * 1.5);
         if (any(q < float3(-0.5, -0.5, -0.5)) || any(q > float3(GX - 0.5, GY - 0.5, GZ - 0.5))) break;
-        float2 dd = Den.SampleLevel(Linear, uvwOf(q, slab), 0);
+        DEN dd = Den.SampleLevel(Linear, uvwOf(q, slab), 0);
         tau += dd.x + dd.y;
     }
     tau *= 1.5 * SunToward.w * volume.z;
@@ -696,14 +751,31 @@ std::unordered_map<const ParticleSystemTemplate *, TemplateKind> templateKinds;
 unsigned claimedCount = 0, joinedCount = 0, droppedCount = 0;
 int lastReport = 0;
 
-bool requested()
-{
-	static const bool on = findEarlyCommandLineOption(L"-volsmoke") != NULL;
-	return on;
-}
-
 unsigned tierOf(unsigned slot) { return slot >= TierShapes[1].first ? 1 : 0; }
 unsigned slabOf(unsigned slot) { return slot - TierShapes[tierOf(slot)].first; }
+
+void releaseState();
+
+// The setting, read every time: Off, Low or High from the options menu, or -volsmoke for the run.
+// A change drops every volume, program and texture, and forgets every system taken, so with Off
+// the next frame draws the billboards again, and with a new level the atlases are made again at
+// its size the next time a blast asks.
+bool requested()
+{
+	const int want = TheGlobalData ? (std::min)((std::max)(TheGlobalData->m_volumeSmoke, 0), 2) : 0;
+	if (want != level) {
+		releaseState();
+		takenSystems.clear();
+		firstSeen.clear();
+		lastReport = 0;
+		level = want;
+		TierShapes[0].slabs = Qualities[level].slabs[0];
+		TierShapes[1].slabs = Qualities[level].slabs[1];
+		TierShapes[1].first = TierShapes[0].slabs;
+		DEBUG_LOG(("VOLSMOKE: setting %s\n", level == 0 ? "Off" : level == 1 ? "Low" : "High"));
+	}
+	return level > 0;
+}
 
 void releaseState()
 {
@@ -1262,7 +1334,7 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 	run(context, tier, AdvectProgram, { tier.velocity[0].view, tier.density[in].view, tier.curl.view },
 		{ tier.velocity[1].write, tier.density[out].write, tier.pressure[0].write }, slabs);
 	run(context, tier, DivergenceProgram, { tier.velocity[1].view }, { tier.divergence.write }, slabs);
-	for (unsigned sweep = 0; sweep < JacobiSweeps; ++sweep) {
+	for (unsigned sweep = 0; sweep < Qualities[level].sweeps; ++sweep) {
 		const unsigned from = sweep & 1;
 		run(context, tier, JacobiProgram, { tier.pressure[from].view, tier.divergence.view }, { tier.pressure[1 - from].write }, slabs);
 	}
@@ -1557,7 +1629,7 @@ void Render(const HazardCloud::Camera &camera)
 		context->PSSetSamplers(0, 2, samplers);
 		context->PSSetConstantBuffers(0, 1, &state.drawConstants);
 		// the budget: past three volumes on screen each one is marched in longer steps
-		const float stepCells = StepCells * (std::max)(1.0f, shown / 3.0f);
+		const float stepCells = Qualities[level].stepCells * (std::max)(1.0f, shown / 3.0f);
 		int boundTier = -1;
 		for (unsigned n = 0; n < shown; ++n) {
 			const unsigned slot = order[n];
