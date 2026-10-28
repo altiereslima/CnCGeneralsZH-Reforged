@@ -68,6 +68,7 @@ const TierShape TierShapes[2] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 } }
 const unsigned MaxVolumes = 26;		// both tiers' slabs, the small tier's first
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
 const unsigned MaxPuffs = 24;
+const unsigned MaxStreaks = 16;
 const unsigned JacobiSweeps = 14;		// even, so the pressure ends where it started
 const unsigned NoiseSide = 32;
 
@@ -162,6 +163,8 @@ struct DrawConstants {
 	float SunDir[4];		// towards the sun
 	float Blast[4];			// the core's centre and radius in cells
 	float Effects[4];		// flash, condensation shell radius in cells and opacity, unused
+	float Extra[4];			// streaks, the flash's height over its width, its radius in cells, unused
+	float Streaks[MaxStreaks * 2][4];	// a glowing fragment's trail: tail and radius, head and brightness
 };
 
 // What every program starts with, after the tier's GX, GY, GZ and SLABS: the fade that keeps smoke
@@ -488,6 +491,8 @@ cbuffer Draw : register(b0)
     float4 SunDir;
     float4 Blast;
     float4 Effects;
+    float4 Extra;
+    float4 Streaks[32];
 };
 float3 worldAt(float2 pixel, float depth)
 {
@@ -532,10 +537,26 @@ float4 main(float4 position : SV_Position) : SV_Target
         float3 cell = (eye + ray * (enter + (i + jitter) * stepLength) - Box.xyz) / Box.w - 0.5;
         float3 fromBlast = cell - Blast.xyz;
         float near2 = dot(fromBlast, fromBlast);
-        // the flash: light with nothing to absorb it, round the core for the first frames
-        if (Effects.x > 0)
-            color += transmittance * float3(1.0, 0.86, 0.62) * Effects.x * exp(-near2 / (Blast.w * Blast.w * 2))
-                * stepLength / Box.w;
+        // the flash: light with nothing to absorb it, a tall glow over the blast for its first frames
+        if (Effects.x > 0) {
+            float wide = Extra.z, tall = Extra.z * Extra.y;
+            float3 f = cell - Blast.xyz - float3(0, 0, tall * 0.5);
+            float falloff = (f.x * f.x + f.y * f.y) / (wide * wide) + f.z * f.z / (tall * tall);
+            color += transmittance * float3(1.0, 0.9, 0.7) * Effects.x * exp(-falloff) * stepLength / Box.w;
+        }
+        // the fragments: thin bright trails, each brighter at its head
+        uint streaks = (uint)Extra.x;
+        if (streaks > 0) {
+            float glow = 0;
+            for (uint k = 0; k < streaks; ++k) {
+                float3 a = Streaks[k * 2].xyz, ab = Streaks[k * 2 + 1].xyz - a;
+                float along = saturate(dot(cell - a, ab) / max(dot(ab, ab), 1e-4));
+                float3 e = cell - a - ab * along;
+                float r = Streaks[k * 2].w;
+                glow += Streaks[k * 2 + 1].w * (0.3 + 0.7 * along) * exp(-dot(e, e) / (r * r));
+            }
+            color += transmittance * float3(1.0, 0.7, 0.35) * glow * stepLength / Box.w;
+        }
         float3 clamped = clamp(cell, float3(0, 0, 0), float3(GX - 1, GY - 1, GZ - 1));
         float3 uvw = float3((clamped.x + 0.5) / GX, (clamped.y + 0.5) / GY, (clamped.z + 0.5 + slabBase) / (GZ * SLABS));
         float2 dd = Den.SampleLevel(Linear, uvw, 0);
@@ -912,42 +933,63 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 	std::memset(shape, 0, 16);
 	std::memset(motion, 0, 16);
 	shape[2] = 1000.0f;		// no ceiling
-	unsigned count = 0;
-	float flash = 0, shellRadius = 0, shellOpacity = 0;
+	unsigned count = 0, streaks = 0;
+	float flash = 0, shellRadius = 0, shellOpacity = 0, flashTall = 1.0f, flashWide = 3.0f;
 	float soot[4] = { 0.06f, 0.055f, 0.05f, 1.6f }, dust[3] = { 0.52f, 0.43f, 0.31f };
 	const float bx = volume.blast[0], by = volume.blast[1], bz = volume.blast[2];
+	// a glowing fragment: its trail over the last quarter second of its flight
+	auto streak = [&](const Volume &from, unsigned index, float speed, float tiltLow, float tiltHigh, float age,
+		float brightness) {
+		float head[6], tail[6];
+		if (!draw || streaks >= MaxStreaks || !jetAt(from, index, speed, tiltLow, tiltHigh, age, head)) return;
+		jetAt(from, index, speed, tiltLow, tiltHigh, (std::max)(age - 0.25f, 0.0f), tail);
+		float *a = draw->Streaks[streaks * 2], *b = draw->Streaks[streaks * 2 + 1];
+		a[0] = tail[0]; a[1] = tail[1]; a[2] = tail[2]; a[3] = 0.45f;
+		b[0] = head[0]; b[1] = head[1]; b[2] = head[2]; b[3] = brightness;
+		++streaks;
+	};
 
 	if (volume.kind == TankDeath) {
-		// the hull's own small blast and dust skirt
-		blast[3] = 2.2f;
-		if (t < 0.25f) { power[0] = 18.0f * (1 - t / 0.25f); power[3] = 0.6f; }
-		if (t < 0.4f) power[1] = 1.6f;
-		if (t < 0.6f) power[2] = 1.3f;
-		// the flame jet through the turret ring
-		if (t < 1.1f)
-			emit(slab, count, { bx, by, bz + 1.5f, 1.6f, 0, 0, 35.0f, 0.6f, 1.7f, 0, 0.5f });
+		// The first second, after a real vehicle's: an overexposed flash several times the hull's
+		// size, standing tall over it for a few frames; thin bright fragments fanning out, mostly
+		// up, of uneven length; at the base a low, wide band of fire and black-brown soot in three
+		// to five separate lumps; a light grey dust haze along the ground.  Then the column.
+		flash = t < 0.04f ? 10.0f : 10.0f * std::exp(-(t - 0.04f) / 0.035f);
+		flashWide = 4.0f;
+		flashTall = 2.0f;
+		if (t < 0.3f) { power[0] = 14.0f * (1 - t / 0.3f); power[3] = 0.8f; }
+		dust[0] = 0.62f; dust[1] = 0.60f; dust[2] = 0.56f;
+		if (t < 0.8f)
+			for (unsigned f = 0; f < 12; ++f)
+				streak(volume, f, 45.0f, 0.0f, 0.95f, t, 3.5f * (1 - t / 0.8f));
+		const unsigned lumps = 3 + unsigned(hashUnit(volume.seed, 800) * 2.99f);
+		if (t < 0.5f)
+			for (unsigned l = 0; l < lumps; ++l) {
+				const float a = (l + 0.4f * hashUnit(volume.seed, 801 + l)) * 6.2831853f / lumps;
+				const float r = 2.0f + 2.0f * hashUnit(volume.seed, 811 + l);
+				const float ox = r * std::cos(a) * 1.4f, oy = r * std::sin(a) * 0.8f;	// longer than wide, as a hull lies
+				emit(slab, count, { bx + ox, by + oy, bz, 2.6f, ox * 3.0f, oy * 3.0f, 3.0f, 16.0f, 1.5f, 0, 0.3f });
+			}
 		// the cook-off pops, two to four, each an orange puff with sparks
 		const unsigned pops = 2 + unsigned(hashUnit(volume.seed, 900) * 2.99f);
-		float when = 0.6f;
+		float when = 0.9f;
 		for (unsigned p = 0; p < pops; ++p) {
 			when += 0.5f + 1.0f * hashUnit(volume.seed, 901 + p);
 			const float age = t - when;
 			if (age < 0 || age > 0.9f) continue;
 			const float ox = (hashUnit(volume.seed, 910 + p) - 0.5f) * 2.5f, oy = (hashUnit(volume.seed, 920 + p) - 0.5f) * 2.5f;
 			if (age < 0.2f) emit(slab, count, { bx + ox, by + oy, bz + 1.0f, 2.8f, 0, 0, 12.0f, 12.0f, 1.6f, 0, 0.3f });
+			if (age < 0.06f) { flash = (std::max)(flash, 8.0f); flashWide = 3.0f; flashTall = 1.5f; }
 			Volume sparks = volume;
 			sparks.seed = volume.seed + 31 * (p + 1);
 			sparks.blast[0] += ox;
 			sparks.blast[1] += oy;
-			for (unsigned s = 0; s < 4; ++s) {
-				float jet[6];
-				if (jetAt(sparks, s, 30.0f, 0.3f, 1.1f, age, jet) && age < 0.7f)
-					emit(slab, count, { jet[0], jet[1], jet[2], 1.0f, jet[3], jet[4], jet[5], 0.3f, 1.5f, 0, 0.2f });
-			}
+			for (unsigned s = 0; s < 4; ++s)
+				if (age < 0.6f) streak(sparks, s, 30.0f, 0.2f, 1.1f, age, 5.0f * (1 - age / 0.6f));
 		}
-		// the hull burning: a thick black column for half a minute
-		if (t > 0.2f && t < 28.0f) {
-			const float rise = (std::min)((t - 0.2f) / 1.0f, 1.0f), fall = t > 18.0f ? 1 - (t - 18.0f) / 10.0f : 1.0f;
+		// the hull burning: a thick black column for half a minute, from when the band has spread
+		if (t > 0.8f && t < 28.0f) {
+			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 18.0f ? 1 - (t - 18.0f) / 10.0f : 1.0f;
 			emit(slab, count, { bx, by, bz + 0.5f, 3.0f, 0, 0, 12.0f, 4.5f * rise * fall, 1.0f, 0.05f, 0.25f });
 		}
 	} else if (volume.kind == Shell || volume.kind == Airburst) {
@@ -989,6 +1031,8 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		blast[3] = radius;
 		motion[0] = 42.0f / 7.0f * std::exp(-t / 7.0f);
 		flash = t < 0.06f ? 40.0f : 40.0f * std::exp(-(t - 0.06f) / 0.15f);
+		flashWide = radius * 1.5f;
+		flashTall = 1.2f;
 		if (t < 4.0f) power[1] = 1.3f;
 		power[2] = 2.0f * std::exp(-t / 5.0f);
 		if (t < 4.0f) { power[0] = 70.0f * std::exp(-t / 1.5f); power[3] = 1.2f; }
@@ -1024,6 +1068,9 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		draw->Effects[0] = flash;
 		draw->Effects[1] = shellRadius;
 		draw->Effects[2] = shellOpacity;
+		draw->Extra[0] = (float)streaks;
+		draw->Extra[1] = flashTall;
+		draw->Extra[2] = flashWide;
 	}
 }
 
@@ -1171,15 +1218,15 @@ bool Takes(ParticleSystem *system)
 	system->getPosition(&where);
 
 	// Another system of a blast already taken: it joins it if it started beside it, at its start.
-	// A tank's and a shell's take smoke, dust and dirt and leave the fire cards; a nuclear blast
-	// takes everything.  A system that starts a blast of its own joins only one of its own kind
+	// A shell's takes smoke, dust and dirt and leaves the fire cards; a tank's and a nuclear
+	// blast's take everything, as the sim draws their flash and fire.  A system that starts a blast of its own joins only one of its own kind
 	// (the nuke's several mushroom systems, a tank's two death smokes), so a tank dying under the
 	// shell that killed it still gets a tank's smoke.
 	const TemplateKind kind = kindOfTemplate(system->getTemplate(), system);
 	const bool alpha = system->getShaderType() == ParticleSystemInfo::ALPHA && !system->getTemplate()->isEmissive();
 	for (const Volume &volume : volumes) {
 		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 120 : 30)) continue;
-		if (volume.kind != Nuclear && !alpha) continue;
+		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
 		if (kind.trigger && (kind.kind == TankDeath) != (volume.kind == TankDeath)) continue;
 		if (kind.trigger && (kind.kind == Nuclear) != (volume.kind == Nuclear)) continue;
 		const float bx = volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell;
