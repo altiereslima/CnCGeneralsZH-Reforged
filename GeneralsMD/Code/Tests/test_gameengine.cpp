@@ -5290,6 +5290,30 @@ TEST(controlbar_mod_slots_past_the_bar_fit_its_windows)
 		CHECK_EQ( shown[ slot ], humvee[ slot ] != N && slot < WINDOWS ? slot : -1 );
 }
 
+TEST(controlbar_wide_grid_only_for_a_set_past_fourteen)
+{
+	enum { SLOTS = MAX_COMMANDS_PER_SET };
+	const Int N = GUI_COMMAND_NONE, B = GUI_COMMAND_DOZER_CONSTRUCT, P = GUI_COMMAND_PURCHASE_SCIENCE;
+
+	/* Stealth's Arms Dealer: twelve buttons, one of them in 15, which the fourteen windows still hold */
+	const Int armsDealer[ SLOTS ] = { N, B, B, B, B, B, N, B, N, B, B, B, B, B, B, N, N, N };
+	CHECK( !ControlBar_needsWideCommandGrid( armsDealer, SLOTS ) );
+
+	/* a promotion screen's set has its own screen, however many slots it fills */
+	Int science[ SLOTS ];
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		science[ slot ] = P;
+	CHECK( !ControlBar_needsWideCommandGrid( science, SLOTS ) );
+
+	/* fourteen fit, fifteen do not */
+	Int full[ SLOTS ];
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		full[ slot ] = slot < 14 ? B : N;
+	CHECK( !ControlBar_needsWideCommandGrid( full, SLOTS ) );
+	full[ 16 ] = B;
+	CHECK( ControlBar_needsWideCommandGrid( full, SLOTS ) );
+}
+
 TEST(controlbar_force_attack_slot_is_under_attack_move)
 {
 	enum { SLOTS = MAX_COMMANDS_PER_SET, WINDOWS = 14 };

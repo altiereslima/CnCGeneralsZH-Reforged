@@ -473,6 +473,19 @@ void ControlBar_fitCommandSlots( const Int *types, const Bool *windowed, Int cou
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool ControlBar_needsWideCommandGrid( const Int *types, Int count )
+{
+	Int buttons = 0;
+	for( Int slot = 0; slot < count; slot++ )
+	{
+		if( types[ slot ] == GUI_COMMAND_PURCHASE_SCIENCE )
+			return FALSE;
+		buttons += types[ slot ] != GUI_COMMAND_NONE ? 1 : 0;
+	}
+	return buttons > COMMAND_GRID_NARROW_SLOTS;
+}
+
+//-------------------------------------------------------------------------------------------------
 Int ControlBar_forceAttackSlot( const Int *types, Int count, Bool forceFires )
 {
 	enum { SLOT = 11, ABOVE = 10 };
@@ -1599,6 +1612,7 @@ ControlBar::ControlBar( void )
 {
 	Int i;
 	m_controlBarSchemeManager = NULL;
+	m_commandGridWide = FALSE;
 	m_isObserverCommandBar = FALSE;
 	m_observerLookAtPlayer = NULL;
 	m_watchedSelection = NULL;
@@ -2685,6 +2699,49 @@ void ControlBar::shutdownWindows( void )
 }  // end shutdownWindows
 
 //-------------------------------------------------------------------------------------------------
+/** Widen 'win' by 'step' pixels at both ends.  Its children stay where they stood on screen, or with
+	* 'carryChildren' move left with its left edge. */
+//-------------------------------------------------------------------------------------------------
+static void growSideways( GameWindow *win, Int step, Bool carryChildren )
+{
+	if( win == NULL )
+		return;
+	Int x, y, w, h;
+	win->winGetPosition( &x, &y );
+	win->winGetSize( &w, &h );
+	win->winSetPosition( x - step, y );
+	win->winSetSize( w + 2 * step, h );
+	if( carryChildren )
+		return;
+	for( GameWindow *child = win->winGetChild(); child; child = child->winGetNext() )
+	{
+		child->winGetPosition( &x, &y );
+		child->winSetPosition( x + step, y );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The first loaded command set the fourteen-window grid cannot hold (ControlBar_needsWideCommandGrid),
+	* NULL when it holds them all.  Every Zero Hour set fits, Reforged's and Turkiye's too. */
+//-------------------------------------------------------------------------------------------------
+static const CommandSet *commandSetPastNarrowGrid( void )
+{
+	for( CommandSet *each = TheCommandStore->friend_getCommandSets(); each; each = each->friend_getNext() )
+	{
+		const CommandSet *set = (const CommandSet *)each->friend_getFinalOverride();
+		Int types[ MAX_COMMANDS_PER_SET ];
+		for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+		{
+			const CommandButton *button = set->getCommandButton( i );
+			types[ i ] = ( button && !BitTest( button->getOptions(), SCRIPT_ONLY ) ) ? button->getCommandType() : GUI_COMMAND_NONE;
+		}
+		if( ControlBar_needsWideCommandGrid( types, MAX_COMMANDS_PER_SET ) )
+			return set;
+	}
+	return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Look up every window the bar drives, and lay the bar out.  Re-callable: a resolution change
 	* rebuilds ControlBar.wnd and then calls this instead of replacing the whole ControlBar. */
 //-------------------------------------------------------------------------------------------------
@@ -2695,12 +2752,58 @@ void ControlBar::initWindows( void )
 
 		//
 		// the control bar has several windows that make up our context sensitive interface, we
-		// want those parent windows so that we can easily hide and show them to make the 
+		// want those parent windows so that we can easily hide and show them to make the
 		// interface context sensitive
 		//
 		NameKeyType id;
 		id = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ControlBarParent" );
 		m_contextParent[ CP_MASTER ] = TheWindowManager->winGetWindowFromId( NULL, id );
+
+		//
+		// A mod whose sets hold more than fourteen buttons gets all eighteen windows, nine columns
+		// of two, the plate one column longer at each end the way Contra's edit of ControlBar Pro
+		// draws it.  Our layout keeps ButtonCommand15 to 18 hidden past the plate's right end, one
+		// and two columns on, so moving the whole grid a column left and widening what frames it puts
+		// 01 to 18 down the columns from the new left end.  This is done in the loader's own
+		// stretched space before layoutPanels reads the authored rectangles, so the wide grid is the
+		// one it remembers.  A mod's own ControlBar.wnd keeps its grid as it drew it: its button 15
+		// stands inside its CommandWindow.
+		//
+		m_commandGridWide = FALSE;
+		Bool spareWindows = FALSE;
+		{
+			GameWindow *grid = barWindow( "ControlBar.wnd:CommandWindow" );
+			GameWindow *first = barWindow( "ControlBar.wnd:ButtonCommand01" );
+			GameWindow *third = barWindow( "ControlBar.wnd:ButtonCommand03" );
+			GameWindow *spare = barWindow( "ControlBar.wnd:ButtonCommand15" );
+			if( grid && first && third && spare )
+			{
+				ICoord2D gridAt, gridSize, firstAt, thirdAt, spareAt, spareSize;
+				grid->winGetScreenPosition( &gridAt.x, &gridAt.y );
+				grid->winGetSize( &gridSize.x, &gridSize.y );
+				first->winGetScreenPosition( &firstAt.x, &firstAt.y );
+				third->winGetScreenPosition( &thirdAt.x, &thirdAt.y );
+				spare->winGetScreenPosition( &spareAt.x, &spareAt.y );
+				spare->winGetSize( &spareSize.x, &spareSize.y );
+				spareWindows = spareAt.x + spareSize.x > gridAt.x + gridSize.x;
+				const CommandSet *wideSet = spareWindows ? commandSetPastNarrowGrid() : NULL;
+				if( wideSet )
+				{
+					m_commandGridWide = TRUE;
+					const Int step = thirdAt.x - firstAt.x;
+					growSideways( grid, step, TRUE );
+					growSideways( barWindow( "ControlBar.wnd:ControlBarProBlockInputProduction" ), step, TRUE );
+					growSideways( barWindow( "ControlBar.wnd:UnderConstructionWindow" ), step, FALSE );
+					growSideways( barWindow( "ControlBar.wnd:OCLTimerWindow" ), step, FALSE );
+					growSideways( barWindow( "ControlBar.wnd:BeaconWindow" ), step, FALSE );
+					growSideways( barWindow( "ControlBar.wnd:ControlBarProOverlayConstruction" ), step, TRUE );
+					growSideways( barWindow( "ControlBar.wnd:ControlBarProOverlayOCLTimer" ), step, TRUE );
+					growSideways( barWindow( "ControlBar.wnd:ControlBarProOverlayBeacon" ), step, TRUE );
+					growSideways( barWindow( "ControlBar.wnd:ControlBarProBlockInputBeacon" ), step, TRUE );
+					DEBUG_LOG(( "COMMANDGRID: eighteen windows, %s holds more than fourteen buttons\n", wideSet->getName().str() ));
+				}
+			}
+		}
 
 		//
 		// These windows are new, so anything remembered about the last set of them is about
@@ -2786,10 +2889,19 @@ void ControlBar::initWindows( void )
 //			// set the size and position to make sure their in the same place as the buttons.
 //			m_commandMarkers[i]->winSetPosition(commandPos.x -2, commandPos.y - 2);
 //			m_commandMarkers[i]->winSetSize(commandSize.x + 2, commandSize.y + 2);
-			
+
 
 
 		}  // end for i
+
+		// the narrow grid leaves our spare four hidden and out of the bar's reach, the bar it always was
+		if( spareWindows && !m_commandGridWide )
+			for( i = COMMAND_GRID_NARROW_SLOTS; i < MAX_COMMANDS_PER_SET; i++ )
+				m_commandWindows[ i ] = NULL;
+		Int windowCount = 0;
+		for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+			windowCount += m_commandWindows[ i ] ? 1 : 0;
+		DEBUG_LOG(( "COMMANDGRID: %d command windows, %s\n", windowCount, m_commandGridWide ? "nine columns" : "as laid out" ));
 
 
 		for( i = 0; i < MAX_PURCHASE_SCIENCE_RANK_1; i++ )
