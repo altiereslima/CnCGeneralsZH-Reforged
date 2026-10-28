@@ -2,10 +2,13 @@
 // the repository's GPL-3.0 terms; see LICENSE.md.
 //
 // A death's smoke system (DEATH_EXPLOSION priority, "Smoke" in the template's name: a tank's or a
-// building's plume) that VolumeSmoke::Takes claims gets a box of 32 x 32 x 64 cells over the spot,
-// one slab of a shared 3D atlas, and stops drawing billboards.  Its particles still live
-// on the client and are the sources: each logic frame the volume is stepped, every live particle
-// stamps its density, velocity and heat into the grid as a soft ball, and the grid does the rest.
+// building's plume) that VolumeSmoke::Takes claims gets a box of 48 x 48 x 40 cells over the spot,
+// one slab of a shared 3D atlas, and stops drawing billboards.  The detonation drives it: for
+// 0.3 s the core swells (a divergence source the pressure solve keeps), pushing the air out in
+// every direction, the ground turns the push sideways and the soot it fills the core with runs
+// out along the surface in a ring; drag stops the ring, and the core's heat lifts it into a
+// rolling plume that the wind leans and thins.  The particles still live on the client and emit
+// smoke and heat where they are, each logic frame, and the flow carries it.
 // One step is six compute passes over every slab at once: the curl of the velocity, a
 // semi-Lagrangian advection with buoyancy, vorticity confinement and decay, the divergence, 14
 // Jacobi sweeps of the pressure, the projection that makes the flow incompressible (what rolls a
@@ -17,9 +20,10 @@
 //
 // Nothing here is read by the logic or draws a random number: the noise is integer hashes.  The
 // D3D9 and SDL3 paths, -headless and every run without the switch keep the billboards, and with
-// the switch off Takes and Render return before touching anything.  Sixteen volumes at most; a
-// system that finds none keeps its billboards, one whose particles have been gone a second gives
-// its volume up to a new blast, and the march gets coarser as more are on screen.
+// the switch off Takes and Render return before touching anything.  With it on, a taken system
+// draws no billboards at all, its GPU overflow particles included.  24 volumes at most: a new
+// blast with every one in use takes the one whose particles have been gone longest, and that
+// system's smoke is dropped; the march gets coarser as more are on screen.
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
 #include "Common/EarlyCommandLine.h"
@@ -51,23 +55,35 @@
 
 namespace {
 
-const unsigned GridX = 32, GridY = 32, GridZ = 64;
-const unsigned MaxVolumes = 16;		// slabs of the atlas, 64 cells deep each
+// Wide and low: the blast throws its ring out along the ground before the plume rises.
+const unsigned GridX = 48, GridY = 48, GridZ = 40;
+const unsigned MaxVolumes = 24;		// slabs of the atlas, GridZ cells deep each
 const unsigned MaxPuffs = 24;
 const unsigned JacobiSweeps = 14;		// even, so the pressure ends where it started
 const unsigned NoiseSide = 32;
-const int LingerFrames = 5 * LOGICFRAMES_PER_SECOND;	// after the last particle: the smoke thins out
-const int FadeFrames = 2 * LOGICFRAMES_PER_SECOND;
+const int LingerFrames = 8 * LOGICFRAMES_PER_SECOND;	// after the last particle: the smoke thins out
+const int FadeFrames = 3 * LOGICFRAMES_PER_SECOND;
 
 // The look, in cells and seconds: what to tune.
 const float Buoyancy = 9.0f;			// cells/s^2 of lift at heat 1
 const float Weight = 1.0f;				// cells/s^2 of sink at density 1
-const float Vorticity = 2.4f;
-const float DensityHalfLife = 5.0f;
-const float HeatHalfLife = 0.8f;
+const float Vorticity = 3.0f;
+const float Drag = 0.045f;				// per cell of speed: a 60 cells/s burst loses most of it in 0.3 s
+const float DensityHalfLife = 3.0f;
+const float HeatHalfLife = 0.9f;
 const float VelocityHalfLife = 3.0f;
+const float WindX = 5.0f, WindY = 3.0f;	// world units/s; the game has no wind for smoke to read
+const float EmitRate = 2.5f;			// a particle's stamp a second
+// The blast: the core's radius in cells, its outward speed at detonation in cells/s, how long it
+// pushes, and the soot and heat it leaves in the core.
+const float BlastCore = 4.0f;
+const float BlastSpeed = 75.0f;
+const int BlastFrames = LOGICFRAMES_PER_SECOND * 3 / 10;
+const int SootFrames = LOGICFRAMES_PER_SECOND / 10;
+const float BlastSoot = 1.4f;
+const float BlastHeat = 1.2f;
 const float Extinction = 0.16f;			// per world unit at density 1
-const float StepCells = 0.85f;			// march step with up to three volumes on screen
+const float StepCells = 0.6f;			// march step with up to three volumes on screen
 
 const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/s, w heat
 const DXGI_FORMAT ScalarFormat = DXGI_FORMAT_R16_FLOAT;
@@ -109,14 +125,19 @@ bool make(ID3D11Device *device, Field &field, DXGI_FORMAT format, unsigned depth
 }
 
 // The pass constants.  Volumes: x live, y puffs, z world units a cell, w one on the step that
-// starts it, so the slab's last tenant is not read.  Three float4 a puff: cell position and
-// radius in cells; velocity in cells/s and strength; heat and how hard it pushes the flow.
+// starts it, so the slab's last tenant is not read.  Blasts: the detonation's cell and its core's
+// radius in cells; Power: the core's outward speed in cells/s on this step, the soot and heat it
+// leaves, zero once the blast is spent.  Three float4 a puff: cell position and radius in cells;
+// unused and strength; heat.
 struct SimConstants {
 	float Step[4];			// dt seconds, seconds, unused, unused
-	float Forces[4];		// buoyancy, weight, vorticity, unused
+	float Forces[4];		// buoyancy, weight, vorticity, drag
 	float Keep[4];			// density, heat, velocity kept over this step
 	float Sun[4];			// towards the sun, extinction per world unit
+	float Wind[4];			// world units/s on x and y, the particles' emission rate a second
 	float Volumes[MaxVolumes][4];
+	float Blasts[MaxVolumes][4];
+	float Power[MaxVolumes][4];
 	float Puffs[MaxVolumes * MaxPuffs * 3][4];
 };
 
@@ -136,13 +157,13 @@ struct DrawConstants {
 // What every program starts with: the grid, and the fade that keeps smoke off the box's walls, round
 // about the column's axis so no square corner shows and thinning out under the lid.
 const char *const Grid = R"HLSL(
-#define GX 32
-#define GY 32
-#define GZ 64
+#define GX 48
+#define GY 48
+#define GZ 40
 float walls(float3 cell)
 {
     float2 across = (cell.xy - float2(GX - 1, GY - 1) * 0.5) / (GX * 0.5 - 1);
-    return (1 - smoothstep(0.55, 1.0, length(across))) * smoothstep(0, 16, GZ - 1 - cell.z);
+    return (1 - smoothstep(0.6, 1.0, length(across))) * smoothstep(0, 10, GZ - 1 - cell.z);
 }
 )HLSL";
 
@@ -154,7 +175,10 @@ cbuffer Sim : register(b0)
     float4 Forces;
     float4 Keep;
     float4 SunToward;
+    float4 Wind;
     float4 Volumes[SLABS];
+    float4 Blasts[SLABS];
+    float4 Power[SLABS];
     float4 Puffs[SLABS * PUFFS * 3];
 };
 SamplerState Linear : register(s0);
@@ -172,6 +196,29 @@ uint hash(uint3 v)
     uint h = v.x * 73856093u ^ v.y * 19349663u ^ v.z * 83492791u;
     h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
     return h;
+}
+float3 jitterAt(uint3 id)
+{
+    uint h = hash(uint3(id.xy, id.z + (uint)(Step.y * 30) * 4099u));
+    return float3(h & 1023, (h >> 10) & 1023, (h >> 20) & 1023) / 511.5 - 1;
+}
+// The blast's outflow: a core expanding at the same rate everywhere inside its radius and the
+// divergence-free 1/r^2 shell outside it, which is what a point of gas swelling into still air
+// pushes.  Zero once the blast is spent.
+float3 blastFlow(float3 cell, uint slab)
+{
+    float4 blast = Blasts[slab];
+    float speed = Power[slab].x;
+    if (speed <= 0) return 0;
+    float3 offset = cell - blast.xyz;
+    float r = max(length(offset), 0.5);
+    float s = r < blast.w ? speed * r / blast.w : speed * (blast.w / r) * (blast.w / r);
+    // Lobes round the ring, a different set for every slab: no real blast pushes evenly.
+    uint h = hash(uint3(slab, 17, 91));
+    float3 phase = float3(h & 255, (h >> 8) & 255, (h >> 16) & 255) * (6.2831853 / 256);
+    float a = atan2(offset.y, offset.x);
+    s *= 1 + 0.35 * sin(3 * a + phase.x) * cos(2 * a + phase.y) + 0.15 * sin(5 * a + phase.z);
+    return offset / r * s;
 }
 #define CELL_HEADER \
     uint slab = id.z / GZ; \
@@ -225,31 +272,44 @@ void main(uint3 id : SV_DispatchThreadID)
         float length2 = dot(grad, grad);
         if (length2 > 1e-10)
             vt.xyz += dt * Forces.z * cross(grad * rsqrt(length2), Curl.Load(int4(id, 0)).xyz);
+        // Air drag, which grows with speed: the burst dies in a fraction of a second, a drift keeps.
+        vt.xyz /= 1 + Forces.w * length(vt.xyz) * dt;
+        // The wind, felt from a few cells above the ground, carries and spreads what has thinned.
+        vt.xy += (Wind.xy / volume.z - vt.xy) * saturate(dt * 0.35 * saturate(c.z / 6.0));
         vt.xyz *= Keep.z;
         vt.w *= Keep.y;
         d *= Keep.x;
     }
-    // The particles: soft balls of smoke, pushing the flow their own way, hot while young, with a
-    // little hashed jitter in the push for the confinement to turn into eddies.
-    // Overlapping puffs add up, as their billboards' opacity did.
+    // The blast.  For its first fraction of a second the core swells, so the flow is pushed out
+    // from it in every direction, the ground turns the downward half sideways and the smoke runs
+    // out along the surface in a ring; the core is filled with thick soot and heat, which then
+    // lifts it into the rising, rolling plume.  The hashed jitter breaks the ring's symmetry.
+    float4 power = Power[slab];
+    if (power.x > 0) {
+        float3 offset = float3(c) - Blasts[slab].xyz;
+        float r = length(offset);
+        float reach = 1 - smoothstep(Blasts[slab].w * 2.5, Blasts[slab].w * 4.5, r);
+        float3 flow = blastFlow(float3(c), slab) + jitterAt(id) * power.x * 0.25 * reach;
+        vt.xyz = lerp(vt.xyz, flow, 0.6 * reach);
+        float core = saturate(1 - r / Blasts[slab].w);
+        d = max(d, power.y * sqrt(core));
+        vt.w = max(vt.w, power.z * core);
+    }
+    // The particles are emitters now: each puts smoke into the flow where it is, hot while young,
+    // and the flow carries it.  Overlapping puffs add up, as their billboards' opacity did.
     uint count = (uint)volume.y;
-    float stamped = 0;
+    float emitted = 0;
     for (uint i = 0; i < count; ++i) {
         uint base = (slab * PUFFS + i) * 3;
         float4 where = Puffs[base];
-        float4 motion = Puffs[base + 1];
-        float4 heat = Puffs[base + 2];
         float3 offset = float3(c) - where.xyz;
         float r2 = dot(offset, offset) / (where.w * where.w);
         if (r2 >= 1) continue;
         float k = (1 - r2) * (1 - r2);
-        stamped += motion.w * k;
-        uint h = hash(uint3(id.xy, id.z + (uint)(Step.y * 30) * 4099u));
-        float3 jitter = float3(h & 1023, (h >> 10) & 1023, (h >> 20) & 1023) / 511.5 - 1;
-        vt.xyz = lerp(vt.xyz, motion.xyz + jitter * 6 * heat.x, k * heat.y);
-        vt.w = max(vt.w, heat.x * k);
+        emitted += Puffs[base + 1].w * k;
+        vt.w = max(vt.w, Puffs[base + 2].x * k);
     }
-    d = max(d, min(stamped, 3));
+    d = min(d + emitted * Wind.z * dt, 3);
     d *= lerp(0.92, 1, walls(float3(c)));	// smoke that drifts to the walls thins out there
     // Open sides and top: smoke that reaches them is gone.  The ground lets nothing through.
     if (c.x == 0 || c.y == 0 || c.x == GX - 1 || c.y == GY - 1 || c.z == GZ - 1) { d = 0; vt.w = 0; }
@@ -268,9 +328,14 @@ void main(uint3 id : SV_DispatchThreadID)
 {
     CELL_HEADER
     float below = c.z == 0 ? -v(c, slab).z : v(c - int3(0, 0, 1), slab).z;
+    // The swelling core is the one place the flow may diverge: 3 speed / radius inside it, what
+    // blastFlow carries, so the projection keeps the burst instead of cancelling it.
+    float source = 0;
+    if (Power[slab].x > 0 && length(float3(c) - Blasts[slab].xyz) < Blasts[slab].w)
+        source = 3 * Power[slab].x / Blasts[slab].w;
     DivOut[id] = 0.5 * (v(c + int3(1, 0, 0), slab).x - v(c - int3(1, 0, 0), slab).x
         + v(c + int3(0, 1, 0), slab).y - v(c - int3(0, 1, 0), slab).y
-        + v(c + int3(0, 0, 1), slab).z - below);
+        + v(c + int3(0, 0, 1), slab).z - below) - source;
 }
 )HLSL";
 
@@ -436,8 +501,9 @@ float4 main(float4 position : SV_Position) : SV_Target
         // the map's light sets the hue only, so the volume is no brighter than the smoke it replaced.
         float height = saturate(cell.z / 24);
         float3 lit = paint * tint * (0.26 + 0.12 * height + 0.75 * sun * phase);
-        float hot = saturate((heat - 0.35) / 0.65);
-        float3 glow = float3(1.0, 0.36, 0.08) * hot * hot * 3;
+        // only the hottest soot glows, and dull red-orange: the fireball's own billboards are the flame
+        float hot = saturate((heat - 0.55) / 0.45);
+        float3 glow = float3(1.0, 0.3, 0.06) * hot * hot * 1.5;
         float3 source = (lit + glow) * sigma;
         float through = exp(-sigma * stepLength);
         color += transmittance * (source - source * through) / sigma;
@@ -460,6 +526,7 @@ struct Volume {
 	int born = 0;
 	int lastSeen = 0;
 	unsigned puffs = 0;
+	float blast[3] = {};				// the detonation, in cells
 	TextureClass *picture = nullptr;	// the particle texture, held until its mean is taken
 	bool meanKnown = false;
 };
@@ -496,22 +563,10 @@ State state;
 Volume volumes[MaxVolumes];
 SimConstants sim;
 std::unordered_map<const ParticleSystemTemplate *, bool> templateKinds;
-std::unordered_set<int> refusedSystems;	// found every volume taken: billboards for life
-unsigned claimedCount = 0, refusedCount = 0;
+// Systems whose volume was given to a newer blast: their smoke is dropped, never billboards.
+std::unordered_set<int> droppedSystems;
+unsigned claimedCount = 0, droppedCount = 0;
 int lastReport = 0;
-float lastViewProjection[16];		// the main view's, from the last Render
-bool lastViewKnown = false;
-
-// Inside the last main view, with a margin for the plume that rises out of a blast at its edge.
-bool onScreen(const Coord3D &where)
-{
-	if (!lastViewKnown) return false;
-	const float world[4] = { where.x, where.y, where.z, 1 };
-	float clip[4] = {};
-	for (unsigned column = 0; column < 4; ++column)
-		for (unsigned k = 0; k < 4; ++k) clip[column] += world[k] * lastViewProjection[k * 4 + column];
-	return clip[3] > 1.0f && std::fabs(clip[0]) <= clip[3] * 1.3f && std::fabs(clip[1]) <= clip[3] * 1.6f;
-}
 
 bool requested()
 {
@@ -758,20 +813,16 @@ void gatherPuffs(unsigned slot, Volume &volume, ParticleSystem *system)
 		// A puff that has grown past six cells (SizeRate swells some to hundreds of units) stamps
 		// no wider: spreading it is the flow's job, and wider stamps fill the box to its walls.
 		puff[3] = (std::min)((std::max)(p->getSize() * 0.42f / volume.cell, 1.3f), 6.0f);
-		const float perSecond = (float)LOGICFRAMES_PER_SECOND / volume.cell;
-		puff[4] = p->m_vel.x * perSecond;
-		puff[5] = p->m_vel.y * perSecond;
-		puff[6] = p->m_vel.z * perSecond;
-		// As opaque through its middle as the billboard was, so a big faint puff is a thin ball and
-		// not a solid one: optical depth -ln(1 - alpha) over the ball's diameter, whose (1 - r^2)^2
-		// falloff averages 0.53 along a line through the centre.
+		puff[4] = puff[5] = puff[6] = 0;
+		// Emits, a second, what makes it as opaque through its middle as the billboard was: optical
+		// depth -ln(1 - alpha) over the ball's diameter, whose (1 - r^2)^2 falloff averages 0.53
+		// along a line through the centre.  A big faint puff puts in thin smoke.
 		const float alpha = (std::min)(p->getAlpha() * fade, 0.95f);
 		const float diameter = 2.0f * puff[3] * volume.cell;
 		puff[7] = (std::min)(-std::log(1.0f - alpha) / (Extinction * diameter * 0.53f), 1.5f);
 		const float life = p->m_lifetime ? (float)p->getLifetimeLeft() / (float)p->m_lifetime : 0.0f;
 		puff[8] = 1.2f * life * life * life * life;	// hot only while young
-		puff[9] = 0.35f;
-		puff[10] = puff[11] = 0;
+		puff[9] = puff[10] = puff[11] = 0;
 		const RGBColor *tint = p->getColor();
 		color[0] += tint->red;
 		color[1] += tint->green;
@@ -830,13 +881,17 @@ void takeMeans(ID3D11Device *device, ID3D11DeviceContext *context)
 	unbindCompute(context);
 }
 
-void step(ID3D11DeviceContext *context, float dt, float seconds, const float sunToward[3], unsigned slabs)
+void step(ID3D11DeviceContext *context, int now, float dt, float seconds, const float sunToward[3], unsigned slabs)
 {
 	sim.Step[0] = dt;
 	sim.Step[1] = seconds;
 	sim.Forces[0] = Buoyancy;
 	sim.Forces[1] = Weight;
 	sim.Forces[2] = Vorticity;
+	sim.Forces[3] = Drag;
+	sim.Wind[0] = WindX;
+	sim.Wind[1] = WindY;
+	sim.Wind[2] = EmitRate;
 	sim.Keep[0] = std::pow(0.5f, dt / DensityHalfLife);
 	sim.Keep[1] = std::pow(0.5f, dt / HeatHalfLife);
 	sim.Keep[2] = std::pow(0.5f, dt / VelocityHalfLife);
@@ -848,6 +903,15 @@ void step(ID3D11DeviceContext *context, float dt, float seconds, const float sun
 		sim.Volumes[slot][1] = (float)volume.puffs;
 		sim.Volumes[slot][2] = volume.cell;
 		sim.Volumes[slot][3] = volume.reset ? 1.0f : 0.0f;
+		// The push falls off as the square of what is left of it; soot and heat only at the start.
+		const int age = now - volume.born;
+		const float left = age < BlastFrames ? 1.0f - (float)age / BlastFrames : 0.0f;
+		for (unsigned i = 0; i < 3; ++i) sim.Blasts[slot][i] = volume.blast[i];
+		sim.Blasts[slot][3] = BlastCore;
+		sim.Power[slot][0] = BlastSpeed * left * left;
+		sim.Power[slot][1] = age < SootFrames ? BlastSoot : 0.0f;
+		sim.Power[slot][2] = age < BlastFrames ? BlastHeat : 0.0f;
+		sim.Power[slot][3] = 0;
 	}
 	upload(context, state.simConstants, &sim, sizeof(sim));
 	context->CSSetConstantBuffers(0, 1, &state.simConstants);
@@ -905,58 +969,64 @@ bool screenRect(const Volume &volume, const float viewProjection[16], const Haza
 
 namespace VolumeSmoke {
 
-bool Takes(ParticleSystem *system)
+bool Hides(ParticleSystem *system)
 {
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
 	const ParticleSystemID id = system->getSystemID();
 	for (const Volume &volume : volumes)
 		if (volume.live && volume.system == id) return true;
+	return droppedSystems.count((int)id) != 0;
+}
+
+bool Takes(ParticleSystem *system)
+{
+	if (Hides(system)) return true;
+	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
 	// A death's smoke (a tank's, a building's): the shell impacts' small puffs would take every
-	// volume in a tank fight and leave the plumes on billboards.
+	// volume in a tank fight.
 	if (system->getPriority() != DEATH_EXPLOSION
 			|| system->getShaderType() != ParticleSystemInfo::ALPHA || !system->shouldBillboard() || system->isUsingStreak()
-			|| system->getVolumeParticleDepth() > 1 || system->isSystemForever() || system->getGpuSampleCount() != 0
+			|| system->getVolumeParticleDepth() > 1 || system->isSystemForever()
 			|| system->getAttachedObject() != INVALID_ID || system->getAttachedDrawable() != INVALID_DRAWABLE_ID
 			|| !explosionSmokeTemplate(system->getTemplate()))
 		return false;
-	if (refusedSystems.count((int)id)) return false;
-	// Off screen it keeps its billboards and is asked again next frame, so a death across the map
-	// does not take a volume from the one in view.
-	Coord3D where;
-	system->getPosition(&where);
-	if (!onScreen(where)) return false;
-	if (!usable()) return false;
+	if (!usable()) return false;	// no device for the volumes: the billboards are all there is
+	const ParticleSystemID id = system->getSystemID();
 
+	// Every one is taken, on screen or not, so none ever falls back to billboards.  With every
+	// volume in use the one whose particles have been gone longest gives way, else the oldest
+	// blast; its system's smoke is dropped for good.
 	unsigned slot = 0;
 	while (slot < MaxVolumes && volumes[slot].live) ++slot;
-	// None free: the one whose particles have been gone longest gives way, a second at least, as it
-	// is thin smoke by then.  A fresh blast is worth more than the end of an old one.
 	const int now = (int)TheGameLogic->getFrame();
-	if (slot == MaxVolumes)
-		for (unsigned i = 0; i < MaxVolumes; ++i)
-			if (now - volumes[i].lastSeen > LOGICFRAMES_PER_SECOND
-					&& (slot == MaxVolumes || volumes[i].lastSeen < volumes[slot].lastSeen))
-				slot = i;
 	if (slot == MaxVolumes) {
+		slot = 0;
+		for (unsigned i = 1; i < MaxVolumes; ++i)
+			if (volumes[i].lastSeen < volumes[slot].lastSeen
+					|| (volumes[i].lastSeen == volumes[slot].lastSeen && volumes[i].born < volumes[slot].born))
+				slot = i;
 		// ponytail: the set only grows until 512, then forgets the systems that are gone
-		if (refusedSystems.size() > 512)
-			for (auto it = refusedSystems.begin(); it != refusedSystems.end();)
-				it = TheParticleSystemManager->findParticleSystem((ParticleSystemID)*it) ? std::next(it) : refusedSystems.erase(it);
-		refusedSystems.insert((int)id);
-		++refusedCount;
-		return false;
+		if (droppedSystems.size() > 512)
+			for (auto it = droppedSystems.begin(); it != droppedSystems.end();)
+				it = TheParticleSystemManager->findParticleSystem((ParticleSystemID)*it) ? std::next(it) : droppedSystems.erase(it);
+		if (TheParticleSystemManager->findParticleSystem(volumes[slot].system))
+			droppedSystems.insert((int)volumes[slot].system);
+		++droppedCount;
 	}
 
-	// The box from what the template's particles grow to: three and a half times the full width
-	// of the biggest one, twice that high, standing on the ground under the blast.
+	// The box from what the template's particles grow to, wide and low: 48 cells across for four
+	// and a half times the full width of the biggest one, 40 high, standing on the ground under
+	// the blast with the detonation a little above its floor.
 	const Real start = system->m_startSize.getMaximumValue() * system->getSizeMultiplier();
 	const Real rate = system->m_sizeRate.getMaximumValue() * system->getSizeMultiplier();
 	const Real damping = system->m_sizeRateDamping.getMaximumValue();
 	const Real life = system->m_lifetime.getMaximumValue();
 	const Real grown = damping < 0.999f ? (std::min)(rate / (1.0f - damping), rate * life) : rate * life;
-	// ponytail: past 160 units a cell would be coarser than the young puffs it has to hold, so a
+	// ponytail: past 240 units a cell would be coarser than the young puffs it has to hold, so a
 	// building-sized plume is cut by its box; a finer grid or a second, bigger one if that shows.
-	const Real side = (std::max)(48.0f, (std::min)(160.0f, (start + (std::max)(grown, 0.0f)) * 3.5f));
+	const Real side = (std::max)(96.0f, (std::min)(240.0f, (start + (std::max)(grown, 0.0f)) * 4.5f));
+	Coord3D where;
+	system->getPosition(&where);
 	const Real ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(where.x, where.y, NULL) : where.z;
 
 	Volume &volume = volumes[slot];
@@ -971,10 +1041,14 @@ bool Takes(ParticleSystem *system)
 	volume.origin[0] = where.x - side * 0.5f;
 	volume.origin[1] = where.y - side * 0.5f;
 	volume.origin[2] = (std::min)(where.z, ground) - volume.cell * 1.5f;
-	volume.born = volume.lastSeen = (int)TheGameLogic->getFrame();
-	if (claimedCount++ == 0)
-		DEBUG_LOG(("VOLSMOKE: first volume, '%s' at (%.0f, %.0f, %.0f), %.0f units wide\n",
-			system->getTemplate()->getName().str(), where.x, where.y, where.z, side));
+	volume.blast[0] = (GridX - 1) * 0.5f;
+	volume.blast[1] = (GridY - 1) * 0.5f;
+	// at the blast's height, but never under the ground's first cell: the ground turns its push
+	volume.blast[2] = (std::max)((where.z - volume.origin[2]) / volume.cell - 0.5f, 2.5f);
+	volume.born = volume.lastSeen = now;
+	if (claimedCount++ < 4)
+		DEBUG_LOG(("VOLSMOKE: frame %d, volume %u for '%s' at (%.0f, %.0f, %.0f), %.0f units wide\n",
+			now, slot, system->getTemplate()->getName().str(), where.x, where.y, where.z, side));
 	return true;
 }
 
@@ -986,11 +1060,9 @@ void Render(const HazardCloud::Camera &camera)
 	// a mirror or the sun's map: the main view only
 	ID3D11RenderTargetView *scene = backend->Scene_Target();
 	if (!scene || !camera.width || !camera.height) return;
-	// The camera's matrices, as HazardCloud's layers take them from it; Takes culls with them too.
+	// The camera's matrices, as HazardCloud's layers take them from it.
 	float viewProjection[16], eyeRows[16];
 	HazardCloud::multiply(camera.view, camera.projection, viewProjection);
-	std::memcpy(lastViewProjection, viewProjection, sizeof(viewProjection));
-	lastViewKnown = true;
 
 	const int now = (int)TheGameLogic->getFrame();
 	unsigned live = 0, slabs = 0;
@@ -1013,8 +1085,8 @@ void Render(const HazardCloud::Camera &camera)
 	}
 	if (now - lastReport >= 10 * LOGICFRAMES_PER_SECOND && (live || claimedCount)) {
 		lastReport = now;
-		DEBUG_LOG(("VOLSMOKE: frame %d, %u volumes live, %u claimed and %u left on billboards so far, %u draws\n",
-			now, live, claimedCount, refusedCount, state.drawn));
+		DEBUG_LOG(("VOLSMOKE: frame %d, %u volumes live, %u claimed and %u dropped for newer blasts so far, %u draws\n",
+			now, live, claimedCount, droppedCount, state.drawn));
 	}
 	if (!live) {
 		state.lastStepFrame = now;
@@ -1037,7 +1109,7 @@ void Render(const HazardCloud::Camera &camera)
 	takeMeans(device->Get_Device(), context);
 	if (state.lastStepFrame != now) {
 		const int frames = state.lastStepFrame < 0 ? 1 : (std::min)((std::max)(now - state.lastStepFrame, 1), 4);
-		step(context, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward, slabs);
+		step(context, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward, slabs);
 		state.lastStepFrame = now;
 	}
 
@@ -1142,7 +1214,7 @@ void Reset()
 		dropPicture(volume);
 		volume = Volume();
 	}
-	refusedSystems.clear();
+	droppedSystems.clear();
 	state.lastStepFrame = -1;
 	lastReport = 0;
 }

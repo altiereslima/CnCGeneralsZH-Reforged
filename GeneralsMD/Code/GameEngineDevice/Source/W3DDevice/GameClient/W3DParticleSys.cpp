@@ -2740,7 +2740,11 @@ void W3DParticleSystemManager::refreshGpuSystems( void )
 		ParticleSystem *sys = m_gpuSlots[ slot ].system;
 		if (sys == NULL)
 			continue;
-		const Real fade = sys->getStealthFade();
+		Real fade = sys->getStealthFade();
+#ifdef _WIN32
+		if (VolumeSmoke::Hides( sys ))
+			fade = 0.0f;	// a smoke volume draws it (-volsmoke): no overflow billboards either
+#endif
 		const Real shown = fade > 0.0f ? fade : 0.0f;
 		if (m_gpuFades[ slot ] != shown)
 		{

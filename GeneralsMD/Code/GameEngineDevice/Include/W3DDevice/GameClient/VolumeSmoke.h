@@ -8,11 +8,15 @@ namespace HazardCloud { struct Camera; }
 
 namespace VolumeSmoke {
 
-// True for a system whose smoke a volume draws in place of its billboards.  The first time an
-// explosion smoke system is asked about it is given a volume if one is free; a system that found
-// none keeps its billboards for life, so nothing changes look halfway.  False whenever -volsmoke
-// is off or the device cannot take the volumes.
+// True for a system whose billboards are not drawn: a volume draws its smoke, or its volume went
+// to a newer blast and its smoke is dropped.  The first time a death's smoke system is asked
+// about it is given a volume, the oldest one's if none is free, so none of them ever draws
+// billboards.  False whenever -volsmoke is off or the device cannot take the volumes.
 bool Takes(ParticleSystem *system);
+
+// Takes without claiming anything and without touching the device: for the GPU overflow path,
+// whose particles of a taken system are hidden as well.
+bool Hides(ParticleSystem *system);
 
 // Steps every volume once per logic frame that passed and draws them into the scene, from
 // doParticles between two of the backend's draws.  Nothing with -volsmoke off.
