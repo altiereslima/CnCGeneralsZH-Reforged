@@ -1485,9 +1485,13 @@ void GameState::friend_xferSaveDataForCRC( Xfer *xfer, SnapshotType which )
 	gameInfo->description.clear();
 	gameInfo->saveFileType = SAVE_FILE_TYPE_NORMAL;
 	gameInfo->missionMapName.clear();
+	// cleared for the CRC's sake and put back after: a loaded save still needs to know the map it
+	// was started on (SidesList::isForkAIMapPath), and the next save writes it out again
+	const AsciiString pristine = gameInfo->pristineMapName;
 	gameInfo->pristineMapName.clear();
 
 	xferSaveData(xfer, which);
+	gameInfo->pristineMapName = pristine;
 }
 
 // ------------------------------------------------------------------------------------------------

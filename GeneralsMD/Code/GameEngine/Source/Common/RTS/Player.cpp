@@ -1292,6 +1292,12 @@ Bool Player::aiRunsOwnAI( void ) const
 	return m_ai != NULL && m_ai->runsOwnAI();
 }
 
+//-------------------------------------------------------------------------------------------------
+Bool Player::isForkMapComputer( void ) const
+{
+	return m_playerType == PLAYER_COMPUTER && TheSidesList != NULL && TheSidesList->forkAIMap();
+}
+
 
 //----------------------------------------------------------------------------------------------------------
 /**

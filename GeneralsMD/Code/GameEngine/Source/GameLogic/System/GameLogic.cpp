@@ -4757,8 +4757,9 @@ static void salvageCrateTick( void )
 			if( owner == NULL || crate->getShroudedStatus( owner->getPlayerIndex() ) >= OBJECTSHROUD_FOGGED )
 				continue;
 			// a human's units go where the human sends them; only the computer's are sent for salvage,
-			// and only on the fork's AI: EA's never went for a crate on its own
-			if( owner->getPlayerType() != PLAYER_COMPUTER || !owner->aiRunsOwnAI() )
+			// and only on an official or random map: in a mission, a Challenge or on a player's own map
+			// the computer plays EA's game, which never went for a crate on its own
+			if( !owner->isForkMapComputer() )
 				continue;
 
 			const Bool upgrades = wantsSalvageUpgrade( them );

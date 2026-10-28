@@ -703,12 +703,32 @@ SidesInfo *SidesList::findSkirmishSideNamed(const AsciiString& side, Int mod, Te
 		path = TheGameState->getPristineMapName();
 	if (path.isEmpty())
 		return false;
-	// the generator's maps sit in the player's own Maps folder, but the game made them
-	if (isGeneratedMapPath(path))
+
+	// The generator's maps sit in the player's own Maps folder, but the game made them.  Told by the
+	// leaf name alone ("rmg_v17_..."), the way the lobby and the replay carry it: isGeneratedMapPath
+	// also checks a template's CRC against this machine's copy of it, a local file.
+	const char *back = path.reverseFind('\\');
+	const char *forward = path.reverseFind('/');
+	const char *sep = (forward != NULL && (back == NULL || forward > back)) ? forward : back;
+	AsciiString leaf = sep ? sep + 1 : path.str();
+	leaf.toLower();
+	Int version = 0, seed = 0, players = 0, cells = 0;
+	if (sscanf(leaf.str(), "rmg_v%d_%d_%dp_%dc", &version, &seed, &players, &cells) == 4 &&
+			version == RANDOM_MAP_GENERATOR_VERSION)
 		return true;
-	// "maps\..." is the game's folder and its archives, "userdata\maps\..." the player's: the same
-	// portable name the lobby sends and the replay records, so every machine reads the same answer
-	return TheGameState && TheGameState->realMapPathToPortableMapPath(path).startsWithNoCase("maps\\");
+
+	// The player's own Maps folder first: with no user data folder it would be "Maps" itself, the
+	// game's, and nothing tells the two apart, so the game's wins as it does for the lobby.  Then the
+	// game's folder and its archives.  Anything else (a save's copy with no pristine name) is not ours.
+	const AsciiString userData = TheGlobalData->getPath_UserData();
+	if (!userData.isEmpty())
+	{
+		AsciiString userMaps = userData;
+		userMaps.concat("Maps\\");
+		if (path.startsWithNoCase(userMaps.str()))
+			return false;
+	}
+	return path.startsWithNoCase("maps\\") || path.startsWithNoCase("maps/");
 }
 
 void SidesList::prepareForMP_or_Skirmish(void)
@@ -759,12 +779,14 @@ void SidesList::prepareForMP_or_Skirmish(void)
 	if (!gotScripts) {
 		AsciiString path = "data\\Scripts\\SkirmishScripts.scb";
 		// A player's own map gets EA's scripts as EA shipped them: the fork's file carries its own
-		// openings and its Hard without the free cash.  A -mod brings its own skirmish AI and keeps it.
-		// ponytail: any -mod keeps the resolved file, even one that ships no .scb; check the mod's
-		// archives for one if that ever matters.
-		// (GlobalData::computeExeCRC hashes this file too, under the same name)
+		// openings and its Hard without the free cash.  A -mod that ships its own SkirmishScripts.scb
+		// keeps it, since that is the file that resolves; a mod with none (art only) changes nothing.
+		// Either way the exe CRC hashes the resolved file and this one (GlobalData::computeExeCRC), so
+		// two machines that disagree here never share a match.
 		const char *retail = "data\\Scripts\\SkirmishScriptsRetail.scb";
-		if (!m_forkAIMap && TheGlobalData->m_mods.empty() && TheFileSystem->doesFileExist(retail))
+		Bool inModArchive = FALSE;
+		const Bool modScripts = TheFileSystem->modLooseFile(path, &inModArchive).isNotEmpty() || inModArchive;
+		if (!m_forkAIMap && !modScripts && TheFileSystem->doesFileExist(retail))
 			path = retail;
 		DEBUG_LOG(("Skirmish map using standard scripts %s: fork AI %s, map %s\n", path.str(),
 							 m_forkAIMap ? "on" : "off", TheGlobalData->m_mapName.str()));
