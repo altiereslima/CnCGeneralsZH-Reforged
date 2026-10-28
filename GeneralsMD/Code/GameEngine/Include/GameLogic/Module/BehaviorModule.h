@@ -240,7 +240,9 @@ public:
 	};
 	virtual Bool shouldReserveDoorWhenQueued(const ThingTemplate* thing) const = 0; 
 	virtual Bool hasAvailableSpaceFor(const ThingTemplate* thing) const = 0; 
-	virtual Bool hasReservedSpace(ObjectID id) const = 0; 
+	virtual Bool hasReservedSpace(ObjectID id) const = 0;
+	/// would reserveSpace(id, ...) succeed? asks without reserving, and without the helipad shortcut
+	virtual Bool canReserveSpace(ObjectID id) const = 0;
 	virtual Int  getSpaceIndex( ObjectID id ) const = 0;
 	virtual Bool reserveSpace(ObjectID id, Real parkingOffset, PPInfo* info) = 0;
 	virtual void releaseSpace(ObjectID id) = 0; 

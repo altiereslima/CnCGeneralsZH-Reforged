@@ -114,6 +114,7 @@ public:
 
 	const Coord3D* friend_getProducerLocation() const { return &m_producerLocation; }
 	Real friend_getOutOfAmmoDamagePerSecond() const { return getJetAIUpdateModuleData()->m_outOfAmmoDamagePerSecond; }
+	Bool friend_hadAirfield() const { return getFlag(HAD_AIRFIELD); }
 	Bool friend_keepsParkingSpaceWhenAirborne() const { return getJetAIUpdateModuleData()->m_keepsParkingSpaceWhenAirborne; }
 	Bool friend_needsRunway() const { return getJetAIUpdateModuleData()->m_needsRunway; }
 	Real friend_getTakeoffDistForMaxLift() const { return getJetAIUpdateModuleData()->m_takeoffDistForMaxLift; }
@@ -172,7 +173,8 @@ private:
 		USE_SPECIAL_RETURN_LOCO,
 		ALLOW_CIRCLING,
 		ALLOW_INTERRUPT_AND_RESUME_OF_CUR_STATE_FOR_RELOAD,
-		TAXI_IN_PROGRESS
+		TAXI_IN_PROGRESS,
+		HAD_AIRFIELD			///< it has belonged to an airfield at some point, so it was not placed on the map without one
 	};
 
 	Coord3D									m_producerLocation;		///< remember this, so that if our producer dies, we have a place to circle aimlessly
