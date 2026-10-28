@@ -1494,24 +1494,28 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// The middle jet's height is not drawn, so no neighbour can stand over it; the further out
 			// a jet, the more its height is left to the hash, which makes the top ragged.
 			const float u = (j + 0.5f) / jets * 2 - 1;
-			const float side = (u < 0 ? -1.0f : 1.0f) * std::pow(std::fabs(u), 1.2f), centre = 1 - std::fabs(side);
+			const float shortHull = (std::min)((std::max)((8.7f - L) / 3.7f, 0.0f), 1.0f);
+			const float side = (u < 0 ? -1.0f : 1.0f) * std::pow(std::fabs(u), 1.2f - 0.3f * shortHull), centre = 1 - std::fabs(side);
 			// The lower third of a jet barely leans; between a third and three quarters of its path
 			// it bends out by `crown` cells, up to three quarters of the hull's length for the outer
 			// ones (side^0.5), so the base and the middle stay one mass and only the crown fans out
 			// towards one and a half hulls.  Leaning the whole jet that far from the hull top split a
 			// short hull's fan into a V again; bending over the last half only spread the tips,
 			// which the taper had already thinned to nothing, so the crown stayed a hull wide.
-			const float tilt = 0.7f * std::pow(std::fabs(side), 1.1f) + 0.04f * (field(1) - 0.5f);
+			// `shortHull` is 0 for an Overlord's length (half 8.7 cells) and 1 from a Crusader's (5)
+			// down, and blends the curved jets above into a cone: a short hull is nearly a point,
+			// so its jets go out straight from over its middle, up to half a radian off upright,
+			// each to about the same height (the middle one a little taller), and the cone's top is
+			// its widest part, as in the photo.  Curved jets on a short hull spread at mid height
+			// under a lone spike, and bent harder they heaped their heads into a ball on a neck.
+			const float tilt = (1 - shortHull) * 0.7f * std::pow(std::fabs(side), 1.1f) + shortHull * 0.7f * std::fabs(side)
+				+ 0.04f * (field(1) - 0.5f);
 			const float azimuth = (side < 0 ? 3.14159265f : 0.0f) + (field(3) - 0.5f) * 0.9f;
 			const float ca = std::cos(azimuth), cc = std::sin(azimuth);
 			const float dz = std::cos(tilt);
-			// `shortHull` is 0 for an Overlord's length (half 8.7 cells) and 1 from a Crusader's (5)
-			// down: there the outer jets climb nearly as high as the middle one and bend later, so
-			// the crown is widest at the top.  With the Overlord's profile a short hull's outer jets
-			// stopped and spread at mid height, broad shoulders under a lone middle spike.
-			const float shortHull = (std::min)((std::max)((8.7f - L) / 3.7f, 0.0f), 1.0f);
-			const float height = reach * (0.75f + 0.07f * shortHull + (0.25f - 0.07f * shortHull) * centre * centre)
-				* (1 - 0.3f * (1 - centre * centre * centre * centre) * field(4));
+			const float curvedHeight = (0.75f + 0.25f * centre * centre) * (1 - 0.3f * (1 - centre * centre * centre * centre) * field(4));
+			const float coneHeight = (0.92f + 0.08f * centre * centre) * (1 - 0.12f * (1 - centre * centre * centre * centre) * field(4)) / dz;
+			const float height = reach * ((1 - shortHull) * curvedHeight + shortHull * coneHeight);
 			const float speed = height / slows;
 			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
 			const float path = travelled / (0.78f * height);
@@ -1519,15 +1523,16 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// and the ends rather than crossing.  A long hull's or a tall jet's lean is cut, so a
 			// whole jet, head and push, ends inside 15 cells, where walls() has faded it by a few
 			// percent (0.78 of its height is as far as it gets).
-			const float a0 = (side * 0.5f + (field(5) - 0.5f) * 0.4f) * L, c0 = (field(6) - 0.5f) * W * 0.6f;
-			float straight = std::sin(tilt), crown = (1.5f * L + 0.5f * W) * std::pow(std::fabs(side), 0.5f);
+			const float a0 = ((0.5f - 0.1f * shortHull) * side + (field(5) - 0.5f) * (0.4f - 0.2f * shortHull)) * L,
+				c0 = (field(6) - 0.5f) * W * (0.6f - 0.3f * shortHull);
+			float straight = std::sin(tilt), crown = (1 - shortHull) * (1.5f * L + 0.5f * W) * std::pow(std::fabs(side), 0.5f);
 			const float lean = straight * 0.78f * height + crown;
 			if (lean > 1e-3f) {
 				const float k = (std::min)(1.0f, (std::max)(0.0f, 15.0f - std::sqrt(a0 * a0 + c0 * c0)) / lean);
 				straight *= k;
 				crown *= k;
 			}
-			const float bendLow = 0.3f + 0.12f * shortHull, bendSpan = 0.45f;
+			const float bendLow = 0.3f, bendSpan = 0.45f;
 			const float bendU = (path - bendLow) / bendSpan;
 			const float bend = smoothstep01(path, bendLow, bendLow + bendSpan),
 				bending = bendU > 0 && bendU < 1 ? 6 * bendU * (1 - bendU) / bendSpan : 0.0f;
@@ -1551,11 +1556,13 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// crown went dark and the crown floated off the hull.  The rate goes with the reach, so Low's
 			// shorter jets lay as much a cell as High's: laying the same smoke into half the length
 			// heaped a white ball on the hull on Low.
-			const float taper = 1 - smoothstep01(path, 0.55f + 0.08f * shortHull, 1.0f);
+			// a cone's rays stay full nearly to their heads, so its top is the widest part
+			const float taper = 1 - smoothstep01(path, 0.55f + 0.25f * shortHull, 1.0f);
 			const float rate = 45.0f * (0.75f + 0.45f * centre) * reach / 36.0f * now / speed * taper;
 			const float heat = (2.8f + 0.4f * centre * centre) * (0.7f + 0.3f * std::pow(now / speed, 0.4f)) * (1 - 0.2f * path)
 				* (0.45f + 0.55f * taper) * (0.7f + 0.3f * smoothstep01(path, 0.0f, 0.15f));
-			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.06f * travelled) * (0.35f + 0.65f * taper) * (0.8f + 0.5f * centre * centre),
+			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.06f * travelled) * (0.35f + 0.65f * taper)
+				* (0.8f + 0.2f * shortHull + (0.5f - 0.2f * shortHull) * centre * centre),
 				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.08f);
 		}
 		// The stem: the 24th emitter, one wide hot puff climbing at 0.4 of the middle jet's pace,
