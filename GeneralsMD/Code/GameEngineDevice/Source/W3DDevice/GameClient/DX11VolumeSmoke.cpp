@@ -38,6 +38,7 @@
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
 #include "Common/EarlyCommandLine.h"
+#include "Common/LogicThread.h"
 #include "GameClient/ParticleSys.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
@@ -649,6 +650,7 @@ struct Volume {
 	float origin[3] = {};
 	float cell = 1;
 	float blast[3] = {};				// the detonation, in cells
+	float ground = 0;					// the terrain's height under it, in cells
 	unsigned seed = 0;
 	int born = 0;
 	int life = 0;						// logic frames
@@ -921,8 +923,6 @@ bool upload(ID3D11DeviceContext *context, ID3D11Buffer *buffer, const void *data
 // and artillery barrage puffs, the Scud's arms and the Nuke Cannon's stem; a nuclear blast's the
 // mushroom of the missile, the GLA's and the MOAB.  Unknown templates, mods' included, are left
 // alone.
-const bool ShellsOn = true, NuclearOn = true;		// the kinds that are done
-
 TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSystem *system)
 {
 	auto known = templateKinds.find(tmplate);
@@ -930,10 +930,7 @@ TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSyste
 	const char *name = tmplate->getName().str();
 	TemplateKind kind = { false, Shell, 1.0f };
 	const bool alpha = system->getShaderType() == ParticleSystemInfo::ALPHA && !tmplate->isEmissive();
-	if (!ShellsOn && !NuclearOn) {
-		if (alpha && system->getPriority() == DEATH_EXPLOSION && std::strstr(name, "Smoke"))
-			kind = { true, TankDeath, 1.0f };
-	} else if (NuclearOn && std::strstr(name, "Mushroom") && !std::strstr(name, "NukeCannon"))
+	if (std::strstr(name, "Mushroom") && !std::strstr(name, "NukeCannon") && !std::strstr(name, "Chemical"))
 		kind = { true, Nuclear, 1.0f };
 	else if (std::strstr(name, "NukeCannonMushroomStem"))
 		kind = { true, Shell, 3.0f };
@@ -943,7 +940,8 @@ TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSyste
 		kind = { true, Shell, 1.6f };
 	else if (alpha && std::strstr(name, "BuggyMissileExplosionSmoke"))
 		kind = { true, Shell, 1.0f };
-	else if (alpha && system->getPriority() == DEATH_EXPLOSION && std::strstr(name, "Smoke"))
+	// a building's damage and death smoke is DEATH_EXPLOSION too; buildings are not tanks
+	else if (alpha && system->getPriority() == DEATH_EXPLOSION && std::strstr(name, "Smoke") && !std::strstr(name, "Structure"))
 		kind = { true, TankDeath, 1.0f };
 	templateKinds[tmplate] = kind;
 	return kind;
@@ -1069,7 +1067,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		dust[0] = 0.33f; dust[1] = 0.26f; dust[2] = 0.19f;
 		// the skirt along the ground, or for an airburst a patch of dust under it
 		if (ground && t < 0.3f) { power[0] = 30.0f * (1 - t / 0.3f); power[3] = 1.5f; }
-		if (!ground && t < 0.4f) emit(slab, count, { bx, by, 1.0f, 4.0f, 0, 0, 0, 0, 0, 6.0f, 0 });
+		if (!ground && t < 0.4f) emit(slab, count, { bx, by, volume.ground + 0.5f, 4.0f, 0, 0, 0, 0, 0, 6.0f, 0 });
 		// the black-grey puff in the middle, rising slowly
 		if (t < 0.2f) power[1] = 1.6f;
 		if (t < 0.3f) power[2] = 1.1f;
@@ -1094,12 +1092,14 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		}
 	} else {
 		// nuclear: the flash, the fireball rising fast and slowing, the condensation shell, the
-		// skirt racing out, then the rolling cap on its stem, spreading once it stops
-		const float rise = 1 - std::exp(-t / 7.0f);
-		const float radius = 5.0f + 5.0f * (1 - std::exp(-t / 3.0f));
-		blast[2] = bz + 42.0f * rise;
+		// skirt racing out, then the rolling cap on its stem, spreading once it stops.  Sized so the
+		// whole mushroom stays in the play camera's view: it stops 24 cells (240 units) up and its
+		// cap spreads to 16 cells; the surge on the ground keeps its full reach.
+		const float rise = 1 - std::exp(-t / 5.0f);
+		const float radius = 3.5f + 3.5f * (1 - std::exp(-t / 3.0f));
+		blast[2] = bz + 22.0f * rise;
 		blast[3] = radius;
-		motion[0] = 42.0f / 7.0f * std::exp(-t / 7.0f);
+		motion[0] = 22.0f / 5.0f * std::exp(-t / 5.0f);
 		flash = t < 0.06f ? 40.0f : 40.0f * std::exp(-(t - 0.06f) / 0.15f);
 		flashWide = radius * 1.5f;
 		flashTall = 1.2f;
@@ -1120,9 +1120,9 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		if (t > 0.8f) {
 			shape[0] = 35.0f * std::exp(-t / 30.0f);
 			shape[1] = radius * (0.9f + 0.03f * (std::max)(t - 10.0f, 0.0f));
-			shape[1] = (std::min)(shape[1], 30.0f);
+			shape[1] = (std::min)(shape[1], 16.0f);
 		}
-		shape[2] = bz + 46.0f;
+		shape[2] = bz + 24.0f;
 		if (t > 1.5f) shape[3] = 14.0f * std::exp(-t / 40.0f);
 		// the ground dust the stem draws up
 		if (t > 0.5f && t < 40.0f)
@@ -1190,7 +1190,10 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 			heights[y * shape.gx + x] = (ground - volume.origin[2]) / cell;
 		}
 	const float right = volume.origin[0] + shape.gx * cell, top = volume.origin[1] + shape.gy * cell;
-	for (Object *object = TheGameLogic ? TheGameLogic->getFirstObject() : nullptr; object; object = object->getNextObject()) {
+	// ponytail: beside an overlapped logic tick the object list is not safe to walk, so the
+	// buildings wait for a pass outside it; every structure goes in, seen or not, at full height
+	const bool walk = TheGameLogic && !LogicThread::isInsideWindow();
+	for (Object *object = walk ? TheGameLogic->getFirstObject() : nullptr; object; object = object->getNextObject()) {
 		if (!object->isKindOf(KINDOF_STRUCTURE)) continue;
 		const Coord3D *at = object->getPosition();
 		const GeometryInfo &geometry = object->getGeometryInfo();
@@ -1210,6 +1213,12 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 				const bool inside = box ? std::fabs(along) <= major && std::fabs(side) <= minor : dx * dx + dy * dy <= major * major;
 				if (inside) heights[y * shape.gx + x] = (std::max)(heights[y * shape.gx + x], roof);
 			}
+	}
+	if (!walk) volume.floorFrame = now - 2 * LOGICFRAMES_PER_SECOND;	// again on the next pass
+	// a blast on a building goes off on its roof, not inside it
+	if (volume.reset && volume.kind != Airburst) {
+		const unsigned column = unsigned(volume.blast[1]) * shape.gx + unsigned(volume.blast[0]);
+		volume.blast[2] = (std::max)(volume.blast[2], heights[column] + 0.5f);
 	}
 	const D3D11_BOX region = { 0, slab * shape.gy, 0, shape.gx, (slab + 1) * shape.gy, 1 };
 	context->UpdateSubresource(tier.floor, 0, &region, heights.data(), shape.gx * sizeof(float), 0);
@@ -1349,6 +1358,10 @@ bool Takes(ParticleSystem *system)
 	for (const Volume &volume : volumes) {
 		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 120 : 30)) continue;
 		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
+		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
+		const char *joiner = system->getTemplate()->getName().str();
+		if (volume.kind == Nuclear && !alpha && !std::strstr(joiner, "Nuke") && !std::strstr(joiner, "MOAB")) continue;
+		if (system->isSystemForever()) continue;
 		if (kind.trigger && (kind.kind == TankDeath) != (volume.kind == TankDeath)) continue;
 		if (kind.trigger && (kind.kind == Nuclear) != (volume.kind == Nuclear)) continue;
 		const float bx = volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell;
@@ -1407,11 +1420,13 @@ bool Takes(ParticleSystem *system)
 			for (int i = 0; i <= 6; ++i)
 				lowest = (std::min)(lowest, TheTerrainRenderObject->getHeightMapHeight(
 					volume.origin[0] + sideX * i / 6.0f, volume.origin[1] + sideY * j / 6.0f, NULL));
-	volume.origin[2] = lowest - volume.cell;
+	// no more than four cells under the blast's own ground, so a box over a valley keeps headroom
+	volume.origin[2] = (std::max)(lowest, (std::min)(where.z, ground) - 3.0f * volume.cell) - volume.cell;
 	volume.blast[0] = (shape.gx - 1) * 0.5f;
 	volume.blast[1] = (shape.gy - 1) * 0.5f;
 	// at the blast's height, but never under the ground: the ground turns its push
 	const float groundCell = (ground - volume.origin[2]) / volume.cell;
+	volume.ground = groundCell;
 	volume.blast[2] = type == Airburst ? (where.z - volume.origin[2]) / volume.cell - 0.5f : groundCell + 0.5f;
 	volume.seed = unsigned(int(where.x) * 73856093) ^ unsigned(int(where.y) * 19349663) ^ unsigned(now * 83492791);
 	volume.born = now;
