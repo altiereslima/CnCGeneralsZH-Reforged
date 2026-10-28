@@ -1074,7 +1074,13 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 			// a posted unit holds its spot and shoots what walks into range, rather than chasing it
 			// off the post the player put it on.  EA's guard button armed it with its own mode
 			if (msgType == GameMessage::MSG_DO_GUARD_POSITION)
+			{
 				movemsg->appendIntegerArgument( TheInGameUI->getGuardArmedMode() );
+				// the circle the wheel set, one for the whole group; an untouched wheel sends none
+				const Real radius = TheInGameUI->getArmedGuardRadius();
+				if( radius > 0.0f )
+					movemsg->appendRealArgument( radius );
+			}
 
 		}  // end if
 	}

@@ -1256,6 +1256,7 @@ InGameUI::InGameUI()
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
 	m_guardArmedMode		= GUARDMODE_GUARD_WITHOUT_PURSUIT;
+	m_guardRadiusScale	= 1.0f;
 	m_moveArmed					= false;
 	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
@@ -1411,6 +1412,7 @@ void InGameUI::setRadiusCursor(RadiusCursorType cursorType, const SpecialPowerTe
 		return;
 
 	m_curRadiusCursor.clear();
+	m_curRadiusCursorCentre.clear();
 	m_curRcType = RADIUSCURSOR_NONE;
 
 	if (cursorType == RADIUSCURSOR_NONE)
@@ -1499,7 +1501,20 @@ void InGameUI::setRadiusCursor(RadiusCursorType cursorType, const SpecialPowerTe
 		return;
 
 	Coord3D pos = { 0, 0, 0 };	// will be updated right away
-	m_radiusCursors[cursorType].createRadiusDecal(pos, radius, controller, m_curRadiusCursor);
+	const Real unwheeled = radius;
+	if (cursorType == RADIUSCURSOR_GUARD_AREA)
+		radius *= m_guardRadiusScale;
+	if (cursorType == RADIUSCURSOR_GUARD_AREA && m_radiusCursors[cursorType].getTexture().compareNoCase("SCCGuard_Generic") == 0)
+	{
+		// EA's guard marker is one picture, the ring with the shield in its middle, so sizing it to
+		// the wheeled radius stretched the shield too.  The two are drawn apart (Tools/guard_marker.py):
+		// the ring at the radius, the shield, half the picture's width, at the size it has unwheeled.
+		// A mod's own marker stays one picture
+		m_radiusCursors[cursorType].createRadiusDecal(pos, radius, controller, m_curRadiusCursor, "ReforgedGuardRing");
+		m_radiusCursors[cursorType].createRadiusDecal(pos, unwheeled * 0.5f, controller, m_curRadiusCursorCentre, "ReforgedGuardCentre");
+	}
+	else
+		m_radiusCursors[cursorType].createRadiusDecal(pos, radius, controller, m_curRadiusCursor);
 	m_curRcType = cursorType;
 
 	handleRadiusCursor();
@@ -1718,12 +1733,16 @@ void InGameUI::handleRadiusCursor()
     {
       m_curRadiusCursor.setOpacity( m_duringDoubleClickAttackMoveGuardHintTimer * 0.1f );
   		m_curRadiusCursor.setPosition( m_duringDoubleClickAttackMoveGuardHintStashedPosition );	//world space position of center of decal
+      m_curRadiusCursorCentre.setOpacity( m_duringDoubleClickAttackMoveGuardHintTimer * 0.1f );
+      m_curRadiusCursorCentre.setPosition( m_duringDoubleClickAttackMoveGuardHintStashedPosition );
 
     }
     else if ( hasPos )
     {
   		m_curRadiusCursor.setPosition(pos);	//world space position of center of decal
       m_curRadiusCursor.update();
+      m_curRadiusCursorCentre.setPosition(pos);
+      m_curRadiusCursorCentre.update();
     }
 
   }
@@ -2531,6 +2550,10 @@ void InGameUI::update( void )
 
 	updateReplaySeek();
 
+	// the wheeled radius belongs to the guard it was wheeled for; a shift-kept key keeps it
+	if( !m_guardArmed )
+		m_guardRadiusScale = 1.0f;
+
 	/// @todo make sure this code gets called even when the UI is not being drawn
 	if ( m_videoStream && m_videoBuffer )
 	{
@@ -2990,6 +3013,7 @@ void InGameUI::reset( void )
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
 	m_guardArmedMode		= GUARDMODE_GUARD_WITHOUT_PURSUIT;
+	m_guardRadiusScale	= 1.0f;
 	m_moveArmed					= false;
 	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
@@ -5887,6 +5911,55 @@ void InGameUI::adjustPlacementRowGap( Real spin )
 	}
 
 }  // end adjustPlacementRowGap
+
+static const Real GUARD_PICK_RADIUS_MIN = 50.0f;
+static const Real GUARD_PICK_STEP = 1.15f;		///< what one notch of the wheel multiplies the radius by
+// ponytail: under logic's GUARD_RADIUS_MAX of 800 because one ground decal draws at most 104 terrain
+// cells across (W3DProjectedShadow's index buffer clip), and a ring past about 515 came out squared
+// off.  Raise both together if the decal buffers grow
+static const Real GUARD_PICK_RADIUS_MAX = 500.0f;
+
+//-------------------------------------------------------------------------------------------------
+/** The range the guard marker is drawn at before the wheel touches it, the one setRadiusCursor
+	* takes: the first selected unit's own guard range. */
+//-------------------------------------------------------------------------------------------------
+static Real guardMarkerBaseRadius( Drawable *draw )
+{
+	const Object *obj = draw ? draw->getObject() : NULL;
+	return obj ? AIGuardMachine::getStdGuardRange( obj ) : 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real InGameUI::getArmedGuardRadius( void )
+{
+	if( !m_guardArmed || m_guardRadiusScale == 1.0f )
+		return 0.0f;
+	return guardMarkerBaseRadius( getFirstSelectedDrawable() ) * m_guardRadiusScale;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A notch away from the player grows the circle by a fixed share, so the wheel feels the same on a
+	* small circle as on a big one.  The scale stops where the radius does, so the wheel never winds
+	* up travel that has to be undone first. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::adjustArmedGuardRadius( Real notches )
+{
+	const Real base = guardMarkerBaseRadius( getFirstSelectedDrawable() );
+	if( base <= 0.0f )
+		return;
+
+	// half the unwheeled size at the least: the ring's inside edge is then still clear of the shield,
+	// which keeps its own size
+	m_guardRadiusScale *= (Real)pow( GUARD_PICK_STEP, notches );
+	m_guardRadiusScale = min( max( m_guardRadiusScale, max( 0.5f, GUARD_PICK_RADIUS_MIN / base ) ), max( 1.0f, GUARD_PICK_RADIUS_MAX / base ) );
+
+	// the ring is made at its size, so it is made again
+	if( m_curRcType == RADIUSCURSOR_GUARD_AREA )
+	{
+		setRadiusCursorNone();
+		setRadiusCursor( RADIUSCURSOR_GUARD_AREA, NULL, PRIMARY_WEAPON );
+	}
+}
 
 //-------------------------------------------------------------------------------------------------
 /** The first unit of the player's in the selection with a stance to read, for the stance key's face

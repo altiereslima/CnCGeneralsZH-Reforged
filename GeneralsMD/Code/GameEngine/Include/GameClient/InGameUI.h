@@ -1137,6 +1137,12 @@ public:  // ********************************************************************
 	Bool isGuardArmed( void ) const						{ return m_guardArmed; }
 	GuardMode getGuardArmedMode( void ) const	{ return m_guardArmedMode; }	///< what the armed guard's click gives: the key's, or the EA button's own
 
+	// While a guard is armed the wheel grows and shrinks the circle it will hold instead of zooming,
+	// the guard marker's ring follows it and the order carries it.  0 until the wheel has touched
+	// it: the click is then the retail guard, each unit on its own range
+	void adjustArmedGuardRadius( Real notches );
+	Real getArmedGuardRadius( void );
+
 	/** One of the page's keys past attack, hold position and move, an OrderKeyExtra (ControlBar.h),
 		* pressed with the mouse or its grid key: the stance key puts the selection on the other
 		* stance from the first unit's */
@@ -1555,6 +1561,7 @@ protected:
 
 	RadiusDecalTemplate					m_radiusCursors[RADIUSCURSOR_COUNT];
 	RadiusDecal									m_curRadiusCursor;
+	RadiusDecal									m_curRadiusCursorCentre;	///< the guard marker's shield, apart from its ring so it never stretches
 	RadiusCursorType						m_curRcType;
 
 	enum { AURA_RING_MAX = 256 };	// ponytail: past this many rings on the map the rest go undrawn; the slot match is n squared
@@ -1588,6 +1595,7 @@ protected:
 	Bool												m_forceAttackArmed;	///< is the attack key holding force fire for the next click?
 	Bool												m_guardArmed;				///< is the guard key holding a guard order for the next click?
 	GuardMode										m_guardArmedMode;		///< the mode that guard order carries
+	Real												m_guardRadiusScale;	///< what the wheel has made of the armed guard's range, 1 untouched
 	Bool												m_moveArmed;				///< is the move key holding a move for the next click?
 	Bool												m_orderKeyKeptByShift;	///< an armed key was clicked with under shift, and drops when shift comes up
 	Bool												m_preferSelection;		///< the shift key has been depressed.

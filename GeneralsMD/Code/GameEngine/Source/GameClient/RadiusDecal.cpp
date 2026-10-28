@@ -91,7 +91,7 @@ Real RadiusDecalTemplate::lightScale() const
 }
 
 // ------------------------------------------------------------------------------------------------
-void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, const Player* owningPlayer, RadiusDecal& result) const
+void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, const Player* owningPlayer, RadiusDecal& result, const char* texture) const
 {
 	result.clear();
 	
@@ -121,7 +121,7 @@ void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, con
 		result.m_template = this;
 		// By value, not through this: a template can be a module's own copy (DeliverPayloadAIUpdate's),
 		// gone before the call runs when its object is made and destroyed in the same tick.
-		const AsciiString name = m_name;
+		const AsciiString name = texture ? AsciiString(texture) : m_name;
 		const ShadowType shadowType = m_shadowType;
 		const Real size = radius*2;
 		const Color color = m_color == 0 ? clientPlayerColor(owningPlayer) : m_color;
