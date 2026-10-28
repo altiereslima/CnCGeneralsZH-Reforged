@@ -856,7 +856,7 @@ bool upload(ID3D11DeviceContext *context, ID3D11Buffer *buffer, const void *data
 // and artillery barrage puffs, the Scud's arms and the Nuke Cannon's stem; a nuclear blast's the
 // mushroom of the missile, the GLA's and the MOAB.  Unknown templates, mods' included, are left
 // alone.
-const bool ShellsOn = false, NuclearOn = false;		// the kinds that are done
+const bool ShellsOn = true, NuclearOn = false;		// the kinds that are done
 
 TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSystem *system)
 {
@@ -994,14 +994,19 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		}
 	} else if (volume.kind == Shell || volume.kind == Airburst) {
 		const bool ground = volume.kind == Shell;
-		flash = t < 0.05f ? 10.0f : 0.0f;
-		blast[3] = 2.0f;
-		soot[0] = 0.10f; soot[1] = 0.095f; soot[2] = 0.09f; soot[3] = 1.2f;
+		// a flash shorter than a frame at 30, white-orange
+		flash = t < 0.03f ? 12.0f : 0.0f;
+		flashWide = 3.0f;
+		flashTall = 1.3f;
+		blast[3] = 2.5f;
+		soot[0] = 0.11f; soot[1] = 0.105f; soot[2] = 0.10f; soot[3] = 1.2f;
+		// dark brown thrown earth: tan dust on tan ground was invisible
+		dust[0] = 0.33f; dust[1] = 0.26f; dust[2] = 0.19f;
 		// the skirt along the ground, or for an airburst a patch of dust under it
-		if (ground && t < 0.3f) { power[0] = 30.0f * (1 - t / 0.3f); power[3] = 0.9f; }
-		if (!ground && t < 0.4f) emit(slab, count, { bx, by, 1.0f, 4.0f, 0, 0, 0, 0, 0, 2.5f, 0 });
+		if (ground && t < 0.3f) { power[0] = 30.0f * (1 - t / 0.3f); power[3] = 1.5f; }
+		if (!ground && t < 0.4f) emit(slab, count, { bx, by, 1.0f, 4.0f, 0, 0, 0, 0, 0, 6.0f, 0 });
 		// the black-grey puff in the middle, rising slowly
-		if (t < 0.15f) power[1] = 1.1f;
+		if (t < 0.2f) power[1] = 1.6f;
 		if (t < 0.3f) power[2] = 1.1f;
 		// the dirt fountain: a hollow cone of jets 10 to 20 m up, falling back in 3 to 6 s
 		if (ground && t < 6.0f) {
@@ -1009,7 +1014,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			for (unsigned j = 0; j < 10; ++j) {
 				float jet[6];
 				if (jetAt(volume, j, speed, 0.12f, 0.5f, t, jet))
-					emit(slab, count, { jet[0], jet[1], jet[2], 1.3f, jet[3], jet[4], jet[5], 0, 0, 5.0f, 0.35f });
+					emit(slab, count, { jet[0], jet[1], jet[2], 2.0f, jet[3], jet[4], jet[5], 0, 0, 160.0f, 0.35f });
 			}
 		}
 		// a bomb's small mushroom
