@@ -2,7 +2,7 @@
 // run), on the Direct3D 11 frame only.  Distributed under
 // the repository's GPL-3.0 terms; see LICENSE.md.
 //
-// Three kinds of blast, each told from the particle systems its FX spawns and each played from a
+// Four kinds of blast, each told from the particle systems its FX spawns and each played from a
 // timeline of its own, modelled on how the real thing looks:
 //
 // A tank's death is an ammunition cook-off, laid out on the dying hull's own box (its template's
@@ -19,6 +19,12 @@
 // middle that rises slowly, and pushes a skirt of dust out along the ground.  Bombs are the same
 // at a larger cell with a small mushroom on top; an airburst has no dirt, only the puff and a
 // patch of dust under it.
+//
+// A building's death is laid out on its footprint, read from the structure list Gather keeps, and
+// sized by it: fire and soot burst out low over the whole footprint, a ragged plume of fire climbs
+// out of it and cools to smoke, the collapse pours pale dust out from under every wall along the
+// ground and round the buildings beside it, and the ruin burns under a dark column for half a
+// minute.  A damaged stage blows out of the roof and walls of a building that stays standing.
 //
 // A nuclear-class blast (the missile, the GLA's, the MOAB) has a volume of its own, much bigger:
 // a white flash, a white dome at the shock front, a fireball glowing from inside that rises,
@@ -125,7 +131,7 @@ const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/
 const DXGI_FORMAT DensityFormat = DXGI_FORMAT_R16G16_FLOAT;			// soot, dust
 const DXGI_FORMAT ScalarFormat = DXGI_FORMAT_R16_FLOAT;
 
-enum Kind { TankDeath, Shell, Airburst, Nuclear, Air };
+enum Kind { TankDeath, Shell, Airburst, Nuclear, Air, Structure };
 
 template <class T> void drop(T *&object)
 {
@@ -994,9 +1000,12 @@ struct Volume {
 	float cell = 1;
 	float blast[3] = {};				// the detonation, in cells
 	float ground = 0;					// the terrain's height under it, in cells
-	// a tank's hull: its heading, then its half length, half width and height in cells
+	// a tank's hull or a building's footprint: its heading, then its half length, half width and
+	// height in cells
 	float hull[5] = { 1, 0, 5, 3.3f, 3.3f };
 	bool onHull = false;				// a shell that burst on a vehicle
+	ObjectID building = INVALID_ID;		// a structure blast's building, left out of its floor once it has fallen
+	bool standing = false;				// a damaged stage blowing out of a building that stays up
 	unsigned seed = 0;
 	int born = 0;
 	int life = 0;						// logic frames
@@ -1074,8 +1083,10 @@ std::vector<Hull> hulls, lastHulls;
 // thread's window (the render runs inside it, where walking the object list is a counted read).
 // A structure goes in once the player whose view is drawn has seen it, so smoke parting round
 // nothing does not give away an unscouted base.
-struct Solid { float x, y, top, major, minor, angle; bool box; };
-std::vector<Solid> solids;
+// The list before the last read is kept too, so a building that died just after a read still has its
+// footprint when its death's smoke asks for it.
+struct Solid { float x, y, top, major, minor, angle, tall; bool box; ObjectID id; };
+std::vector<Solid> solids, lastSolids;
 int solidsFrame = -100000;
 
 unsigned tierOf(unsigned slot) { return slot >= TierShapes[1].first ? 1 : 0; }
@@ -1106,6 +1117,7 @@ bool requested()
 		hulls.clear();
 		lastHulls.clear();
 		solids.clear();
+		lastSolids.clear();
 		solidsFrame = -100000;
 		lastReport = 0;
 		level = want;
@@ -1419,6 +1431,11 @@ TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSyste
 		kind = { true, Shell, 1.6f };
 	else if (alpha && std::strstr(name, "BuggyMissileExplosionSmoke"))
 		kind = { true, Shell, 1.0f };
+	// a building's death and its damaged stages (FX_Structure*Death, TransitionDamageFX), and
+	// FX_SmallStructureDeath's
+	else if (alpha && std::strstr(name, "Smoke") && (!std::strncmp(name, "StructureTransition", 19)
+			|| !std::strcmp(name, "StructureExplosionSmoke")))
+		kind = { true, Structure, 1.0f };
 	// a building's damage and death smoke is DEATH_EXPLOSION too; buildings are not tanks
 	else if (alpha && system->getPriority() == DEATH_EXPLOSION && std::strstr(name, "Smoke") && !std::strstr(name, "Structure"))
 		kind = { true, TankDeath, 1.0f };
@@ -1657,6 +1674,95 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			for (int end = -1; end <= 1; end += 2)
 				onHull(end * L * 0.45f, 0, 0.5f, (std::max)(W * 0.9f, 2.2f), 0, 0, 12.0f, 2.7f * rise * fall, 1.0f, 0.05f, 0.25f);
 		}
+	} else if (volume.kind == Structure) {
+		// A building coming down, or blowing out a damaged stage, laid out on its own footprint the
+		// way a tank's cook-off is laid on its hull: `along` its long side, `across` it, `up` from
+		// the ground, in cells.  Fire and soot burst out low over the whole footprint and roll off
+		// it, a ragged plume of fire climbs out of it in seven jets spread from end to end, the
+		// collapse pours pale dust out from under every wall along the ground, which runs down the
+		// slopes and round the buildings beside it, and the ruin burns under a dark column for half a
+		// minute.  A damaged stage blows out of the roof and the walls of a building that stays up:
+		// no collapse, a little dust, no column (its own fires smoke on).  No ball, rays or ring.
+		const float hx = volume.hull[0], hy = volume.hull[1], L = volume.hull[2], W = volume.hull[3], H = volume.hull[4];
+		auto onFootprint = [&](float along, float across, float up, float radius, float va, float vc, float vz, float sootRate,
+			float heat, float dustRate, float push) {
+			emit(slab, count, { bx + hx * along - hy * across, by + hy * along + hx * across, bz + up, radius,
+				hx * va - hy * vc, hy * va + hx * vc, vz, sootRate, heat, dustRate, push });
+		};
+		auto unit = [&](unsigned salt) { return hashUnit(volume.seed, salt); };
+		const bool standing = volume.standing;
+		const float size = (std::max)(L, W), base = standing ? H + 0.6f : 0.6f;
+		dust[0] = 0.76f; dust[1] = 0.72f; dust[2] = 0.65f;	// pale concrete and plaster dust; at 0.66 it lay grey-brown in its own shade
+		// the burst: four fire-and-soot bodies over the footprint's quarters, thrown outwards along it
+		if (t < 0.8f) {
+			const float fade = 1 - t / 0.8f;
+			for (unsigned i = 0; i < 4; ++i) {
+				const float sa = (i & 1) ? 1.0f : -1.0f, sc = (i & 2) ? 1.0f : -1.0f;
+				onFootprint(sa * L * (0.45f + 0.15f * unit(500 + i)), sc * W * (0.4f + 0.15f * unit(510 + i)),
+					base + (standing ? 0.0f : H * 0.3f * unit(520 + i)), (std::max)((std::min)(L, W) * 0.55f, 2.5f) * (0.8f + 0.4f * unit(530 + i)),
+					sa * (6.0f + 8.0f * unit(540 + i)) * fade, sc * (5.0f + 6.0f * unit(550 + i)) * fade, 3.0f + 4.0f * unit(560 + i),
+					16.0f * fade, 1.35f, 3.0f * fade, 0.3f);
+			}
+		}
+		// The plume, the tank's jets spread over the footprint: each lays thin smoke at a rate that
+		// goes with its speed and tapers to a streak, so it stands as a ragged mass of fire that
+		// cools to grey-brown smoke, never a ball carried on its head.
+		const float reach = (std::min)((std::max)(standing ? 1.2f * size + 0.5f * H : 1.9f * size + 1.2f * H, 10.0f),
+			TierShapes[0].gz - 18.0f - (standing ? H : 0.0f));
+		for (unsigned j = 0; j < 7; ++j) {
+			auto field = [&](unsigned f) { return unit(600 + 16 * j + f); };
+			const float slows = 0.22f, age = t - 0.08f * field(0);
+			if (age < 0 || age > 1.5f * slows) continue;
+			const float u = (j + 0.5f) / 7 * 2 - 1, centre = 1 - std::fabs(u);
+			const float a0 = (u + (field(1) - 0.5f) * 0.2f) * L * 0.75f, c0 = (field(2) - 0.5f) * W * 0.9f;
+			const float tilt = 0.28f * std::fabs(u) + 0.08f * (field(3) - 0.5f);
+			const float azimuth = (u < 0 ? 3.14159265f : 0.0f) + (field(4) - 0.5f) * 1.2f;
+			const float ca = std::cos(azimuth), cc = std::sin(azimuth), dz = std::cos(tilt), out = std::sin(tilt);
+			const float height = reach * (0.75f + 0.25f * centre * centre) * (1 - 0.25f * field(5));
+			const float speed = height / slows;
+			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
+			const float path = travelled / (0.78f * height);
+			const float taper = 1 - smoothstep01(path, 0.55f, 1.0f);
+			const float rate = 40.0f * reach / 36.0f * (0.75f + 0.45f * centre) * now / speed * taper;
+			const float heat = 2.5f * (0.7f + 0.3f * std::pow(now / speed, 0.4f)) * (1 - 0.2f * path) * (0.45f + 0.55f * taper)
+				* (0.7f + 0.3f * smoothstep01(path, 0.0f, 0.15f));
+			onFootprint(a0 + ca * out * travelled, c0 + cc * out * travelled, base + dz * travelled,
+				(2.2f + 0.07f * travelled) * (0.4f + 0.6f * taper) * (0.8f + 0.3f * centre),
+				ca * out * now, cc * out * now, dz * now, rate, heat, rate * 0.5f, 0.08f);
+		}
+		// The collapse: pale dust pushed out low from under every wall, two bodies a side, each sunk
+		// half its radius into the ground so only a low lens of it stands over it, and the eight
+		// overlap into one sheet the shape of the footprint.  Standing on the ground, the same
+		// bodies stood round the building as a ring of grey balls.
+		if (t > 0.1f && t < 3.0f) {
+			const float fade = 1 - (t - 0.1f) / 2.9f, pour = standing ? 0.3f : 1.0f;
+			for (unsigned k = 0; k < 8; ++k) {
+				const bool end = k >= 4;
+				const float s = (k & 1) ? 1.0f : -1.0f, along = (k & 2) ? 0.5f : -0.5f;
+				const float push = (9.0f + 5.0f * unit(700 + k)) * fade * pour, wobble = (unit(710 + k) - 0.5f) * 3.0f;
+				const float radius = (std::max)((end ? W : L) * 0.7f, 3.0f);
+				if (end)
+					onFootprint(s * (L + 0.3f), along * W, -0.5f * radius, radius, s * push, wobble, 0.2f, 1.0f * fade * pour, 0,
+						14.0f * fade * pour, 0.35f);
+				else
+					onFootprint(along * L, s * (W + 0.3f), -0.5f * radius, radius, wobble, s * push, 0.2f, 1.0f * fade * pour, 0,
+						14.0f * fade * pour, 0.35f);
+			}
+		}
+		// the building falling into its footprint: dust dropping from its height as it comes down
+		if (!standing && t > 0.2f && t < 1.6f) {
+			const float progress = (t - 0.2f) / 1.4f, fade = 1 - progress;
+			for (int end = -1; end <= 1; end += 2)
+				onFootprint(end * L * 0.4f, 0, 1.0f + H * 0.6f * (1 - progress), (std::max)(W * 0.7f, 3.0f), 0, 0, -8.0f * fade,
+					2.0f * fade, 0, 18.0f * fade, 0.3f);
+		}
+		// the ruin burning: a dark column off the footprint for half a minute, leaning with the wind
+		if (!standing && t > 0.8f && t < 28.0f) {
+			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 16.0f ? 1 - (t - 16.0f) / 12.0f : 1.0f;
+			for (int end = -1; end <= 1; end += 2)
+				onFootprint(end * L * 0.4f, 0, 0.6f, (std::max)(W * 0.8f, 2.5f), 0, 0, 12.0f, 3.2f * rise * fall, 1.0f, 0.1f, 0.25f);
+		}
+		soot[3] = 1.6f + 2.4f * std::exp(-t / 0.3f);
 	} else if (volume.kind == Shell || volume.kind == Airburst) {
 		const bool ground = volume.kind == Shell;
 		// a flash shorter than a frame at 30, white-orange
@@ -1838,6 +1944,8 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 	const float right = volume.origin[0] + shape.gx * cell, top = volume.origin[1] + shape.gy * cell;
 	// the structures Gather read outside the logic thread's window, every two seconds
 	for (const Solid &solid : solids) {
+		// a building whose fall this blast is: the dust pours out over the ground it stood on
+		if (volume.kind == Structure && !volume.standing && solid.id == volume.building) continue;
 		const float major = solid.major, minor = solid.minor;
 		const float reach = std::sqrt(major * major + minor * minor);
 		if (solid.x + reach < volume.origin[0] || solid.x - reach > right || solid.y + reach < volume.origin[1] || solid.y - reach > top)
@@ -1855,7 +1963,7 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 			}
 	}
 	// a blast on a building goes off on its roof, not inside it
-	if (volume.reset && volume.kind != Airburst) {
+	if (volume.reset && volume.kind != Airburst && volume.kind != Structure) {
 		const unsigned column = unsigned(volume.blast[1]) * shape.gx + unsigned(volume.blast[0]);
 		volume.blast[2] = (std::max)(volume.blast[2], heights[column] + 0.5f);
 	}
@@ -2121,6 +2229,7 @@ void gatherSolids(int now)
 {
 	if (now - solidsFrame < 2 * LOGICFRAMES_PER_SECOND && now >= solidsFrame) return;
 	solidsFrame = now;
+	lastSolids.swap(solids);
 	solids.clear();
 	// the player whose fog is drawn: an observer may be watching through someone
 	const Int seer = TheObserverCamera.getShroudPlayerIndex();
@@ -2133,7 +2242,8 @@ void gatherSolids(int now)
 		const Coord3D *at = object->getPosition();
 		const GeometryInfo &geometry = object->getGeometryInfo();
 		solids.push_back({ at->x, at->y, at->z + geometry.getMaxHeightAbovePosition(), geometry.getMajorRadius(),
-			geometry.getMinorRadius(), object->getOrientation(), geometry.getGeomType() == GEOMETRY_BOX });
+			geometry.getMinorRadius(), object->getOrientation(), geometry.getMaxHeightAbovePosition(),
+			geometry.getGeomType() == GEOMETRY_BOX, object->getID() });
 	}
 }
 
@@ -2468,10 +2578,34 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 
 // How long each kind lives, in seconds, how big its cell is, how far and how long after its blast
 // another system of the same FX joins it, and which of those it takes.
-float lifeOf(Kind kind) { return kind == TankDeath ? 36.0f : kind == Nuclear ? 90.0f : 12.0f; }
+float lifeOf(Kind kind) { return kind == TankDeath || kind == Structure ? 36.0f : kind == Nuclear ? 90.0f : 12.0f; }
 float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : 2.0f * scale; }
-float joinRadius(const Volume &volume) { return volume.kind == Nuclear ? 500.0f : volume.kind == TankDeath ? 60.0f : 30.0f * volume.scale; }
-int rankOf(const Volume &volume) { return volume.kind == TankDeath ? 2 : volume.scale >= 2.0f ? 1 : 0; }
+float joinRadius(const Volume &volume)
+{
+	if (volume.kind == Structure) return (std::max)(volume.hull[2], volume.hull[3]) * volume.cell + 40.0f;
+	return volume.kind == Nuclear ? 500.0f : volume.kind == TankDeath ? 60.0f : 30.0f * volume.scale;
+}
+int rankOf(const Volume &volume) { return volume.kind == TankDeath || volume.kind == Structure ? 2 : volume.scale >= 2.0f ? 1 : 0; }
+
+// The structure Gather saw, this read or the one before: the one named, or with none named the one
+// whose middle `where` is (a death FX goes off at the building's own position; a footprint test
+// laid a building's fall on its neighbour).  None, null.
+const Solid *structureAt(const Coord3D &where, ObjectID id)
+{
+	const Solid *found = nullptr;
+	float nearest = 1e30f;
+	for (const std::vector<Solid> *list : { &solids, &lastSolids })
+		for (const Solid &solid : *list) {
+			if (id != INVALID_ID) {
+				if (solid.id == id) return &solid;
+				continue;
+			}
+			const float dx = where.x - solid.x, dy = where.y - solid.y, d2 = dx * dx + dy * dy;
+			const float middle = 0.3f * (solid.box ? (std::min)(solid.major, solid.minor) : solid.major) + 2.0f;
+			if (d2 <= middle * middle && d2 < nearest) { nearest = d2; found = &solid; }
+		}
+	return found;
+}
 
 // The vehicle Gather saw nearest `where`, this logic frame or the one before: with `onTop`, one
 // whose box `where` is over; else one standing within its own length of it (a death FX goes
@@ -2545,21 +2679,31 @@ bool Takes(ParticleSystem *system)
 			return true;
 		}
 	}
-	const bool loose = !system->isUsingStreak() && system->getVolumeParticleDepth() <= 1
+	// A building's damaged stage blows out of systems hung on the building itself (TransitionDamageFX):
+	// those are taken as if they lay loose at its middle, once the player whose view is drawn has
+	// seen the building (Gather's list), so a blast never outlines an unscouted base.
+	const char *own = system->getTemplate()->getName().str();
+	const bool structural = !std::strncmp(own, "Structure", 9) || std::strstr(own, "ReforgedStructure")
+		|| std::strstr(own, "HotCoreStructure");
+	const Solid *onBuilding = structural && system->getAttachedObject() != INVALID_ID && !system->isSystemForever()
+		&& !system->isUsingStreak() ? structureAt(Coord3D(), system->getAttachedObject()) : nullptr;
+	const bool loose = (!system->isUsingStreak() && system->getVolumeParticleDepth() <= 1
 		&& system->getAttachedObject() == INVALID_ID && system->getAttachedDrawable() == INVALID_DRAWABLE_ID
-		&& system->getPriority() != AREA_EFFECT;
+		&& system->getPriority() != AREA_EFFECT) || onBuilding;
 	const bool flat = loose && !system->shouldBillboard();
 	// and a nuke's own flat rings (NukeRing's orange fire disc on the ground, its blast wave) as
-	// far as its blast: under the volume's fireball the ring lay round it as a flat orange plate
-	const char *own = system->getTemplate()->getName().str();
+	// far as its blast: under the volume's fireball the ring lay round it as a flat orange plate;
+	// and a building's flat shock rings as far as its blast (the owner wants no ring)
 	const bool nukeFlat = flat && std::strstr(own, "Nuke") && !std::strstr(own, "NukeCannon");
-	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION && !nukeFlat)) return takeAir(system);
+	const bool structFlat = flat && structural;
+	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION && !nukeFlat && !structFlat)) return takeAir(system);
 	// flying bits stay the game's own here too: a blast that took them drew nothing in their place
 	if (airLookOf(system->getTemplate(), system).scrap) return false;
 	const int now = (int)TheGameLogic->getFrame();
 	const int seen = firstSeen.emplace(id, now).first->second;
 	Coord3D where;
 	system->getPosition(&where);
+	if (onBuilding) where = { onBuilding->x, onBuilding->y, onBuilding->top - onBuilding->tall };	// its own is local to the building
 
 	// Another system of a blast already taken: it joins it if it started beside it, at its start.
 	// A shell's takes smoke, dust and dirt and leaves the fire cards; a tank's and a nuclear
@@ -2570,16 +2714,37 @@ bool Takes(ParticleSystem *system)
 	// which started a second tank blast in the first one's fire and burned a white ball on the hull.
 	const TemplateKind kind = kindOfTemplate(system->getTemplate(), system);
 	const bool alpha = system->getShaderType() == ParticleSystemInfo::ALPHA && !system->getTemplate()->isEmissive();
+	// A building's blast lies on its footprint.  A death smoke that goes off inside a footprint with
+	// no vehicle there is the building's too (FX_SmallStructureDeath fires the Mammoth's).
+	Kind kindNow = kind.kind;
+	const Solid *building = onBuilding;
+	// (only the smoke that FX fires: a jet or a tank dying beside a building is not its fall)
+	const bool mammoth = !std::strcmp(own, "MammothTankSubExplosionSmoke");
+	if (kind.trigger && !building && (kindNow == Structure || (kindNow == TankDeath && mammoth && !hullAt(where, false))))
+		building = structureAt(where, INVALID_ID);
+	if (kindNow == TankDeath && building && !onBuilding) kindNow = Structure;
 	for (const Volume &volume : volumes) {
-		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 180 : volume.kind == TankDeath ? 90 : 30)) continue;	// a nuke's stem comes 2 s after its flare
-		if (flat && !(volume.kind == TankDeath && system->getPriority() == DEATH_EXPLOSION) && !(nukeFlat && volume.kind == Nuclear)) continue;
+		if (!volume.live || seen < volume.born - 10
+				|| seen > volume.born + (volume.kind == Nuclear ? 180 : volume.kind == TankDeath || volume.kind == Structure ? 90 : 30)) continue;	// a nuke's stem comes 2 s after its flare
+		if (flat && !(volume.kind == TankDeath && system->getPriority() == DEATH_EXPLOSION) && !(nukeFlat && volume.kind == Nuclear)
+			&& !(structFlat && volume.kind == Structure)) continue;
+		// a building's blast takes its own FX's systems only, not the fire of the shells still
+		// landing on the ruin
+		if (volume.kind == Structure && !structural && system->getPriority() != DEATH_EXPLOSION) continue;
 		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
 		const char *joiner = system->getTemplate()->getName().str();
 		if (volume.kind == Nuclear && !alpha && !std::strstr(joiner, "Nuke") && !std::strstr(joiner, "MOAB")) continue;
 		if (system->isSystemForever()) continue;
-		if (kind.trigger && (kind.kind == TankDeath) != (volume.kind == TankDeath)) continue;
-		if (kind.trigger && (kind.kind == Nuclear) != (volume.kind == Nuclear)) continue;
+		if (kind.trigger && (kindNow == TankDeath) != (volume.kind == TankDeath)) continue;
+		if (kind.trigger && (kindNow == Nuclear) != (volume.kind == Nuclear)) continue;
+		if (kind.trigger && (kindNow == Structure) != (volume.kind == Structure)) continue;
+		// A building falling a second after its last damaged stage blew is a blast of its own: its
+		// loose death FX go to the fall, the stage's systems hung on the building to the stage.  The
+		// rubble stage's systems, hung on the building in the frame its death FX goes off, join the
+		// fall (and a stage made from them that frame gives way to it, below).
+		if (volume.kind == Structure && volume.standing != (onBuilding != nullptr)
+				&& !(onBuilding && !volume.standing && volume.building == onBuilding->id && std::abs(seen - volume.born) <= 30)) continue;
 		const float bx = volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell;
 		const float by = volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell;
 		const float dx = where.x - bx, dy = where.y - by, reach = joinRadius(volume);
@@ -2593,7 +2758,7 @@ bool Takes(ParticleSystem *system)
 	if (flat || !kind.trigger || system->isSystemForever() || seen < now - 5 || !usable()) return takeAir(system);
 
 	const Real ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(where.x, where.y, NULL) : where.z;
-	Kind type = kind.kind;
+	Kind type = kindNow;
 	// A shell bursting high, or on a vehicle's hull rather than the ground, throws no dirt: on a
 	// tank the dirt fountain stood over it as brown fingers.
 	const bool onHull = type == Shell && hullAt(where, true);
@@ -2629,6 +2794,14 @@ bool Takes(ParticleSystem *system)
 	volume.live = true;
 	volume.reset = true;
 	volume.cell = cellOf(type, kind.scale);
+	// A building's box is about two and a half footprints across, so the cell goes with its size: 3
+	// units for an American power plant, about 6.5 for a War Factory or a Particle Cannon.  None
+	// seen (a building this player has not scouted), a 40 unit one at a hashed heading.
+	const float extent = building ? (building->box ? (std::max)(building->major, building->minor) : building->major) : 40.0f;
+	if (type == Structure) {
+		volume.cell = (std::min)((std::max)(extent * 0.105f, 3.0f), 8.0f);
+		if (building) where = { building->x, building->y, building->top - building->tall };
+	}
 	const float sideX = shape.gx * volume.cell, sideY = shape.gy * volume.cell;
 	volume.origin[0] = where.x - sideX * 0.5f;
 	volume.origin[1] = where.y - sideY * 0.5f;
@@ -2666,8 +2839,29 @@ bool Takes(ParticleSystem *system)
 			DEBUG_LOG(("VOLSMOKE: frame %d, tank hull %s, %.0f by %.0f by %.0f units, heading %.2f\n", now,
 				found ? "found" : "not found", volume.hull[2] * 2 * cell, volume.hull[3] * 2 * cell, volume.hull[4] * cell, heading));
 	}
+	if (type == Structure) {
+		const float cell = volume.cell, heading = building ? building->angle : hashUnit(volume.seed, 7) * 6.2831853f;
+		volume.hull[0] = std::cos(heading);
+		volume.hull[1] = std::sin(heading);
+		volume.hull[2] = (std::min)((std::max)((building ? building->major : 40.0f) / cell, 2.0f), 14.0f);
+		volume.hull[3] = (std::min)((std::max)((building ? (building->box ? building->minor : building->major) : 40.0f) / cell, 2.0f), 14.0f);
+		volume.hull[4] = (std::min)((std::max)((building ? building->tall : 30.0f) / cell, 1.5f), 14.0f);
+		volume.building = building ? building->id : INVALID_ID;
+		volume.standing = onBuilding != nullptr;
+		// a stage the rubble systems made in the same moment is this fall's
+		if (!volume.standing && building)
+			for (Volume &other : volumes)
+				if (&other != &volume && other.live && other.kind == Structure && other.standing && other.building == building->id
+						&& now - other.born <= 2)
+					other.live = false;
+		static unsigned structuresLogged = 0;
+		if (structuresLogged++ < 12)
+			DEBUG_LOG(("VOLSMOKE: frame %d, structure %s for '%s', %.0f by %.0f by %.0f units at %.1f a cell, %s\n", now,
+				building ? "found" : "not found", own, volume.hull[2] * 2 * cell, volume.hull[3] * 2 * cell, volume.hull[4] * cell, cell,
+				volume.standing ? "a damaged stage" : "its fall"));
+	}
 	volume.born = now;
-	volume.life = int(lifeOf(type) * LOGICFRAMES_PER_SECOND);
+	volume.life = int((type == Structure && volume.standing ? 14.0f : lifeOf(type)) * LOGICFRAMES_PER_SECOND);
 	// its front through the air round it, in world units a second.  A tank's has none: a sphere
 	// pushing out from the hull's middle blew its own fire into a dome and the dust round it into
 	// rings, where a real one bursts out along the hull and up (schedule).
@@ -2684,12 +2878,13 @@ bool Takes(ParticleSystem *system)
 			TheDisplay->createLightPulse(&at, &white, 250.0f, 450.0f, 0, LOGICFRAMES_PER_SECOND * 3 / 10);
 		}
 	}
+	else if (type == Structure) addShock(where, 140.0f, volume.standing ? 30.0f : 50.0f, 1.0f, now);
 	else if (type != TankDeath) addShock(where, 160.0f * kind.scale, 70.0f * kind.scale, 1.0f, now);
 	pruneSets();
 	takenSystems.insert(id);
 	if (claimedCount++ < 8)
 		DEBUG_LOG(("VOLSMOKE: frame %d, %s volume %u for '%s' at (%.0f, %.0f, %.0f), %.0f units wide\n", now,
-			type == TankDeath ? "tank" : type == Shell ? "shell" : type == Airburst ? "airburst" : "nuclear", slot,
+			type == TankDeath ? "tank" : type == Shell ? "shell" : type == Airburst ? "airburst" : type == Structure ? "structure" : "nuclear", slot,
 			system->getTemplate()->getName().str(), where.x, where.y, where.z, sideX));
 	return true;
 }
@@ -2926,6 +3121,7 @@ void Reset()
 	movers.clear();
 	shocks.clear();
 	solids.clear();
+	lastSolids.clear();
 	solidsFrame = -100000;
 	takenSystems.clear();
 	firstSeen.clear();
