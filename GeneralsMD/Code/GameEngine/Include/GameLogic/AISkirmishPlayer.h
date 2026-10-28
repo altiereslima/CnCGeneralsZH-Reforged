@@ -110,6 +110,7 @@ protected:
 	void adjustBuildList(BuildListInfo *list);
 	Int getMyEnemyPlayerIndex(void);
 	void acquireEnemy(void);
+	void acquireEnemyRetail(void);	///< EA's acquireEnemy, for a seat that plays EA's AI (!runsOwnAI)
 	void doSurrender(void);			///< say GG and give up once the match is lost beyond recovery
 
 protected:

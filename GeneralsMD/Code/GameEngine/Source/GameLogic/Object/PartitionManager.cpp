@@ -6057,7 +6057,7 @@ Bool PartitionFilterPossibleToAttack::allow(Object *objOther)
 	// picking its own target, so an explicit order to level one still goes through, and a tech
 	// building that shoots back is still shot back at.
 	//
-	if (m_obj->getControllingPlayer() && m_obj->getControllingPlayer()->getPlayerType() == PLAYER_COMPUTER &&
+	if (m_obj->getControllingPlayer() && m_obj->getControllingPlayer()->aiRunsOwnAI() &&
 			aiIsIncomeNotATarget(objOther->isKindOf(KINDOF_TECH_BUILDING),
 													 objOther->isKindOf(KINDOF_CAPTURABLE),
 													 objOther->isKindOf(KINDOF_TECH_BASE_DEFENSE)))

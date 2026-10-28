@@ -467,6 +467,7 @@ Data/Scenarios/vision.txt
 Data/Scenarios/wallgarrison.txt
 Data/Scenarios/wreckcheck.txt
 Data/Scripts/SkirmishScripts.scb
+Data/Scripts/SkirmishScriptsRetail.scb
 Data/Turkish/Generals.str
 Data/Ukrainian/Generals.str
 Data/Window/ControlBar.wnd

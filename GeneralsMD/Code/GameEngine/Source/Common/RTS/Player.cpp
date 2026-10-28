@@ -1283,7 +1283,13 @@ void Player::becomingLocalPlayer(Bool yes)
 //-------------------------------------------------------------------------------------------------
 Bool Player::isSkirmishAIPlayer( void )
 {
-	return m_ai ? m_ai->isSkirmishAI() : false; 
+	return m_ai ? m_ai->isSkirmishAI() : false;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool Player::aiRunsOwnAI( void ) const
+{
+	return m_ai != NULL && m_ai->runsOwnAI();
 }
 
 
@@ -1697,7 +1703,7 @@ void Player::onUnitLost(const Object *obj)
 //-------------------------------------------------------------------------------------------------
 Bool Player::isAIDutyAmbulance(const Object *obj) const
 {
-	return m_ai ? m_ai->isDutyAmbulance(obj) : FALSE;
+	return m_ai && m_ai->runsOwnAI() ? m_ai->isDutyAmbulance(obj) : FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3568,11 +3574,11 @@ Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild, Int unitsPerO
     maxSimultaneousOfType = (UnsignedInt)cap;
   }
 
-  // the defence allowance binds computer players in skirmish and network matches and their replays;
-  // humans, and a campaign or Generals Challenge mission, keep EA's rules
+  // the defence allowance binds computer players on the fork's AI in skirmish and network matches and
+  // their replays; humans, a campaign or Generals Challenge mission and a player's own map keep EA's rules
   if ( whatToBuild->isKindOf( KINDOF_FS_SUPERWEAPON ) && TheGameLogic && !TheGameLogic->isInSinglePlayerGame()
     && SuperweaponNeedsDefenses( whatToBuild->getName(), proRules, (Int)TheGameLogic->getSuperweaponRestriction(),
-                                 getPlayerType() == PLAYER_COMPUTER ) )
+                                 aiRunsOwnAI() ) )
   {
     SuperweaponDefenseCount count = { 0, 0 };
     iterateObjects( countSuperweaponDefenses, &count );

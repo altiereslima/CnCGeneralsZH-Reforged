@@ -51,7 +51,9 @@
 #include "Common/DataChunk.h"
 #include "Common/FileSystem.h"
 #include "Common/GameState.h"
+#include "Common/GlobalData.h"
 #include "Common/PlayerTemplate.h"
+#include "Common/RandomMapGenerator.h"
 #include "Common/WellKnownKeys.h"
 #include "Common/Xfer.h"
 #include "GameLogic/AI.h"
@@ -207,7 +209,7 @@ Int SidesInfo::removeFromBuildList(BuildListInfo *pBuildList)
 /**
  SidesList - Constructor.
 */
-SidesList::SidesList(void) : m_numSides(0), m_numSkirmishSides(0), m_skirmishScriptsFromMap(false)
+SidesList::SidesList(void) : m_numSides(0), m_numSkirmishSides(0), m_skirmishScriptsFromMap(false), m_forkAIMap(false)
 {
 }
 
@@ -234,6 +236,7 @@ void SidesList::clear(void)
 	emptySides();
 	emptyTeams();
 	m_skirmishScriptsFromMap = false;
+	m_forkAIMap = false;
 }
 
 
@@ -692,8 +695,25 @@ SidesInfo *SidesList::findSkirmishSideNamed(const AsciiString& side, Int mod, Te
 	return best;
 }
 
+/*static*/ Bool SidesList::isForkAIMapPath(const AsciiString& mapPath)
+{
+	AsciiString path = mapPath;
+	// a loaded save plays its own copy of the map from the save folder; the map it was started on decides
+	if (TheGameState && TheGameState->isInSaveDirectory(path))
+		path = TheGameState->getPristineMapName();
+	if (path.isEmpty())
+		return false;
+	// the generator's maps sit in the player's own Maps folder, but the game made them
+	if (isGeneratedMapPath(path))
+		return true;
+	// "maps\..." is the game's folder and its archives, "userdata\maps\..." the player's: the same
+	// portable name the lobby sends and the replay records, so every machine reads the same answer
+	return TheGameState && TheGameState->realMapPathToPortableMapPath(path).startsWithNoCase("maps\\");
+}
+
 void SidesList::prepareForMP_or_Skirmish(void)
 {
+	m_forkAIMap = isForkAIMapPath(TheGlobalData->m_mapName);
 	m_skirmishTeamrec.clear();
 	Int i;
 	for (i = 0; i < getNumTeams(); i++)
@@ -733,10 +753,21 @@ void SidesList::prepareForMP_or_Skirmish(void)
 		}
 	}
 	m_skirmishScriptsFromMap = gotScripts;
+	if (gotScripts)
+		DEBUG_LOG(("Skirmish map brings its own scripts: fork AI off, map %s\n", TheGlobalData->m_mapName.str()));
 	loadModSkirmishScripts();
 	if (!gotScripts) {
 		AsciiString path = "data\\Scripts\\SkirmishScripts.scb";
-		DEBUG_LOG(("Skirmish map using standard scripts\n"));
+		// A player's own map gets EA's scripts as EA shipped them: the fork's file carries its own
+		// openings and its Hard without the free cash.  A -mod brings its own skirmish AI and keeps it.
+		// ponytail: any -mod keeps the resolved file, even one that ships no .scb; check the mod's
+		// archives for one if that ever matters.
+		// (GlobalData::computeExeCRC hashes this file too, under the same name)
+		const char *retail = "data\\Scripts\\SkirmishScriptsRetail.scb";
+		if (!m_forkAIMap && TheGlobalData->m_mods.empty() && TheFileSystem->doesFileExist(retail))
+			path = retail;
+		DEBUG_LOG(("Skirmish map using standard scripts %s: fork AI %s, map %s\n", path.str(),
+							 m_forkAIMap ? "on" : "off", TheGlobalData->m_mapName.str()));
 		m_skirmishTeamrec.clear();
 		CachedFileInputStream theInputStream;
 		if (theInputStream.open(path)) { 

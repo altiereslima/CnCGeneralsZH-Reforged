@@ -1458,9 +1458,10 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 				 buildings. No spot now means no building from this entry: giveUpOnSpot drops it or
 				 sets it aside, so the rest of the list is not held behind it. */
 			static const Int NEIGHBOURS[8][2] = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {-1,1}, {1,-1}, {-1,-1} };
-			const Int searchRadius = runsOwnAI() ? SKIRMISH_BUILD_SEARCH_CELLS : BUILD_SEARCH_CELLS;
+			// EA's reach and stride, keyed as EA keyed them: any skirmish AI searched wide, its own map or not
+			const Int searchRadius = isSkirmishAI() ? SKIRMISH_BUILD_SEARCH_CELLS : BUILD_SEARCH_CELLS;
 			const Int searchWidth = 2*searchRadius + 1;
-			const Int probeStride = runsOwnAI() ? 2 : 1;		// the rings tried every other cell for a skirmish AI too
+			const Int probeStride = isSkirmishAI() ? 2 : 1;		// the rings tried every other cell for a skirmish AI too
 			// A home building the skirmish AI asked for stays within the base's edge and away from an
 			// enemy.  The flood only tested that the building fits.
 			const Bool home = runsOwnAI() && info->isPriorityBuild() && m_baseCenterSet && staysHome(bldgPlan);
@@ -2025,6 +2026,9 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 				}
 
 				order->m_factoryID = INVALID_ID; // no longer using this factory.
+				// a support order the fork's AI put in for a job of its own; EA's AI never has one, and
+				// a unit that came out of anything else must not land in those slots
+				const Bool dutyOrder = order->m_isScout && runsOwnAI();
 				if (ai) {
 					// tell it to start gathering resources.
 					// Here is the special bit for this exit style, force wanting on SupplyTruck types
@@ -2059,7 +2063,7 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 						// a Chinook buyGunshipChinook ordered (a support-unit order, m_isScout): the supply
 						// center's exit put it to gathering, which the line above has just switched off, and
 						// it stays on our books as a gunship.  A script team's transport Chinook is not one
-						else if (order->m_isScout && unit->isKindOf(KINDOF_AIRCRAFT) && unit->isKindOf(KINDOF_HARVESTER) &&
+						else if (dutyOrder && unit->isKindOf(KINDOF_AIRCRAFT) && unit->isKindOf(KINDOF_HARVESTER) &&
 								passengersFireFrom(unit->getTemplate())) {
 							for (Int chinook = 0; chinook < MAX_GUNSHIP_CHINOOKS; ++chinook) {
 								if (m_gunshipChinook[chinook] == INVALID_ID) {
@@ -2071,7 +2075,7 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 							}
 						}
 						// ... and a plain one buyTransportChinook ordered, which flies the wave's units
-						else if (order->m_isScout && unit->isKindOf(KINDOF_AIRCRAFT) && unit->isKindOf(KINDOF_HARVESTER) &&
+						else if (dutyOrder && unit->isKindOf(KINDOF_AIRCRAFT) && unit->isKindOf(KINDOF_HARVESTER) &&
 								transportContainOf(unit->getTemplate())) {
 							for (Int shuttle = 0; shuttle < MAX_TRANSPORT_CHINOOKS; ++shuttle) {
 								if (m_shuttle[shuttle].id == INVALID_ID) {
@@ -2089,10 +2093,10 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 					}
 				}
 				// a Helix buyDutyHelix ordered; a team's Helix comes out of a team order, not a support one
-				if (order->m_isScout && isHelicopter(unit))
+				if (dutyOrder && isHelicopter(unit))
 					takeDutyHelix(unit);
 				// ... and an Ambulance doAmbulances ordered
-				if (order->m_isScout && isAmbulanceTemplate(unit->getTemplate())) {
+				if (dutyOrder && isAmbulanceTemplate(unit->getTemplate())) {
 					for (Int slot = 0; slot < MAX_DUTY_AMBULANCES; ++slot) {
 						if (m_ambulance[slot].id == INVALID_ID) {
 							m_ambulance[slot].id = unit->getID();
@@ -2203,7 +2207,7 @@ static void summarizeStrike( const Coord3D *at, Int playerNdx, Real radius, Int 
 //----------------------------------------------------------------------------------------------------------
 Int AIPlayer::superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits )
 {
-	const Int value = getPlayerSuperweaponValue( center, playerNdx, radius, targetMilitaryUnits, m_player->getPlayerIndex(),
+	const Int value = getPlayerSuperweaponValue( center, playerNdx, radius, targetMilitaryUnits, knowledgeObserver(),
 																							 strikeEconomyWeight(), strikeThreatWeight() );
 	if( value <= 0 || !runsOwnAI() )
 		return value;
@@ -2453,7 +2457,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 	if( success )
 	{
 		StrikeSummary summary;
-		summarizeStrike( &veryBestPos, playerNdx, weaponRadius, m_player->getPlayerIndex(), &summary );
+		summarizeStrike( &veryBestPos, playerNdx, weaponRadius, knowledgeObserver(), &summary );
 		DEBUG_LOG(("AI SUPERWEAPON frame %d player %d skill %d aims '%s' at (%.0f,%.0f), worth %d: structures %d units %d, top '%s'\n",
 			TheGameLogic->getFrame(), m_player->getPlayerIndex(), (Int)m_skillLevel, power->getName().str(), veryBestPos.x,
 			veryBestPos.y, cash, summary.structures, summary.units, summary.top ? summary.top->getTemplate()->getName().str() : "none"));
@@ -2890,7 +2894,8 @@ Bool AIPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 		return false;
 	}
 
-	if (hasEnoughMoneyUnitsFor(proto)) {
+	// the cap on hackers and other money units is the fork's; EA's AI trains what its script asks for
+	if (runsOwnAI() && hasEnoughMoneyUnitsFor(proto)) {
 		return false;
 	}
 	// check build limit
@@ -4138,8 +4143,9 @@ void AIPlayer::buildBySupplies(Int minimumCash, const AsciiString& thingName, Bo
 		}
 		// Every call aims at the same spot beside the warehouse and the wiggle below takes the nearest
 		// free ground to it, so each defense the scripts asked for went up against the last one: a
-		// Hard China stood nine Gattling cannons shoulder to shoulder at one pile.
-		if (bestSupplyWarehouse && countOwnedNear(m_player, tTemplate, bestSupplyWarehouse->getPosition(),
+		// Hard China stood nine Gattling cannons shoulder to shoulder at one pile.  EA's AI builds
+		// every defense its script asks for, as the mission was balanced against.
+		if (bestSupplyWarehouse && runsOwnAI() && countOwnedNear(m_player, tTemplate, bestSupplyWarehouse->getPosition(),
 				SUPPLY_CENTER_CLOSE_DIST + bestSupplyWarehouse->getGeometryInfo().getBoundingCircleRadius()) >= MAX_DEFENSES_PER_WAREHOUSE) {
 			return;
 		}
@@ -4488,6 +4494,7 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 	Coord3D enemyCenter;
 	enemyCenter.zero();
 	Region2D bounds;
+	const Bool ownAI = runsOwnAI();
 	Player *enemy = getAiEnemy();
 	if (enemy) {
 		getPlayerStructureBounds(&bounds, enemy->getPlayerIndex(), FALSE, m_player->getPlayerIndex());
@@ -4500,8 +4507,9 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 			if (!obj->isKindOf(KINDOF_STRUCTURE)) continue;
 			if (!obj->isKindOf(KINDOF_SUPPLY_SOURCE)) continue;
 			// ... and one this AI has laid eyes on. This loop walks every object on the map, so
-			// without the test the AI expands to docks in shroud it has never been near.
-			if (!observerKnowsAbout(obj, m_player->getPlayerIndex())) continue;
+			// without the test the AI expands to docks in shroud it has never been near.  EA's AI knew
+			// every dock, and a mission's script picks from all of them.
+			if (!observerKnowsAbout(obj, knowledgeObserver())) continue;
 			static const NameKeyType key_warehouseUpdate = NAMEKEY("SupplyWarehouseDockUpdate");
 			SupplyWarehouseDockUpdate *warehouseModule = (SupplyWarehouseDockUpdate*)obj->findUpdateModule( key_warehouseUpdate );
 			if( warehouseModule )	{	 
@@ -4528,12 +4536,12 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 				// Another side's pile: its supply center works it, or its base stands round it.  Only
 				// our own center was looked for (an ally's too, for a supportive AI), so a dock inside
 				// an ally's base or a second enemy's read as free and the AI put a center, then guns
-				// and factories, against theirs.
-				if (otherSideStructureNear(m_player, obj)) {
+				// and factories, against theirs.  EA's AI takes the dock its script asks for, as it did.
+				if (ownAI && otherSideStructureNear(m_player, obj)) {
 					continue;
 				}
 				// a site given up at this dock lately (watchSite): not straight back into the same trap
-				if (aiSpotCooling(m_cooledSpots, obj->getPosition(), AI_COOLED_DOCK_RADIUS, TheGameLogic->getFrame())) {
+				if (ownAI && aiSpotCooling(m_cooledSpots, obj->getPosition(), AI_COOLED_DOCK_RADIUS, TheGameLogic->getFrame())) {
 					continue;
 				}
 
@@ -4571,7 +4579,7 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 				// Hard AI's expansion for ten minutes with a free pile one valley over.  A safe dock
 				// is preferred, the nearest of them, and the unsafe nearest only when none is safe.
 				// A mission's script picked its piles by hand and keeps EA's nearest.
-				if (!holdableOnly && runsOwnAI() && (bestSafeWarehouse==NULL || bestSafeDistSqr>distSqr) &&
+				if (!holdableOnly && ownAI && (bestSafeWarehouse==NULL || bestSafeDistSqr>distSqr) &&
 						isLocationSafe(obj->getPosition(), obj->getTemplate())) {
 					bestSafeWarehouse = obj;
 					bestSafeDistSqr = distSqr;
@@ -5096,7 +5104,12 @@ Int AIPlayer::computeStructureDelay( void )
 //----------------------------------------------------------------------------------------------------------
 Bool AIPlayer::runsOwnAI( void )
 {
-	return isSkirmishAI() && !TheSidesList->skirmishScriptsFromMap();
+	return isSkirmishAI() && TheSidesList->forkAIMap() && !TheSidesList->skirmishScriptsFromMap();
+}
+
+Int AIPlayer::knowledgeObserver( void )
+{
+	return runsOwnAI() ? m_player->getPlayerIndex() : -1;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -5502,7 +5515,9 @@ void AIPlayer::doUpgradesAndSkills( void )
 				}
 			}
 		}
-		if (isSkirmishAI()) {
+		if (isSkirmishAI() && !runsOwnAI()) {
+			m_skillsetSelector = GameLogicRandomValue(0, limit);	// EA's roll, across every set
+		} else if (isSkirmishAI()) {
 			//
 			// Split the designers' skill sets between the two roles rather than rolling across all
 			// of them (D8).  This makes no claim about which set is which - only that an aggressive
@@ -16331,6 +16346,10 @@ const AIPersonaWeights &AIPlayer::personaWeights( void ) const
 
 void AIPlayer::setAIPersonality( AIPersonality persona )
 {
+	// EA's AI has no personality: a seat on a map that plays it is Normal whatever the lobby said,
+	// draws nothing and keeps the role it rolled (SidesList's flags are set before players are)
+	if( !runsOwnAI() )
+		persona = AIPERSONA_NORMAL;
 	// only a Random seat draws, so a Normal seat's random stream is the one it always was
 	m_personaFromRandom = persona == AIPERSONA_RANDOM;
 	if( m_personaFromRandom )
@@ -17961,6 +17980,10 @@ void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool c
 	bounds->hi.x = bounds->lo.x = bounds->hi.y = bounds->lo.y = 0;
 	Region2D objBounds;
 	objBounds.hi.x = objBounds.lo.x = objBounds.hi.y = objBounds.lo.y = 0;
+	// EA's AI saw every building on the map, and the map scripts it runs were written for that: a
+	// player's own index only limits the fork's AI, whichever caller passed it
+	if (!runsOwnAI())
+		observerNdx = -1;
 
 	Player* pPlayer = ThePlayerList->getNthPlayer(playerNdx);
 	if (pPlayer == NULL) 

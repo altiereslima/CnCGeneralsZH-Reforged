@@ -560,6 +560,7 @@ Bool FileSystem::isForkOwnedPath(const AsciiString& filename)
 	if (p == "data\\ini\\modernwater.ini")
 		return TRUE;
 	return p == "data\\patch.str"
+		|| p == "data\\scripts\\skirmishscriptsretail.scb"	// EA's own, for a player's own map
 		|| starts("data\\turkish\\") || starts("data\\german\\")
 		|| starts("data\\ukrainian\\") || starts("data\\russian\\") || starts("data\\french\\")
 		|| starts("art\\textures\\reforged")

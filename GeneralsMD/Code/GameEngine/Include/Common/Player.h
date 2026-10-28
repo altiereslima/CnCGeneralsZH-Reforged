@@ -616,6 +616,7 @@ public:
 
 	/// Is this player a skirmish ai player?
 	Bool isSkirmishAIPlayer( void );
+	Bool aiRunsOwnAI( void ) const;		///< a computer player on the fork's AI (AIPlayer::runsOwnAI); FALSE for a human and for EA's AI
 
 	/// Have the ai check for bridges.
 	virtual Bool checkBridges(Object *unit, Waypoint *way);

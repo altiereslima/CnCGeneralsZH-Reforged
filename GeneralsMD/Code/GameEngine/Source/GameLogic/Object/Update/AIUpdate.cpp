@@ -7079,7 +7079,11 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 	// members and base defence turrets all route through here - so the exemption covered every one
 	// of them.  The AI now sees what a player sees, which is also what makes stealth work against it.
 	//
-	if( (calledByAI || beyondVision) && obj->getControllingPlayer() )
+	// A computer player on EA's AI (a mission, a Challenge, a player's own map) keeps EA's exemption:
+	// those maps and their scripts were made for an opponent whose units see into the fog.
+	const Player *controller = obj->getControllingPlayer();
+	if( controller && ( beyondVision ||
+			( calledByAI && ( controller->getPlayerType() == PLAYER_HUMAN || controller->aiRunsOwnAI() ) ) ) )
 	{
 		flags |= AI::UNFOGGED;
 	}

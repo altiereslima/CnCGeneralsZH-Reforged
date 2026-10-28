@@ -1863,12 +1863,14 @@ void GlobalData::computeExeCRC( void )
 	// Add in MP scripts to the EXE CRC, since the game will go out of sync if they change
 	// -modfactions: then each mod's own SkirmishScripts.scb, which its factions' computer players run
 	// (SidesList::loadModSkirmishScripts)
-	std::vector<Int> focus( 2, FILE_FOCUS_ALL );
+	// and EA's own SkirmishScripts.scb, which a player's own map runs (SidesList::prepareForMP_or_Skirmish)
+	std::vector<Int> focus( 3, FILE_FOCUS_ALL );
 	for (Int mod = 0; m_modFactions && mod < (Int)m_mods.size(); ++mod)
 		focus.push_back( mod );
 	for (size_t s = 0; s < focus.size(); ++s)
 	{
-		const char *script = s == 1 ? "Data\\Scripts\\MultiplayerScripts.scb" : "Data\\Scripts\\SkirmishScripts.scb";
+		const char *script = s == 1 ? "Data\\Scripts\\MultiplayerScripts.scb"
+											 : s == 2 ? "Data\\Scripts\\SkirmishScriptsRetail.scb" : "Data\\Scripts\\SkirmishScripts.scb";
 		File *fp = NULL;
 		if (focus[s] == FILE_FOCUS_ALL)
 		{

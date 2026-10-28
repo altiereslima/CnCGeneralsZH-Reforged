@@ -230,8 +230,14 @@ public: // AIPlayer interface, may be overridden by AISkirmishPlayer.  jba.
 	virtual Bool isSkirmishAI(void) {return false;}
 	/** A skirmish AI that plays the fork's own game beside its scripts: economy, base, army, waves and
 		* tactics.  Not one whose map wrote those scripts itself (an Art of Defense map's waves), which is
-		* left to them the way a Challenge or mission opponent is. */
+		* left to them the way a Challenge or mission opponent is, and not one on a player's own map
+		* (SidesList::forkAIMap), which plays EA's AI.  Every fork AI rule keys on this, never on
+		* isSkirmishAI() or the player type. */
 	Bool runsOwnAI(void);
+	/** Whose eyes this AI reads another player's estate through: its own index on the fork's AI, so
+		* it knows only what it has scouted; -1 on EA's, which knew the whole map and whose map scripts
+		* were written for that.  Pass it as the observerNdx below. */
+	Int knowledgeObserver(void);
 	virtual Player *getAiEnemy(void) {return NULL;}	///< Solo AI attacks based on scripting.  Only skirmish auto-acquires an enemy at this point.  jba.
 	virtual Bool checkBridges(Object *unit, Waypoint *way) {return false;}
 	/** Center, Flank or Backdoor: the approach with the least enemy firepower this AI knows about.
