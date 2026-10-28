@@ -1789,6 +1789,7 @@ GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DTruckDraw.h
 GameEngineDevice/Include/W3DDevice/GameClient/SunShadowCasterCull.h
 GameEngineDevice/Include/W3DDevice/GameClient/TerrainTex.h
 GameEngineDevice/Include/W3DDevice/GameClient/TileData.h
+GameEngineDevice/Include/W3DDevice/GameClient/VolumeSmoke.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DAssetManager.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DAssetManagerExposed.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DBibBuffer.h
@@ -1917,6 +1918,7 @@ GameEngineDevice/Source/W3DDevice/Common/W3DConvert.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/BaseHeightMap.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/DX11GpuParticles.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/DX11HazardCloud.cpp
+GameEngineDevice/Source/W3DDevice/GameClient/DX11VolumeSmoke.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DDebrisDraw.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DDefaultDraw.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DDependencyModelDraw.cpp

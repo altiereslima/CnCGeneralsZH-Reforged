@@ -1542,6 +1542,8 @@ if(ZH_PLATFORM_POSIX)
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/(HazardCloudUnsupported|DX11HazardCloud)\\.cpp$")
   # The GPU particles have only a Direct3D 11 backend; GpuParticlesUnsupported answers for SDL3.
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11GpuParticles\\.cpp$")
+  # The -volsmoke smoke volumes are Direct3D 11's alone; W3DParticleSys calls them only on Windows.
+  list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11VolumeSmoke\\.cpp$")
 
   # ---- the movies (V1): Windows' Bink player and its Bink API on FFmpeg, the same two files -------------
   # FFmpeg is built from the tarball Tools/vendor.sh keeps, into the build tree, with the Bink demuxer

@@ -9,7 +9,6 @@
 #include <initializer_list>
 
 namespace HazardCloud {
-namespace {
 
 void multiply(const float left[16], const float right[16], float result[16])
 {
@@ -48,6 +47,8 @@ bool inverse(const float source[16], float result[16])
         for (unsigned c = 0; c < 4; ++c) result[r * 4 + c] = static_cast<float>(rows[r][c + 4]);
     return true;
 }
+
+namespace {
 
 constexpr unsigned MinimumEmbers = 24;
 constexpr unsigned MaximumEmbers = 96;

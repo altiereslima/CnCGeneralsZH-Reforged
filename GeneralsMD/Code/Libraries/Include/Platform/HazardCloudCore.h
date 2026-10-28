@@ -70,6 +70,11 @@ unsigned emberConstants(const FieldState &field, unsigned index, bool terrain,
                         const float viewProjection[16], const float viewport[4],
                         float timeSeconds, EmberConstants &constants);
 
+// Row-major 4x4 product and inverse, in the device's layout (the inverse in doubles, so a camera
+// far from the origin still comes back); the -volsmoke volumes take them too.
+void multiply(const float left[16], const float right[16], float result[16]);
+bool inverse(const float source[16], float result[16]);
+
 // HLSL text. SDL GPU wants explicit register spaces; FXC's shader model 5
 // rejects them, so the Direct3D 11 backend asks for the text without.
 enum class Pass { Volume, Composite, Density, Lighting, Heat };
