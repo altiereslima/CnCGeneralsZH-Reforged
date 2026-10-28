@@ -40,6 +40,8 @@
 #include "Common/EarlyCommandLine.h"
 #include "GameClient/ParticleSys.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/Object.h"
+#include "Common/Geometry.h"
 #include "W3DDevice/GameClient/BaseHeightMap.h"
 #include "W3DDevice/GameClient/VolumeSmoke.h"
 #include "Platform/HazardCloud.h"
@@ -226,6 +228,25 @@ int4 at(int3 cell, uint slab)
 {
     return int4(clamp(cell, int3(0, 0, 0), int3(GX - 1, GY - 1, GZ - 1)) + int3(0, 0, slab * GZ), 0);
 }
+// The ground and the buildings, as a height a column: the top of what is solid, in cells over the
+// box's floor.  A cell whose centre is under it is solid: no smoke in it, no flow into it.
+Texture2D<float> Floor : register(t4);
+float groundAt(int2 xy, uint slab)
+{
+    xy = clamp(xy, int2(0, 0), int2(GX - 1, GY - 1));
+    return Floor.Load(int3(xy.x, xy.y + slab * GY, 0));
+}
+bool solid(int3 c, uint slab) { return c.z < 0 || c.z + 0.5 < groundAt(c.xy, slab); }
+// A flow that would run into a solid neighbour stops at its face; along it, it goes on.
+float3 noPenetration(float3 v, int3 c, uint slab)
+{
+    if (solid(c + int3(1, 0, 0), slab)) v.x = min(v.x, 0);
+    if (solid(c - int3(1, 0, 0), slab)) v.x = max(v.x, 0);
+    if (solid(c + int3(0, 1, 0), slab)) v.y = min(v.y, 0);
+    if (solid(c - int3(0, 1, 0), slab)) v.y = max(v.y, 0);
+    if (solid(c - int3(0, 0, 1), slab)) v.z = max(v.z, 0);
+    return v;
+}
 float3 jitterAt(uint3 id)
 {
     uint h = hash(uint3(id.xy, id.z + (uint)(Step.y * 30) * 4099u));
@@ -233,7 +254,10 @@ float3 jitterAt(uint3 id)
 }
 // The skirt: a thin outflow along the ground from under the blast, the core's footprint swelling
 // evenly and the 1/r sheet outside it, lobed by a hash of the slab, as no real blast pushes evenly.
-float skirtLayer(float3 cell) { return 1 - smoothstep(1.5, 4.0, cell.z); }
+float skirtLayer(float3 cell, uint slab)
+{
+    return 1 - smoothstep(1.5, 4.0, cell.z - groundAt((int2)cell.xy, slab) + 1.5);
+}
 float2 skirtFlow(float3 cell, uint slab)
 {
     float4 blast = Blasts[slab];
@@ -316,15 +340,24 @@ void main(uint3 id : SV_DispatchThreadID)
     float2 offset = cell.xy - blast.xy;
     float rho = length(offset);
     float2 radial = rho > 0.01 ? offset / rho : float2(0, 0);
+    float layer = skirtLayer(cell, slab);
     // The ground skirt, and the dust it lifts.
     if (power.x > 0) {
-        float layer = skirtLayer(cell);
         float reach = 1 - smoothstep(blast.w * 3, blast.w * 7, rho);
         float3 flow = float3(skirtFlow(cell, slab), 0) + jitterAt(id) * power.x * 0.2;
         vt.xyz = lerp(vt.xyz, flow, 0.6 * layer * reach);
     }
     if (power.w > 0 && rho < blast.w * 1.6)
-        d.y = max(d.y, power.w * skirtLayer(cell) * (0.5 + valueNoise(cell / 2, slab + 5)));
+        d.y = max(d.y, power.w * layer * (0.5 + valueNoise(cell / 2, slab + 5)));
+    // A shock front: a ring of dust racing out along the ground, far past the fireball, slowing
+    // as it goes (Motion: front radius, its speed, its dust).  Buildings in its way stop it.
+    float4 motion = Motion[slab];
+    if (motion.z > 0) {
+        float across = (rho - motion.y) / 3;
+        float band = exp(-across * across) * layer;
+        vt.xy = lerp(vt.xy, radial * motion.z * (1 + 0.3 * jitterAt(id).x), 0.5 * band);
+        d.y = max(d.y, motion.w * band * (0.4 + valueNoise(cell / 2.5, slab + 9)));
+    }
     // The vortex ring: a torus round the core, up through the middle, out over the top, down
     // outside the rim and in underneath; it rolls the cap and draws the ground air inward.
     if (shape.x > 0) {
@@ -334,13 +367,19 @@ void main(uint3 id : SV_DispatchThreadID)
         float tube = max(shape.y * 0.5, 1.5);
         float k = exp(-q * q / (tube * tube));
         float3 swirl = float3(radial * h, -dr) * (shape.x / max(q, 0.75));
-        swirl.z += Motion[slab].x;
+        swirl.z += motion.x;
         vt.xyz = lerp(vt.xyz, swirl, 0.3 * k);
+        // the cap is the ring: soot and heat fed into the tube while it climbs, so it reads as a torus
+        if (motion.x > 0.3) {
+            float tubeCore = exp(-q * q / (tube * tube * 0.35));
+            d.x = max(d.x, 1.2 * tubeCore * (0.4 + 1.2 * valueNoise(cell / 2.5 + Step.y * 0.3, slab + 3)));
+            vt.w = max(vt.w, 0.9 * tubeCore);
+        }
     }
     // The stem: air drawn in along the ground under the cap and up the axis into it.
     if (shape.w > 0) {
         float ring = max(shape.y, 2);
-        float ground = skirtLayer(cell) * (1 - smoothstep(ring * 1.5, ring * 3, rho));
+        float ground = layer * (1 - smoothstep(ring * 1.5, ring * 3, rho));
         float axis = exp(-rho * rho / (ring * ring * 0.2)) * (cell.z < blast.z ? 1 : 0);
         float3 stem = float3(-radial * shape.w * 0.6, 0) * ground + float3(0, 0, shape.w) * axis;
         vt.xyz = lerp(vt.xyz, stem, 0.15 * max(ground, axis));
@@ -378,7 +417,12 @@ const char *const AdvectPassEnd = R"HLSL(
     // Open sides and top: what reaches them is gone.  The ground lets nothing through and keeps
     // a little of the dust that lands on it.
     if (c.x == 0 || c.y == 0 || c.x == GX - 1 || c.y == GY - 1 || c.z == GZ - 1) { d = 0; vt.w = 0; }
-    if (c.z == 0) { vt.z = max(vt.z, 0); d.y *= 0.97; }
+    // The terrain and the buildings: nothing inside them, and no flow into their faces.
+    if (solid(c, slab)) { vt = 0; d = 0; }
+    else {
+        vt.xyz = noPenetration(vt.xyz, c, slab);
+        if (solid(c - int3(0, 0, 1), slab)) d.y *= 0.97;
+    }
     VelOut[id] = vt;
     DenOut[id] = d;
 }
@@ -392,15 +436,20 @@ float3 v(int3 c, uint slab) { return Vel.Load(at(c, slab)).xyz; }
 void main(uint3 id : SV_DispatchThreadID)
 {
     CELL_HEADER
-    float below = c.z == 0 ? -v(c, slab).z : v(c - int3(0, 0, 1), slab).z;
+    if (solid(c, slab)) { DivOut[id] = 0; return; }
+    // a solid neighbour is a wall: it mirrors the flow, so none crosses its face
+    float3 here = v(c, slab);
+    float east = solid(c + int3(1, 0, 0), slab) ? -here.x : v(c + int3(1, 0, 0), slab).x;
+    float west = solid(c - int3(1, 0, 0), slab) ? -here.x : v(c - int3(1, 0, 0), slab).x;
+    float north = solid(c + int3(0, 1, 0), slab) ? -here.y : v(c + int3(0, 1, 0), slab).y;
+    float south = solid(c - int3(0, 1, 0), slab) ? -here.y : v(c - int3(0, 1, 0), slab).y;
+    float below = solid(c - int3(0, 0, 1), slab) ? -here.z : v(c - int3(0, 0, 1), slab).z;
     // The skirt's footprint is the one place the flow may diverge, what skirtFlow carries, so the
     // projection keeps the outflow instead of cancelling it.
     float source = 0;
     if (Power[slab].x > 0 && length(float2(c.xy) - Blasts[slab].xy) < Blasts[slab].w)
-        source = 2 * Power[slab].x / Blasts[slab].w * skirtLayer(float3(c));
-    DivOut[id] = 0.5 * (v(c + int3(1, 0, 0), slab).x - v(c - int3(1, 0, 0), slab).x
-        + v(c + int3(0, 1, 0), slab).y - v(c - int3(0, 1, 0), slab).y
-        + v(c + int3(0, 0, 1), slab).z - below) - source;
+        source = 2 * Power[slab].x / Blasts[slab].w * skirtLayer(float3(c), slab);
+    DivOut[id] = 0.5 * (east - west + north - south + v(c + int3(0, 0, 1), slab).z - below) - source;
 }
 )HLSL";
 
@@ -411,6 +460,7 @@ float p(int3 c, uint slab, float here)
 {
     if (c.z < 0) return here;
     if (any(c < int3(0, 0, 0)) || any(c >= int3(GX, GY, GZ))) return 0;
+    if (solid(c, slab)) return here;	// a wall: no pressure across it
     return Pres.Load(int4(c + int3(0, 0, slab * GZ), 0));
 }
 )HLSL";
@@ -442,8 +492,8 @@ void main(uint3 id : SV_DispatchThreadID)
         p(c + int3(0, 1, 0), slab, here) - p(c - int3(0, 1, 0), slab, here),
         p(c + int3(0, 0, 1), slab, here) - p(c - int3(0, 0, 1), slab, here));
     float4 vt = Vel.Load(int4(id, 0));
-    vt.xyz -= grad;
-    if (c.z == 0) vt.z = max(vt.z, 0);
+    vt.xyz = noPenetration(vt.xyz - grad, c, slab);
+    if (solid(c, slab)) vt = 0;
     VelOut[id] = vt;
 }
 )HLSL";
@@ -603,6 +653,7 @@ struct Volume {
 	int born = 0;
 	int life = 0;						// logic frames
 	unsigned puffs = 0;
+	int floorFrame = -1000;				// when its terrain and buildings were last laid into the grid
 };
 
 struct Tier {
@@ -611,6 +662,8 @@ struct Tier {
 	ID3D11PixelShader *march = nullptr;
 	ID3D11Buffer *simConstants = nullptr;
 	Field velocity[2], density[2], pressure[2], curl, divergence, light;
+	ID3D11Texture2D *floor = nullptr;	// each slab's solid height a column, slabs stacked in y
+	ID3D11ShaderResourceView *floorView = nullptr;
 	unsigned current = 0;		// which density holds the last step's result
 };
 
@@ -664,6 +717,8 @@ void releaseState()
 		drop(tier.curl);
 		drop(tier.divergence);
 		drop(tier.light);
+		drop(tier.floorView);
+		drop(tier.floor);
 	}
 	drop(state.fullscreen);
 	drop(state.linear);
@@ -755,6 +810,16 @@ bool makeTier(DX11BackendClass *backend, ID3D11Device *device, Tier &tier, const
 			&& make(device, tier.pressure[i], ScalarFormat, shape);
 	made = made && make(device, tier.curl, VelocityFormat, shape) && make(device, tier.divergence, ScalarFormat, shape)
 		&& make(device, tier.light, ScalarFormat, shape);
+	D3D11_TEXTURE2D_DESC floor = {};
+	floor.Width = shape.gx;
+	floor.Height = shape.gy * shape.slabs;
+	floor.MipLevels = floor.ArraySize = 1;
+	floor.Format = DXGI_FORMAT_R32_FLOAT;
+	floor.SampleDesc.Count = 1;
+	floor.Usage = D3D11_USAGE_DEFAULT;
+	floor.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	made = made && SUCCEEDED(device->CreateTexture2D(&floor, nullptr, &tier.floor))
+		&& SUCCEEDED(device->CreateShaderResourceView(tier.floor, nullptr, &tier.floorView));
 	D3D11_BUFFER_DESC buffer = {};
 	buffer.Usage = D3D11_USAGE_DYNAMIC;
 	buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
@@ -1040,23 +1105,30 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		flashTall = 1.2f;
 		if (t < 4.0f) power[1] = 1.3f;
 		power[2] = 2.0f * std::exp(-t / 5.0f);
-		if (t < 4.0f) { power[0] = 70.0f * std::exp(-t / 1.5f); power[3] = 1.2f; }
+		if (t < 1.0f) { power[0] = 70.0f * std::exp(-t / 0.5f); power[3] = 1.2f; }
+		// the base surge: a ring front of dust racing out along the ground, far past the fireball,
+		// slowing as it goes, 42 cells (420 units) out over a 1.6 s constant
+		if (t < 7.0f) {
+			motion[1] = 42.0f * (1 - std::exp(-t / 1.6f));
+			motion[2] = 42.0f / 1.6f * std::exp(-t / 1.6f) * 1.2f;
+			motion[3] = 1.6f * (1 - t / 7.0f);
+		}
 		if (t > 0.3f && t < 2.2f) {
 			shellRadius = radius * 1.7f;
 			shellOpacity = 1.2f * std::sin((t - 0.3f) / 1.9f * 3.14159265f);
 		}
 		if (t > 0.8f) {
-			shape[0] = 18.0f * std::exp(-t / 30.0f);
+			shape[0] = 35.0f * std::exp(-t / 30.0f);
 			shape[1] = radius * (0.9f + 0.03f * (std::max)(t - 10.0f, 0.0f));
 			shape[1] = (std::min)(shape[1], 30.0f);
 		}
 		shape[2] = bz + 46.0f;
-		if (t > 1.5f) shape[3] = 8.0f * std::exp(-t / 40.0f);
+		if (t > 1.5f) shape[3] = 14.0f * std::exp(-t / 40.0f);
 		// the ground dust the stem draws up
 		if (t > 0.5f && t < 40.0f)
 			for (unsigned k = 0; k < 5; ++k) {
 				const float a = k * 1.2566371f, r = k == 0 ? 0.0f : 6.0f;
-				emit(slab, count, { bx + r * std::cos(a), by + r * std::sin(a), 1.0f, 4.0f, 0, 0, 0, 0, 0, 1.5f, 0 });
+				emit(slab, count, { bx + r * std::cos(a), by + r * std::sin(a), bz, 4.0f, 0, 0, 0, 0, 0, 1.5f, 0 });
 			}
 		const float grey = (std::min)(t / 25.0f, 1.0f);
 		soot[0] = 0.42f + (0.70f - 0.42f) * grey;
@@ -1081,9 +1153,9 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 
 void unbindCompute(ID3D11DeviceContext *context)
 {
-	ID3D11ShaderResourceView *const views[4] = {};
+	ID3D11ShaderResourceView *const views[5] = {};
 	ID3D11UnorderedAccessView *const writes[3] = {};
-	context->CSSetShaderResources(0, 4, views);
+	context->CSSetShaderResources(0, 5, views);
 	context->CSSetUnorderedAccessViews(0, 3, writes, nullptr);
 }
 
@@ -1092,12 +1164,56 @@ void run(ID3D11DeviceContext *context, const Tier &tier, Pass pass, std::initial
 {
 	unbindCompute(context);
 	context->CSSetShaderResources(0, (UINT)reads.size(), reads.begin());
+	context->CSSetShaderResources(4, 1, &tier.floorView);
 	context->CSSetUnorderedAccessViews(0, (UINT)writes.size(), writes.begin(), nullptr);
 	context->CSSetShader(tier.compute[pass], nullptr, 0);
 	context->Dispatch(tier.shape.gx / 8, tier.shape.gy / 8, slabs * tier.shape.gz / 8);
 }
 
 float secondsSince(const Volume &volume, int now) { return (float)(now - volume.born) / LOGICFRAMES_PER_SECOND; }
+
+// The terrain under the box and every structure standing in it, as the top of what is solid a
+// column, in cells over the box's floor.  Read on the client from the objects' own geometry; the
+// logic reads nothing back.  Laid again every two seconds, as buildings fall.
+void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Volume &volume, int now)
+{
+	if (now - volume.floorFrame < 2 * LOGICFRAMES_PER_SECOND && !volume.reset) return;
+	volume.floorFrame = now;
+	const TierShape &shape = tier.shape;
+	static std::vector<float> heights;
+	heights.assign(shape.gx * shape.gy, 0.0f);
+	const float cell = volume.cell;
+	for (unsigned y = 0; y < shape.gy; ++y)
+		for (unsigned x = 0; x < shape.gx; ++x) {
+			const float wx = volume.origin[0] + (x + 0.5f) * cell, wy = volume.origin[1] + (y + 0.5f) * cell;
+			const float ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(wx, wy, NULL) : 0.0f;
+			heights[y * shape.gx + x] = (ground - volume.origin[2]) / cell;
+		}
+	const float right = volume.origin[0] + shape.gx * cell, top = volume.origin[1] + shape.gy * cell;
+	for (Object *object = TheGameLogic ? TheGameLogic->getFirstObject() : nullptr; object; object = object->getNextObject()) {
+		if (!object->isKindOf(KINDOF_STRUCTURE)) continue;
+		const Coord3D *at = object->getPosition();
+		const GeometryInfo &geometry = object->getGeometryInfo();
+		const float major = geometry.getMajorRadius(), minor = geometry.getMinorRadius();
+		const float reach = std::sqrt(major * major + minor * minor);
+		if (at->x + reach < volume.origin[0] || at->x - reach > right || at->y + reach < volume.origin[1] || at->y - reach > top)
+			continue;
+		const float roof = (at->z + geometry.getMaxHeightAbovePosition() - volume.origin[2]) / cell;
+		const float c = std::cos(object->getOrientation()), s = std::sin(object->getOrientation());
+		const bool box = geometry.getGeomType() == GEOMETRY_BOX;
+		const int x0 = (std::max)(0, int((at->x - reach - volume.origin[0]) / cell)), x1 = (std::min)(int(shape.gx) - 1, int((at->x + reach - volume.origin[0]) / cell));
+		const int y0 = (std::max)(0, int((at->y - reach - volume.origin[1]) / cell)), y1 = (std::min)(int(shape.gy) - 1, int((at->y + reach - volume.origin[1]) / cell));
+		for (int y = y0; y <= y1; ++y)
+			for (int x = x0; x <= x1; ++x) {
+				const float dx = volume.origin[0] + (x + 0.5f) * cell - at->x, dy = volume.origin[1] + (y + 0.5f) * cell - at->y;
+				const float along = dx * c + dy * s, side = -dx * s + dy * c;
+				const bool inside = box ? std::fabs(along) <= major && std::fabs(side) <= minor : dx * dx + dy * dy <= major * major;
+				if (inside) heights[y * shape.gx + x] = (std::max)(heights[y * shape.gx + x], roof);
+			}
+	}
+	const D3D11_BOX region = { 0, slab * shape.gy, 0, shape.gx, (slab + 1) * shape.gy, 1 };
+	context->UpdateSubresource(tier.floor, 0, &region, heights.data(), shape.gx * sizeof(float), 0);
+}
 
 void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float seconds, const float sunToward[3], unsigned slabs)
 {
@@ -1123,6 +1239,7 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		sim.Volumes[slab][2] = volume.cell;
 		sim.Volumes[slab][3] = volume.reset ? 1.0f : 0.0f;
 		if (!volume.live) continue;
+		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
 		schedule(volume, slab, secondsSince(volume, now), nullptr);
 		settle = DustSettle / volume.cell;	// ponytail: one settling speed a tier, its last volume's cell
 	}
@@ -1282,11 +1399,20 @@ bool Takes(ParticleSystem *system)
 	const float sideX = shape.gx * volume.cell, sideY = shape.gy * volume.cell;
 	volume.origin[0] = where.x - sideX * 0.5f;
 	volume.origin[1] = where.y - sideY * 0.5f;
-	volume.origin[2] = (std::min)(where.z, ground) - volume.cell * 1.5f;
+	// The box's floor under the lowest ground it covers, so smoke can run down into a valley; the
+	// terrain itself is laid into the grid as solid (layFloor).
+	float lowest = (std::min)(where.z, ground);
+	if (TheTerrainRenderObject)
+		for (int j = 0; j <= 6; ++j)
+			for (int i = 0; i <= 6; ++i)
+				lowest = (std::min)(lowest, TheTerrainRenderObject->getHeightMapHeight(
+					volume.origin[0] + sideX * i / 6.0f, volume.origin[1] + sideY * j / 6.0f, NULL));
+	volume.origin[2] = lowest - volume.cell;
 	volume.blast[0] = (shape.gx - 1) * 0.5f;
 	volume.blast[1] = (shape.gy - 1) * 0.5f;
-	// at the blast's height, but never under the ground's first cell: the ground turns its push
-	volume.blast[2] = type == Airburst ? (where.z - volume.origin[2]) / volume.cell - 0.5f : 1.5f;
+	// at the blast's height, but never under the ground: the ground turns its push
+	const float groundCell = (ground - volume.origin[2]) / volume.cell;
+	volume.blast[2] = type == Airburst ? (where.z - volume.origin[2]) / volume.cell - 0.5f : groundCell + 0.5f;
 	volume.seed = unsigned(int(where.x) * 73856093) ^ unsigned(int(where.y) * 19349663) ^ unsigned(now * 83492791);
 	volume.born = now;
 	volume.life = int(lifeOf(type) * LOGICFRAMES_PER_SECOND);
