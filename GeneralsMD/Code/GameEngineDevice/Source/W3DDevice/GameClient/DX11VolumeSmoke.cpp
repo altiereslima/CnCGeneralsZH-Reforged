@@ -8,8 +8,9 @@
 // A tank's death is an ammunition cook-off, laid out on the dying hull's own box (its template's
 // length, width and height and its heading, read from the drawable).  Orange flame and black soot
 // burst out low along the hull and roll along the ground off both ends over a skirt of pale dust,
-// a ragged near-white plume of fire fans up out of the hull top in twelve to fourteen uneven
-// jets, on High twice as high as the band is long, and cools to grey-brown smoke, two to four
+// a ragged plume of fire, white in the middle and orange at its edges, fans up out of the hull
+// top in thirteen jets, the middle one tallest, on High twice as high as the band is long, and
+// cools to grey-brown smoke, two to four
 // smaller pops follow over a few seconds, and then the hull burns: a thick black column for half
 // a minute that rises from its whole length, leans with the wind and thins.
 //
@@ -1372,40 +1373,54 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, 1.25f, 8.0f * fade, 0.35f);
 			}
 		}
-		// The plume, the photo's tallest part: twelve to fourteen jets of white-hot fire and dust
-		// shot up out of the hull top in the first half second, each to its own height, fanning out
-		// as they climb, so the flare is ragged and opens upwards.  The tallest is set for about
-		// twice the base band's length once the heat has lifted it on, twenty cells short of the
-		// grid's top (20 on Low's 40, 36 on High's 56: hot heads rise on into the lid), and they
-		// lean out up to a radian and 15 cells off the blast's axis, so the fan opens wide at the
-		// top.  Kept to 12 cells and 0.8, a High plume twice as tall came out a narrow pillar.  Each lays
+		// The plume, the photo's tallest part: thirteen jets of white-hot fire and dust shot up out
+		// of the hull top in the first quarter second, the middle one straight up and tallest, the
+		// others leaning further out and stopping lower the further from the middle they are, so the
+		// flare is one ragged column that opens upwards.  The middle one is set for about twice the
+		// base band's length once the heat has lifted it on, twenty cells short of the grid's top
+		// (20 on Low's 40, 36 on High's 56: hot heads rise on into the lid), and the outer ones lean
+		// out up to a radian and 15 cells off the blast's axis.  Kept to 12 cells and 0.8, a High
+		// plume twice as tall came out a narrow pillar.  Each lays
 		// down thin smoke at a rate that goes with its speed, the same a cell along the whole jet,
 		// and pushes the air only lightly.  A thick jet, a hard push or a fixed rate carried the
 		// smoke along with the head and left a round ball at the top with nothing under it.  The
 		// fire burns brighter for the first second (soot[3] below), so the plume flares white and
 		// then hangs as grey-brown smoke and dust.
 		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 20.0f);
-		const unsigned jets = 14;	// with the base and the skirt, the 24 a slab holds
+		// an odd count, so one jet stands straight up the middle: with fourteen the two middle ones
+		// leaned apart and notched the top into a heart
+		const unsigned jets = 13;	// with the base and the skirt, 23 of the 24 a slab holds
 		for (unsigned j = 0; j < jets; ++j) {
 			auto field = [&](unsigned f) { return unit(1000 + 16 * j + f); };
 			// a jet stops once it has slowed to a fifth of its speed: lingering at the top it heated a
 			// round ball there
 			const float age = t - 0.06f * field(0), slows = 0.18f;
 			if (age < 0 || age > 1.5f * slows) continue;
-			// Spread evenly over the fan, one end of the hull to the other, with a little hash on
-			// top, so the gaps between them fill into one widening wedge: drawn at random they
-			// bunched into four or five fingers with a ball on each.
-			const float side = (j + 0.5f) / jets * 2 - 1;
-			const float tilt = 0.12f + 0.9f * std::fabs(side) + 0.08f * (field(1) - 0.5f);
+			// Spread over the fan from one end of the hull to the other, a little bunched towards
+			// the middle (side = u^1.2), with a little hash on top, so the gaps fill into one
+			// column: drawn at random they bunched into four or five fingers with a ball on each.
+			// The middle is the photo's column, so `centre` sets it tallest, thickest and hottest
+			// and the outer jets lean shorter, thinner and orange.  The jets near the middle stand
+			// nearly upright (tilt ~ side^1.1).  With every jet but the middle one tilted at least
+			// 0.15 towards its own end, the two halves of the fan split apart round one thin middle
+			// jet: a V, two lobes over a gap at the centre top, from the play camera a white heart.
+			// Shown with the middle jet alone (a thin spike, the tallest) and all but it (two lobes).
+			// The middle jet's height is not drawn, so no neighbour can stand over it; the further out
+			// a jet, the more its height is left to the hash, which makes the top ragged.
+			const float u = (j + 0.5f) / jets * 2 - 1;
+			const float side = (u < 0 ? -1.0f : 1.0f) * std::pow(std::fabs(u), 1.2f), centre = 1 - std::fabs(side);
+			const float tilt = 1.15f * std::pow(std::fabs(side), 1.1f) + 0.04f * (field(1) - 0.5f);
 			const float azimuth = (side < 0 ? 3.14159265f : 0.0f) + (field(3) - 0.5f) * 0.9f;
 			float da = std::sin(tilt) * std::cos(azimuth), dc = std::sin(tilt) * std::sin(azimuth);
 			const float dz = std::cos(tilt);
-			const float height = reach * (0.6f + 0.4f * field(4)), speed = height / slows;
+			const float height = reach * (0.75f + 0.25f * centre * centre) * (1 - 0.3f * (1 - centre * centre * centre * centre) * field(4));
+			const float speed = height / slows;
 			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
-			// A long hull's or a tall jet's lean is cut, so a whole jet, head and push, ends inside 15
-			// cells, where walls() has faded it by a few percent (0.78 of its height is as far as it
-			// gets).
-			const float a0 = (field(5) - 0.5f) * L * 1.2f, c0 = (field(6) - 0.5f) * W * 0.6f;
+			// A jet starts on the part of the hull it leans to, so the fan opens from the middle
+			// and the ends rather than crossing.  A long hull's or a tall jet's lean is cut, so a
+			// whole jet, head and push, ends inside 15 cells, where walls() has faded it by a few
+			// percent (0.78 of its height is as far as it gets).
+			const float a0 = (side * 0.5f + (field(5) - 0.5f) * 0.4f) * L, c0 = (field(6) - 0.5f) * W * 0.6f;
 			const float lean = std::sqrt(da * da + dc * dc) * 0.78f * height;
 			if (lean > 1e-3f) {
 				const float k = (std::min)(1.0f, (std::max)(0.0f, 15.0f - std::sqrt(a0 * a0 + c0 * c0)) / lean);
@@ -1415,23 +1430,32 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float along = a0 + da * travelled, across = c0 + dc * travelled;
 			// Smoke and heat both go with the jet's speed, hottest low down; it cools once laid.
 			// Some dust, which the sun lights pale; the soot is what glows (a jet of twice as much dust
-			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.  Hot
-			// enough low down to burn near-white (fireColour past 1.6).  The fan of jets is what
-			// widens the plume; one jet widens only a little.  Thin jets that doubled their width as
-			// they climbed stood on a thin stem under a fat top, a mushroom.
-			// Wider as it climbs (the advection smears a two-cell jet's heat into the cold air round
-			// it, which cooled the fan's top to orange), then over its last stretch the jet thins,
-			// lays less and cools, so it ends in a spiky streak and not a bright ball.  Heat never
-			// under 3.2 in the first quarter second, so the fan burns pale, as the photo's does.
-			const float taper = 1 - smoothstep01(travelled / (0.78f * height), 0.55f, 1.0f);
-			const float rate = 45.0f * now / speed * taper;
-			const float heat = (std::max)(4.6f * std::pow(now / speed, 0.4f), t < 0.25f ? 3.2f : 0.0f) * (0.5f + 0.5f * taper);
-			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.04f * travelled) * (0.35f + 0.65f * taper),
-				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.15f);
+			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.  The
+			// fan of jets is what widens the plume; one jet widens only a little.  Thin jets that
+			// doubled their width as they climbed stood on a thin stem under a fat top, a mushroom.
+			// Wider as it climbs, then over its last stretch the jet thins, lays less and cools, so
+			// it ends in a spiky streak and not a bright ball.  Heat 3.2 low in the middle jet and
+			// 2.3 in the outer ones, every jet cooler as it climbs.  A thin jet's heat smears into the
+			// cold air round it, so the outer ones burn orange and only the middle, where the jets
+			// overlap, stays white (fireColour past 1.6): a soft white core in an orange fan.  With
+			// every jet at 3.2 or more for the first quarter second the whole fan was one white
+			// shape; at 1.2 the outer jets went out unseen.  A jet leaves the hull only a third as hot
+			// and takes its full heat over the first quarter of its path: heat is the hottest
+			// emitter's, not a sum, so a jet at full heat set the base band's thick soot alight
+			// and a white ball sat on the hull for half a second.  The rate goes with the reach, so Low's
+			// shorter jets lay as much a cell as High's: laying the same smoke into half the length
+			// heaped a white ball on the hull on Low.
+			const float path = travelled / (0.78f * height);
+			const float taper = 1 - smoothstep01(path, 0.55f, 1.0f);
+			const float rate = 45.0f * (0.75f + 0.45f * centre) * reach / 36.0f * now / speed * taper;
+			const float heat = (2.3f + 0.9f * centre * centre) * (0.6f + 0.4f * std::pow(now / speed, 0.4f)) * (1 - 0.25f * path)
+				* (0.7f + 0.3f * taper) * (0.35f + 0.65f * smoothstep01(path, 0.0f, 0.25f));
+			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.06f * travelled) * (0.35f + 0.65f * taper) * (0.8f + 0.5f * centre * centre),
+				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.08f);
 		}
 		// the default 1.6 once the flare is over; a fifth of a second of white, so several tanks
 		// dying at once do not white out the view
-		soot[3] = 1.6f + 4.6f * std::exp(-t / 0.2f);
+		soot[3] = 1.6f + 3.4f * std::exp(-t / 0.18f);
 		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
 		if (t < 0.9f) {
 			const float fade = 1 - t / 0.9f;
@@ -2260,11 +2284,13 @@ bool Takes(ParticleSystem *system)
 	// A shell's takes smoke, dust and dirt and leaves the fire cards; a tank's and a nuclear
 	// blast's take everything, as the sim draws their fire.  A system that starts a blast of its own joins only one of its own kind
 	// (the nuke's several mushroom systems, a tank's two death smokes), so a tank dying under the
-	// shell that killed it still gets a tank's smoke.
+	// shell that killed it still gets a tank's smoke.  A tank's stays open for a second and a half:
+	// the Overlord's and the Paladin's wrecks set off a second death smoke 35 to 40 frames on,
+	// which started a second tank blast in the first one's fire and burned a white ball on the hull.
 	const TemplateKind kind = kindOfTemplate(system->getTemplate(), system);
 	const bool alpha = system->getShaderType() == ParticleSystemInfo::ALPHA && !system->getTemplate()->isEmissive();
 	for (const Volume &volume : volumes) {
-		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 120 : 30)) continue;
+		if (!volume.live || seen < volume.born - 10 || seen > volume.born + (volume.kind == Nuclear ? 120 : volume.kind == TankDeath ? 90 : 30)) continue;
 		if (flat && volume.kind != TankDeath) continue;
 		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
