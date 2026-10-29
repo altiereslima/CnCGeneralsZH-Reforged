@@ -2757,7 +2757,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		soot[0] = 0.78f; soot[1] = 0.77f; soot[2] = 0.75f; soot[3] = 1.6f + 1.4f * std::exp(-t / 0.05f);
 		dust[0] = 0.62f; dust[1] = 0.55f; dust[2] = 0.44f;	// sunlit tan
 		// The fireball, as the photos have it: a cone of flame straight out of the muzzle, widening
-		// forward, brightest at the tip and orange-red at its fringe.  Five hot puffs on the barrel's
+		// forward, brightest at the tip and orange-red at its fringe.  Six hot puffs on the barrel's
 		// line, the first just inside the tip, each wider than the one behind it, the hottest at the
 		// muzzle, pushed on only gently so the cone stays on the gun.  Four puffs out ahead, thrown
 		// fastest from the muzzle, left a gap and then a round ball.  Its heat goes in a few frames
@@ -2767,11 +2767,14 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float grow = 0.7f + 0.3f * smoothstep01(t, 0.0f, 0.05f), fade = 1 - t / 0.1f;
 			// (the glow is soot times heat along the eye's ray, so laid evenly the wide far puffs outshone
 			// the thin tip and the cone read as a ball ahead of the gun: the tip lays the most and the
-			// hottest, the far end little and cooler)
-			for (unsigned k = 0; k < 5; ++k) {
-				const float d = (-0.3f + 1.5f * k) * grow;
-				along(d, 0, (1.2f + 0.4f * (std::max)(d, 0.0f)) * grow, (4.0f + 4.0f * k) * fade, 0.5f, 70.0f - 13.0f * k,
-					(2.9f - 0.35f * k) * (0.7f + 0.3f * fade), 0.4f);
+			// hottest, the far end somewhat less and a little cooler)
+			// (about a third of a Crusader's barrel long, 12 units, and as tall as its turret at the far
+			// end; at 8 units and a far end laying a quarter of the tip's soot at half its heat it read
+			// smaller than the photo's and the game's own flame)
+			for (unsigned k = 0; k < 6; ++k) {
+				const float d = (-0.3f + 1.6f * k) * grow;
+				along(d, 0, (1.3f + 0.45f * (std::max)(d, 0.0f)) * grow, (4.0f + 3.0f * k) * fade, 0.5f, 70.0f - 6.0f * k,
+					(2.9f - 0.12f * k) * (0.7f + 0.3f * fade), 0.4f);
 			}
 		}
 		// a little smoke, pushed on ahead and spreading, lightly lifted
