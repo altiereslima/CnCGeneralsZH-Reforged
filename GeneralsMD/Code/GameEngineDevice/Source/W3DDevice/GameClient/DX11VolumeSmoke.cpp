@@ -20,11 +20,12 @@
 // at a larger cell with a small mushroom on top; an airburst has no dirt, only the puff and a
 // patch of dust under it.
 //
-// A building's death is laid out on its footprint, read from the structure list Gather keeps, and
-// sized by it: fire and soot burst out low over the whole footprint, a ragged plume of fire climbs
-// out of it and cools to smoke, the collapse pours pale dust out from under every wall along the
-// ground and round the buildings beside it, and the ruin burns under a dark column for half a
-// minute.  A damaged stage blows out of the roof and walls of a building that stays standing.
+// A building's death is laid out on its model's meshes, boxes read from its render object by
+// Gather, and sized by them: each mesh fills with smoke and dust in its own place and slumps, fire
+// bursts out of the tops of the biggest, a ragged plume climbs out of them and cools to grey-brown
+// smoke, the collapse pours pale dust out from under every wall along the ground and round the
+// buildings beside it, and the ruin burns under a column for fifteen seconds.  A damaged stage
+// blows fire out of the top of a building that stays standing.
 //
 // A nuclear-class blast (the missile, the GLA's, the MOAB) has a volume of its own, much bigger:
 // a white flash, a white dome at the shock front, a fireball glowing from inside that rises,
@@ -67,6 +68,9 @@
 #include "GameLogic/Object.h"
 #include "Common/Geometry.h"
 #include "W3DDevice/GameClient/BaseHeightMap.h"
+#include "W3DDevice/GameClient/Module/W3DModelDraw.h"
+#include "hlod.h"
+#include "Common/DrawModule.h"
 #include "W3DDevice/GameClient/VolumeSmoke.h"
 #include "Platform/HazardCloud.h"
 #include "Platform/HazardCloudCore.h"
@@ -123,6 +127,7 @@ const float VelocityHalfLife = 3.0f;
 const float HeatHalfLife = 1.8f;
 const float DustHalfLife = 6.0f;
 const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
+const float StructureSootHalfLife = 7.0f;	// a building's blast's soot, as the air's
 const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
@@ -196,6 +201,7 @@ struct SimConstants {
 	float Origins[MaxSlabs][4];		// each slab's world corner, for the movers below
 	float MoverCount[4];
 	float Movers[MaxMovers * 4][4];	// the units that push the air this step, in world units (Mover)
+	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest)
 };
 
 struct DrawConstants {
@@ -282,6 +288,7 @@ cbuffer Sim : register(b0)
     float4 Origins[VOLS];
     float4 MoverCount;
     float4 Movers[16 * 4];
+    float4 Thin[VOLS];
 };
 SamplerState Linear : register(s0);
 float3 uvwOf(float3 cell, uint slab)
@@ -505,9 +512,14 @@ void main(uint3 id : SV_DispatchThreadID)
         d.x = carried.x;
         d.y = settled.y;
 #ifdef AIR
-        d.z = carried.z * Keep.w;	// soot thins out in the open air
+        // Soot thins out in the open air; a missile's trail (told by its brightness, over a
+        // puff's) at its own rate, quicker low down, so a Rocket Buggy salvo's twenty trails
+        // do not hang over the field as a tan haze for seconds.
+        float trail = saturate((carried.z / max(carried.x, 0.01) - 1.02) / 0.2);
+        float keep = lerp(Keep.w, Wind.z, trail);
+        d.z = carried.z * keep;
         d.w = settled.w * Keep.z;
-        d.x *= Keep.w;
+        d.x *= keep;
 #endif
         // Heat lifts, fading out under the ceiling, where a rising cap stops and spreads.
         float lift = Forces.x * vt.w * saturate((shape.z - cell.z) / max(shape.z * 0.3, 1));
@@ -520,9 +532,21 @@ void main(uint3 id : SV_DispatchThreadID)
             vt.xyz += dt * Forces.z * cross(grad * rsqrt(length2), Curl.Load(int4(id, 0)).xyz);
         vt.xyz /= 1 + Forces.w * length(vt.xyz) * dt;
         vt.xy += (Wind.xy / volume.z - vt.xy) * saturate(dt * 0.35 * saturate(cell.z / 6.0));
+#ifdef AIR
+        // A trail's smoke is stirred by a slow eddy of its own, about a cell a second, so a Scud
+        // Storm's columns billow and spread as they age instead of standing as straight pillars.
+        if (trail > 0) {
+            float3 q = cell / 5 + float3(0, 0, -Step.y * 0.3);
+            float3 eddy = float3(valueNoise(q, 31), valueNoise(q + 7.1, 37), valueNoise(q + 3.3, 41)) - 0.5;
+            vt.xyz += eddy * (Wind.w * trail * dt);
+        }
+#endif
         vt.xyz *= Keep.y;
         vt.w *= Keep.x;
         d.y *= Keep.z;
+#ifndef AIR
+        d.x *= Thin[slab].x;	// a building's smoke thins out as it spreads
+#endif
     }
     float2 offset = cell.xy - blast.xy;
     float rho = length(offset);
@@ -860,7 +884,9 @@ float4 main(float4 position : SV_Position) : SV_Target
     float g = 0.35;
     float phase = lerp(1, (1 - g * g) / pow(abs(1 + g * g - 2 * g * cosine), 1.5), 0.6);
     float3 light = SunColor.rgb + Ambient.rgb;
-    float3 tint = light / max(dot(light, float3(0.299, 0.587, 0.114)), 0.01);
+    // the light's hue at the day's brightness; a night's dim moonlight is not lifted to it, or the
+    // smoke and the trails stood out of the dark ground self-lit pale blue
+    float3 tint = light / max(dot(light, float3(0.299, 0.587, 0.114)), 0.75);
     float3 color = 0;
     float transmittance = 1;
     float slabBase = Slab.x * GZ;
@@ -919,6 +945,13 @@ float4 main(float4 position : SV_Position) : SV_Target
         // billows: the surface is eroded by the noise, the inside left whole
 #ifdef AIR
         float eroded = total * saturate(0.35 + 1.1 * n);	// the air's smoke is thin: the noise shapes it, it does not eat it
+        // A missile's trail is a cell or two across, so the noise at nine cells cut it into white
+        // patches: it keeps most of its smoke, only its edge billows with a noise twice as fine.
+        float trail = saturate((dd.z / max(dd.x, 0.01) - 1.02) / 0.2);
+        if (trail > 0) {
+            float fine = Noise.SampleLevel(Wrap, cell / 4 + float3(0.43, 0.17, -Camera.w * 0.08), 0);
+            eroded = lerp(eroded, total * saturate(0.6 + 0.7 * fine), trail);
+        }
 #else
         float eroded = max(total - (1 - n) * 0.45 * (1 - saturate(total * 1.2)), 0);
         // a nuclear fireball is thin on purpose, so its middle shows: the noise shapes it into
@@ -973,14 +1006,23 @@ const float AirCoverage = 0.7f;			// a billboard's opacity at its centre, agains
 // A sphere's falloff, the trilinear blur of a few cells and the noise take most of the opacity a
 // particle's density was worked out for; this gives it back (by eye, on volair's dust and smoke).
 const float AirGain = 4.0f;
-// and a missile's ribbon of jet smoke, a cell or two wide: a little less in the air, where a Rocket
-// Buggy salvo's twenty trails stood as a white wall at 1.8, and more in the tall air, where one trail
-// coming down alone is seen across and its cells are half again as wide
-const float StreakGain[2] = { 0.7f, 1.8f };
+// and a missile's ribbon of jet smoke, a cell or two wide: less in the air, where a Rocket Buggy
+// salvo's twenty trails stood as a white wall at 1.8 and as a tan haze over the field at 0.7, more
+// in the tall air, where one trail coming down alone is seen across and its cells are wider
+// (1.8 in the tall air made a Tomahawk's arc over Heartland Shield a thick white arch that hung on)
+const float StreakGain[2] = { 0.45f, 0.75f };
 // A missile's white jet smoke against a cloud's grey puff: the billboard is the texture's white times
-// the particle's colour, unlit, so a sunlit cell needs about twice the puff's albedo to match it.  At
-// 1.8 a Scud's trail came down mid grey over sunlit tan ground and could not be seen.
-const float TrailBright = 2.4f;
+// the particle's colour, unlit, so a sunlit cell needs more of the puff's albedo to match it.  At 1.8
+// with the old density cap a Scud's trail came down mid grey and could not be seen; at 2.4 the Scud
+// Storm's columns stood as glowing pillars.
+const float TrailBright = 1.7f;
+// A trail's smoke half-life in the air and the tall air (the brightness tells its cells): a Rocket
+// Buggy salvo's goes in a couple of seconds, a Scud Storm's columns hang on as rocket smoke does.
+const float TrailHalfLife[2] = { 2.5f, 3.0f };	// (at 6 a Tomahawk's arc over Heartland Shield hung on for ten seconds)
+// A trail's particle stands for more smoke the older it is, spread wider: the end of a column
+// farthest from the missile is up to this much wider than its head, so it opens out as it ages.
+const float TrailSpread = 1.5f;
+const float TrailEddy = 0.25f;			// cells/s^2: the stir a trail's smoke takes (about a cell a second once the drag holds it)
 // The tall air: a second grid round the camera, as wide as the air's and a thousand units tall at
 // twice its cell, for the systems that climb out of the air's top, a nuclear missile's or a Scud
 // Storm's trail coming down from high up, a Scud's arc.  It runs only while one of them is in it.
@@ -990,6 +1032,11 @@ const AirShape TallShapes[3] = { { 8, 8, 8, 1.0f, 0, 0, 1.0f }, { 48, 48, 48, 24
 	{ 96, 96, 96, 12.0f, 4096, 8, 1.25f } };
 const float AirTallOver = 30.0f;		// units over the air's top less its rim: a trail with a particle that high goes to the tall air
 const float AirTrailOver = 150.0f;		// units over the top: any other system with a particle that high keeps its billboards
+
+// A mesh of a building's model as a box: along the building's heading and across it round its
+// position, half sizes, bottom and top over its ground.  World units in a Solid, cells in a Volume.
+struct Part { float along, across, halfAlong, halfAcross, bottom, top; };
+const unsigned MaxParts = 6;
 
 struct Volume {
 	bool live = false;
@@ -1006,6 +1053,8 @@ struct Volume {
 	bool onHull = false;				// a shell that burst on a vehicle
 	ObjectID building = INVALID_ID;		// a structure blast's building, left out of its floor once it has fallen
 	bool standing = false;				// a damaged stage blowing out of a building that stays up
+	Part parts[MaxParts] = {};			// the building's meshes, in cells; none, its footprint stands in
+	unsigned partCount = 0;
 	unsigned seed = 0;
 	int born = 0;
 	int life = 0;						// logic frames
@@ -1085,7 +1134,8 @@ std::vector<Hull> hulls, lastHulls;
 // nothing does not give away an unscouted base.
 // The list before the last read is kept too, so a building that died just after a read still has its
 // footprint when its death's smoke asks for it.
-struct Solid { float x, y, top, major, minor, angle, tall; bool box; ObjectID id; };
+// Each also keeps the boxes of its model's biggest meshes (readParts, Part).
+struct Solid { float x, y, top, major, minor, angle, tall; bool box; ObjectID id; Part parts[MaxParts]; unsigned partCount; };
 std::vector<Solid> solids, lastSolids;
 int solidsFrame = -100000;
 
@@ -1722,51 +1772,108 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		};
 		auto unit = [&](unsigned salt) { return hashUnit(volume.seed, salt); };
 		const bool standing = volume.standing;
-		const float size = (std::max)(L, W), base = standing ? H + 0.6f : 0.6f;
 		dust[0] = 0.76f; dust[1] = 0.72f; dust[2] = 0.65f;	// pale concrete and plaster dust; at 0.66 it lay grey-brown in its own shade
-		// the burst: four fire-and-soot bodies over the footprint's quarters, thrown outwards along it
-		if (t < 0.8f) {
-			const float fade = 1 - t / 0.8f;
-			for (unsigned i = 0; i < 4; ++i) {
-				const float sa = (i & 1) ? 1.0f : -1.0f, sc = (i & 2) ? 1.0f : -1.0f;
-				onFootprint(sa * L * (0.45f + 0.15f * unit(500 + i)), sc * W * (0.4f + 0.15f * unit(510 + i)),
-					base + (standing ? 0.0f : H * 0.3f * unit(520 + i)), (std::max)((std::min)(L, W) * 0.55f, 2.5f) * (0.8f + 0.4f * unit(530 + i)),
-					sa * (6.0f + 8.0f * unit(540 + i)) * fade, sc * (5.0f + 6.0f * unit(550 + i)) * fade, 3.0f + 4.0f * unit(560 + i),
-					16.0f * fade, 1.35f, 3.0f * fade, 0.3f);
+		// grey-brown smoke of a burning building, where a tank's black soot made a factory's fall
+		// one black box
+		soot[0] = 0.2f; soot[1] = 0.19f; soot[2] = 0.18f;
+		// and lit on its sunny side, with more sky in its shade: on Winter Wolf's snow the column
+		// stood pure black with no side lit at 0.26 and 0.75
+		shade = 0.4f;
+		sunShare = 0.95f;
+		// Its meshes (readParts): the tallest first, then the biggest.  With none read, its
+		// footprint stands in as one box.
+		Part parts[MaxParts];
+		unsigned partCount = volume.partCount;
+		for (unsigned i = 0; i < partCount; ++i) parts[i] = volume.parts[i];
+		if (!partCount) { parts[0] = { 0, 0, L, W, 0, H }; partCount = 1; }
+		float size = 0, top = 0;
+		for (unsigned i = 0; i < partCount; ++i) {
+			size = (std::max)(size, (std::max)(std::fabs(parts[i].along) + parts[i].halfAlong, std::fabs(parts[i].across) + parts[i].halfAcross));
+			top = (std::max)(top, parts[i].top);
+		}
+		// how much of the building a mesh is, by its plan area, for the jets
+		auto areaOf = [&](unsigned i) { return parts[i].halfAlong * parts[i].halfAcross; };
+		// the biggest after the tallest, for the bursts and the ruin's column
+		unsigned big[MaxParts];
+		for (unsigned i = 0; i < partCount; ++i) big[i] = i;
+		std::sort(big, big + partCount, [&](unsigned a, unsigned b) { return areaOf(a) > areaOf(b); });
+		// The fall starts as the building's own shape in smoke and dust: each mesh's box filled at
+		// the moment it comes down, slumping, with a dull glow inside, two bodies one over the other
+		// for a mesh taller than it is wide.  A factory's hall, its stacks and a mast each leave their
+		// own outline before it settles, where the footprint's quarters drew one square.
+		if (!standing && t < 0.45f) {
+			const float fade = 1 - t / 0.45f;
+			unsigned laid = 0;
+			for (unsigned i = 0; i < partCount && laid < 9; ++i) {
+				const Part &p = parts[i];
+				const float tall = (std::max)(p.top - p.bottom, 1.0f), narrow = (std::min)(p.halfAlong, p.halfAcross);
+				const unsigned stack = tall > 3.2f * narrow ? 2 : 1;
+				for (unsigned k = 0; k < stack && laid < 9; ++k, ++laid) {
+					const float radius = (std::min)(narrow, tall / (2.0f * stack)) * 1.15f + 0.4f;
+					onFootprint(p.along, p.across, p.bottom + tall * (k + 0.5f) / stack, radius, p.along * 0.4f, p.across * 0.4f, -4.0f * fade,
+						3.0f * fade, 1.0f, 16.0f * fade, 0.25f);
+				}
 			}
 		}
-		// The plume, the tank's jets spread over the footprint: each lays thin smoke at a rate that
-		// goes with its speed and tapers to a streak, so it stands as a ragged mass of fire that
-		// cools to grey-brown smoke, never a ball carried on its head.
-		const float reach = (std::min)((std::max)(standing ? 1.2f * size + 0.5f * H : 1.9f * size + 1.2f * H, 10.0f),
-			TierShapes[0].gz - 18.0f - (standing ? H : 0.0f));
-		for (unsigned j = 0; j < 7; ++j) {
+		// Fire bursts out of the tops of its biggest meshes, thrown outwards; a damaged stage only
+		// out of its tallest, with a third of the soot, so it is fire blowing out of a standing
+		// building and not a black cloud over its roof.
+		if (t < (standing ? 0.6f : 0.7f)) {
+			const float fade = 1 - t / (standing ? 0.6f : 0.7f);
+			const unsigned bursts = (std::min)(partCount, standing ? 2u : 3u);
+			for (unsigned i = 0; i < bursts; ++i) {
+				const Part &p = parts[standing ? i : big[i]];
+				const float out = std::sqrt(p.along * p.along + p.across * p.across) + 1e-3f;
+				// (a damaged stage's smaller: one of a mesh's size stood over the roof as a brown ball)
+				onFootprint(p.along, p.across, p.top * (standing ? 1.0f : 0.85f) + 0.4f,
+					(std::max)((std::min)(p.halfAlong, p.halfAcross) * (standing ? 0.45f : 0.75f), 2.0f),
+					p.along / out * 6.0f * fade, p.across / out * 6.0f * fade, 4.0f + 3.0f * unit(560 + i),
+					(standing ? 3.0f : 5.0f) * fade, standing ? 1.6f : 1.45f, 3.0f * fade, 0.3f);
+			}
+		}
+		// The plume, the tank's jets out of the tops of its meshes: each lays thin smoke at a rate that
+		// goes with its speed and tapers to a streak, so it stands as a ragged mass of fire that cools
+		// to grey-brown smoke, never a ball carried on its head.  More from the bigger meshes.
+		const unsigned jets = standing ? 3 : 6;
+		float areaTotal = 0;
+		for (unsigned i = 0; i < partCount; ++i) areaTotal += areaOf(i);
+		for (unsigned j = 0; j < jets; ++j) {
 			auto field = [&](unsigned f) { return unit(600 + 16 * j + f); };
 			const float slows = 0.22f, age = t - 0.08f * field(0);
 			if (age < 0 || age > 1.5f * slows) continue;
-			const float u = (j + 0.5f) / 7 * 2 - 1, centre = 1 - std::fabs(u);
-			const float a0 = (u + (field(1) - 0.5f) * 0.2f) * L * 0.75f, c0 = (field(2) - 0.5f) * W * 0.9f;
-			const float tilt = 0.28f * std::fabs(u) + 0.08f * (field(3) - 0.5f);
-			const float azimuth = (u < 0 ? 3.14159265f : 0.0f) + (field(4) - 0.5f) * 1.2f;
+			// the mesh this jet comes out of, picked by plan area
+			float pick = field(7) * areaTotal;
+			unsigned m = 0;
+			while (m + 1 < partCount && pick > areaOf(m)) { pick -= areaOf(m); ++m; }
+			const Part &p = parts[m];
+			const float base = p.top + 0.4f;
+			const float reach = (std::min)((std::max)(standing ? 0.8f * size : 1.4f * size + 0.6f * top, 6.0f), TierShapes[0].gz - 14.0f - base);
+			if (reach < 3.0f) continue;
+			const float a0 = p.along + (field(1) - 0.5f) * p.halfAlong * 1.4f, c0 = p.across + (field(2) - 0.5f) * p.halfAcross * 1.4f;
+			const float outLen = std::sqrt(a0 * a0 + c0 * c0) + 1e-3f;
+			const float tilt = 0.12f + 0.25f * (std::min)(outLen / (size + 1e-3f), 1.0f) + 0.08f * (field(3) - 0.5f);
+			const float azimuth = std::atan2(c0, a0) + (field(4) - 0.5f) * 0.8f;
 			const float ca = std::cos(azimuth), cc = std::sin(azimuth), dz = std::cos(tilt), out = std::sin(tilt);
-			const float height = reach * (0.75f + 0.25f * centre * centre) * (1 - 0.25f * field(5));
+			const float height = reach * (0.75f + 0.25f * field(5));
 			const float speed = height / slows;
 			const float travelled = height * (1 - std::exp(-age / slows)), now = speed * std::exp(-age / slows);
 			const float path = travelled / (0.78f * height);
 			const float taper = 1 - smoothstep01(path, 0.55f, 1.0f);
-			const float rate = 40.0f * reach / 36.0f * (0.75f + 0.45f * centre) * now / speed * taper;
-			const float heat = 2.5f * (0.7f + 0.3f * std::pow(now / speed, 0.4f)) * (1 - 0.2f * path) * (0.45f + 0.55f * taper)
+			// (half a tank's: a blast's smoke does not thin by itself, and six jets' worth over a
+			// factory filled the middle of the frame with one dark mass)
+			const float rate = 20.0f * reach / 36.0f * now / speed * taper * (standing ? 0.6f : 1.0f);
+			const float heat = 2.4f * (0.7f + 0.3f * std::pow(now / speed, 0.4f)) * (1 - 0.2f * path) * (0.45f + 0.55f * taper)
 				* (0.7f + 0.3f * smoothstep01(path, 0.0f, 0.15f));
 			onFootprint(a0 + ca * out * travelled, c0 + cc * out * travelled, base + dz * travelled,
-				(2.2f + 0.07f * travelled) * (0.4f + 0.6f * taper) * (0.8f + 0.3f * centre),
+				(2.0f + 0.07f * travelled) * (0.4f + 0.6f * taper),
 				ca * out * now, cc * out * now, dz * now, rate, heat, rate * 0.5f, 0.08f);
 		}
 		// The collapse: pale dust pushed out low from under every wall, two bodies a side, each sunk
 		// half its radius into the ground so only a low lens of it stands over it, and the eight
 		// overlap into one sheet the shape of the footprint.  Standing on the ground, the same
-		// bodies stood round the building as a ring of grey balls.
-		if (t > 0.1f && t < 3.0f) {
-			const float fade = 1 - (t - 0.1f) / 2.9f, pour = standing ? 0.3f : 1.0f;
+		// bodies stood round the building as a ring of grey balls.  A standing building drops none.
+		if (!standing && t > 0.1f && t < 3.0f) {
+			const float fade = 1 - (t - 0.1f) / 2.9f, pour = 1.0f;
 			for (unsigned k = 0; k < 8; ++k) {
 				const bool end = k >= 4;
 				const float s = (k & 1) ? 1.0f : -1.0f, along = (k & 2) ? 0.5f : -0.5f;
@@ -1780,18 +1887,17 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 						14.0f * fade * pour, 0.35f);
 			}
 		}
-		// the building falling into its footprint: dust dropping from its height as it comes down
-		if (!standing && t > 0.2f && t < 1.6f) {
-			const float progress = (t - 0.2f) / 1.4f, fade = 1 - progress;
-			for (int end = -1; end <= 1; end += 2)
-				onFootprint(end * L * 0.4f, 0, 1.0f + H * 0.6f * (1 - progress), (std::max)(W * 0.7f, 3.0f), 0, 0, -8.0f * fade,
-					2.0f * fade, 0, 18.0f * fade, 0.3f);
-		}
-		// the ruin burning: a dark column off the footprint for half a minute, leaning with the wind
-		if (!standing && t > 0.8f && t < 28.0f) {
-			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 16.0f ? 1 - (t - 16.0f) / 12.0f : 1.0f;
-			for (int end = -1; end <= 1; end += 2)
-				onFootprint(end * L * 0.4f, 0, 0.6f, (std::max)(W * 0.8f, 2.5f), 0, 0, 12.0f, 3.2f * rise * fall, 1.0f, 0.1f, 0.25f);
+		// The ruin burning: a column for fifteen seconds off the ground its two biggest meshes stood
+		// on, leaning with the wind.  A blast's smoke does not thin by itself, so at the old rate a
+		// War Factory's column had grown into a black wall across the middle of the frame by the
+		// next building's death.
+		if (!standing && t > 0.8f && t < 16.0f) {
+			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 6.0f ? 1 - (t - 6.0f) / 10.0f : 1.0f;
+			for (unsigned i = 0; i < (std::min)(partCount, 2u); ++i) {
+				const Part &p = parts[big[i]];
+				onFootprint(p.along, p.across, 0.6f, (std::max)((std::min)(p.halfAlong, p.halfAcross) * 0.6f, 2.0f), 0, 0, 12.0f,
+					0.8f * rise * fall * (i ? 0.6f : 1.0f), 1.0f, 0.1f, 0.25f);
+			}
 		}
 		soot[3] = 1.6f + 2.4f * std::exp(-t / 0.3f);
 	} else if (volume.kind == Shell || volume.kind == Airburst) {
@@ -1978,10 +2084,15 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 		// a building whose fall this blast is: the dust pours out over the ground it stood on
 		if (volume.kind == Structure && !volume.standing && solid.id == volume.building) continue;
 		const float major = solid.major, minor = solid.minor;
-		const float reach = std::sqrt(major * major + minor * minor);
+		float reach = std::sqrt(major * major + minor * minor);
+		for (unsigned i = 0; i < solid.partCount; ++i) {
+			const Part &p = solid.parts[i];
+			reach = (std::max)(reach, std::sqrt((std::fabs(p.along) + p.halfAlong) * (std::fabs(p.along) + p.halfAlong)
+				+ (std::fabs(p.across) + p.halfAcross) * (std::fabs(p.across) + p.halfAcross)));
+		}
 		if (solid.x + reach < volume.origin[0] || solid.x - reach > right || solid.y + reach < volume.origin[1] || solid.y - reach > top)
 			continue;
-		const float roof = (solid.top - volume.origin[2]) / cell;
+		const float roof = (solid.top - volume.origin[2]) / cell, base = solid.top - solid.tall;
 		const float c = std::cos(solid.angle), s = std::sin(solid.angle);
 		const int x0 = (std::max)(0, int((solid.x - reach - volume.origin[0]) / cell)), x1 = (std::min)(int(shape.gx) - 1, int((solid.x + reach - volume.origin[0]) / cell));
 		const int y0 = (std::max)(0, int((solid.y - reach - volume.origin[1]) / cell)), y1 = (std::min)(int(shape.gy) - 1, int((solid.y + reach - volume.origin[1]) / cell));
@@ -1989,8 +2100,26 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 			for (int x = x0; x <= x1; ++x) {
 				const float dx = volume.origin[0] + (x + 0.5f) * cell - solid.x, dy = volume.origin[1] + (y + 0.5f) * cell - solid.y;
 				const float along = dx * c + dy * s, side = -dx * s + dy * c;
+				float &height = heights[y * shape.gx + x];
+				// its meshes where it has them, so the smoke runs between a factory's stacks and round
+				// a tower rather than over one box as tall as the tallest
+				// (and the footprint up to its lowest one, so a building of many small walls, more than
+				// the meshes kept, has no hole the smoke runs through)
+				if (solid.partCount) {
+					float lowest = 1e9f;
+					for (unsigned i = 0; i < solid.partCount; ++i) {
+						const Part &p = solid.parts[i];
+						if (p.bottom >= 4.0f) continue;
+						lowest = (std::min)(lowest, p.top);
+						if (std::fabs(along - p.along) <= p.halfAlong && std::fabs(side - p.across) <= p.halfAcross)
+							height = (std::max)(height, (base + p.top - volume.origin[2]) / cell);
+					}
+					const bool onFootprint = solid.box ? std::fabs(along) <= major && std::fabs(side) <= minor : dx * dx + dy * dy <= major * major;
+					if (onFootprint && lowest < 1e8f) height = (std::max)(height, (base + lowest - volume.origin[2]) / cell);
+					continue;
+				}
 				const bool inside = solid.box ? std::fabs(along) <= major && std::fabs(side) <= minor : dx * dx + dy * dy <= major * major;
-				if (inside) heights[y * shape.gx + x] = (std::max)(heights[y * shape.gx + x], roof);
+				if (inside) height = (std::max)(height, roof);
 			}
 	}
 	// a blast on a building goes off on its roof, not inside it
@@ -2026,6 +2155,9 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		sim.Volumes[slab][1] = 0;
 		sim.Volumes[slab][2] = volume.cell;
 		sim.Volumes[slab][3] = volume.reset ? 1.0f : 0.0f;
+		// A building's smoke thins with a half-life of its own: a blast's soot otherwise stays as laid,
+		// and a War Factory's had piled into a dark wall across the frame by the next building's fall.
+		sim.Thin[slab][0] = volume.kind == Structure ? std::pow(0.5f, dt / StructureSootHalfLife) : 1.0f;
 		for (unsigned i = 0; i < 3; ++i) sim.Origins[slab][i] = volume.origin[i];
 		if (!volume.live) continue;
 		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
@@ -2256,6 +2388,77 @@ void collectMovers(int now)
 	moverPeak = (std::max)(moverPeak, (unsigned)movers.size());
 }
 
+// The building's shape as its model draws it: each mesh of its render object, as a box along the
+// building's heading round its own position, so a hall, a tower and a stack each stand where they
+// stand.  Flat meshes (the bib, a decal) and slivers are left out, and of the rest the biggest by
+// volume and the tallest are kept.  Client side: the drawable's render object, read from Gather.
+void readParts(Object *object, Solid &solid)
+{
+	solid.partCount = 0;
+	Drawable *drawable = object->getDrawable();
+	if (!drawable) return;
+	const float c = std::cos(solid.angle), s = std::sin(solid.angle), groundZ = solid.top - solid.tall;
+	const float reach = 2.5f * (std::max)(solid.major, solid.minor) + 20.0f;
+	struct Found { Part part; float volume; };
+	Found found[48];
+	unsigned count = 0;
+	// ponytail: read again every two seconds (Gather's cadence), no cache: a model swapped for its
+	// damaged one can come back at the same address.  Cache by model name if a town map hitches.
+	auto take = [&](RenderObjClass *mesh) {
+		if (!mesh || mesh->Is_Hidden() || count >= 48) return;
+		{
+			{
+				AABoxClass box;
+				mesh->Get_Obj_Space_Bounding_Box(box);
+				const Matrix3D &m = mesh->Get_Transform();
+				Vector3 centre;
+				Matrix3D::Transform_Vector(m, box.Center, &centre);
+				// the box's half sizes along the building's heading, across it and up
+				float half[3] = {};
+				for (unsigned axis = 0; axis < 3; ++axis) {
+					const Vector3 edge(m[0][axis] * (&box.Extent.X)[axis], m[1][axis] * (&box.Extent.X)[axis], m[2][axis] * (&box.Extent.X)[axis]);
+					half[0] += std::fabs(edge.X * c + edge.Y * s);
+					half[1] += std::fabs(-edge.X * s + edge.Y * c);
+					half[2] += std::fabs(edge.Z);
+				}
+				const float dx = centre.X - solid.x, dy = centre.Y - solid.y;
+				const Part part = { dx * c + dy * s, -dx * s + dy * c, half[0], half[1], centre.Z - half[2] - groundZ, centre.Z + half[2] - groundZ };
+				const bool flat = half[2] < 1.0f, sliver = half[0] < 0.75f || half[1] < 0.75f;
+				const bool stray = std::fabs(part.along) > reach || std::fabs(part.across) > reach || half[0] > reach || half[1] > reach;
+				if (!flat && !sliver && !stray && part.top > 2.0f)
+					found[count++] = { part, half[0] * half[1] * (part.top - (std::max)(part.bottom, 0.0f)) };
+			}
+		}
+	};
+	// every model its draw modules show
+	for (DrawModule **modules = drawable->getDrawModulesNonDirty(); modules && *modules; ++modules) {
+		const ObjectDrawInterface *draw = (*modules)->getObjectDrawInterface();
+		RenderObjClass *model = draw ? ((W3DModelDraw *)draw)->getRenderObject() : nullptr;
+		if (!model || model->Is_Hidden()) continue;
+		if (model->Class_ID() == RenderObjClass::CLASSID_HLOD) {
+			// the level of detail it draws now and the models hung on it, not every level's copy
+			HLodClass *lod = (HLodClass *)model;
+			const int level = lod->Get_LOD_Level();
+			for (int i = 0; i < lod->Get_Lod_Model_Count(level); ++i) take(lod->Peek_Lod_Model(level, i));
+			for (int i = 0; i < lod->Get_Additional_Model_Count(); ++i) take(lod->Peek_Additional_Model(i));
+		} else if (model->Get_Num_Sub_Objects() > 0) {
+			for (int i = 0; i < model->Get_Num_Sub_Objects(); ++i) {
+				RenderObjClass *mesh = model->Get_Sub_Object(i);
+				take(mesh);
+				if (mesh) mesh->Release_Ref();
+			}
+		} else take(model);	// one mesh: the model itself
+	}
+	if (count) {
+		unsigned tallest = 0;
+		for (unsigned i = 1; i < count; ++i)
+			if (found[i].part.top > found[tallest].part.top) tallest = i;
+		std::swap(found[0], found[tallest]);
+		std::sort(found + 1, found + count, [](const Found &a, const Found &b) { return a.volume > b.volume; });
+		for (unsigned i = 0; i < count && solid.partCount < MaxParts; ++i) solid.parts[solid.partCount++] = found[i].part;
+	}
+}
+
 void gatherSolids(int now)
 {
 	if (now - solidsFrame < 2 * LOGICFRAMES_PER_SECOND && now >= solidsFrame) return;
@@ -2272,9 +2475,25 @@ void gatherSolids(int now)
 		if (seer >= 0 && object->getShroudedStatus(seer) == OBJECTSHROUD_SHROUDED) continue;
 		const Coord3D *at = object->getPosition();
 		const GeometryInfo &geometry = object->getGeometryInfo();
-		solids.push_back({ at->x, at->y, at->z + geometry.getMaxHeightAbovePosition(), geometry.getMajorRadius(),
-			geometry.getMinorRadius(), object->getOrientation(), geometry.getMaxHeightAbovePosition(),
-			geometry.getGeomType() == GEOMETRY_BOX, object->getID() });
+		Solid solid = {};
+		solid.x = at->x;
+		solid.y = at->y;
+		solid.top = at->z + geometry.getMaxHeightAbovePosition();
+		solid.major = geometry.getMajorRadius();
+		solid.minor = geometry.getMinorRadius();
+		solid.angle = object->getOrientation();
+		solid.tall = geometry.getMaxHeightAbovePosition();
+		solid.box = geometry.getGeomType() == GEOMETRY_BOX;
+		solid.id = object->getID();
+		readParts(object, solid);
+		solids.push_back(solid);
+	}
+	static unsigned partsLogged = 0;
+	if (partsLogged < 1 && !solids.empty()) {
+		++partsLogged;
+		unsigned shaped = 0;
+		for (const Solid &solid : solids) shaped += solid.partCount ? 1 : 0;
+		DEBUG_LOG(("VOLSMOKE: frame %d, %u structures seen, %u with their meshes' boxes\n", now, (unsigned)solids.size(), shaped));
 	}
 }
 
@@ -2382,8 +2601,18 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 			if (alpha < 0.02f) { chained = false; continue; }
 			const Coord3D *at = p->getPosition();
 			// at most 8 cells, so a sphere reaches 27 bricks at most (AirTileEntries)
-			// (a ribbon's spheres are laid along its links too, so it may go thinner without breaking up)
-			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * (streak ? 0.6f : 0.8f)), cell * 8.0f);
+			// (a ribbon's spheres are laid along its links too, so it may go thinner without breaking up).
+			// A trail's particle is a puff of its own size, hashed from the particle, wider the older it
+			// is: a Scud Storm's columns stood as straight pillars of one width all the way up.
+			float puff = 1.0f, thick = 1.0f;
+			if (trail) {
+				// the particle's address is the same for its whole life (a client-side look, nothing to replay)
+				const unsigned h = (p->getPersonality() ^ unsigned(reinterpret_cast<uintptr_t>(p) >> 4)) * 2654435761u;
+				const float age = p->m_lifetime ? 1.0f - (float)p->getLifetimeLeft() / (float)p->m_lifetime : 0.0f;
+				puff = (0.65f + 0.8f * ((h >> 8) & 255) / 255.0f) * (1.0f + TrailSpread * (std::min)((std::max)(age, 0.0f), 1.0f));
+				thick = 0.55f + 0.9f * ((h >> 16) & 255) / 255.0f;
+			}
+			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * (streak ? 0.6f : 0.8f)) * puff, cell * 8.0f);
 			// inside the box less its faded rim
 			const float rim = 4.0f * cell;
 			if (at->x < low[0] + rim || at->x > high[0] - rim || at->y < low[1] + rim || at->y > high[1] - rim
@@ -2398,7 +2627,7 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 			}
 			++inside;
 			// the density whose optical depth through the sphere's middle is the particle's opacity
-			const float density = AirGain * (streak ? StreakGain[g] : 1.0f) * -std::log(1.0f - alpha) / (2.0f * radius * AirExtinction);
+			const float density = AirGain * (streak ? StreakGain[g] : 1.0f) * thick * -std::log(1.0f - alpha) / (2.0f * radius * AirExtinction);
 			const RGBColor *colour = p->getColor();
 			const float grey = (std::min)(1.0f, 0.3f * colour->red + 0.59f * colour->green + 0.11f * colour->blue) * (trail ? TrailBright : 1.0f);
 			const float dx = at->x - look.x, dy = at->y - look.y;
@@ -2541,6 +2770,8 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 	sim.Sun[3] = AirExtinction;
 	sim.Wind[0] = WindX;
 	sim.Wind[1] = WindY;
+	sim.Wind[2] = std::pow(0.5f, dt / TrailHalfLife[g]);	// a trail's cells (AdvectPass)
+	sim.Wind[3] = TrailEddy;
 	sim.Shape[0][2] = 1000.0f;	// no ceiling
 	for (unsigned i = 0; i < 3; ++i) sim.Origins[0][i] = volume.origin[i];
 	fillMovers();
@@ -2609,7 +2840,7 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 
 // How long each kind lives, in seconds, how big its cell is, how far and how long after its blast
 // another system of the same FX joins it, and which of those it takes.
-float lifeOf(Kind kind) { return kind == TankDeath || kind == Structure ? 36.0f : kind == Nuclear ? 90.0f : 12.0f; }
+float lifeOf(Kind kind) { return kind == TankDeath ? 36.0f : kind == Structure ? 24.0f : kind == Nuclear ? 90.0f : 12.0f; }
 float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : 2.0f * scale; }
 float joinRadius(const Volume &volume)
 {
@@ -2759,9 +2990,10 @@ bool Takes(ParticleSystem *system)
 				|| seen > volume.born + (volume.kind == Nuclear ? 180 : volume.kind == TankDeath || volume.kind == Structure ? 90 : 30)) continue;	// a nuke's stem comes 2 s after its flare
 		if (flat && !(volume.kind == TankDeath && system->getPriority() == DEATH_EXPLOSION) && !(nukeFlat && volume.kind == Nuclear)
 			&& !(structFlat && volume.kind == Structure)) continue;
-		// a building's blast takes its own FX's systems only, not the fire of the shells still
-		// landing on the ruin
-		if (volume.kind == Structure && !structural && system->getPriority() != DEATH_EXPLOSION) continue;
+		// A building's blast takes its own FX's systems, and the fire cards (not the smoke) of the
+		// shells landing on it in its first second and a half: an Overlord's BuggyMissileExplosion
+		// fireballs floated over the cloud as separate flat sprites.
+		if (volume.kind == Structure && !structural && system->getPriority() != DEATH_EXPLOSION && (alpha || seen > volume.born + 45)) continue;
 		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
 		const char *joiner = system->getTemplate()->getName().str();
@@ -2879,6 +3111,12 @@ bool Takes(ParticleSystem *system)
 		volume.hull[4] = (std::min)((std::max)((building ? building->tall : 30.0f) / cell, 1.5f), 14.0f);
 		volume.building = building ? building->id : INVALID_ID;
 		volume.standing = onBuilding != nullptr;
+		volume.partCount = building ? building->partCount : 0;
+		for (unsigned i = 0; i < volume.partCount; ++i) {
+			const Part &p = building->parts[i];
+			volume.parts[i] = { p.along / cell, p.across / cell, (std::max)(p.halfAlong / cell, 0.5f), (std::max)(p.halfAcross / cell, 0.5f),
+				(std::max)(p.bottom, 0.0f) / cell, (std::min)(p.top / cell, TierShapes[0].gz - 12.0f) };
+		}
 		// a stage the rubble systems made in the same moment is this fall's
 		if (!volume.standing && building)
 			for (Volume &other : volumes)
@@ -2886,10 +3124,12 @@ bool Takes(ParticleSystem *system)
 						&& now - other.born <= 2)
 					other.live = false;
 		static unsigned structuresLogged = 0;
-		if (structuresLogged++ < 12)
-			DEBUG_LOG(("VOLSMOKE: frame %d, structure %s for '%s', %.0f by %.0f by %.0f units at %.1f a cell, %s\n", now,
+		if (structuresLogged++ < 24)
+			DEBUG_LOG(("VOLSMOKE: frame %d, structure %s for '%s', %.0f by %.0f by %.0f units at %.1f a cell, %s, %u meshes, the first %.0f by %.0f, %.0f to %.0f up\n", now,
 				building ? "found" : "not found", own, volume.hull[2] * 2 * cell, volume.hull[3] * 2 * cell, volume.hull[4] * cell, cell,
-				volume.standing ? "a damaged stage" : "its fall"));
+				volume.standing ? "a damaged stage" : "its fall", volume.partCount,
+				volume.partCount ? volume.parts[0].halfAlong * 2 * cell : 0.0f, volume.partCount ? volume.parts[0].halfAcross * 2 * cell : 0.0f,
+				volume.partCount ? volume.parts[0].bottom * cell : 0.0f, volume.partCount ? volume.parts[0].top * cell : 0.0f));
 	}
 	volume.born = now;
 	volume.life = int((type == Structure && volume.standing ? 14.0f : lifeOf(type)) * LOGICFRAMES_PER_SECOND);
@@ -2977,6 +3217,13 @@ void Render(const HazardCloud::Camera &camera)
 	for (float &axis : toward) axis = length > 1e-4f ? axis / length : 0.0f;
 	if (length <= 1e-4f) toward[2] = 1;
 	const float seconds = (float)now / LOGICFRAMES_PER_SECOND;
+	static int lightLogged = -1;
+	if (lightLogged != (int)time) {
+		lightLogged = (int)time;
+		const float luma = 0.299f * (sun.diffuse.red + sun.ambient.red) + 0.587f * (sun.diffuse.green + sun.ambient.green)
+			+ 0.114f * (sun.diffuse.blue + sun.ambient.blue);
+		DEBUG_LOG(("VOLSMOKE: the smoke's light is %.2f bright (under 0.75 it is drawn dimmer)\n", luma));
+	}
 
 	ID3D11DeviceContext *context = device->Get_Context();
 	D3D11_VIEWPORT savedViewport;
