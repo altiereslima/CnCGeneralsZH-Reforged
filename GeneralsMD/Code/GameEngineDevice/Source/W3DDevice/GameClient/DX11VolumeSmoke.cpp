@@ -24,7 +24,7 @@
 // Gather, and sized by them: each mesh fills with smoke and dust in its own place and slumps, fire
 // bursts out of the tops of the biggest, a ragged plume climbs out of them and cools to grey-brown
 // smoke, the collapse pours pale dust out from under every wall along the ground and round the
-// buildings beside it, and the ruin burns under a column for fifteen seconds.  A damaged stage
+// buildings beside it, and the ruin burns under a column for seven seconds.  A damaged stage
 // blows fire out of the top of a building that stays standing.
 //
 // A nuclear-class blast (the missile, the GLA's, the MOAB) has a volume of its own, much bigger:
@@ -127,7 +127,7 @@ const float VelocityHalfLife = 3.0f;
 const float HeatHalfLife = 1.8f;
 const float DustHalfLife = 6.0f;
 const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
-const float StructureSootHalfLife = 7.0f;	// a building's blast's soot, as the air's
+const float StructureSootHalfLife = 3.0f;	// a building's blast's soot: at 7 a fall's smoke was on screen for 14 s, stock's for 7 to 10
 // A tank's soot from 5 s on, once its column is falling: with its 10 s life it is gone from the play
 // camera about 8 s after the death, as the game's billboard column (ReforgedTankSmoke, 1.5 s of
 // puffs living 5 to 6 s) is.  It used to hang for half a minute; thinned from 3 s at 1.2 it was
@@ -1005,7 +1005,9 @@ const AirShape AirShapes[3] = { { 8, 8, 8, 1.0f, 0, 0, 1.0f }, { 96, 96, 24, 12.
 	{ 160, 160, 40, 7.2f, 12288, 8, 1.25f } };
 const unsigned AirTileEntries = 27;		// brick list room a particle: a sphere of at most 8 cells reaches 27
 const float AirExtinction = 0.04f;		// per world unit at density 1: the air's smoke is thinner than a blast's
-const float AirSootHalfLife = 7.0f;		// seconds, once no particle holds it up
+// seconds, once no particle holds it up: a damaged building's SmokeFaction* puffs live 2 to 5.3 s
+// and StructureDamagedSmoke's 1.5 s, and at 7 the air kept them on screen for twice as long again
+const float AirSootHalfLife = 3.0f;
 const float AirTakeUp = 8.0f;			// a second: how fast the cells under a particle reach its smoke
 const float AirCoverage = 0.7f;			// a billboard's opacity at its centre, against its alpha
 // A sphere's falloff, the trilinear blur of a few cells and the noise take most of the opacity a
@@ -1023,7 +1025,11 @@ const float StreakGain[2] = { 0.45f, 0.75f };
 const float TrailBright = 1.7f;
 // A trail's smoke half-life in the air and the tall air (the brightness tells its cells): a Rocket
 // Buggy salvo's goes in a couple of seconds, a Scud Storm's columns hang on as rocket smoke does.
-const float TrailHalfLife[2] = { 2.5f, 3.0f };	// (at 6 a Tomahawk's arc over Heartland Shield hung on for ten seconds)
+// (a Tomahawk's and a Scud's jet smoke lives 2 s, a Rocket Buggy's 1.2 s, so at 3 a Tomahawk's arc
+// over Heartland Shield was on screen for 5 to 6 s where stock's is gone in 3; a cell holds what its
+// particle laid while it lives, so the half-life is what follows the particle's 2 s: at 1.5 the arc
+// still showed 4.5 s after the launch)
+const float TrailHalfLife[2] = { 0.8f, 0.8f };
 // A trail's particle stands for more smoke the older it is, spread wider: the end of a column
 // farthest from the missile is up to this much wider than its head, so it opens out as it ages.
 const float TrailSpread = 1.5f;
@@ -1902,16 +1908,16 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 						14.0f * fade * pour, 0.35f);
 			}
 		}
-		// The ruin burning: a column for fifteen seconds off the ground its two biggest meshes stood
-		// on, leaning with the wind.  A blast's smoke does not thin by itself, so at the old rate a
-		// War Factory's column had grown into a black wall across the middle of the frame by the
-		// next building's death.
-		if (!standing && t > 0.8f && t < 16.0f) {
-			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 6.0f ? 1 - (t - 6.0f) / 10.0f : 1.0f;
+		// The ruin burning: a column off the ground its two biggest meshes stood on, leaning with the
+		// wind, done by 7.5 s, as the stock building smoke is (StructureTransition*Smoke lives 6.7 s,
+		// ReforgedStructureSmoke 7.3 to 8.7 s): the game is fast, and a column that hung on for
+		// fifteen seconds hid the next fight.  Its fire goes out with it.
+		if (!standing && t > 0.8f && t < 7.5f) {
+			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 3.0f ? 1 - (t - 3.0f) / 4.5f : 1.0f;
 			for (unsigned i = 0; i < (std::min)(partCount, 2u); ++i) {
 				const Part &p = parts[big[i]];
 				onFootprint(p.along, p.across, 0.6f, (std::max)((std::min)(p.halfAlong, p.halfAcross) * 0.6f, 2.0f), 0, 0, 12.0f,
-					0.8f * rise * fall * (i ? 0.6f : 1.0f), 1.0f, 0.1f, 0.25f);
+					0.8f * rise * fall * (i ? 0.6f : 1.0f), fall, 0.1f, 0.25f);
 			}
 		}
 		soot[3] = 1.6f + 2.4f * std::exp(-t / 0.3f);
@@ -2858,7 +2864,7 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 
 // How long each kind lives, in seconds, how big its cell is, how far and how long after its blast
 // another system of the same FX joins it, and which of those it takes.
-float lifeOf(Kind kind) { return kind == TankDeath ? 10.0f : kind == Structure ? 24.0f : kind == Nuclear ? 90.0f : 12.0f; }
+float lifeOf(Kind kind) { return kind == TankDeath ? 10.0f : kind == Structure ? 12.0f : kind == Nuclear ? 90.0f : 12.0f; }
 float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : 2.0f * scale; }
 float joinRadius(const Volume &volume)
 {
@@ -3153,7 +3159,7 @@ bool Takes(ParticleSystem *system)
 				volume.partCount ? volume.parts[0].bottom * cell : 0.0f, volume.partCount ? volume.parts[0].top * cell : 0.0f));
 	}
 	volume.born = now;
-	volume.life = int((type == Structure && volume.standing ? 14.0f : lifeOf(type)) * LOGICFRAMES_PER_SECOND);
+	volume.life = int((type == Structure && volume.standing ? 8.0f : lifeOf(type)) * LOGICFRAMES_PER_SECOND);
 	// its front through the air round it, in world units a second.  A tank's has none: a sphere
 	// pushing out from the hull's middle blew its own fire into a dome and the dust round it into
 	// rings, where a real one bursts out along the hull and up (schedule).
