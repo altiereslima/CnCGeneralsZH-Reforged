@@ -1582,8 +1582,9 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		dust[0] = 0.70f; dust[1] = 0.62f; dust[2] = 0.50f;	// sunlit, fire-lit dust, warm against the tan ground
 		// The base: orange flame and black soot bursting out low along the whole hull, rolling off
 		// both ends and a little to the sides, held down by the dust in it.  The four towards the
-		// ends burn only a dull red-brown (heat 0.8), so the hot middle sits between dark lobes,
-		// as in the photo; at 1.25 all along the base read as one bright band.
+		// ends burn only a dull red (heat 0.62), so the hot middle sits between dark lobes, as in
+		// the photo; at 1.25 all along the base read as one bright band, and at 0.8 the soot laid
+		// in them glowed orange (heat is the hottest emitter's) instead of reading dark.
 		if (t < 0.7f) {
 			const float fade = 1 - t / 0.7f;
 			for (unsigned i = 0; i < 6; ++i) {
@@ -1591,7 +1592,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 				const float across = (unit(810 + i) - 0.5f) * W * 0.7f;
 				const float radius = (std::max)(W * 0.85f, 2.2f) * (0.8f + 0.4f * unit(820 + i));
 				onHull(s * L * 1.15f, across, 0.6f + 0.6f * unit(830 + i), radius, s * (8.0f + 12.0f * unit(840 + i)) * fade,
-					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, std::fabs(s) < 0.5f ? 1.25f : 0.8f, 8.0f * fade, 0.35f);
+					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, std::fabs(s) < 0.5f ? 1.25f : 0.62f, 8.0f * fade, 0.35f);
 			}
 		}
 		// The plume, the photo's tallest part: thirteen jets of white-hot fire and dust shot up out
@@ -1734,19 +1735,23 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// the default 1.6 once the flare is over; about a third of a second of white, as long as
 		// the jets run, and no longer, so several tanks dying at once do not white out the view
 		soot[3] = 1.6f + 4.2f * std::exp(-t / 0.22f);
-		// Dark soot banked on the hull: two thick lobes at each end, just past the jets' roots and
-		// over the base fire, which edges them red, so the bright core stands between near-black
-		// lobes as in the photo and the fan's top stays clear of them.  Heat 0.3 does not glow at all
-		// (fireColour starts at 0.5).  Heat is the hottest emitter's, so laid inside the jets' roots
-		// the soot burned as bright as they did; laid round the hull's sides as well (pass 12) the
-		// lobes closed into a dark ring round the fire from the play camera.  Kept low and short (0.5
-		// s), so a fight's dead tanks do not hang under black clouds.
-		if (t < 0.5f) {
-			const float fade = 1 - t / 0.5f;
+		// Dark soot banked on the hull: four big lobes lying low along its length, two over each
+		// half from the jets' roots out past the end, which the base fire edges red, so the bright
+		// core stands between near-black masses as in the photo and the fan's top stays clear of
+		// them.  They swell for nearly two seconds, well after the flash, and the column takes over.  Heat
+		// 0.3 does not glow at all (fireColour starts at 0.5).  Heat is the hottest emitter's, so laid
+		// inside the jets' roots the soot burned as bright as they did; laid round the hull's sides
+		// as well (pass 12) the lobes closed into a dark ring round the fire from the play camera;
+		// small and gone in half a second (pass 13) they hid behind the fire from the side.
+		// 22 a second at most and half as wide again by 1.2 s: at 45 and nearly twice as wide they
+		// rolled into one black ball over the wreck from the play camera.
+		if (t < 1.8f) {
+			const float fade = 1 - t / 1.8f, swell = 1 + 0.5f * (std::min)(t / 1.2f, 1.0f);
 			for (unsigned k = 0; k < 4; ++k) {
-				const float s = k < 2 ? -1.0f : 1.0f, side = (k & 1) ? 1.0f : -1.0f;
-				onHull(s * L * (1.0f + 0.15f * unit(980 + k)), side * W * 0.35f, H * (0.45f + 0.25f * unit(984 + k)),
-					(std::max)(W * 0.7f, 2.2f) * (1 + t), s * 4.0f * fade, side * 1.5f * fade, 1.5f, 40.0f * fade, 0.3f, 2.0f * fade, 0.2f);
+				const float s = (k < 2 ? -1.0f : 1.0f) * ((k & 1) ? 1.05f : 0.7f) * (0.95f + 0.1f * unit(980 + k));
+				const float across = ((k & 1) ? 0.3f : -0.3f) * W;
+				onHull(s * L, across, H * (0.4f + 0.2f * unit(984 + k)), (std::max)(W * 0.9f, 2.6f) * swell,
+					s * 2.5f * fade, across * 0.3f * fade, 0.8f, 22.0f * fade * fade, 0.3f, 2.0f * fade, 0.15f);
 			}
 		}
 		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
