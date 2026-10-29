@@ -2237,6 +2237,13 @@ target_sources(test_hazard_cloud_policy PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudFlow.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudUnsupported.cpp)
 
+# W3DDevice/GameClient/VolumeFireCore.h: the -volsmoke fires' template table, heat release, black
+# body and sites, device-free.
+add_lib_test(test_volume_fire_policy)
+target_include_directories(test_volume_fire_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Include)
+target_sources(test_volume_fire_policy PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/VolumeFireCore.cpp)
+
 add_lib_test(test_wwmath wwmath wwlib wwsaveload wwdebug)
 target_include_directories(test_wwmath PRIVATE ${WW}/WWLib ${WW}/WWSaveLoad ${WW}/Wwutil)
 # R1, smooth motion: W3DSmoothMotion.h's blend and verdicts, header-only over WWMath.

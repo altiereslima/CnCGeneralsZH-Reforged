@@ -72,6 +72,7 @@
 #include "hlod.h"
 #include "Common/DrawModule.h"
 #include "W3DDevice/GameClient/VolumeSmoke.h"
+#include "W3DDevice/GameClient/VolumeFireCore.h"
 #include "Platform/HazardCloud.h"
 #include "Platform/HazardCloudCore.h"
 #include "dx11backend.h"
@@ -95,9 +96,10 @@ namespace {
 // Two atlases: the small one for tanks and shells, the big one for nuclear blasts.  The slab
 // counts and the small one's height are the setting's (Quality below); a change of setting builds
 // the atlases again.
+// A third, the fire tier, holds one burning building or wreck a slab (VolumeFireCore's sites).
 struct TierShape { unsigned gx, gy, gz, slabs, first; };
-TierShape TierShapes[2] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 } };
-const unsigned MaxVolumes = 26;		// both tiers' slabs at High, the small tier's first
+TierShape TierShapes[3] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 }, { 32, 32, 48, 12, 26 } };
+const unsigned MaxVolumes = 38;		// all three tiers' slabs at High, the small tier's first, the fires' last
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
 const unsigned MaxPuffs = 28;	// a tank's 28 (base, jets, stem, soot, skirt); PUFFS in the HLSL is the same
 const unsigned MaxMovers = 16;		// High's; Low takes the nearest 8
@@ -110,8 +112,15 @@ const unsigned NoiseSide = 32;
 // Low still costs too much on a weak card.
 // High's small grid is 56 cells tall where Low's is 40, so a tank's plume has room to climb to
 // twice its base's width under the grid's top (Low keeps the shorter plume and the cheaper grid).
-struct Quality { unsigned slabs[2]; unsigned sweeps; float stepCells; unsigned smallHeight; };
-const Quality Qualities[3] = { { { 0, 0 }, 0, 0.0f, 40 }, { { 12, 1 }, 8, 0.9f, 40 }, { { 24, 2 }, 14, 0.6f, 56 } };	// sweeps even, so the pressure ends where it started
+// The fires' constants are in world units and are taken to cells per slab, so Low's fire grid is a
+// coarser one over the same world box, stepped every other logic frame.
+struct Quality { unsigned slabs[2]; unsigned sweeps; float stepCells; unsigned smallHeight;
+	unsigned fireSlabs, fireSide, fireHeight, fireSweeps, fireEvery; float fireLight; };
+const Quality Qualities[3] = { { { 0, 0 }, 0, 0.0f, 40, 0, 8, 8, 0, 1, 0.0f }, { { 12, 1 }, 8, 0.9f, 40, 6, 24, 32, 6, 2, 0.0f },
+	{ { 24, 2 }, 14, 0.6f, 56, 8, 32, 48, 8, 2, 0.6f } };	// sweeps even, so the pressure ends where it started
+// (High's fires were 12 slabs, 10 sweeps and a step every logic frame: eight burning buildings cost
+// 1.85 ms of GPU time over the smoke alone, past the 1.5 the fires were allowed; 8 and 8 alone moved
+// nothing, with six of them burning at once)	// sweeps even, so the pressure ends where it started
 int level = 0;		// the setting the atlases were last made for
 
 // The world, in game units (a tank is about 30, 7 m: a unit is about 0.23 m).
@@ -139,11 +148,34 @@ const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does no
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
 
+// The fires: fuel the burning surfaces give off, lit by the heat round it, burning into heat and
+// soot (FireAdvectPass).  Heat is 300 K + 1200 K a unit, so 1 is a 1500 K flame.
+const float FireBurnRate = 5.0f;		// a second, of the fuel in a cell hot enough to burn
+const float FireIgnition = 0.45f;		// heat, about 840 K
+const float FireRich = 2.0f;			// fuel at which a cell's air is used up: a diffusion flame burns on its envelope
+const float FireSootYield = 0.25f;		// soot a unit of fuel burned leaves, the more the richer it burns
+const float FireRadiation = 1.5f;		// heat a second a sooty cell radiates away at 1500 K, going as T^4
+const float FireSootBurn = 1.5f;		// a second: soot burns away where it is hotter than about 1100 K
+const float FireExpansion = 0.5f;		// cells a second of outflow a unit of fuel burned makes, the gas expanding
+const float FireHeatHalfLife = 0.5f;	// mixing with the air round it, seconds
+const float FireSootHalfLife = 0.75f;	// as a building's blast's: the fire's smoke thins as it rises
+// Boussinesq's lift, g (T - T0) / T0, is 42 x 4 units/s^2 at heat 1; the cells cannot hold the
+// mixing that holds a real flame back, so it is taken at 0.15 of that.
+// ponytail: the 0.15 is by eye against the stock flames' height; measure it if a flame reads wrong.
+const float FireLift = 42.0f * 4.0f * 0.15f;
+const float FireExit = 4.0f;			// units/s: the gas leaving a burning surface
+const float FirePilot = 0.8f;			// a burning surface's heat (about 1260 K), so its fuel lights where it leaves
+const float FireSurfaceSoot = 0.3f;		// soot the surface gives off with each unit of fuel: what glows at a flame's foot
+const float FireWarmSeconds = 0.6f;		// a new fire's slab runs this long under the billboards before taking them
+const float FireGain = 1.0f;			// a 1500 K body's light against the scene's white (at 2 the flames burned out to yellow balls)
+const float FireExposure = 0.6f;		// the black body's brightness is taken to this power: 800 K is a hundredth of 1500 K's
+const float FireEndFade = 1.5f;
+
 const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/s, w heat
 const DXGI_FORMAT DensityFormat = DXGI_FORMAT_R16G16_FLOAT;			// soot, dust
 const DXGI_FORMAT ScalarFormat = DXGI_FORMAT_R16_FLOAT;
 
-enum Kind { TankDeath, Shell, Airburst, Nuclear, Air, Structure };
+enum Kind { TankDeath, Shell, Airburst, Nuclear, Air, Structure, Fire };
 
 template <class T> void drop(T *&object)
 {
@@ -209,6 +241,12 @@ struct SimConstants {
 	float MoverCount[4];
 	float Movers[MaxMovers * 4][4];	// the units that push the air this step, in world units (Mover)
 	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest)
+	// A fire's slab (FireFields, after Thin in its programs' cbuffer only): burn rate, heat a unit of
+	// fuel gives, soot yield, ignition heat; the fuel that starves it, radiation, soot burn,
+	// expansion; its lift in cells/s^2 at heat 1.
+	float Fire[MaxSlabs][4];
+	float Fire2[MaxSlabs][4];
+	float Fire3[MaxSlabs][4];
 };
 
 struct DrawConstants {
@@ -228,6 +266,10 @@ struct DrawConstants {
 	float ClipLow[4];		// the world box the march keeps to: the grid's, or for the air where smoke is
 	float ClipHigh[4];
 	float Look[4];			// the light the shade side keeps, the fine billows' depth, the sun's share, how far thin smoke is spared
+	// A fire's only (FireMarchPass): its light's gain, ignition heat, the fuel that starves it, the
+	// black body's exposure; the reaction zone's blue and how much the flame lights its smoke.
+	float FireLook[4];
+	float FireTint[4];
 };
 
 // What every program starts with, after the tier's GX, GY, GZ and SLABS: the fade that keeps smoke
@@ -995,6 +1037,261 @@ float4 main(float4 position : SV_Position) : SV_Target
 }
 )HLSL";
 
+// The fire tier's own programs.  Its cbuffer gains FireFields after Thin (makeTier splices them into
+// the Prelude's text for this tier only, so the blasts' and the air's programs keep their text and
+// their cached code); density is soot and fuel, and the fuel is never drawn.
+const char *const FireFields = "    float4 Fire[VOLS];\n    float4 Fire2[VOLS];\n    float4 Fire3[VOLS];\n";
+
+// A fire's box fades only at its sides and its top: the building it burns on sits in its middle.
+const char *const FireWalls = R"HLSL(
+float fireWalls(float3 cell)
+{
+    float2 inside = min(cell.xy, float2(GX - 1, GY - 1) - cell.xy);
+    return smoothstep(0, 2, inside.x) * smoothstep(0, 2, inside.y) * smoothstep(0, 6, GZ - 1 - cell.z);
+}
+)HLSL";
+
+// The fuel that burns a second in a cell: none under the ignition, and no more than the air reaching
+// it lets burn, however rich the cell, so a fuel-rich core burns slowly and sooty inside its flame.
+// (Cut off to nothing past the rich mark, as a first try had it, a burning surface's own cells never lit.)
+const char *const FireHelpers = R"HLSL(
+float burnRate(float fuel, float heat, uint slab)
+{
+    float4 f = Fire[slab];
+    return f.x * fuel / (1 + fuel / Fire2[slab].x) * smoothstep(f.w - 0.05, f.w + 0.05, heat);
+}
+)HLSL";
+
+const char *const FireAdvectPass = R"HLSL(
+Texture3D<float4> Vel : register(t0);
+Texture3D<DEN> Den : register(t1);
+Texture3D<float4> Curl : register(t2);
+RWTexture3D<float4> VelOut : register(u0);
+RWTexture3D<DEN> DenOut : register(u1);
+RWTexture3D<float> PresOut : register(u2);
+float w(int3 c, uint slab) { return Curl.Load(at(c, slab)).w; }
+[numthreads(8, 8, 8)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+    CELL_HEADER
+    float dt = Step.x;
+    float3 cell = float3(c);
+    float4 fire = Fire[slab], fire2 = Fire2[slab];
+    float4 vt = 0;
+    DEN d = 0;
+    if (volume.w > 0.5) {
+        PresOut[id] = 0;
+    } else {
+        float3 back = cell - Vel.Load(int4(id, 0)).xyz * dt;
+        vt = Vel.SampleLevel(Linear, uvwOf(back, slab), 0);
+        d = Den.SampleLevel(Linear, uvwOf(back, slab), 0);
+        vt.z += dt * Fire3[slab].x * vt.w;	// hot gas rises
+        float3 grad = 0.5 * float3(w(c + int3(1, 0, 0), slab) - w(c - int3(1, 0, 0), slab),
+            w(c + int3(0, 1, 0), slab) - w(c - int3(0, 1, 0), slab),
+            w(c + int3(0, 0, 1), slab) - w(c - int3(0, 0, 1), slab));
+        float length2 = dot(grad, grad);
+        if (length2 > 1e-10)
+            vt.xyz += dt * Forces.z * cross(grad * rsqrt(length2), Curl.Load(int4(id, 0)).xyz);
+        vt.xyz /= 1 + Forces.w * length(vt.xyz) * dt;
+        // the wind from the flame's foot up, so a flame leans from where it burns
+        float overGround = cell.z - groundAt((int2)cell.xy, slab);
+        vt.xy += (Wind.xy / volume.z - vt.xy) * saturate(dt * 0.35 * saturate(overGround / 2));
+        vt.xyz *= Keep.y;
+        d.x *= Thin[slab].x;
+    }
+    // the fuel the burning surfaces give off, as hot as they are, so it lights where it leaves them
+    uint count = (uint)volume.y;
+    for (uint i = 0; i < count; ++i) {
+        uint base = (slab * PUFFS + i) * 3;
+        float4 where = Puffs[base];
+        float4 motion = Puffs[base + 1];
+        float4 heat = Puffs[base + 2];
+        float3 away = cell - where.xyz;
+        float r2 = dot(away, away) / (where.w * where.w);
+        if (r2 >= 1) continue;
+        float k = (1 - r2) * (1 - r2);
+        d.x += motion.w * k * dt;
+        d.y += heat.y * k * dt;
+        vt.w = max(vt.w, heat.x * k);
+        vt.xyz = lerp(vt.xyz, motion.xyz, saturate(k * heat.z));
+    }
+    // It burns: the fuel turns into heat and soot, the soot burns away where it is hottest (what is
+    // left past the flame's tip is its smoke), and the heat goes as the hot soot radiates it, T^4
+    // against the air's, and as the flame mixes with the air round it.
+    float burn = min(burnRate(d.y, vt.w, slab), d.y / max(dt, 1e-4));
+    d.y -= burn * dt;
+    vt.w += fire.y * burn * dt;
+    d.x += fire.z * burn * dt * saturate(d.y / fire2.x + 0.25);
+    d.x *= exp(-fire2.z * dt * smoothstep(0.65, 0.95, vt.w));
+    float t = 0.2 + 0.8 * vt.w, t2 = t * t;
+    vt.w -= dt * fire2.y * (1 - exp(-2 * d.x)) * max(t2 * t2 - 0.0016, 0);
+    vt.w = clamp(vt.w * Keep.x, 0, 2.2);
+    // units push the flame and its smoke; the dust a rotor lifts is no fuel
+    float fuel = d.y;
+    applyMovers(vt, d, cell, slab, dt);
+    d.y = fuel;
+    d = min(d, 4);
+    float rim = fireWalls(cell);
+    d *= lerp(0.9, 1, rim);
+    vt.w *= lerp(0.9, 1, rim);
+    if (c.x == 0 || c.y == 0 || c.x == GX - 1 || c.y == GY - 1 || c.z == GZ - 1) { d = 0; vt.w = 0; }
+    if (solid(c, slab)) { vt = 0; d = 0; }
+    else vt.xyz = noPenetration(vt.xyz, c, slab);
+    VelOut[id] = vt;
+    DenOut[id] = d;
+}
+)HLSL";
+
+// The divergence, with what burns as a source: the burning gas expands and pushes the flame outward.
+const char *const FireDivergencePass = R"HLSL(
+Texture3D<float4> Vel : register(t0);
+Texture3D<DEN> Den : register(t1);
+RWTexture3D<float> DivOut : register(u0);
+float3 v(int3 c, uint slab) { return Vel.Load(at(c, slab)).xyz; }
+[numthreads(8, 8, 8)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+    CELL_HEADER
+    if (solid(c, slab)) { DivOut[id] = 0; return; }
+    float3 here = v(c, slab);
+    float east = solid(c + int3(1, 0, 0), slab) ? -here.x : v(c + int3(1, 0, 0), slab).x;
+    float west = solid(c - int3(1, 0, 0), slab) ? -here.x : v(c - int3(1, 0, 0), slab).x;
+    float north = solid(c + int3(0, 1, 0), slab) ? -here.y : v(c + int3(0, 1, 0), slab).y;
+    float south = solid(c - int3(0, 1, 0), slab) ? -here.y : v(c - int3(0, 1, 0), slab).y;
+    float below = solid(c - int3(0, 0, 1), slab) ? -here.z : v(c - int3(0, 0, 1), slab).z;
+    float source = Fire2[slab].w * burnRate(Den.Load(int4(id, 0)).y, Vel.Load(int4(id, 0)).w, slab);
+    DivOut[id] = 0.5 * (east - west + north - south + v(c + int3(0, 0, 1), slab).z - below) - source;
+}
+)HLSL";
+
+// The sun through the soot only: the fuel is a clear gas.
+const char *const FireLightPass = R"HLSL(
+Texture3D<DEN> Den : register(t0);
+RWTexture3D<float> LightOut : register(u0);
+[numthreads(8, 8, 8)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+    CELL_HEADER
+    float tau = 0;
+    [loop] for (int k = 1; k <= 16; ++k) {
+        float3 q = float3(c) + SunToward.xyz * (k * 1.5);
+        if (any(q < float3(-0.5, -0.5, -0.5)) || any(q > float3(GX - 0.5, GY - 0.5, GZ - 0.5))) break;
+        tau += Den.SampleLevel(Linear, uvwOf(q, slab), 0).x;
+    }
+    tau *= 1.5 * SunToward.w * volume.z;
+    LightOut[id] = exp(-tau) * 0.75 + exp(-tau * 0.25) * 0.25;
+}
+)HLSL";
+
+// A fire's march.  Hot soot glows as a black body does (Kirchhoff: it gives off what it absorbs times
+// the black body's light, Blackbody holding the colour and the brightness against 1500 K), the
+// reaction zone adds a faint blue where the fuel burns, and the flame lights its own smoke from below.
+const char *const FireMarchPass = R"HLSL(
+Texture2D<float> SceneDepth : register(t0);
+Texture3D<DEN> Den : register(t1);
+Texture3D<float> Light : register(t2);
+Texture3D<float4> Vel : register(t3);
+Texture3D<float> Noise : register(t4);
+Texture1D<float4> Blackbody : register(t5);
+SamplerState Linear : register(s0);
+SamplerState Wrap : register(s1);
+cbuffer Draw : register(b0)
+{
+    row_major float4x4 WorldFromClip;
+    float4 Camera;
+    float4 Viewport;
+    float4 Box;
+    float4 Slab;
+    float4 Soot;
+    float4 Dust;
+    float4 SunColor;
+    float4 Ambient;
+    float4 SunDir;
+    float4 Blast;
+    float4 Effects;
+    float4 Extra;
+    float4 ClipLow;
+    float4 ClipHigh;
+    float4 Look;
+    float4 FireLook;
+    float4 FireTint;
+};
+float3 worldAt(float2 pixel, float depth)
+{
+    float2 uv = (pixel - Viewport.xy) / max(Viewport.zw, float2(1, 1));
+    float4 world = mul(float4(uv * float2(2, -2) + float2(-1, 1), depth, 1), WorldFromClip);
+    float w = abs(world.w) < 0.000001 ? (world.w < 0 ? -0.000001 : 0.000001) : world.w;
+    return world.xyz / w;
+}
+float3 glowOf(float heat)
+{
+    float kelvin = 300 + 1200 * heat;
+    if (kelvin < 800) return 0;
+    float4 b = Blackbody.SampleLevel(Linear, saturate((kelvin - 800) / 2200), 0);
+    return b.rgb * pow(max(b.a, 0), FireLook.w);
+}
+float3 uvwAt(float3 cell)
+{
+    float3 c = clamp(cell, float3(0, 0, 0), float3(GX - 1, GY - 1, GZ - 1));
+    return float3((c.x + 0.5) / GX, (c.y + 0.5) / GY, (c.z + 0.5 + Slab.x * GZ) / (GZ * SLABS));
+}
+float4 main(float4 position : SV_Position) : SV_Target
+{
+    float3 eye = Camera.xyz;
+    float3 ray = worldAt(position.xy, SceneDepth.Load(int3(position.xy, 0))) - eye;
+    float sceneDistance = length(ray);
+    ray /= max(sceneDistance, 0.0001);
+    float3 inverse = 1 / (abs(ray) > 1e-6 ? ray : 1e-6);
+    float3 t0 = (ClipLow.xyz - eye) * inverse, t1 = (ClipHigh.xyz - eye) * inverse;
+    float3 nearest = min(t0, t1), farthest = max(t0, t1);
+    float enter = max(max(nearest.x, nearest.y), max(nearest.z, 0));
+    float leave = min(min(min(farthest.x, farthest.y), farthest.z), sceneDistance);
+    if (leave <= enter) discard;
+    float span = leave - enter;
+    uint steps = (uint)clamp(ceil(span / (Box.w * Slab.z)), 1, 128);
+    float stepLength = span / steps;
+    float jitter = frac(52.9829189 * frac(dot(position.xy, float2(0.06711056, 0.00583715)) + Camera.w * 7.31));
+    float cosine = dot(ray, SunDir.xyz);
+    float g = 0.35;
+    float phase = lerp(1, (1 - g * g) / pow(abs(1 + g * g - 2 * g * cosine), 1.5), 0.6);
+    float3 light = SunColor.rgb + Ambient.rgb;
+    float3 tint = light / max(dot(light, float3(0.299, 0.587, 0.114)), 0.75);
+    float3 color = 0;
+    float transmittance = 1;
+    [loop] for (uint i = 0; i < steps; ++i) {
+        float3 cell = (eye + ray * (enter + (i + jitter) * stepLength) - Box.xyz) / Box.w - 0.5;
+        DEN dd = Den.SampleLevel(Linear, uvwAt(cell), 0);
+        if (dd.x < 0.004 && dd.y < 0.004) continue;	// empty air costs one sample
+        // ragged, flickering tongues rather than the cells' staircase, as the blasts' march does
+        float3 q = cell / 4 + float3(Slab.x * 0.37, 0, -Camera.w * 0.9);
+        float3 warp = float3(Noise.SampleLevel(Wrap, q, 0), Noise.SampleLevel(Wrap, q + 0.31, 0),
+            Noise.SampleLevel(Wrap, q + 0.67, 0)) - 0.5;
+        float3 uvw = uvwAt(cell + warp * 1.5);
+        dd = Den.SampleLevel(Linear, uvw, 0);
+        float heat = Vel.SampleLevel(Linear, uvw, 0).w;
+        float rim = fireWalls(cell) * Slab.y;
+        // the reaction zone, a clear gas: light with nothing to absorb it
+        float react = dd.y / (1 + dd.y / FireLook.z) * smoothstep(FireLook.y - 0.05, FireLook.y + 0.05, heat);
+        color += transmittance * FireTint.rgb * react * rim * stepLength / Box.w;
+        float n = Noise.SampleLevel(Wrap, cell / 7 + float3(Slab.x * 0.37, 0, -Camera.w * 0.05), 0);
+        float soot = max(dd.x - (1 - n) * 0.3 * (1 - saturate(dd.x * 1.2)), 0);
+        float sigma = soot * rim * Slab.w;
+        if (sigma <= 0) continue;
+        float sun = Light.SampleLevel(Linear, uvw, 0);
+        float height = saturate(cell.z / 24);
+        float3 lit = Soot.rgb * tint * (Look.x + 0.12 * height + Look.z * sun * phase);
+        // lit from the flame under it
+        if (FireTint.w > 0) lit += Soot.rgb * glowOf(Vel.SampleLevel(Linear, uvwAt(cell - float3(0, 0, 2)), 0).w) * FireTint.w;
+        float3 source = (lit + glowOf(heat) * FireLook.x) * sigma;
+        float through = exp(-sigma * stepLength);
+        color += transmittance * (source - source * through) / sigma;
+        transmittance *= through;
+        if (transmittance < 0.01) break;
+    }
+    return float4(color, 1 - transmittance);
+}
+)HLSL";
+
 enum Pass { CurlProgram, AdvectProgram, DivergenceProgram, JacobiProgram, ProjectProgram, LightProgram, ScrollProgram,
 	ProgramCount };
 
@@ -1080,6 +1377,9 @@ struct Volume {
 	int life = 0;						// logic frames
 	unsigned puffs = 0;
 	int floorFrame = -1000;				// when its terrain and buildings were last laid into the grid
+	int site = -1;						// a fire's site in `fires`
+	bool frozen = false;				// a fire off the screen: not stepped this frame
+	int placed = 0;						// when a fire's box was last laid
 };
 
 struct Tier {
@@ -1098,7 +1398,11 @@ struct State {
 	ID3D11Device *device = nullptr;
 	bool refused = false;
 	bool tallRefused = false;	// the device would not make the tall air: what climbs out of the air keeps its billboards
-	Tier tiers[2];
+	bool fireRefused = false;	// nor the fires': they keep their billboards
+	Tier tiers[3];
+	ID3D11Texture1D *blackbody = nullptr;	// the fires' colour and brightness from 800 to 3000 K
+	ID3D11ShaderResourceView *blackbodyView = nullptr;
+	int lastFireStep = -1;
 	Tier air, tall;
 	// the particles and tile lists of the air ([0]) and the tall air ([1])
 	ID3D11Buffer *sources[2] = {}, *tileRange[2] = {}, *tileIndex[2] = {};
@@ -1162,8 +1466,31 @@ std::vector<Coord3D> pendingSparks;
 struct Solid { float x, y, top, major, minor, angle, tall; bool box; ObjectID id; Part parts[MaxParts]; unsigned partCount; };
 std::vector<Solid> solids, lastSolids;
 int solidsFrame = -100000;
+// The fires: their sites (VolumeFireCore), the systems whose billboards a fire slab draws, the
+// templates that are fires, and the objects they hang on that moved in the last second (a wreck
+// that drives off keeps its billboards).
+VolumeFire::Fires fires;
+std::unordered_set<int> fireTaken;
+std::unordered_set<unsigned> fireEmitting;	// systems the last fire step laid fuel for: only these give up their billboards
+std::unordered_map<const ParticleSystemTemplate *, bool> fireTemplates;
+std::unordered_map<unsigned, Coord3D> fireAnchors;
+std::unordered_set<unsigned> movingObjects;
+int anchorsFrame = -100000;
+unsigned fireClaims = 0;
+// A site's key is the object its systems hang on, or for the art's fire bones (hung on the drawable)
+// DrawableKey with the drawable's ID: which object that drawable is can only be asked outside the
+// logic window, so Gather does (fireOwners) and a site waits a frame for its slab.
+const unsigned DrawableKey = 0x80000000u;
+std::unordered_map<unsigned, unsigned> fireOwners;
+std::unordered_set<unsigned> pendingOwners;
+unsigned ownerOf(unsigned key)
+{
+	if (!(key & DrawableKey)) return key;
+	auto found = fireOwners.find(key);
+	return found == fireOwners.end() ? 0 : found->second;
+}
 
-unsigned tierOf(unsigned slot) { return slot >= TierShapes[1].first ? 1 : 0; }
+unsigned tierOf(unsigned slot) { return slot >= TierShapes[2].first ? 2 : slot >= TierShapes[1].first ? 1 : 0; }
 unsigned slabOf(unsigned slot) { return slot - TierShapes[tierOf(slot)].first; }
 
 void releaseState();
@@ -1171,6 +1498,8 @@ void pruneSets();
 void boxOf(const Volume &volume, const TierShape &shape, float low[3], float high[3]);
 void addShock(const Coord3D &where, float speed, float strength, float seconds, int now);
 void fillMovers();
+const Solid *structureAt(const Coord3D &where, ObjectID id);
+void clearFires();
 
 // The setting, read every time: Off, Low or High from the options menu, or -volsmoke for the run.
 // A change drops every volume, program and texture, and forgets every system taken, so with Off
@@ -1195,11 +1524,14 @@ bool requested()
 		lastSolids.clear();
 		solidsFrame = -100000;
 		lastReport = 0;
+		clearFires();
 		level = want;
 		TierShapes[0].slabs = Qualities[level].slabs[0];
 		TierShapes[0].gz = Qualities[level].smallHeight;
 		TierShapes[1].slabs = Qualities[level].slabs[1];
 		TierShapes[1].first = TierShapes[0].slabs;
+		TierShapes[2] = { Qualities[level].fireSide, Qualities[level].fireSide, Qualities[level].fireHeight,
+			Qualities[level].fireSlabs, TierShapes[1].first + TierShapes[1].slabs };
 		DEBUG_LOG(("VOLSMOKE: setting %s\n", level == 0 ? "Off" : level == 1 ? "Low" : "High"));
 	}
 	return level > 0;
@@ -1237,8 +1569,9 @@ void releaseAir(unsigned g)
 
 void releaseState()
 {
-	dropTier(state.tiers[0]);
-	dropTier(state.tiers[1]);
+	for (Tier &tier : state.tiers) dropTier(tier);
+	drop(state.blackbodyView);
+	drop(state.blackbody);
 	releaseAir(0);
 	releaseAir(1);
 	drop(state.fullscreen);
@@ -1250,6 +1583,7 @@ void releaseState()
 	drop(state.noiseView);
 	drop(state.noise);
 	state = State();
+	fireTaken.clear();	// their slabs are gone: the billboards draw until a new slab is warm
 	for (Volume &volume : volumes) volume = Volume();
 	airVolume = Volume();
 	tallVolume = Volume();
@@ -1331,27 +1665,39 @@ bool makeStructured(ID3D11Device *device, unsigned count, unsigned stride, ID3D1
 		&& SUCCEEDED(device->CreateShaderResourceView(buffer, &shown, &view));
 }
 
-bool makeTier(DX11BackendClass *backend, ID3D11Device *device, Tier &tier, const TierShape &shape, bool air)
+bool makeTier(DX11BackendClass *backend, ID3D11Device *device, Tier &tier, const TierShape &shape, bool air, bool fire = false)
 {
 	tier.shape = shape;
 	tier.air = air;
 	const std::string header = std::string(air ? "#define AIR 1\n" : "") + "#define GX " + std::to_string(shape.gx)
 		+ "\n#define GY " + std::to_string(shape.gy) + "\n#define GZ " + std::to_string(shape.gz) + "\n#define SLABS "
 		+ std::to_string(shape.slabs) + "\n" + Grid;
-	const std::string prelude = header + Prelude;
+	std::string prelude = header + Prelude;
+	if (fire) {
+		// the fire's fields at the end of the Sim cbuffer, after Thin, as SimConstants holds them
+		const std::string thin = "float4 Thin[VOLS];\n";
+		const size_t at = prelude.find(thin);
+		if (at == std::string::npos) return false;
+		prelude.insert(at + thin.size(), FireFields);
+	}
 	static const char *const names[ProgramCount] = { "volsmoke curl", "volsmoke advect", "volsmoke divergence",
 		"volsmoke jacobi", "volsmoke project", "volsmoke light", "volsmoke scroll" };
+	static const char *const fireNames[ProgramCount] = { "volfire curl", "volfire advect", "volfire divergence",
+		"volfire jacobi", "volfire project", "volfire light", "volfire scroll" };
 	const std::string sources[ProgramCount] = {
-		prelude + CurlPass, prelude + MoverPass + AdvectPass + MushroomPass + AdvectPassEnd, prelude + DivergencePass,
-		prelude + PressureHelpers + JacobiPass, prelude + PressureHelpers + ProjectPass, prelude + LightPass,
-		prelude + ScrollPass };
+		prelude + CurlPass,
+		fire ? prelude + MoverPass + FireWalls + FireHelpers + FireAdvectPass : prelude + MoverPass + AdvectPass + MushroomPass + AdvectPassEnd,
+		fire ? prelude + FireHelpers + FireDivergencePass : prelude + DivergencePass,
+		prelude + PressureHelpers + JacobiPass, prelude + PressureHelpers + ProjectPass,
+		prelude + (fire ? FireLightPass : LightPass), prelude + ScrollPass };
 	std::vector<unsigned char> code;
 	bool made = true;
 	for (unsigned pass = 0; made && pass < ProgramCount; ++pass)
 		if (pass != ScrollProgram || air)	// only the air moves with the camera
-			made = compile(backend, sources[pass], names[pass], "cs_5_0", code)
+			made = compile(backend, sources[pass], (fire ? fireNames : names)[pass], "cs_5_0", code)
 				&& SUCCEEDED(device->CreateComputeShader(code.data(), code.size(), nullptr, &tier.compute[pass]));
-	made = made && compile(backend, header + MarchPass, "volsmoke march", "ps_5_0", code)
+	made = made && compile(backend, fire ? header + FireWalls + FireMarchPass : header + MarchPass, fire ? "volfire march" : "volsmoke march",
+			"ps_5_0", code)
 		&& SUCCEEDED(device->CreatePixelShader(code.data(), code.size(), nullptr, &tier.march));
 	const DXGI_FORMAT density = air ? VelocityFormat : DensityFormat;	// the air's four channels
 	for (unsigned i = 0; made && i < 2; ++i)
@@ -1399,6 +1745,34 @@ bool makeState(DX11BackendClass *backend, ID3D11Device *device)
 		releaseAir(1);
 		state.tallRefused = true;
 		DEBUG_LOG(("VOLSMOKE: the device refused the tall air; trails that climb out of the air keep their billboards\n"));
+	}
+	// The fires are a nicety too: a device that will not make them keeps their billboards.  Their
+	// black body: colour (brightest channel 1) and brightness against 1500 K, 800 to 3000 K.
+	if (made && TierShapes[2].slabs) {
+		float texels[64 * 4];
+		float rgb[64 * 3];
+		VolumeFire::blackbodyTable(rgb, 64, 800.0f, 3000.0f);
+		for (unsigned i = 0; i < 64; ++i) {
+			for (unsigned k = 0; k < 3; ++k) texels[i * 4 + k] = rgb[i * 3 + k];
+			texels[i * 4 + 3] = VolumeFire::blackbodyLuminance(800.0f + 2200.0f * i / 63.0f);
+		}
+		D3D11_TEXTURE1D_DESC description = {};
+		description.Width = 64;
+		description.MipLevels = description.ArraySize = 1;
+		description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		description.Usage = D3D11_USAGE_IMMUTABLE;
+		description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		const D3D11_SUBRESOURCE_DATA data = { texels, sizeof(texels), 0 };
+		const bool fire = makeTier(backend, device, state.tiers[2], TierShapes[2], false, true)
+			&& SUCCEEDED(device->CreateTexture1D(&description, &data, &state.blackbody))
+			&& SUCCEEDED(device->CreateShaderResourceView(state.blackbody, nullptr, &state.blackbodyView));
+		if (!fire) {
+			dropTier(state.tiers[2]);
+			drop(state.blackbodyView);
+			drop(state.blackbody);
+			state.fireRefused = true;
+			DEBUG_LOG(("VOLSMOKE: the device refused the fires; they keep their billboards\n"));
+		}
 	}
 	std::vector<unsigned char> code;
 	made = made && compile(backend, HazardCloud::vertexShader(), "volsmoke fullscreen", "vs_5_0", code)
@@ -1456,9 +1830,10 @@ bool makeState(DX11BackendClass *backend, ID3D11Device *device)
 		state.refused = true;
 		return false;
 	}
-	DEBUG_LOG(("VOLSMOKE: programs, %u + %u volumes (the small %u cells tall), a %ux%ux%u air at %.1f units a cell and %s made in %.1f ms\n",
+	DEBUG_LOG(("VOLSMOKE: programs, %u + %u volumes (the small %u cells tall), a %ux%ux%u air at %.1f units a cell, %s and %u %ux%ux%u fires made in %.1f ms\n",
 		TierShapes[0].slabs, TierShapes[1].slabs, TierShapes[0].gz, air.gx, air.gy, air.gz, air.cell,
 		state.tallRefused ? "no tall air" : level == 2 ? "a 96 cell tall air at 12" : "a 48 cell tall air at 24",
+		state.fireRefused ? 0u : TierShapes[2].slabs, TierShapes[2].gx, TierShapes[2].gy, TierShapes[2].gz,
 		DX11Resource_Milliseconds_Now() - started));
 	return true;
 }
@@ -1543,6 +1918,86 @@ void emit(unsigned slab, unsigned &count, const Emitter &e)
 	std::memcpy(puff, values, sizeof(values));
 }
 
+// A fire's slab this step: an emitter a burning system of its site (VolumeFireCore), laying fuel
+// for the heat its stock flame stands for, puffing at its pool's frequency, pushed out of the
+// building's meshes when its bone is inside one; and its constants, in this slab's cells.
+void scheduleFire(const Volume &volume, unsigned slab, DrawConstants *draw)
+{
+	const int now = TheGameLogic ? (int)TheGameLogic->getFrame() : volume.born;
+	const float seconds = (float)now / LOGICFRAMES_PER_SECOND, cell = volume.cell;
+	const TierShape &shape = TierShapes[2];
+	static std::vector<VolumeFire::Emitter> list;
+	list.clear();
+	unsigned object = 0;
+	if (volume.site >= 0 && volume.site < (int)fires.sites.size()) {
+		fires.emitters(volume.site, now, LOGICFRAMES_PER_SECOND, list);
+		object = ownerOf(fires.sites[volume.site].object);
+	}
+	VolumeFire::PartBox boxes[MaxParts];
+	unsigned boxCount = 0;
+	if (const Solid *building = object ? structureAt(Coord3D(), (ObjectID)object) : nullptr) {
+		const float c = std::cos(building->angle), s = std::sin(building->angle), base = building->top - building->tall;
+		for (unsigned i = 0; i < building->partCount; ++i) {
+			const Part &p = building->parts[i];
+			boxes[boxCount++] = { building->x + p.along * c - p.across * s, building->y + p.along * s + p.across * c, c, s,
+				p.halfAlong, p.halfAcross, base + p.bottom, base + p.top };
+		}
+		if (!boxCount)
+			boxes[boxCount++] = { building->x, building->y, c, s, building->major, building->box ? building->minor : building->major,
+				base, building->top };
+	}
+	unsigned count = 0;
+	for (const VolumeFire::Emitter &e : list) {
+		float x = e.x, y = e.y, z = e.z;
+		VolumeFire::pushOut(x, y, z, boxes, boxCount, cell);
+		float cx = (x - volume.origin[0]) / cell - 0.5f, cy = (y - volume.origin[1]) / cell - 0.5f, cz = (z - volume.origin[2]) / cell - 0.5f;
+		// out through a wall and past the box, or far off the building: it burns on the roof over its
+		// bone instead (a mesh's box is wider than its walls, and flames hung beside it in the air)
+		const bool outside = cx < 2 || cy < 2 || cx > shape.gx - 3.0f || cy > shape.gy - 3.0f;
+		if (boxCount && (outside || std::hypot(x - e.x, y - e.y) > 2.0f * cell)) {
+			float roof = e.z;
+			for (unsigned i = 0; i < boxCount; ++i) {
+				const VolumeFire::PartBox &b = boxes[i];
+				const float dx = e.x - b.x, dy = e.y - b.y;
+				if (std::fabs(dx * b.c + dy * b.s) <= b.halfAlong && std::fabs(-dx * b.s + dy * b.c) <= b.halfAcross)
+					roof = (std::max)(roof, b.top + cell * 0.5f);
+			}
+			x = e.x;
+			y = e.y;
+			z = roof;
+			cx = (x - volume.origin[0]) / cell - 0.5f;
+			cy = (y - volume.origin[1]) / cell - 0.5f;
+			cz = (z - volume.origin[2]) / cell - 0.5f;
+		}
+		const float radius = (std::min)((std::max)(e.radius / cell, 1.5f), 4.0f);	// under 1.5 cells it can miss every cell centre
+		if (cx < 2 || cy < 2 || cx > shape.gx - 3.0f || cy > shape.gy - 3.0f || cz < 0 || cz > shape.gz - 8.0f) continue;
+		const float kW = e.kW * VolumeFire::puff(e, seconds), rate = VolumeFire::emitterRate(kW, radius, cell);
+		emit(slab, count, { cx, cy, cz, radius, 0, 0, FireExit / cell, rate * FireSurfaceSoot, FirePilot, rate, 0.15f });
+		if (!draw) fireEmitting.insert(e.id);
+	}
+	sim.Volumes[slab][1] = (float)count;
+	const float fire[4] = { FireBurnRate, VolumeFire::HeatPerFuel, FireSootYield, FireIgnition };
+	const float fire2[4] = { FireRich, FireRadiation, FireSootBurn, FireExpansion };
+	const float fire3[4] = { FireLift / cell, 0, 0, 0 };
+	std::memcpy(sim.Fire[slab], fire, sizeof(fire));
+	std::memcpy(sim.Fire2[slab], fire2, sizeof(fire2));
+	std::memcpy(sim.Fire3[slab], fire3, sizeof(fire3));
+	if (draw) {
+		const float soot[4] = { 0.14f, 0.13f, 0.12f, 0 }, look[4] = { ShadeLight, 0, SunShare, 0 };
+		const float fireLook[4] = { FireGain, FireIgnition, FireRich, FireExposure };
+		// the reaction zone's faint blue (CH and C2 light, not a black body's), and the flame's light on its smoke
+		const float fireTint[4] = { 0.015f, 0.03f, 0.07f, Qualities[level].fireLight };
+		std::memcpy(draw->Soot, soot, sizeof(soot));
+		std::memset(draw->Dust, 0, sizeof(draw->Dust));
+		std::memset(draw->Blast, 0, sizeof(draw->Blast));
+		std::memset(draw->Effects, 0, sizeof(draw->Effects));
+		std::memset(draw->Extra, 0, sizeof(draw->Extra));
+		std::memcpy(draw->Look, look, sizeof(look));
+		std::memcpy(draw->FireLook, fireLook, sizeof(fireLook));
+		std::memcpy(draw->FireTint, fireTint, sizeof(fireTint));
+	}
+}
+
 // A ballistic jet from the blast: where it is at t, and its velocity; false once it has landed.
 bool jetAt(const Volume &volume, unsigned index, float speed, float tiltLow, float tiltHigh, float t,
 	float out[6])
@@ -1566,6 +2021,10 @@ bool jetAt(const Volume &volume, unsigned index, float speed, float tiltLow, flo
 // and condensation shell, and the soot's and the dust's colours, through the draw constants.
 void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 {
+	if (volume.kind == Fire) {
+		scheduleFire(volume, slab, draw);
+		return;
+	}
 	float *blast = sim.Blasts[slab], *power = sim.Power[slab], *shape = sim.Shape[slab], *motion = sim.Motion[slab];
 	for (unsigned i = 0; i < 3; ++i) blast[i] = volume.blast[i];
 	blast[3] = 2.0f;
@@ -2190,7 +2649,7 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 			}
 	}
 	// a blast on a building goes off on its roof, not inside it
-	if (volume.reset && volume.kind != Airburst && volume.kind != Structure) {
+	if (volume.reset && volume.kind != Airburst && volume.kind != Structure && volume.kind != Fire) {
 		const unsigned column = unsigned(volume.blast[1]) * shape.gx + unsigned(volume.blast[0]);
 		volume.blast[2] = (std::max)(volume.blast[2], heights[column] + 0.5f);
 	}
@@ -2201,13 +2660,15 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float seconds, const float sunToward[3], unsigned slabs)
 {
 	Tier &tier = state.tiers[t];
+	const bool fire = t == 2;
+	if (fire) fireEmitting.clear();	// scheduleFire names them again below
 	sim.Step[0] = dt;
 	sim.Step[1] = seconds;
 	sim.Forces[0] = Buoyancy;
 	sim.Forces[1] = Weight;
 	sim.Forces[2] = Vorticity;
 	sim.Forces[3] = Drag;
-	sim.Keep[0] = std::pow(0.5f, dt / HeatHalfLife);
+	sim.Keep[0] = std::pow(0.5f, dt / (fire ? FireHeatHalfLife : HeatHalfLife));
 	sim.Keep[1] = std::pow(0.5f, dt / VelocityHalfLife);
 	sim.Keep[2] = std::pow(0.5f, dt / DustHalfLife);
 	sim.Keep[3] = std::pow(0.5f, dt / CapSpillHalfLife);
@@ -2218,13 +2679,15 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 	float settle = 0;
 	for (unsigned slab = 0; slab < tier.shape.slabs; ++slab) {
 		const Volume &volume = volumes[tier.shape.first + slab];
-		sim.Volumes[slab][0] = volume.live ? 1.0f : 0.0f;
+		// a fire off the screen is not stepped (its cells keep what they held, a step stale at most)
+		sim.Volumes[slab][0] = volume.live && !volume.frozen ? 1.0f : 0.0f;
 		sim.Volumes[slab][1] = 0;
 		sim.Volumes[slab][2] = volume.cell;
 		sim.Volumes[slab][3] = volume.reset ? 1.0f : 0.0f;
 		// A building's smoke thins with a half-life of its own: a blast's soot otherwise stays as laid,
 		// and a War Factory's had piled into a dark wall across the frame by the next building's fall.
-		sim.Thin[slab][0] = volume.kind == Structure ? std::pow(0.5f, dt / StructureSootHalfLife) : 1.0f;
+		sim.Thin[slab][0] = volume.kind == Structure ? std::pow(0.5f, dt / StructureSootHalfLife)
+			: volume.kind == Fire ? std::pow(0.5f, dt / FireSootHalfLife) : 1.0f;
 		// A tank's thins once its column has died down, so it is gone as soon as the game's own.
 		if (volume.kind == TankDeath && volume.live && secondsSince(volume, now) > TankSootThinFrom)
 			sim.Thin[slab][0] = std::pow(0.5f, dt / TankSootHalfLife);
@@ -2244,8 +2707,9 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 	run(context, tier, CurlProgram, { tier.velocity[0].view }, { tier.curl.write }, slabs);
 	run(context, tier, AdvectProgram, { tier.velocity[0].view, tier.density[in].view, tier.curl.view },
 		{ tier.velocity[1].write, tier.density[out].write, tier.pressure[0].write }, slabs);
-	run(context, tier, DivergenceProgram, { tier.velocity[1].view }, { tier.divergence.write }, slabs);
-	for (unsigned sweep = 0; sweep < Qualities[level].sweeps; ++sweep) {
+	// (the fire's divergence also reads the new fuel and heat, for the gas its burning releases)
+	run(context, tier, DivergenceProgram, { tier.velocity[1].view, tier.density[out].view }, { tier.divergence.write }, slabs);
+	for (unsigned sweep = 0; sweep < (fire ? Qualities[level].fireSweeps : Qualities[level].sweeps); ++sweep) {
 		const unsigned from = sweep & 1;
 		run(context, tier, JacobiProgram, { tier.pressure[from].view, tier.divergence.view }, { tier.pressure[1 - from].write }, slabs);
 	}
@@ -2975,6 +3439,259 @@ void pruneSets()
 			it = TheParticleSystemManager->findParticleSystem((ParticleSystemID)it->first) ? std::next(it) : firstSeen.erase(it);
 }
 
+// ---- The fires: a burning building's or wreck's stock fire systems drawn as a burning volume ----
+
+void clearFires()
+{
+	fires.clear();
+	fireTaken.clear();
+	fireAnchors.clear();
+	movingObjects.clear();
+	fireOwners.clear();
+	pendingOwners.clear();
+	fireEmitting.clear();
+	anchorsFrame = -100000;
+	state.lastFireStep = -1;
+}
+
+bool isFire(ParticleSystem *system)
+{
+	const ParticleSystemTemplate *tmplate = system->getTemplate();
+	auto known = fireTemplates.find(tmplate);
+	if (known != fireTemplates.end()) return known->second;
+	const bool fire = VolumeFire::classOf(tmplate->getName().str()) == VolumeFire::Building;
+	fireTemplates[tmplate] = fire;
+	return fire;
+}
+
+// The fire slab a site has, else MaxVolumes.
+unsigned fireSlotOf(int site)
+{
+	const TierShape &shape = TierShapes[2];
+	for (unsigned slot = shape.first; slot < shape.first + shape.slabs; ++slot)
+		if (volumes[slot].live && volumes[slot].kind == Fire && volumes[slot].site == site) return slot;
+	return MaxVolumes;
+}
+
+// Its systems' billboards back, the next frame (the slab is going).
+void releaseFireSystems(int site)
+{
+	for (auto it = fireTaken.begin(); it != fireTaken.end();)
+		it = fires.siteOf((unsigned)*it) == site ? fireTaken.erase(it) : std::next(it);
+}
+
+// Where a site's middle is, and how far its camera is from it, for which sites keep a slab.
+float fireDistance(int site)
+{
+	const VolumeFire::Site &s = fires.sites[site];
+	Coord3D look = {};
+	if (TheTacticalView) TheTacticalView->getPosition(&look);
+	const float dx = (s.low[0] + s.high[0]) * 0.5f - look.x, dy = (s.low[1] + s.high[1]) * 0.5f - look.y;
+	return dx * dx + dy * dy;
+}
+
+// Lay a site's slab over it: over its building's footprint and meshes when Gather saw the building,
+// else round its fires, with room over the tallest for the flame and its smoke to rise twice as high
+// again.  The cell is what that box needs, 1.5 to 8 units.
+void placeFire(Volume &volume, int site, int now, int born)
+{
+	const VolumeFire::Site &s = fires.sites[site];
+	const TierShape &shape = TierShapes[2];
+	const unsigned owner = ownerOf(s.object);
+	const Solid *building = owner ? structureAt(Coord3D(), (ObjectID)owner) : nullptr;
+	const float flame = (std::max)(s.flame, 18.0f);
+	// round its fires, not the whole building: the cells are what the box needs, and a War
+	// Factory's footprint and meshes at 32 cells made cells of 6.5 units, wider than its flames
+	// (layFloor still lays the building's meshes into it as solid)
+	const float cx = (s.low[0] + s.high[0]) * 0.5f, cy = (s.low[1] + s.high[1]) * 0.5f;
+	const float half = (std::max)(s.high[0] - s.low[0], s.high[1] - s.low[1]) * 0.5f + 6.0f;
+	float floorZ = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(cx, cy, NULL) : s.low[2];
+	float top = s.high[2];
+	if (building) {
+		floorZ = building->top - building->tall;
+		top = (std::max)(top, building->top);
+	}
+	const float across = 2.0f * (half + 0.6f * flame);
+	float cell = across / (shape.gx - 4.0f);
+	cell = (std::max)(cell, ((std::max)(top, floorZ) - floorZ + 2.5f * flame + 6.0f) / (shape.gz - 8.0f));
+	cell = (std::min)((std::max)(cell, 1.5f), 8.0f);
+	volume = Volume();
+	volume.kind = Fire;
+	volume.live = volume.reset = true;
+	volume.cell = cell;
+	volume.site = site;
+	volume.born = born;
+	volume.placed = now;
+	volume.life = 0x3fffffff;	// as long as its fires burn (gatherFires sets the end)
+	const float side = shape.gx * cell;
+	volume.origin[0] = cx - side * 0.5f;
+	volume.origin[1] = cy - side * 0.5f;
+	float lowest = floorZ;
+	if (TheTerrainRenderObject)
+		for (int j = 0; j <= 6; ++j)
+			for (int i = 0; i <= 6; ++i)
+				lowest = (std::min)(lowest, TheTerrainRenderObject->getHeightMapHeight(volume.origin[0] + side * i / 6.0f,
+					volume.origin[1] + side * j / 6.0f, NULL));
+	volume.origin[2] = (std::max)(lowest, floorZ - 3.0f * cell) - cell;
+	volume.seed = unsigned(int(cx) * 73856093) ^ unsigned(int(cy) * 19349663) ^ unsigned(now * 83492791);
+	if (fireClaims++ < 8)
+		DEBUG_LOG(("VOLSMOKE: frame %d, fire slab for %s %u at (%.0f, %.0f), %.0f units across at %.1f a cell, flame %.0f\n", now,
+			building ? "building" : s.object ? "object" : "loose fires", s.object, cx, cy, side, cell, flame));
+}
+
+// A fire system this frame (Takes, inside the particle loop: client state only).  Its flame, as its
+// live particles draw it, goes to its site; the site gets a slab if one is free or held by a site
+// farther from the camera; its billboards stop once the slab has run FireWarmSeconds under them.
+bool takeFire(ParticleSystem *system)
+{
+	const int id = (int)system->getSystemID();
+	const unsigned drawable = (unsigned)system->getAttachedDrawable();
+	unsigned object = system->getAttachedObject() != INVALID_ID ? (unsigned)system->getAttachedObject() : 0u;
+	if (!object && drawable != (unsigned)INVALID_DRAWABLE_ID) {
+		// the art's fire bones: one site with the body's own fires once Gather has said whose drawable it is
+		const unsigned key = DrawableKey | drawable;
+		auto found = fireOwners.find(key);
+		if (found == fireOwners.end()) {
+			pendingOwners.insert(key);
+			fireTaken.erase(id);
+			return false;
+		}
+		object = found->second ? found->second : key;
+	}
+	const unsigned owner = ownerOf(object);
+	if (!usable() || state.fireRefused || !TierShapes[2].slabs || !TheGameLogic || (owner && movingObjects.count(owner))) {
+		fireTaken.erase(id);
+		return false;
+	}
+	const int now = (int)TheGameLogic->getFrame();
+	Particle *young = nullptr;
+	float highZ = -1e9f, biggest = 0;
+	for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) {
+		young = p;	// the list runs oldest to youngest
+		highZ = (std::max)(highZ, p->getPosition()->z);
+		biggest = (std::max)(biggest, p->getSize());
+	}
+	int site = -1;
+	if (young) {
+		const Coord3D at = *young->getPosition();
+		const ParticleSystemInfo::EmissionVolumeType type = system->getEmisionVolumeType();
+		const float radius = type == ParticleSystemInfo::SPHERE ? system->m_emissionVolume.sphere.radius
+			: type == ParticleSystemInfo::CYLINDER ? system->m_emissionVolume.cylinder.radius : 0.0f;
+		const VolumeFire::Sample sample = { (unsigned)id, object, at.x, at.y, at.z, (highZ - at.z) + biggest * 0.5f,
+			(std::max)(2.0f * radius + biggest * 0.3f, 2.0f) };
+		site = fires.sample(sample, now);
+	} else site = fires.siteOf((unsigned)id);	// between bursts: what it last drew
+	if (site < 0) {
+		fireTaken.erase(id);
+		return false;
+	}
+	unsigned slot = fireSlotOf(site);
+	// A new site waits two frames for its slab, so every bone of its building is in it.
+	if (slot == MaxVolumes && now - fires.sites[site].born < 2) {
+		fireTaken.erase(id);
+		return false;
+	}
+	if (slot == MaxVolumes) {
+		const TierShape &shape = TierShapes[2];
+		for (unsigned s = shape.first; s < shape.first + shape.slabs && slot == MaxVolumes; ++s)
+			if (!volumes[s].live) slot = s;
+		if (slot == MaxVolumes) {
+			// none free: the farthest site gives its slab up to one a quarter nearer
+			float farthest = -1;
+			for (unsigned s = shape.first; s < shape.first + shape.slabs; ++s) {
+				const float d = fireDistance(volumes[s].site);
+				if (d > farthest) { farthest = d; slot = s; }
+			}
+			if (slot == MaxVolumes || fireDistance(site) * 1.6f > farthest) {
+				fireTaken.erase(id);
+				return false;
+			}
+			releaseFireSystems(volumes[slot].site);
+		}
+		placeFire(volumes[slot], site, now, now);
+	}
+	// warm, and one of the emitters the last step laid fuel for (the 24 biggest, inside the box)
+	if (now - volumes[slot].born < (int)(FireWarmSeconds * LOGICFRAMES_PER_SECOND) || !fireEmitting.count((unsigned)id)) {
+		fireTaken.erase(id);
+		return false;
+	}
+	fireTaken.insert(id);
+	return true;
+}
+
+// Once a logic frame, outside the logic window (Gather): systems that are gone leave their sites, a
+// site whose last one went burns out, a wreck that drives off gives its slab up, and every fire
+// slab's end follows its site's.
+void gatherFires(int now)
+{
+	if (!TheParticleSystemManager) return;
+	for (unsigned id : fires.systemIds())
+		if (!TheParticleSystemManager->findParticleSystem((ParticleSystemID)id)) {
+			fires.forget(id, now);
+			fireTaken.erase((int)id);
+		}
+	// whose drawable each art-hung fire burns on
+	if (fireOwners.size() > 4096) fireOwners.clear();	// ponytail: drawables gone long ago; asked again
+	for (unsigned key : pendingOwners) {
+		Drawable *drawable = TheGameClient ? TheGameClient->findDrawableByID((DrawableID)(key & ~DrawableKey)) : nullptr;
+		const Object *object = drawable ? drawable->getObject() : nullptr;
+		fireOwners[key] = object ? (unsigned)object->getID() : 0u;
+	}
+	pendingOwners.clear();
+	if (now - anchorsFrame >= LOGICFRAMES_PER_SECOND || now < anchorsFrame) {
+		anchorsFrame = now;
+		std::unordered_map<unsigned, Coord3D> seen;
+		for (const VolumeFire::Site &s : fires.sites) {
+			const unsigned owner = ownerOf(s.object);
+			if (!s.live || !owner || seen.count(owner)) continue;
+			const Object *object = TheGameLogic->findObjectByID((ObjectID)owner);
+			if (!object) continue;
+			const Coord3D at = *object->getPosition();
+			auto last = fireAnchors.find(owner);
+			if (last != fireAnchors.end()) {
+				const float dx = at.x - last->second.x, dy = at.y - last->second.y;
+				if (dx * dx + dy * dy > 4.0f) movingObjects.insert(owner);
+				else movingObjects.erase(owner);
+			}
+			seen[owner] = at;
+		}
+		fireAnchors.swap(seen);
+	}
+	// freed first, so a slab never outlives its site into the next one given the same index
+	fires.prune(now, LOGICFRAMES_PER_SECOND);
+	const TierShape &shape = TierShapes[2];
+	for (unsigned slot = shape.first; slot < shape.first + shape.slabs; ++slot) {
+		Volume &volume = volumes[slot];
+		if (!volume.live || volume.kind != Fire) continue;
+		const VolumeFire::Site *s = volume.site >= 0 && volume.site < (int)fires.sites.size() ? &fires.sites[volume.site] : nullptr;
+		if (!s || !s->live || (ownerOf(s->object) && movingObjects.count(ownerOf(s->object)))) {
+			releaseFireSystems(volume.site);
+			volume.live = false;
+			continue;
+		}
+		volume.life = s->fuelEnd >= 0 ? s->fuelEnd - volume.born + (int)(VolumeFire::BurnoutSeconds * LOGICFRAMES_PER_SECOND) : 0x3fffffff;
+		// The game stopped drawing its fires (a stealthed building's): so does the volume.
+		if (!fires.fresh(volume.site, now, LOGICFRAMES_PER_SECOND)) {
+			releaseFireSystems(volume.site);
+			volume.live = false;
+			continue;
+		}
+		// A building catches fire bone by bone as it is hurt: a fire that has spread past its slab's
+		// box gets a box over all of it, at most every two seconds and while the cell can still grow
+		// (a carrier deck's fires spread wider than the widest box), and warms up again under its
+		// billboards so the fire does not blink out while the new sim lights.
+		float low[3], high[3];
+		boxOf(volume, shape, low, high);
+		const float rim = 2.0f * volume.cell;
+		if (s->fuelEnd < 0 && volume.cell < 7.99f && now - volume.placed > 2 * LOGICFRAMES_PER_SECOND
+				&& (s->low[0] < low[0] + rim || s->low[1] < low[1] + rim || s->high[0] > high[0] - rim
+					|| s->high[1] > high[1] - rim || s->high[2] > high[2] - 4.0f * volume.cell)) {
+			releaseFireSystems(volume.site);
+			placeFire(volume, volume.site, now, now);
+		}
+	}
+}
+
 } // namespace
 
 namespace VolumeSmoke {
@@ -2984,12 +3701,14 @@ bool Hides(ParticleSystem *system)
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
 	// the air reads only the CPU's particles, so an air system's GPU overflow keeps drawing
 	const int id = (int)system->getSystemID();
-	return takenSystems.count(id) != 0 && !airSystems.count(id);
+	return (takenSystems.count(id) != 0 && !airSystems.count(id)) || fireTaken.count(id) != 0;
 }
 
 bool Takes(ParticleSystem *system)
 {
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
+	// a building's or a wreck's fire burns in a fire slab, or keeps its billboards; never the air's
+	if (isFire(system)) return takeFire(system);
 	const int id = (int)system->getSystemID();
 	if (takenSystems.count(id)) return !airOutside.count(id);
 	// A blast is told from loose billboard systems; trails, streaks, a building's smoke and every
@@ -3063,7 +3782,7 @@ bool Takes(ParticleSystem *system)
 		building = structureAt(where, INVALID_ID);
 	if (kindNow == TankDeath && building && !onBuilding) kindNow = Structure;
 	for (const Volume &volume : volumes) {
-		if (!volume.live || seen < volume.born - 10
+		if (!volume.live || volume.kind == Fire || seen < volume.born - 10
 				|| seen > volume.born + (volume.kind == Nuclear ? 180 : volume.kind == TankDeath || volume.kind == Structure ? 90 : 30)) continue;	// a nuke's stem comes 2 s after its flare
 		if (flat && !(volume.kind == TankDeath && system->getPriority() == DEATH_EXPLOSION) && !(nukeFlat && volume.kind == Nuclear)
 			&& !(structFlat && volume.kind == Structure)) continue;
@@ -3251,6 +3970,7 @@ void Gather()
 	if (gathered == now) return;
 	gathered = now;
 	gatherSolids(now);	// every two seconds, so a blast that starts finds its buildings
+	gatherFires(now);
 	// every frame, idle or not, so a tank that dies now finds its hull; never where no volume can be
 	if (Direct3D11_Present_Is_Enabled()) collectMovers(now);
 	// A dead tank's hot sparks: client particles only, the client's random stream, no logic state.
@@ -3281,25 +4001,39 @@ void Render(const HazardCloud::Camera &camera)
 	HazardCloud::multiply(camera.view, camera.projection, viewProjection);
 
 	const int now = (int)TheGameLogic->getFrame();
-	unsigned live = 0, slabs[2] = {};
+	unsigned live = 0, slabs[3] = {}, fireLive = 0;
 	for (unsigned slot = 0; slot < MaxVolumes; ++slot) {
 		Volume &volume = volumes[slot];
 		if (!volume.live) continue;
 		if (now - volume.born > volume.life || now < volume.born) {
+			if (volume.kind == Fire) releaseFireSystems(volume.site);
 			volume.live = false;
 			continue;
 		}
 		++live;
+		fireLive += volume.kind == Fire ? 1 : 0;
 		slabs[tierOf(slot)] = slabOf(slot) + 1;
+		// a fire whose box, grown by its own size each way, is off the screen is not stepped
+		if (volume.kind == Fire) {
+			float low[3], high[3];
+			boxOf(volume, TierShapes[2], low, high);
+			for (unsigned i = 0; i < 3; ++i) {
+				const float grow = high[i] - low[i];
+				low[i] -= grow;
+				high[i] += grow;
+			}
+			D3D11_RECT ignored;
+			volume.frozen = !volume.reset && !screenRect(low, high, viewProjection, camera, ignored);
+		}
 	}
 	// the air runs while it holds a system, and after, while its smoke can still be there
 	const bool airActive = !airSystems.empty() || !airBoxes.empty() || !tallBoxes.empty();
 	if (now - lastReport >= 10 * LOGICFRAMES_PER_SECOND && (live || claimedCount || airActive)) {
 		lastReport = now;
 		DEBUG_LOG(("VOLSMOKE: frame %d, %u volumes live, %u blasts, %u systems joined, %u dropped so far, %u draws; "
-			"air %u systems (%u tall), %u particles fed, %u left out; %u units pushing, %u at most\n", now, live, claimedCount,
-			joinedCount, droppedCount, state.drawn, (unsigned)airSystems.size(), (unsigned)tallSystems.size(), airFed, airLeftOut,
-			(unsigned)movers.size(), moverPeak));
+			"air %u systems (%u tall), %u particles fed, %u left out; %u units pushing, %u at most; %u fires burning, %u fire systems drawn\n",
+			now, live, claimedCount, joinedCount, droppedCount, state.drawn, (unsigned)airSystems.size(), (unsigned)tallSystems.size(),
+			airFed, airLeftOut, (unsigned)movers.size(), moverPeak, fireLive, (unsigned)fireTaken.size()));
 	}
 	if (!live && !airActive) {
 		state.lastStepFrame = now;
@@ -3330,6 +4064,12 @@ void Render(const HazardCloud::Camera &camera)
 		const int frames = state.lastStepFrame < 0 ? 1 : (std::min)((std::max)(now - state.lastStepFrame, 1), 4);
 		for (unsigned t = 0; t < 2; ++t)
 			if (slabs[t]) step(context, t, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward, slabs[t]);
+		// the fires every logic frame on High, every other on Low
+		if (slabs[2] && (state.lastFireStep < 0 || now - state.lastFireStep >= (int)Qualities[level].fireEvery || now < state.lastFireStep)) {
+			const int fireFrames = state.lastFireStep < 0 || now < state.lastFireStep ? 1 : (std::min)(now - state.lastFireStep, 4);
+			step(context, 2, now, (float)fireFrames / LOGICFRAMES_PER_SECOND, seconds, toward, slabs[2]);
+			state.lastFireStep = now;
+		}
 		if (airActive) stepAir(context, 0, now, (float)frames / LOGICFRAMES_PER_SECOND, seconds, toward);
 		else airVolume.live = false;	// the next system starts it from an empty grid
 		// after the air, which hands it what climbed out of the air's top this step
@@ -3413,8 +4153,12 @@ void Render(const HazardCloud::Camera &camera)
 		context->OMSetBlendState(state.premultiplied, nullptr, 0xffffffff);
 		context->PSSetSamplers(0, 2, samplers);
 		context->PSSetConstantBuffers(0, 1, &state.drawConstants);
-		// the budget: past three volumes on screen each one is marched in longer steps
-		const float stepCells = Qualities[level].stepCells * (std::max)(1.0f, shown / 3.0f);
+		// the budget: past three blasts on screen each one is marched in longer steps, past six fires each fire
+		unsigned firesShown = 0;
+		for (unsigned n = 0; n < shown; ++n) firesShown += volumes[order[n]].kind == Fire ? 1 : 0;
+		const float stepCells = Qualities[level].stepCells * (std::max)(1.0f, (shown - firesShown) / 3.0f);
+		// (a fire's cells are half a blast's or less, so its march takes longer steps in them)
+		const float fireStepCells = 1.5f * Qualities[level].stepCells * (std::max)(1.0f, firesShown / 6.0f);
 		for (unsigned g = 2; g-- > 0;) {
 			if (!airShown[g]) continue;
 			const Tier &tier = g ? state.tall : state.air;
@@ -3452,9 +4196,9 @@ void Render(const HazardCloud::Camera &camera)
 			const int t = (int)tierOf(slot);
 			if (t != boundTier) {
 				const Tier &tier = state.tiers[t];
-				ID3D11ShaderResourceView *const views[5] = { depth, tier.density[tier.current].view, tier.light.view,
-					tier.velocity[0].view, state.noiseView };
-				context->PSSetShaderResources(0, 5, views);
+				ID3D11ShaderResourceView *const views[6] = { depth, tier.density[tier.current].view, tier.light.view,
+					tier.velocity[0].view, state.noiseView, t == 2 ? state.blackbodyView : nullptr };
+				context->PSSetShaderResources(0, 6, views);
 				context->PSSetShader(tier.march, nullptr, 0);
 				boundTier = t;
 			}
@@ -3465,16 +4209,19 @@ void Render(const HazardCloud::Camera &camera)
 			schedule(volume, slabOf(slot), t0, &draw);
 			const float left = (float)(volume.life - (now - volume.born)) / LOGICFRAMES_PER_SECOND;
 			draw.Slab[0] = (float)slabOf(slot);
-			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (volume.kind == TankDeath || volume.kind == Structure ? ShortEndFade : 3.0f)));
-			draw.Slab[2] = stepCells;
+			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (volume.kind == TankDeath || volume.kind == Structure ? ShortEndFade
+				: volume.kind == Fire ? FireEndFade : 3.0f)));
+			// a fire comes up over its warm-up, under the billboards it then takes from
+			if (volume.kind == Fire) draw.Slab[1] *= (std::min)(1.0f, t0 / FireWarmSeconds);
+			draw.Slab[2] = volume.kind == Fire ? fireStepCells : stepCells;
 			draw.Slab[3] = Extinction;
 			upload(context, state.drawConstants, &draw, sizeof(draw));
 			context->RSSetScissorRects(1, &rects[slot]);
 			context->Draw(3, 0);
 			++state.drawn;
 		}
-		ID3D11ShaderResourceView *const none[5] = {};
-		context->PSSetShaderResources(0, 5, none);
+		ID3D11ShaderResourceView *const none[6] = {};
+		context->PSSetShaderResources(0, 6, none);
 		context->OMSetRenderTargets(1, &scene, sceneDepth);
 	}
 	context->RSSetViewports(viewportCount, &savedViewport);
@@ -3484,6 +4231,7 @@ void Render(const HazardCloud::Camera &camera)
 void Reset()
 {
 	pendingSparks.clear();	// before the early return: a burst queued as the setting went Off
+	clearFires();			// the system IDs start again from 1
 	if (!requested()) return;
 	for (Volume &volume : volumes) volume = Volume();
 	airVolume = Volume();
