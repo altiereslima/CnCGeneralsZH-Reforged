@@ -4509,6 +4509,24 @@ bool Takes(ParticleSystem *system)
 	const bool structFlat = flat && structural;
 	// a tank gun's FX go to its shot's volume, its flat ring on the ground (TankMuzzleWave) too
 	const bool gun = tankMuzzle(own), gunFlat = flat && gun;
+	// A building's fall's white shard burst (ReforgedBlastShards* and the puffs on each shard) stood
+	// over its fireball as a firework of fuzzy dots: hidden for a fall the volume draws, while it is
+	// young and beside it.  Elsewhere, a tank's say, the shards keep their look.
+	if (std::strstr(own, "BlastShard") && TheGameLogic) {
+		Coord3D where;
+		system->getPosition(&where);
+		if (Particle *first = system->getFirstParticle()) where = *first->getPosition();
+		const int now = (int)TheGameLogic->getFrame();
+		for (const Volume &volume : volumes) {
+			if (!volume.live || volume.kind != Structure || volume.standing || now - volume.born > (int)(1.5f * LOGICFRAMES_PER_SECOND)) continue;
+			const float dx = where.x - (volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell);
+			const float dy = where.y - (volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell);
+			if (dx * dx + dy * dy > joinRadius(volume) * joinRadius(volume)) continue;
+			pruneSets();
+			takenSystems.insert(id);
+			return true;
+		}
+	}
 	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION && !nukeFlat && !structFlat && !gunFlat)) return takeAir(system);
 	// flying bits stay the game's own here too: a blast that took them drew nothing in their place
 	if (airLookOf(system->getTemplate(), system).scrap && !gun) return false;
@@ -4615,6 +4633,7 @@ bool Takes(ParticleSystem *system)
 				slot = i;
 		++droppedCount;
 		if (rankOf(volumes[slot]) > rank) {
+			if (type == Structure) DEBUG_LOG(("VOLSMOKE: frame %d, a structure's blast dropped: every slab held a higher rank\n", now));
 			pruneSets();
 			takenSystems.insert(id);
 			return true;
@@ -4704,7 +4723,7 @@ bool Takes(ParticleSystem *system)
 						&& now - other.born <= 2)
 					other.live = false;
 		static unsigned structuresLogged = 0;
-		if (structuresLogged++ < 24)
+		if (structuresLogged++ < 24 || !volume.standing)	// every fall, so a film can tell a missed one
 			DEBUG_LOG(("VOLSMOKE: frame %d, structure %s for '%s', %.0f by %.0f by %.0f units at %.1f a cell, %s, %u meshes, the first %.0f by %.0f, %.0f to %.0f up\n", now,
 				building ? "found" : "not found", own, volume.hull[2] * 2 * cell, volume.hull[3] * 2 * cell, volume.hull[4] * cell, cell,
 				volume.standing ? "a damaged stage" : "its fall", volume.partCount,
