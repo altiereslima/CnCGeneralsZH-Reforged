@@ -109,7 +109,7 @@ struct TierShape { unsigned gx, gy, gz, slabs, first; };
 TierShape TierShapes[3] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 }, { 32, 32, 48, 12, 26 } };
 const unsigned MaxVolumes = 38;		// all three tiers' slabs at High, the small tier's first, the fires' last
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
-const unsigned MaxPuffs = 28;	// a tank's 24 (base, jets, stem, dark base masses); PUFFS in the HLSL is the same
+const unsigned MaxPuffs = 28;	// a tank's 28 (base, jets, stem, dark base masses and their rims); PUFFS in the HLSL is the same
 const unsigned MaxMovers = 16;		// High's; Low takes the nearest 8
 const unsigned NoiseSide = 32;
 
@@ -2317,11 +2317,13 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// The dust channel carries the near-black soot masses at the base (below): it never glows (the
 		// march lights fire by the soot's share of a cell alone), so laid beside the fire it stays a
 		// dark mass in front of it, where soot laid there burned with the fire's heat and read as haze.
-		// So the tank's dust is dark brown-black; what dust the jets and the base band carry darkens
-		// with it.  (Pale, 0.70/0.62/0.50, it was the sunlit skirt of passes 6-17.)
+		// So the tank's dust is dark brown-black, and nothing else of it lays dust: one dust colour a
+		// slab, and the jets' and the base band's dust darkened with it (pass 18) turned the fan's
+		// cooled smoke and the band's ends dark on three sides of the fire from the play camera.
+		// (Pale, 0.70/0.62/0.50, it was the sunlit skirt of passes 6-17.)
 		dust[0] = 0.10f; dust[1] = 0.085f; dust[2] = 0.075f;
 		// The base: orange flame and black soot bursting out low along the whole hull, rolling off
-		// both ends and a little to the sides, held down by the dust in it.  The four towards the
+		// both ends and a little to the sides.  The four towards the
 		// ends do not glow (heat 0.5, where fireColour starts), so the hot middle sits between dark
 		// lobes, as in the photo; at 1.25 all along the base read as one bright band, and at 0.8 and
 		// 0.62 the soot laid in them glowed (heat is the hottest emitter's) and read as haze.
@@ -2332,7 +2334,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 				const float across = (unit(810 + i) - 0.5f) * W * 0.7f;
 				const float radius = (std::max)(W * 0.85f, 2.2f) * (0.8f + 0.4f * unit(820 + i));
 				onHull(s * L * 1.15f, across, 0.6f + 0.6f * unit(830 + i), radius, s * (8.0f + 12.0f * unit(840 + i)) * fade,
-					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, std::fabs(s) < 0.5f ? 1.25f : 0.5f, 8.0f * fade, 0.35f);
+					(across < 0 ? -2.5f : 2.5f) * fade, 1.5f, 20.0f * fade, std::fabs(s) < 0.5f ? 1.25f : 0.5f, 0.0f, 0.35f);
 			}
 		}
 		// The plume, the photo's tallest part: thirteen jets of white-hot fire and dust shot up out
@@ -2351,7 +2353,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 20.0f);
 		// an odd count, so one jet stands straight up the middle: with fourteen the two middle ones
 		// leaned apart and notched the top into a heart
-		const unsigned jets = 13;	// with the base, the stem and the four dark base masses, 24 of the 28 a slab holds
+		const unsigned jets = 13;	// with the base, the stem and the four dark base masses and their rims, the 28 a slab holds
 		// A shorter reach (Low's, or a very small hull's on High) fans a short hull's rays less and
 		// from less of its length, so its fan is as tall for its width as High's: at High's angles
 		// Low's came out a round dome.  Long hulls do not use it.
@@ -2431,8 +2433,8 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float along = a0 + ca * out, across = c0 + cc * out, da = ca * outSpeed / (std::max)(now, 1e-3f),
 				dc = cc * outSpeed / (std::max)(now, 1e-3f);
 			// Smoke and heat both go with the jet's speed, hottest low down; it cools once laid.
-			// Some dust, which the sun lights pale; the soot is what glows (a jet of twice as much dust
-			// burned dull tan), and with the dust it cools to grey-brown smoke rather than black.  The
+			// No dust: the tank's dust is the dark base masses' (above); the soot is what glows (a jet
+			// with as much dust as soot burned dull tan), and it cools to dark smoke.  The
 			// fan of jets is what widens the plume; one jet widens only a little.  Thin jets that
 			// doubled their width as they climbed stood on a thin stem under a fat top, a mushroom.
 			// Wider as it climbs, then over its last stretch the jet thins, lays less and cools, so
@@ -2457,7 +2459,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 				* (0.45f + 0.55f * taper) * (0.7f - 0.25f * shortHull + (0.3f + 0.25f * shortHull) * smoothstep01(path, 0.0f, 0.15f));
 			onHull(along, across, H * 0.4f + dz * travelled, (2.0f + 0.06f * travelled) * (0.35f + 0.65f * taper)
 				* (0.8f + 0.2f * shortHull + (0.5f - 0.2f * shortHull) * centre * centre),
-				da * now, dc * now, dz * now, rate, heat, rate * 0.4f, 0.08f * (1 - 0.75f * shortHull));
+				da * now, dc * now, dz * now, rate, heat, 0.0f, 0.08f * (1 - 0.75f * shortHull));
 		}
 		// The stem: one wide hot puff climbing at 0.4 of the middle jet's pace,
 		// so the column under the crown stays lit and the crown does not float off the hull.
@@ -2470,7 +2472,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// (on a short hull no wider than half its length and only orange-hot, or it lit the whole
 			// base white and the dark soot beside it never showed)
 			onHull(0, 0, H * 0.4f + climbed, (std::max)((std::max)(W * (1.2f - 0.4f * stemShort), L * 0.6f), 3.0f) * (1 + climbed / reach), 0, 0,
-				pace * reach / 0.18f * std::exp(-t / 0.18f), 25.0f * reach / 36.0f * fade, 2.8f - 1.2f * stemShort, 10.0f * reach / 36.0f * fade, 0.05f);
+				pace * reach / 0.18f * std::exp(-t / 0.18f), 25.0f * reach / 36.0f * fade, 2.8f - 1.2f * stemShort, 0.0f, 0.05f);
 		}
 		// the default 1.6 once the flare is over; about a third of a second of white, as long as
 		// the jets run, and no longer, so several tanks dying at once do not white out the view
@@ -2484,18 +2486,29 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// slowly, swelling by half, gone in about a second: heavy, they slump onto the ground, which
 		// eats the dust lying on it (GroundDustHalfLife).
 		// (at 70 a second over a hull and a half for 0.85 s they closed round the wreck into a black
-		// ring from the play camera and lay on as a dark disc)
+		// ring from the play camera and lay on as a dark disc; four masses of 0.8 the hull's width
+		// at 0.35 of its length either way met into one dark band from the side)
+		// Each is a round blob with clear air between it and the next: its dust peaks in the middle
+		// and falls off to its edge, and a ring of hot soot round it (a second puff a third wider
+		// laying a little soot at heat 0.85) glows red-orange where the blob's own dust thins out,
+		// while its black middle, all dust, does not light.  With the base, jets and stem, the 28 a slab holds.
 		if (t > 0.05f && t < 0.75f) {
-			const float fade = 1 - (t - 0.05f) / 0.7f, swell = 1 + 0.4f * (std::min)(t / 0.4f, 1.0f);
+			const float fade = 1 - (t - 0.05f) / 0.7f, swell = 1 + 0.3f * (std::min)(t / 0.4f, 1.0f);
+			const float size = (std::min)((std::max)(W * 0.6f, 2.0f), 0.35f * L);
 			for (unsigned k = 0; k < 4; ++k) {
-				const float s = (k < 2 ? -0.35f : 0.35f) * (0.85f + 0.3f * unit(980 + k)), side = (k & 1) ? 1.0f : -1.0f;
+				const float s = (k < 2 ? -0.5f : 0.5f) * (0.9f + 0.2f * unit(980 + k)), side = (k & 1) ? 1.0f : -1.0f;
 				const float wander = 6.2831853f * unit(988 + k) + t * (2.0f + 1.5f * unit(992 + k));
 				// (at 0.4 and at 0.75 to 0.95 of the hull's height they lay black on the black hull's side
 				// and did not show from the side: the photo's stand against the flame, so these stand at
 				// the hull's top, in front of the fan's foot)
-				onHull(s * L, side * W * (1.0f + 0.1f * unit(984 + k)), H * (1.0f + 0.2f * unit(986 + k)) + 0.3f * std::sin(wander),
-					(std::max)(W * 0.8f, 2.4f) * swell * (0.85f + 0.3f * unit(996 + k)),
-					s * 2.0f * fade + 1.5f * std::cos(wander), side * 2.0f * fade, 0.8f, 0, 0.3f, 45.0f * fade * fade, 0.3f);
+				// (out past the flank, at 1.25 of the half width: at the hull's edge the jets' roots drew
+				// them up into the fan and they never showed as blobs)
+				const float along = s * L, across = side * W * (1.25f + 0.1f * unit(984 + k));
+				const float up = H * (0.9f + 0.2f * unit(986 + k)) + 0.3f * std::sin(wander);
+				const float radius = size * swell * (0.9f + 0.2f * unit(996 + k));
+				const float va = s * 1.5f * fade + 1.0f * std::cos(wander), vc = side * 1.5f * fade;
+				onHull(along, across, up, radius, va, vc, 0.8f, 0, 0, 55.0f * fade * fade, 0.3f);
+				onHull(along, across, up, radius * 1.35f, va, vc, 0.8f, 6.0f * fade, 0.85f, 0, 0.1f);
 			}
 		}
 		// the cook-off pops, two to four, each a hot orange puff out of a hatch somewhere on the hull
@@ -2506,7 +2519,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float age = t - when;
 			if (age >= 0 && age < 0.15f)
 				onHull((unit(910 + p) - 0.5f) * L * 1.4f, (unit(920 + p) - 0.5f) * W * 0.8f, H * 0.6f, 2.4f, 0, 0, 12.0f,
-					12.0f, 1.7f, 2.0f, 0.3f);
+					12.0f, 1.7f, 0.0f, 0.3f);
 		}
 		// The hull burning: a black column off its whole length for about a second and a half, which
 		// with the soot thinning (TankSootHalfLife) is gone about 2 s after the death, a quarter as
