@@ -53,10 +53,11 @@
 // the tank's ground ring and the smoke trails behind its flying scrap are taken with them.  The
 // scrap itself, and every gun's muzzle smoke but a tank gun's, stay the game's own.
 //
-// A tank gun's shot has a short volume of its own on a free slab, a few at once: a fireball
-// blooming along the barrel's aim, a grey-white puff ahead of it and a dust cloud blown off the
-// ground round the tank's front, gone in a second and a half.  A shell striking armour throws a
-// shower of sparks off the face it hit, the game's own particles, which Gather starts.
+// A tank gun's shot has a short volume of its own on a free slab, a few at once: a cone of flame
+// out of the muzzle along the barrel's aim, a little grey smoke ahead of it and a dust cloud blown
+// off the ground round the tank's front, gone in a second and a half.  A shell striking armour
+// throws one burst of spark streaks out of the point it hit, the game's own particles, which Gather
+// starts; the stock sparks of that hit are hidden.
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
 #include "Common/LogicThread.h"
@@ -1584,6 +1585,12 @@ std::vector<Coord3D> pendingSparks;
 // the attacker: `along` is the shot's heading).
 struct PendingHit { Coord3D at; float along[2]; };
 std::vector<PendingHit> pendingHits;
+// The hits whose sparks we throw, for eight logic frames: the game's own sparks near one are hidden.
+struct OwnedHit { Coord3D at; int frame; };
+std::vector<OwnedHit> ownedHits;
+// Each live shot's systems (its trigger flame and the FX that joined it), by slot, so a blast that
+// takes the slab gives them their billboards back.
+std::unordered_map<unsigned, std::vector<int>> gunSystems;
 // The structures the smoke flows round, read by Gather every two seconds outside the logic
 // thread's window (the render runs inside it, where walking the object list is a counted read).
 // A structure goes in once the player whose view is drawn has seen it, so smoke parting round
@@ -1665,6 +1672,8 @@ bool requested()
 		shocks.clear();
 		pendingSparks.clear();
 		pendingHits.clear();
+		ownedHits.clear();
+		gunSystems.clear();
 		hulls.clear();
 		lastHulls.clear();
 		solids.clear();
@@ -2726,8 +2735,8 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		}
 	} else if (volume.kind == Muzzle) {
 		// A tank gun firing, after footage of real ones (reference/tank-shoot.jpg): an orange-yellow
-		// fireball blooming out ahead of the barrel, wider than the turret and gone in a tenth of a
-		// second, a grey-white puff of smoke in front of it, and a dust cloud the blast blows up off
+		// cone of flame out of the muzzle, wider than the turret at its far end and gone in a tenth of
+		// a second, a little grey smoke in front of it, and a dust cloud the blast blows up off
 		// the ground round the gun's front, rolling out sideways along it.  Placed along the barrel's
 		// own aim (hull[0..2], the muzzle bone's axis) from the muzzle (blast), in cells.
 		const float ax = volume.hull[0], ay = volume.hull[1], az = volume.hull[2], height = volume.hull[4];
@@ -2737,32 +2746,39 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			emit(slab, count, { bx + ax * d, by + ay * d, bz + az * d + lift, radius, ax * speed, ay * speed, az * speed + rise,
 				sootRate, heat, 0, push });
 		};
-		// the fireball's middle, where the flash glows
-		blast[0] = bx + ax * 3.5f; blast[1] = by + ay * 3.5f; blast[2] = bz + az * 3.5f;
-		blast[3] = 3.0f;
-		// (at 6 over 3 cells for 0.05 s it was a hard white disc wider than the fireball)
-		flash = t < 0.03f ? 2.5f : 0.0f;
-		flashWide = 2.0f;
+		// the flash, small, at the muzzle tip
+		blast[0] = bx + ax * 0.8f; blast[1] = by + ay * 0.8f; blast[2] = bz + az * 0.8f;
+		blast[3] = 1.5f;
+		// (at 6 over 3 cells for 0.05 s it was a hard white disc wider than the fireball; at 2.5 over 2,
+		// 3.5 cells out, a round glow off the muzzle)
+		flash = t < 0.03f ? 2.0f : 0.0f;
+		flashWide = 0.9f;
 		flashTall = 1.0f;
 		soot[0] = 0.78f; soot[1] = 0.77f; soot[2] = 0.75f; soot[3] = 1.6f + 1.4f * std::exp(-t / 0.05f);
 		dust[0] = 0.62f; dust[1] = 0.55f; dust[2] = 0.44f;	// sunlit tan
-		// The fireball: four hot puffs thrown out along the barrel, growing as they go, the far ones
-		// fastest so it stretches out from the muzzle and stays on it (thrown fastest from the muzzle
-		// it left a gap behind it), the middle two white-yellow, the first and the last orange.  Its heat goes in a few frames
-		// (MuzzleHeatHalfLife), so it flares and is smoke by 0.2 s.  A flame glows by the soot it
-		// burns in, so it lays thick smoke (at 8 a second it lit nothing, at 70 it left a brown ball): what is left once it has
-		// cooled is the grey-white cloud in front of the gun.
-		if (t < 0.14f) {
-			const float grow = smoothstep01(t, 0.0f, 0.08f), fade = 1 - t / 0.14f;
-			for (unsigned k = 0; k < 4; ++k)
-				along((0.3f + 2.6f * k) * (0.6f + 0.4f * grow), 0, (2.0f + 1.4f * k) * (0.55f + 0.45f * grow), (12.0f + 8.0f * k) * fade, 1.0f,
-					50.0f, (k == 1 || k == 2 ? 2.5f : 1.8f) * (0.7f + 0.3f * fade), 0.6f);
+		// The fireball, as the photos have it: a cone of flame straight out of the muzzle, widening
+		// forward, brightest at the tip and orange-red at its fringe.  Five hot puffs on the barrel's
+		// line, the first just inside the tip, each wider than the one behind it, the hottest at the
+		// muzzle, pushed on only gently so the cone stays on the gun.  Four puffs out ahead, thrown
+		// fastest from the muzzle, left a gap and then a round ball.  Its heat goes in a few frames
+		// (MuzzleHeatHalfLife), so it flares and is smoke by 0.15 s.  A flame glows by the soot it
+		// burns in (at 8 a second it lit nothing, at 70 it left a brown ball).
+		if (t < 0.1f) {
+			const float grow = 0.7f + 0.3f * smoothstep01(t, 0.0f, 0.05f), fade = 1 - t / 0.1f;
+			// (the glow is soot times heat along the eye's ray, so laid evenly the wide far puffs outshone
+			// the thin tip and the cone read as a ball ahead of the gun: the tip lays the most and the
+			// hottest, the far end little and cooler)
+			for (unsigned k = 0; k < 5; ++k) {
+				const float d = (-0.3f + 1.5f * k) * grow;
+				along(d, 0, (1.2f + 0.4f * (std::max)(d, 0.0f)) * grow, (4.0f + 4.0f * k) * fade, 0.5f, 70.0f - 13.0f * k,
+					(2.9f - 0.35f * k) * (0.7f + 0.3f * fade), 0.4f);
+			}
 		}
-		// the smoke, pushed on ahead and spreading, lightly lifted
+		// a little smoke, pushed on ahead and spreading, lightly lifted
 		if (t > 0.02f && t < 0.45f) {
 			const float fade = 1 - (t - 0.02f) / 0.43f;
 			for (unsigned k = 0; k < 3; ++k)
-				along(2.5f + 3.0f * k, 0.6f + 0.4f * k, 1.8f + 0.8f * k + 1.5f * (1 - fade), (14.0f - 3.0f * k) * fade, 1.5f, 36.0f * fade, 0, 0.35f);
+				along(2.5f + 3.0f * k, 0.6f + 0.4f * k, 1.8f + 0.8f * k + 1.5f * (1 - fade), (14.0f - 3.0f * k) * fade, 1.5f, 18.0f * fade, 0, 0.35f);
 		}
 		// The dust: where the blast meets the ground ahead of the muzzle, thrown out low along the
 		// ground in a fan from straight ahead round to the gun's sides and a little behind them, so it
@@ -4377,6 +4393,7 @@ bool startMuzzle(ParticleSystem *system, const Coord3D &where, float gunScale, i
 	volume.life = int(MuzzleLife * LOGICFRAMES_PER_SECOND);
 	pruneSets();
 	takenSystems.insert((int)system->getSystemID());
+	gunSystems[slot] = { (int)system->getSystemID() };
 	static unsigned gunsLogged = 0;
 	if (gunsLogged++ < 8)
 		DEBUG_LOG(("VOLSMOKE: frame %d, gun volume %u for '%s' at (%.0f, %.0f, %.0f), aim (%.2f, %.2f, %.2f), %.2f a cell, %s\n", now, slot,
@@ -4401,7 +4418,29 @@ bool Takes(ParticleSystem *system)
 		system->getPosition(&hit.at);
 		hit.along[0] = turn[0][0];
 		hit.along[1] = turn[1][0];
-		if (pendingHits.size() < 64 && !(hit.along[0] == 1.0f && hit.along[1] == 0.0f)) pendingHits.push_back(hit);
+		if (pendingHits.size() < 64 && !(hit.along[0] == 1.0f && hit.along[1] == 0.0f)) {
+			pendingHits.push_back(hit);
+			ownedHits.push_back({ hit.at, (int)TheGameLogic->getFrame() });
+		}
+	}
+	// The game's own sparks and lens flare of a hit whose sparks we throw, and of the shell that made
+	// it (TankStruckSparks, the Lenzflares, in the same frame or the next and within 25 units: both go
+	// off in the logic frame that struck): stacked on ours they burst over the turret and all round the
+	// tank as fireworks.  ponytail: by place and frame, not by victim, so a machine gun's hit (the same
+	// template) on a tank parked within 25 units in that frame loses its sparks too; key on the victim
+	// if that shows.
+	const char *own0 = system->getTemplate()->getName().str();
+	if (TheGameLogic && !ownedHits.empty() && (!std::strcmp(own0, "TankStruckSparks") || std::strstr(own0, "TankStruckLenzflare"))) {
+		const int seen = firstSeen.emplace(id, (int)TheGameLogic->getFrame()).first->second;
+		Coord3D where;
+		system->getPosition(&where);
+		for (const OwnedHit &hit : ownedHits) {
+			const float dx = where.x - hit.at.x, dy = where.y - hit.at.y;
+			if (std::abs(seen - hit.frame) > 1 || dx * dx + dy * dy > 25.0f * 25.0f) continue;
+			pruneSets();
+			takenSystems.insert(id);
+			return true;
+		}
 	}
 	if (takenSystems.count(id)) return !airOutside.count(id);
 	// A blast is told from loose billboard systems; trails, streaks, a building's smoke and every
@@ -4516,6 +4555,7 @@ bool Takes(ParticleSystem *system)
 		if (dx * dx + dy * dy > reach * reach) continue;
 		pruneSets();
 		takenSystems.insert(id);
+		if (volume.kind == Muzzle) gunSystems[unsigned(&volume - volumes)].push_back(id);
 		++joinedCount;
 		return true;
 	}
@@ -4561,6 +4601,14 @@ bool Takes(ParticleSystem *system)
 	}
 
 	Volume &volume = volumes[slot];
+	// a shot whose slab this takes gets its billboards back, for what is left of them
+	if (volume.live && volume.kind == Muzzle) {
+		auto shot = gunSystems.find(slot);
+		if (shot != gunSystems.end()) {
+			for (int taken : shot->second) takenSystems.erase(taken);
+			gunSystems.erase(shot);
+		}
+	}
 	volume = fresh;
 	volume.live = true;
 	volume.reset = true;
@@ -4696,13 +4744,15 @@ void Gather()
 					system->setPosition(&at);
 		pendingSparks.clear();
 	}
-	// A shell striking armour: a shower of sparks off the hull's face that took it, thrown back out
-	// towards the side it came from and spreading over that face (the system's x axis is the face's
-	// outward normal).  The hit itself goes off at the vehicle's middle, so the face is where the shot's
-	// line from the attacker meets the hull's box.
+	ownedHits.erase(std::remove_if(ownedHits.begin(), ownedHits.end(), [now](const OwnedHit &hit) { return hit.frame < now - 8; }),
+		ownedHits.end());
+	// A shell striking armour: one dense burst of sparks out of the point where it struck, in a cone
+	// round the face's outward normal (the system's x axis), over a white core.  The hit itself goes off
+	// at the vehicle's middle, so the point is where the shot's line from the attacker meets the hull's
+	// box.  Two systems a hit, plus a tail system on each of its 16 to 20 sparks for a quarter second.
 	if (!pendingHits.empty() && TheParticleSystemManager) {
 		const ParticleSystemTemplate *sparks = TheParticleSystemManager->findTemplate("ReforgedTankHitSparks");
-		const ParticleSystemTemplate *flare = TheParticleSystemManager->findTemplate("ReforgedTankHitSparkFlare");
+		const ParticleSystemTemplate *core = TheParticleSystemManager->findTemplate("ReforgedTankHitSparkCore");
 		static unsigned hitsLogged = 0;
 		if (hitsLogged++ < 4)
 			DEBUG_LOG(("VOLSMOKE: frame %d, %u armour hit spark shower(s), template %s\n", now, (unsigned)pendingHits.size(),
@@ -4730,7 +4780,7 @@ void Gather()
 				}
 				Matrix3D turn(1);
 				turn.Rotate_Z(std::atan2(ny, nx));
-				for (const ParticleSystemTemplate *made : { sparks, flare })
+				for (const ParticleSystemTemplate *made : { sparks, core })
 					if (made)
 						if (ParticleSystem *system = TheParticleSystemManager->createParticleSystem(made)) {
 							system->setLocalTransform(&turn);
@@ -4992,6 +5042,8 @@ void Reset()
 {
 	pendingSparks.clear();	// before the early return: a burst queued as the setting went Off
 	pendingHits.clear();
+	ownedHits.clear();
+	gunSystems.clear();
 	clearFires();			// the system IDs start again from 1
 	if (!requested()) return;
 	for (Volume &volume : volumes) volume = Volume();
