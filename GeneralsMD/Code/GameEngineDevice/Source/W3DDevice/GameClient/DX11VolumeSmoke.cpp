@@ -51,7 +51,12 @@
 // system of a blast this takes draws no billboards, its GPU overflow particles included; the
 // shell keeps its additive fire and flash cards, the tank and the nuclear blast have none, and
 // the tank's ground ring and the smoke trails behind its flying scrap are taken with them.  The
-// scrap itself, and every gun's muzzle smoke, stay the game's own.
+// scrap itself, and every gun's muzzle smoke but a tank gun's, stay the game's own.
+//
+// A tank gun's shot has a short volume of its own on a free slab, a few at once: a fireball
+// blooming along the barrel's aim, a grey-white puff ahead of it and a dust cloud blown off the
+// ground round the tank's front, gone in a second and a half.  A shell striking armour throws a
+// shower of sparks off the face it hit, the game's own particles, which Gather starts.
 #include "Common/GlobalData.h"
 #include "Common/Debug.h"
 #include "Common/LogicThread.h"
@@ -155,6 +160,11 @@ const float StructureSootHalfLife = 0.75f;	// a building's blast's soot: at 7 a 
 // (ReforgedTankSmoke, 1.5 s of puffs living 5 to 6 s); before that it hung for half a minute.
 const float TankSootThinFrom = 1.25f, TankSootHalfLife = 0.375f;
 const float ShortEndFade = 1.5f;		// seconds a tank's, a building's, a launch's or a shell's volume fades over at its end; the rest 3
+// A tank gun's shot (Muzzle): its fireball's heat goes in a few frames, where a blast's is kept for
+// seconds and lifted its smoke away as a glowing ball; its volume lives 1.6 s, the last 0.6 fading.
+// At most this many at once (Low, High), on free slabs only: past that a shot keeps the game's own flash.
+const float MuzzleHeatHalfLife = 0.07f, MuzzleLife = 1.6f, MuzzleEndFade = 0.6f;
+const unsigned MuzzleCap[3] = { 0, 3, 6 };
 const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
@@ -192,7 +202,7 @@ const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/
 const DXGI_FORMAT DensityFormat = DXGI_FORMAT_R16G16_FLOAT;			// soot, dust
 const DXGI_FORMAT ScalarFormat = DXGI_FORMAT_R16_FLOAT;
 
-enum Kind { TankDeath, Shell, Airburst, Nuclear, Air, Structure, Fire, Launch };
+enum Kind { TankDeath, Shell, Airburst, Nuclear, Air, Structure, Fire, Launch, Muzzle };
 
 template <class T> void drop(T *&object)
 {
@@ -257,7 +267,7 @@ struct SimConstants {
 	float Origins[MaxSlabs][4];		// each slab's world corner, for the movers below
 	float MoverCount[4];
 	float Movers[MaxMovers * 4][4];	// the units that push the air this step, in world units (Mover)
-	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest), its cold dust's weight, its ground dust kept
+	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest), its cold dust's weight, its ground dust kept, its heat kept on top of Keep.x (a gun's; 1 for the rest)
 	// A fire's slab (FireFields, after Thin in its programs' cbuffer only): burn rate, heat a unit of
 	// fuel gives, soot yield, ignition heat; the fuel that starves it, radiation, soot burn,
 	// expansion; its lift in cells/s^2 at heat 1.
@@ -621,7 +631,7 @@ void main(uint3 id : SV_DispatchThreadID)
 #ifdef AIR
         vt.w *= lerp(Keep.x, Wind.z * Wind.z * Wind.z, trail);	// a trail's heat is its nozzle's, gone in a few frames
 #else
-        vt.w *= Keep.x;
+        vt.w *= Keep.x * Thin[slab].w;	// a gun's fireball cools in a few frames (Thin.w under 1 for its slab only)
 #endif
         d.y *= Keep.z;
 #ifndef AIR
@@ -1570,6 +1580,10 @@ std::vector<Hull> hulls, lastHulls;
 // in ParticleSystemReforged.ini).  A system cannot be made in Takes, which runs inside the particle
 // manager's own loop, so Gather makes them next frame, outside the logic window.
 std::vector<Coord3D> pendingSparks;
+// The same for a shell striking armour (TankStruckSmoke, which FX_DamageTankStruck turns away from
+// the attacker: `along` is the shot's heading).
+struct PendingHit { Coord3D at; float along[2]; };
+std::vector<PendingHit> pendingHits;
 // The structures the smoke flows round, read by Gather every two seconds outside the logic
 // thread's window (the render runs inside it, where walking the object list is a counted read).
 // A structure goes in once the player whose view is drawn has seen it, so smoke parting round
@@ -1650,6 +1664,7 @@ bool requested()
 		movers.clear();
 		shocks.clear();
 		pendingSparks.clear();
+		pendingHits.clear();
 		hulls.clear();
 		lastHulls.clear();
 		solids.clear();
@@ -2027,6 +2042,12 @@ TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSyste
 	// a building's damage and death smoke is DEATH_EXPLOSION too; buildings are not tanks
 	else if (alpha && system->getPriority() == DEATH_EXPLOSION && std::strstr(name, "Smoke") && !std::strstr(name, "Structure"))
 		kind = { true, TankDeath, 1.0f };
+	// a tank gun's shot: its flame, which the FX turns along the barrel (the Battlemaster's and the
+	// Scorpion's smaller gun, WeaponFX_GenericTankGunNoTracerSmall, at three quarters)
+	else if (std::strstr(name, "TankMuzzleFlashFlame"))
+		kind = { true, Muzzle, 1.0f };
+	else if (std::strstr(name, "TankSmallMuzzleFlashFlame"))
+		kind = { true, Muzzle, 0.75f };
 	templateKinds[tmplate] = kind;
 	return kind;
 }
@@ -2703,12 +2724,74 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float fade = 1 - t / 1.2f;
 			emit(slab, count, { bx, by, bz + 2.0f + 6.0f * t, 2.0f + 2.5f * t, 0, 0, 6.0f, 4.0f * fade, 0.3f, 0, 0.2f });
 		}
+	} else if (volume.kind == Muzzle) {
+		// A tank gun firing, after footage of real ones (reference/tank-shoot.jpg): an orange-yellow
+		// fireball blooming out ahead of the barrel, wider than the turret and gone in a tenth of a
+		// second, a grey-white puff of smoke in front of it, and a dust cloud the blast blows up off
+		// the ground round the gun's front, rolling out sideways along it.  Placed along the barrel's
+		// own aim (hull[0..2], the muzzle bone's axis) from the muzzle (blast), in cells.
+		const float ax = volume.hull[0], ay = volume.hull[1], az = volume.hull[2], height = volume.hull[4];
+		const float flat = (std::max)(std::sqrt(ax * ax + ay * ay), 1e-3f), fx = ax / flat, fy = ay / flat;
+		auto unit = [&](unsigned salt) { return hashUnit(volume.seed, salt); };
+		auto along = [&](float d, float lift, float radius, float speed, float rise, float sootRate, float heat, float push) {
+			emit(slab, count, { bx + ax * d, by + ay * d, bz + az * d + lift, radius, ax * speed, ay * speed, az * speed + rise,
+				sootRate, heat, 0, push });
+		};
+		// the fireball's middle, where the flash glows
+		blast[0] = bx + ax * 3.5f; blast[1] = by + ay * 3.5f; blast[2] = bz + az * 3.5f;
+		blast[3] = 3.0f;
+		// (at 6 over 3 cells for 0.05 s it was a hard white disc wider than the fireball)
+		flash = t < 0.03f ? 2.5f : 0.0f;
+		flashWide = 2.0f;
+		flashTall = 1.0f;
+		soot[0] = 0.78f; soot[1] = 0.77f; soot[2] = 0.75f; soot[3] = 1.6f + 1.4f * std::exp(-t / 0.05f);
+		dust[0] = 0.62f; dust[1] = 0.55f; dust[2] = 0.44f;	// sunlit tan
+		// The fireball: four hot puffs thrown out along the barrel, growing as they go, the far ones
+		// fastest so it stretches out from the muzzle and stays on it (thrown fastest from the muzzle
+		// it left a gap behind it), the middle two white-yellow, the first and the last orange.  Its heat goes in a few frames
+		// (MuzzleHeatHalfLife), so it flares and is smoke by 0.2 s.  A flame glows by the soot it
+		// burns in, so it lays thick smoke (at 8 a second it lit nothing, at 70 it left a brown ball): what is left once it has
+		// cooled is the grey-white cloud in front of the gun.
+		if (t < 0.14f) {
+			const float grow = smoothstep01(t, 0.0f, 0.08f), fade = 1 - t / 0.14f;
+			for (unsigned k = 0; k < 4; ++k)
+				along((0.3f + 2.6f * k) * (0.6f + 0.4f * grow), 0, (2.0f + 1.4f * k) * (0.55f + 0.45f * grow), (12.0f + 8.0f * k) * fade, 1.0f,
+					50.0f, (k == 1 || k == 2 ? 2.5f : 1.8f) * (0.7f + 0.3f * fade), 0.6f);
+		}
+		// the smoke, pushed on ahead and spreading, lightly lifted
+		if (t > 0.02f && t < 0.45f) {
+			const float fade = 1 - (t - 0.02f) / 0.43f;
+			for (unsigned k = 0; k < 3; ++k)
+				along(2.5f + 3.0f * k, 0.6f + 0.4f * k, 1.8f + 0.8f * k + 1.5f * (1 - fade), (14.0f - 3.0f * k) * fade, 1.5f, 36.0f * fade, 0, 0.35f);
+		}
+		// The dust: where the blast meets the ground ahead of the muzzle, thrown out low along the
+		// ground in a fan from straight ahead round to the gun's sides and a little behind them, so it
+		// rolls out past the tank's front corners.
+		if (t < 0.3f) {
+			const float fade = 1 - t / 0.3f;
+			const float reach = (std::max)(height, 1.0f) * 0.8f + 1.0f;
+			const float gx0 = bx + fx * reach, gy0 = by + fy * reach;
+			for (unsigned k = 0; k < 7; ++k) {
+				const float side = k / 3.0f - 1.0f;
+				const float angle = side * 2.2f + (unit(900 + k) - 0.5f) * 0.3f;
+				const float dx = fx * std::cos(angle) - fy * std::sin(angle), dy = fy * std::cos(angle) + fx * std::sin(angle);
+				const float out = 2.0f + 2.0f * (1 - std::fabs(side)), speed = (22.0f + 12.0f * (1 - std::fabs(side))) * fade;
+				// (low and flat: at 40 a second, lifted 0.8 cells a second, it stood up into the smoke as
+				// one tan ball with it)
+				emit(slab, count, { gx0 + dx * out, gy0 + dy * out, volume.ground + 0.4f, 2.2f + 2.0f * (1 - fade),
+					dx * speed, dy * speed, 0.3f, 0, 0, 30.0f * fade, 0.6f });
+			}
+		}
 	} else if (volume.kind == Shell || volume.kind == Airburst) {
 		const bool ground = volume.kind == Shell;
 		// a flash shorter than a frame at 30, white-orange
 		flash = t < 0.03f ? 12.0f : 0.0f;
 		flashWide = 3.0f;
 		flashTall = 1.3f;
+		// a shell striking armour flashes small and white (reference/tank-hit-*.jpg): its sparks are
+		// the light (ReforgedTankHitSparks); at the ground shell's 12 over 3 cells a white oval hid the
+		// tank it hit
+		if (volume.onHull) { flash = t < 0.03f ? 4.0f : 0.0f; flashWide = 1.6f; flashTall = 1.0f; }
 		blast[3] = 2.5f;
 		soot[0] = 0.11f; soot[1] = 0.105f; soot[2] = 0.10f; soot[3] = 1.2f;
 		// dark brown thrown earth: tan dust on tan ground was invisible
@@ -3013,15 +3096,19 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		// A tank's thins once its column has died down, so it is gone as soon as the game's own.
 		if (volume.kind == TankDeath && volume.live && secondsSince(volume, now) > TankSootThinFrom)
 			sim.Thin[slab][0] = std::pow(0.5f, dt / TankSootHalfLife);
-		const bool rolls = (volume.kind == Structure && !volume.standing) || volume.kind == Launch;
+		const bool rolls = (volume.kind == Structure && !volume.standing) || volume.kind == Launch || volume.kind == Muzzle;
 		// (not a bomb's: its small mushroom's stem would fall out of it)
 		sim.Thin[slab][1] = rolls ? RollWeight : volume.kind == Shell && volume.scale < 2.0f ? DirtWeight : 0.0f;
 		sim.Thin[slab][2] = std::pow(0.5f, dt / (rolls ? GroundRollHalfLife : GroundDustHalfLife));
+		// its heat kept over this step on top of the tier's (a gun's fireball goes in a few frames)
+		sim.Thin[slab][3] = volume.kind == Muzzle ? std::pow(0.5f, dt / MuzzleHeatHalfLife) : 1.0f;
 		for (unsigned i = 0; i < 3; ++i) sim.Origins[slab][i] = volume.origin[i];
 		if (!volume.live) continue;
 		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
 		schedule(volume, slab, secondsSince(volume, now), nullptr);
-		settle = DustSettle / volume.cell;	// ponytail: one settling speed a tier, its last volume's cell
+		// ponytail: one settling speed a tier, its last volume's cell (a gun's small cells left out,
+		// so a shot does not hurry a dead tank's dust down)
+		if (volume.kind != Muzzle) settle = DustSettle / volume.cell;
 	}
 	sim.Step[2] = settle;
 	fillMovers();
@@ -3821,17 +3908,24 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 float lifeOf(Kind kind, float scale)
 {
 	return kind == TankDeath ? 4.25f : kind == Structure ? 3.5f : kind == Nuclear ? 90.0f : kind == Launch ? 4.0f
-		: kind == Shell && scale < 2.0f ? 4.0f : 12.0f;
+		: kind == Muzzle ? MuzzleLife : kind == Shell && scale < 2.0f ? 4.0f : 12.0f;
 }
-float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : kind == Launch ? 4.0f * scale : 2.0f * scale; }
+// (a gun's at 1.5 units, its 48 cells 72 units across: the dust round the tank's front and the fireball's whole reach)
+float cellOf(Kind kind, float scale)
+{
+	return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : kind == Launch ? 4.0f * scale : kind == Muzzle ? 1.5f * scale : 2.0f * scale;
+}
 float joinRadius(const Volume &volume)
 {
 	if (volume.kind == Structure) return (std::max)(volume.hull[2], volume.hull[3]) * volume.cell + 40.0f;
-	return volume.kind == Nuclear ? 500.0f : volume.kind == TankDeath ? 60.0f : 30.0f * volume.scale;
+	// a gun's own FX all go off at its muzzle bone, the ground ring under it
+	return volume.kind == Nuclear ? 500.0f : volume.kind == TankDeath ? 60.0f : volume.kind == Muzzle ? 14.0f : 30.0f * volume.scale;
 }
 // A tank's volume past 1.75 s holds only its smoulder, so it gives its slab up before any new blast does.
+// A gun's shot gives its slab up before anything.
 int rankOf(const Volume &volume)
 {
+	if (volume.kind == Muzzle) return -2;
 	if (volume.kind == TankDeath && volume.live && TheGameLogic
 			&& 4 * ((int)TheGameLogic->getFrame() - volume.born) > 7 * LOGICFRAMES_PER_SECOND)
 		return -1;
@@ -4227,6 +4321,69 @@ bool Hides(ParticleSystem *system)
 	return (takenSystems.count(id) != 0 && !airSystems.count(id)) || fireTaken.count(id) != 0;
 }
 
+// A tank gun's own FX systems (WeaponFX_GenericTankGunNoTracer and the rest), the Heroic ones too.
+bool tankMuzzle(const char *name) { return std::strstr(name, "TankMuzzle") || std::strstr(name, "TankSmallMuzzle"); }
+
+// A tank gun's shot, its flame system at the muzzle bone turned along the barrel: a volume on a free
+// small-tier slab, at most MuzzleCap at once.  False, and the shot keeps the game's own flash, when
+// none is free: a shot never takes a slab from a blast.
+bool startMuzzle(ParticleSystem *system, const Coord3D &where, float gunScale, int now)
+{
+	const TierShape &shape = TierShapes[0];
+	unsigned guns = 0, slot = shape.first + shape.slabs;
+	for (unsigned i = shape.first; i < shape.first + shape.slabs; ++i) {
+		if (volumes[i].live) guns += volumes[i].kind == Muzzle ? 1 : 0;
+		else if (slot == shape.first + shape.slabs) slot = i;
+	}
+	if (slot == shape.first + shape.slabs || guns >= MuzzleCap[level]) return false;
+	// a gun high off the ground (the Spectre's howitzer fires the same FX from its orbit) would blow its
+	// shot outside the box and draw nothing in place of its flash
+	const Real ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(where.x, where.y, NULL) : where.z - 10.0f;
+	if (where.z - ground > 25.0f) return false;
+	// the barrel's aim, the muzzle bone's x axis (W3DModelDraw::handleWeaponFireFX)
+	const Matrix3D &bone = *system->getLocalTransform();
+	float aim[3] = { bone[0][0], bone[1][0], bone[2][0] };
+	const float length = std::sqrt(aim[0] * aim[0] + aim[1] * aim[1] + aim[2] * aim[2]);
+	const float flat = std::sqrt(aim[0] * aim[0] + aim[1] * aim[1]);
+	if (length < 1e-3f || flat < 0.5f * length) return false;	// not a barrel's axis (a gun FX turned on its side)
+	for (float &axis : aim) axis /= length;
+	// the tank firing: its muzzle stands a barrel's length ahead of its middle (29 units on a Crusader,
+	// past hullAt's reach), so asked from 15 units back along the barrel
+	const float back = 15.0f / (flat / length);
+	const Coord3D middle = { where.x - aim[0] * back, where.y - aim[1] * back, where.z };
+	const Hull *hull = hullAt(middle, false);
+	// an Overlord's gun throws a bigger blast than a Crusader's, by its hull's half length (15 the Crusader's)
+	const float scale = gunScale * (std::min)((std::max)((hull ? hull->major : 15.0f) / 15.0f, 0.85f), 1.3f);
+	Volume &volume = volumes[slot];
+	volume = Volume();
+	volume.kind = Muzzle;
+	volume.live = true;
+	volume.reset = true;
+	volume.scale = scale;
+	volume.cell = cellOf(Muzzle, scale);
+	const float cell = volume.cell;
+	// the box a little ahead of the gun, round the fireball and the dust in front of the tank
+	const float fx = aim[0] / (flat / length), fy = aim[1] / (flat / length);
+	volume.origin[0] = where.x + fx * 8.0f * cell - shape.gx * cell * 0.5f;
+	volume.origin[1] = where.y + fy * 8.0f * cell - shape.gy * cell * 0.5f;
+	volume.origin[2] = (std::min)(where.z, (Real)ground) - 4.0f * cell;
+	for (unsigned i = 0; i < 3; ++i) volume.blast[i] = ((&where.x)[i] - volume.origin[i]) / cell;
+	volume.ground = ((float)ground - volume.origin[2]) / cell;
+	for (unsigned i = 0; i < 3; ++i) volume.hull[i] = aim[i];
+	volume.hull[3] = (hull ? hull->major : 15.0f) / cell;
+	volume.hull[4] = (std::max)(where.z - (float)ground, 0.0f) / cell;
+	volume.seed = unsigned(int(where.x) * 73856093) ^ unsigned(int(where.y) * 19349663) ^ unsigned(now * 83492791);
+	volume.born = now;
+	volume.life = int(MuzzleLife * LOGICFRAMES_PER_SECOND);
+	pruneSets();
+	takenSystems.insert((int)system->getSystemID());
+	static unsigned gunsLogged = 0;
+	if (gunsLogged++ < 8)
+		DEBUG_LOG(("VOLSMOKE: frame %d, gun volume %u for '%s' at (%.0f, %.0f, %.0f), aim (%.2f, %.2f, %.2f), %.2f a cell, %s\n", now, slot,
+			system->getTemplate()->getName().str(), where.x, where.y, where.z, aim[0], aim[1], aim[2], cell, hull ? "hull found" : "no hull"));
+	return true;
+}
+
 bool Takes(ParticleSystem *system)
 {
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
@@ -4234,6 +4391,18 @@ bool Takes(ParticleSystem *system)
 	if (isFire(system)) return takeFire(system);
 	if (hideFireSmoke(system)) return true;
 	const int id = (int)system->getSystemID();
+	// A shell striking armour: its smoke, turned away from the attacker, says where and from which
+	// side; Gather throws the sparks (ReforgedTankHitSparks) off the hull there, outside this loop.
+	// (Direct3D 11 only, as every volume is; a bomb truck's disguise plays it unturned, and throws none)
+	if (TheGameLogic && !std::strcmp(system->getTemplate()->getName().str(), "TankStruckSmoke") && usable()
+			&& firstSeen.emplace(id, (int)TheGameLogic->getFrame()).second) {
+		const Matrix3D &turn = *system->getLocalTransform();
+		PendingHit hit;
+		system->getPosition(&hit.at);
+		hit.along[0] = turn[0][0];
+		hit.along[1] = turn[1][0];
+		if (pendingHits.size() < 64 && !(hit.along[0] == 1.0f && hit.along[1] == 0.0f)) pendingHits.push_back(hit);
+	}
 	if (takenSystems.count(id)) return !airOutside.count(id);
 	// A blast is told from loose billboard systems; trails, streaks, a building's smoke and every
 	// other smoke or dust go to the air.
@@ -4278,9 +4447,11 @@ bool Takes(ParticleSystem *system)
 	// and a building's flat shock rings as far as its blast (the owner wants no ring)
 	const bool nukeFlat = flat && std::strstr(own, "Nuke") && !std::strstr(own, "NukeCannon");
 	const bool structFlat = flat && structural;
-	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION && !nukeFlat && !structFlat)) return takeAir(system);
+	// a tank gun's FX go to its shot's volume, its flat ring on the ground (TankMuzzleWave) too
+	const bool gun = tankMuzzle(own), gunFlat = flat && gun;
+	if (!loose || (flat && system->getPriority() != DEATH_EXPLOSION && !nukeFlat && !structFlat && !gunFlat)) return takeAir(system);
 	// flying bits stay the game's own here too: a blast that took them drew nothing in their place
-	if (airLookOf(system->getTemplate(), system).scrap) return false;
+	if (airLookOf(system->getTemplate(), system).scrap && !gun) return false;
 	const int now = (int)TheGameLogic->getFrame();
 	const int seen = firstSeen.emplace(id, now).first->second;
 	Coord3D where;
@@ -4308,8 +4479,11 @@ bool Takes(ParticleSystem *system)
 	for (const Volume &volume : volumes) {
 		if (!volume.live || volume.kind == Fire || seen < volume.born - 10
 				|| seen > volume.born + (volume.kind == Nuclear ? 180 : volume.kind == TankDeath || volume.kind == Structure ? 90 : 30)) continue;	// a nuke's stem comes 2 s after its flare
+		// a gun's shot takes its own FX only, and they join nothing else (a tank firing beside a dead
+		// one keeps its shot)
+		if ((volume.kind == Muzzle) != gun) continue;
 		if (flat && !(volume.kind == TankDeath && system->getPriority() == DEATH_EXPLOSION) && !(nukeFlat && volume.kind == Nuclear)
-			&& !(structFlat && volume.kind == Structure)) continue;
+			&& !(structFlat && volume.kind == Structure) && !(gunFlat && volume.kind == Muzzle)) continue;
 		// A building's blast takes its own FX's systems, and the fire cards (not the smoke) of the
 		// shells landing on it in its first second and a half: an Overlord's BuggyMissileExplosion
 		// fireballs floated over the cloud as separate flat sprites.
@@ -4323,6 +4497,9 @@ bool Takes(ParticleSystem *system)
 		// near it.  A building's fall nearby would take them too.
 		if ((volume.kind == TankDeath || volume.kind == Structure) && !alpha && std::strstr(joiner, "Spark")) continue;
 		if (system->isSystemForever()) continue;
+		// a shot's flame starts its own volume: the Overlord's second barrel fires 18 frames after the
+		// first, a few units from it, and joined to the first shot's it drew nothing
+		if (kind.trigger && kindNow == Muzzle) continue;
 		if (kind.trigger && (kindNow == TankDeath) != (volume.kind == TankDeath)) continue;
 		if (kind.trigger && (kindNow == Nuclear) != (volume.kind == Nuclear)) continue;
 		if (kind.trigger && (kindNow == Structure) != (volume.kind == Structure)) continue;
@@ -4344,6 +4521,9 @@ bool Takes(ParticleSystem *system)
 	}
 
 	if (flat || !kind.trigger || system->isSystemForever() || seen < now - 5 || !usable()) return takeAir(system);
+	// (on its first frame only: started a few frames late, after the game's own flash had drawn, a
+	// shot flashed twice)
+	if (kindNow == Muzzle) return seen == now && startMuzzle(system, where, kind.scale, now);
 
 	const Real ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(where.x, where.y, NULL) : where.z;
 	Kind type = kindNow;
@@ -4516,6 +4696,49 @@ void Gather()
 					system->setPosition(&at);
 		pendingSparks.clear();
 	}
+	// A shell striking armour: a shower of sparks off the hull's face that took it, thrown back out
+	// towards the side it came from and spreading over that face (the system's x axis is the face's
+	// outward normal).  The hit itself goes off at the vehicle's middle, so the face is where the shot's
+	// line from the attacker meets the hull's box.
+	if (!pendingHits.empty() && TheParticleSystemManager) {
+		const ParticleSystemTemplate *sparks = TheParticleSystemManager->findTemplate("ReforgedTankHitSparks");
+		const ParticleSystemTemplate *flare = TheParticleSystemManager->findTemplate("ReforgedTankHitSparkFlare");
+		static unsigned hitsLogged = 0;
+		if (hitsLogged++ < 4)
+			DEBUG_LOG(("VOLSMOKE: frame %d, %u armour hit spark shower(s), template %s\n", now, (unsigned)pendingHits.size(),
+				sparks ? "found" : "missing"));
+		if (sparks)
+			for (const PendingHit &hit : pendingHits) {
+				const float length = std::sqrt(hit.along[0] * hit.along[0] + hit.along[1] * hit.along[1]);
+				if (length < 1e-3f) continue;
+				const float dx = hit.along[0] / length, dy = hit.along[1] / length;
+				Coord3D at = hit.at;
+				float nx = -dx, ny = -dy;
+				if (const Hull *hull = hullAt(hit.at, true)) {
+					const float c = std::cos(hull->heading), s = std::sin(hull->heading);
+					const float du = dx * c + dy * s, dv = -dx * s + dy * c;
+					const float tu = std::fabs(du) > 1e-3f ? hull->major / std::fabs(du) : 1e30f;
+					const float tv = std::fabs(dv) > 1e-3f ? hull->minor / std::fabs(dv) : 1e30f;
+					const float reach = (std::min)(tu, tv);
+					at.x = hull->x - dx * reach;
+					at.y = hull->y - dy * reach;
+					if (tu < tv) { nx = du > 0 ? -c : c; ny = du > 0 ? -s : s; }
+					else { nx = dv > 0 ? s : -s; ny = dv > 0 ? -c : c; }
+				} else {
+					at.x -= dx * 6.0f;
+					at.y -= dy * 6.0f;
+				}
+				Matrix3D turn(1);
+				turn.Rotate_Z(std::atan2(ny, nx));
+				for (const ParticleSystemTemplate *made : { sparks, flare })
+					if (made)
+						if (ParticleSystem *system = TheParticleSystemManager->createParticleSystem(made)) {
+							system->setLocalTransform(&turn);
+							system->setPosition(&at);
+						}
+			}
+		pendingHits.clear();
+	}
 }
 
 void Render(const HazardCloud::Camera &camera)
@@ -4684,9 +4907,14 @@ void Render(const HazardCloud::Camera &camera)
 		context->PSSetSamplers(0, 2, samplers);
 		context->PSSetConstantBuffers(0, 1, &state.drawConstants);
 		// the budget: past three blasts on screen each one is marched in longer steps, past six fires each fire
-		unsigned firesShown = 0;
-		for (unsigned n = 0; n < shown; ++n) firesShown += volumes[order[n]].kind == Fire ? 1 : 0;
-		const float stepCells = Qualities[level].stepCells * (std::max)(1.0f, (shown - firesShown) / 3.0f);
+		// (a gun's shot counts for nothing here: it is gone in a second and a half, and six of them in a
+		// tank fight would coarsen the dead tanks' smoke beside them)
+		unsigned firesShown = 0, gunsShown = 0;
+		for (unsigned n = 0; n < shown; ++n) {
+			firesShown += volumes[order[n]].kind == Fire ? 1 : 0;
+			gunsShown += volumes[order[n]].kind == Muzzle ? 1 : 0;
+		}
+		const float stepCells = Qualities[level].stepCells * (std::max)(1.0f, (shown - firesShown - gunsShown) / 3.0f);
 		// (a fire's cells are half a blast's or less, so its march takes longer steps in them)
 		const float fireStepCells = 1.5f * Qualities[level].stepCells * (std::max)(1.0f, firesShown / 6.0f);
 		for (unsigned g = 2; g-- > 0;) {
@@ -4742,7 +4970,7 @@ void Render(const HazardCloud::Camera &camera)
 			const bool shortLived = volume.kind == TankDeath || volume.kind == Structure || volume.kind == Launch
 				|| (volume.kind == Shell && volume.scale < 2.0f);
 			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (shortLived ? ShortEndFade
-				: volume.kind == Fire ? FireEndFade : 3.0f)));
+				: volume.kind == Fire ? FireEndFade : volume.kind == Muzzle ? MuzzleEndFade : 3.0f)));
 			// a fire comes up over its warm-up, under the billboards it then takes from
 			if (volume.kind == Fire) draw.Slab[1] *= (std::min)(1.0f, t0 / FireWarmSeconds);
 			draw.Slab[2] = volume.kind == Fire ? fireStepCells : stepCells;
@@ -4763,6 +4991,7 @@ void Render(const HazardCloud::Camera &camera)
 void Reset()
 {
 	pendingSparks.clear();	// before the early return: a burst queued as the setting went Off
+	pendingHits.clear();
 	clearFires();			// the system IDs start again from 1
 	if (!requested()) return;
 	for (Volume &volume : volumes) volume = Volume();
