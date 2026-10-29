@@ -153,6 +153,9 @@ const float GroundDustHalfLife = 0.38f, GroundRollHalfLife = 1.5f;
 // dirt fountains stood beside a fallen War Factory as tan fingers for ten seconds.
 const float RollWeight = 10.0f, DirtWeight = 30.0f, TankMassWeight = 0.2f;
 const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
+const float FireballSeconds = 0.6f;		// a building's fall's fireball, burst to cooled
+const float FireballHalfLife = 0.15f;	// and its heat after that, over the shared HeatHalfLife (the column's fire is laid again each step)
+const float DebrisDustSeconds = 0.6f;	// how long after a fall its flying debris is given dust trails (Gather)
 const float StructureSootHalfLife = 0.75f;	// a building's blast's soot: at 7 a fall's smoke was on screen for 14 s, at 3 for 7 to 10, at 1.5 for 5 to 6
 // A tank's soot from 1.25 s on, once its column is falling: its black column is gone from the play
 // camera about 2 s after the death and a thin smoulder fades out by 3.5 s (the volume lives 4.25, its
@@ -268,7 +271,7 @@ struct SimConstants {
 	float Origins[MaxSlabs][4];		// each slab's world corner, for the movers below
 	float MoverCount[4];
 	float Movers[MaxMovers * 4][4];	// the units that push the air this step, in world units (Mover)
-	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest), its cold dust's weight, its ground dust kept, its heat kept on top of Keep.x (a gun's; 1 for the rest)
+	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest), its cold dust's weight, its ground dust kept, its heat kept, its heat kept on top of Keep.x (a gun's; 1 for the rest)
 	// A fire's slab (FireFields, after Thin in its programs' cbuffer only): burn rate, heat a unit of
 	// fuel gives, soot yield, ignition heat; the fuel that starves it, radiation, soot burn,
 	// expansion; its lift in cells/s^2 at heat 1.
@@ -2561,12 +2564,12 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		auto unit = [&](unsigned salt) { return hashUnit(volume.seed, salt); };
 		const bool standing = volume.standing;
 		dust[0] = 0.76f; dust[1] = 0.72f; dust[2] = 0.65f;	// pale concrete and plaster dust; at 0.66 it lay grey-brown in its own shade
-		// grey-brown smoke of a burning building, where a tank's black soot made a factory's fall
-		// one black box
-		soot[0] = 0.2f; soot[1] = 0.19f; soot[2] = 0.18f;
+		// black-grey smoke off the fire, as in the building explosion photos (at grey-brown 0.2 the
+		// ruin's column stood pale; a tank's 0.06 had made a factory's fall one black box)
+		soot[0] = 0.085f; soot[1] = 0.08f; soot[2] = 0.075f;
 		// and lit on its sunny side, with more sky in its shade: on Winter Wolf's snow the column
 		// stood pure black with no side lit at 0.26 and 0.75
-		shade = 0.4f;
+		shade = 0.32f;
 		sunShare = 0.95f;
 		// Its meshes (readParts): the tallest first, then the biggest.  With none read, its
 		// footprint stands in as one box.
@@ -2585,38 +2588,43 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		unsigned big[MaxParts];
 		for (unsigned i = 0; i < partCount; ++i) big[i] = i;
 		std::sort(big, big + partCount, [&](unsigned a, unsigned b) { return areaOf(a) > areaOf(b); });
-		// The fall starts as the building's own shape in smoke and dust: each mesh's box filled at
-		// the moment it comes down, slumping, with a dull glow inside, two bodies one over the other
-		// for a mesh taller than it is wide.  A factory's hall, its stacks and a mast each leave their
-		// own outline before it settles, where the footprint's quarters drew one square.
-		if (!standing && t < 0.45f) {
-			const float fade = 1 - t / 0.45f;
-			unsigned laid = 0;
-			for (unsigned i = 0; i < partCount && laid < 9; ++i) {
+		// The fall's fireball, after the building explosion photos: a white-yellow ball out of every
+		// mesh, bigger than the mesh, swelling and pushed out through its walls from the building's
+		// middle, cooling to orange, under a sooty rim that lags it and stays dark where the core's
+		// heat does not reach.  Gone in 0.6 s.  The mesh boxes once filled with dust and a dull glow
+		// read as a slump, and three bursts off the roof as small fires: dust never glows.
+		if (!standing && t < FireballSeconds) {
+			const float fade = 1 - t / FireballSeconds, swell = 1 + 0.7f * smoothstep01(t, 0.0f, 0.5f);
+			for (unsigned i = 0; i < (std::min)(partCount, 6u); ++i) {
 				const Part &p = parts[i];
-				const float tall = (std::max)(p.top - p.bottom, 1.0f), narrow = (std::min)(p.halfAlong, p.halfAcross);
-				const unsigned stack = tall > 3.2f * narrow ? 2 : 1;
-				for (unsigned k = 0; k < stack && laid < 9; ++k, ++laid) {
-					const float radius = (std::min)(narrow, tall / (2.0f * stack)) * 1.15f + 0.4f;
-					onFootprint(p.along, p.across, p.bottom + tall * (k + 0.5f) / stack, radius, p.along * 0.4f, p.across * 0.4f, -4.0f * fade,
-						3.0f * fade, 1.0f, 16.0f * fade, 0.25f);
-				}
+				const float tall = (std::max)(p.top - p.bottom, 1.0f), middle = p.bottom + tall * 0.5f;
+				const float out = std::sqrt(p.along * p.along + p.across * p.across);
+				const float da = out > 0.5f ? p.along / out : std::cos(6.2831853f * unit(560 + i));
+				const float dc = out > 0.5f ? p.across / out : std::sin(6.2831853f * unit(560 + i));
+				const float room = 0.6f * (TierShapes[0].gz - 10.0f - middle);
+				const float radius = (std::min)((std::max)((std::max)(std::sqrt(p.halfAlong * p.halfAlong + p.halfAcross * p.halfAcross) * 0.7f,
+					tall * 0.5f), 2.0f) * swell, (std::max)(room, 2.0f));
+				const float a = p.along + da * 4.0f * t, c = p.across + dc * 4.0f * t, z = middle + 3.0f * t;
+				const float heat = 2.2f * (1 - 0.55f * smoothstep01(t, 0.1f, FireballSeconds));
+				// (soot 8 in the ball and 12 in a rim 1.35 times as wide round it stood as one black dome
+				// over the fall, the fire hidden inside it, and pushed out at 8 the ball ran along the
+				// ground as a glowing carpet)
+				onFootprint(a, c, z, radius, da * 5.0f * fade, dc * 5.0f * fade, 8.0f * fade, 3.0f * fade, heat, 0, 0.35f);
+				if (t > 0.12f)
+					onFootprint(a, c, z + radius * 0.4f, radius * 1.15f, da * 4.0f * fade, dc * 4.0f * fade, 8.0f * fade, 2.5f * fade, 0.6f, 0, 0.2f);
 			}
 		}
-		// Fire bursts out of the tops of its biggest meshes, thrown outwards; a damaged stage only
-		// out of its tallest, with a third of the soot, so it is fire blowing out of a standing
-		// building and not a black cloud over its roof.
-		if (t < (standing ? 0.6f : 0.7f)) {
-			const float fade = 1 - t / (standing ? 0.6f : 0.7f);
-			const unsigned bursts = (std::min)(partCount, standing ? 2u : 3u);
-			for (unsigned i = 0; i < bursts; ++i) {
-				const Part &p = parts[standing ? i : big[i]];
+		// A damaged stage blows fire out of the top of its tallest meshes, thrown outwards, with
+		// little soot, so it is fire blowing out of a standing building and not a black cloud over
+		// its roof.
+		if (standing && t < 0.6f) {
+			const float fade = 1 - t / 0.6f;
+			for (unsigned i = 0; i < (std::min)(partCount, 2u); ++i) {
+				const Part &p = parts[i];
 				const float out = std::sqrt(p.along * p.along + p.across * p.across) + 1e-3f;
-				// (a damaged stage's smaller: one of a mesh's size stood over the roof as a brown ball)
-				onFootprint(p.along, p.across, p.top * (standing ? 1.0f : 0.85f) + 0.4f,
-					(std::max)((std::min)(p.halfAlong, p.halfAcross) * (standing ? 0.45f : 0.75f), 2.0f),
-					p.along / out * 6.0f * fade, p.across / out * 6.0f * fade, 4.0f + 3.0f * unit(560 + i),
-					(standing ? 3.0f : 5.0f) * fade, standing ? 1.6f : 1.45f, 3.0f * fade, 0.3f);
+				// (smaller than a mesh: one of a mesh's size stood over the roof as a brown ball)
+				onFootprint(p.along, p.across, p.top + 0.4f, (std::max)((std::min)(p.halfAlong, p.halfAcross) * 0.45f, 2.0f),
+					p.along / out * 6.0f * fade, p.across / out * 6.0f * fade, 4.0f + 3.0f * unit(560 + i), 3.0f * fade, 1.6f, 3.0f * fade, 0.3f);
 			}
 		}
 		// The plume, the tank's jets out of the tops of its meshes: each lays thin smoke at a rate that
@@ -2694,8 +2702,9 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			const float rise = (std::min)((t - 0.4f) / 0.4f, 1.0f), fall = t > 1.0f ? 1 - (t - 1.0f) / 1.25f : 1.0f;
 			for (unsigned i = 0; i < (std::min)(partCount, 2u); ++i) {
 				const Part &p = parts[big[i]];
+				// (thick: at 0.8 it was a thin pale wisp beside the photos' black column)
 				onFootprint(p.along, p.across, 0.6f, (std::max)((std::min)(p.halfAlong, p.halfAcross) * 0.6f, 2.0f), 0, 0, 12.0f,
-					0.8f * rise * fall * (i ? 0.6f : 1.0f), fall, 0.1f, 0.25f);
+					2.0f * rise * fall * (i ? 0.6f : 1.0f), fall, 0.1f, 0.25f);
 			}
 		}
 		soot[3] = 1.6f + 2.4f * std::exp(-t / 0.3f);
@@ -3122,8 +3131,14 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		sim.Thin[slab][1] = rolls ? RollWeight : volume.kind == TankDeath ? TankMassWeight
 			: volume.kind == Shell && volume.scale < 2.0f ? DirtWeight : 0.0f;
 		sim.Thin[slab][2] = std::pow(0.5f, dt / (rolls ? GroundRollHalfLife : GroundDustHalfLife));
-		// its heat kept over this step on top of the tier's (a gun's fireball goes in a few frames)
-		sim.Thin[slab][3] = volume.kind == Muzzle ? std::pow(0.5f, dt / MuzzleHeatHalfLife) : 1.0f;
+		// a fall's fireball cools on its own clock once its emitters stop, so it is gone inside a
+		// second (at the shared HeatHalfLife it still burned orange at 1.3 s)
+		// Its heat kept over this step on top of the tier's: a gun's fireball goes in a few frames, and
+		// a fall's cools on its own clock once its emitters stop, so it is gone inside a second (at
+		// the shared HeatHalfLife it still burned orange at 1.3 s).
+		const bool fireballCools = volume.kind == Structure && !volume.standing && volume.live && secondsSince(volume, now) > FireballSeconds;
+		sim.Thin[slab][3] = volume.kind == Muzzle ? std::pow(0.5f, dt / MuzzleHeatHalfLife)
+			: fireballCools ? std::pow(0.5f, dt / FireballHalfLife) : 1.0f;
 		for (unsigned i = 0; i < 3; ++i) sim.Origins[slab][i] = volume.origin[i];
 		if (!volume.live) continue;
 		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
@@ -4726,6 +4741,45 @@ bool Takes(ParticleSystem *system)
 	return true;
 }
 
+// A building's fall throws its stock debris (OCL_LargeStructureDebris and the rest, GenericDebris
+// objects), which flies with no trail: each chunk seen beside a fall in its first DebrisDustSeconds
+// gets a short dust trail of its own, a client particle system riding its drawable.  Only with the
+// setting on (Gather), so Off keeps the game's own look; nothing goes back to the logic.
+void attachDebrisDust(int now)
+{
+	if (!TheGameClient || !TheParticleSystemManager) return;
+	static std::unordered_set<DrawableID> dusted;
+	const Volume *falls[MaxVolumes];
+	unsigned fallCount = 0;
+	for (const Volume &volume : volumes)
+		if (volume.live && volume.kind == Structure && !volume.standing
+				&& now - volume.born <= (int)(DebrisDustSeconds * LOGICFRAMES_PER_SECOND))
+			falls[fallCount++] = &volume;
+	if (!fallCount) {
+		if (dusted.size() > 4096) dusted.clear();
+		return;
+	}
+	const ParticleSystemTemplate *trail = TheParticleSystemManager->findTemplate("ReforgedStructureDebrisDust");
+	if (!trail) return;
+	for (Drawable *drawable = TheGameClient->firstDrawable(); drawable; drawable = drawable->getNextDrawable()) {
+		// (not a tank's plates thrown beside a fall: they carry ReforgedDebrisTrail, a tank is no building)
+		if (!drawable->getTemplate() || drawable->getTemplate()->getName() != "GenericDebris" || dusted.count(drawable->getID())
+				|| drawable->getFullyObscuredByShroud() || hullAt(*drawable->getPosition(), false)) continue;
+		const Coord3D *at = drawable->getPosition();
+		for (unsigned f = 0; f < fallCount; ++f) {
+			const Volume &volume = *falls[f];
+			const float dx = at->x - (volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell);
+			const float dy = at->y - (volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell);
+			if (dx * dx + dy * dy > joinRadius(volume) * joinRadius(volume)) continue;
+			dusted.insert(drawable->getID());
+			if (ParticleSystem *system = TheParticleSystemManager->createParticleSystem(trail)) system->attachToDrawable(drawable);
+			static unsigned dustLogged = 0;
+			if (dustLogged++ < 4) DEBUG_LOG(("VOLSMOKE: frame %d, a dust trail on a fallen building's debris\n", now));
+			break;
+		}
+	}
+}
+
 void Gather()
 {
 	if (!requested() || !TheGameLogic || TheGlobalData->m_classicGraphics || LogicThread::isInsideWindow()) return;
@@ -4750,6 +4804,7 @@ void Gather()
 					system->setPosition(&at);
 		pendingSparks.clear();
 	}
+	attachDebrisDust(now);
 	ownedHits.erase(std::remove_if(ownedHits.begin(), ownedHits.end(), [now](const OwnedHit &hit) { return hit.frame < now - 8; }),
 		ownedHits.end());
 	// A shell striking armour: one dense burst of sparks out of the point where it struck, in a cone
