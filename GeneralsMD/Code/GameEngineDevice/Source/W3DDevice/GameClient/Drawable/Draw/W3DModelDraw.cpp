@@ -1061,6 +1061,7 @@ W3DModelDrawModuleData::W3DModelDrawModuleData() :
   m_particlesAttachedToAnimatedBones(false),
 	m_animationsRequirePower(true),
 	m_stabilizedTurretPitch(false),
+	m_barrelArtPitch(0.0f),
 #ifdef CACHE_ATTACH_BONE
 	m_attachToDrawableBoneOffsetValid(false),
 #endif
@@ -1257,6 +1258,7 @@ void W3DModelDrawModuleData::buildFieldParse(MultiIniFieldParse& p)
 		{ "OkToChangeModelColor",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_okToChangeModelColor) },
 		{ "AnimationsRequirePower",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_animationsRequirePower) },
 		{ "StabilizedTurretPitch",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_stabilizedTurretPitch) },
+		{ "BarrelArtPitch",	INI::parseAngleReal, NULL, offsetof(W3DModelDrawModuleData, m_barrelArtPitch) },
 		{ "ParticlesAttachedToAnimatedBones",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_particlesAttachedToAnimatedBones) },
 		{ "MinLODRequired",		INI::parseStaticGameLODLevel,	NULL,	offsetof(W3DModelDrawModuleData, m_minLODRequired) },
 		{ "ProjectileBoneFeedbackEnabledSlots", INI::parseBitString32, TheWeaponSlotTypeNames, offsetof(W3DModelDrawModuleData, m_projectileBoneFeedbackEnabledSlots) },
@@ -2941,23 +2943,18 @@ void W3DModelDraw::handleClientTurretPositioning()
 				if (m_curState)
 					turretPitch += tur.m_turretArtPitch;
 				// The logic aims from a hull that never tilts; the drawn one lies on the ground and rocks when
-				// it fires. A stabilized gun takes that tilt along its own heading off, and the pitch the art
-				// gave the bone (a Paladin's barrel is modelled 5 degrees up), so the drawn barrel stands at
-				// the logic's pitch against level ground, down the line its shell flies.
-				if (getW3DModelDrawModuleData()->m_stabilizedTurretPitch && m_renderObject && obj)
+				// it fires. A stabilized gun takes that tilt along its own heading off, and the angle the barrel
+				// is modelled at (BarrelArtPitch: a Crusader's mesh rises 4.4 degrees from its bone), so the
+				// drawn barrel stands at the logic's pitch against level ground, down the line its shell flies.
+				const W3DModelDrawModuleData* md = getW3DModelDrawModuleData();
+				if (md->m_stabilizedTurretPitch && m_renderObject && obj)
 				{
 					Vector3 heading(cosf(turretAngle), sinf(turretAngle), 0.0f);
 					Vector3 drawn = m_renderObject->Get_Transform().Rotate_Vector(heading);
 					Vector3 logic = obj->getTransformMatrix()->Rotate_Vector(heading);
 					turretPitch -= atan2f(drawn.Z, sqrtf(drawn.X * drawn.X + drawn.Y * drawn.Y))
 						- atan2f(logic.Z, sqrtf(logic.X * logic.X + logic.Y * logic.Y));
-					Int restBone;
-					const Matrix3D* rest = m_curState->findPristineBone(tur.m_turretPitchNameKey, &restBone);
-					if (rest)
-					{
-						Vector3 restX = rest->Get_X_Vector();
-						turretPitch -= atan2f(restX.Z, sqrtf(restX.X * restX.X + restX.Y * restX.Y));
-					}
+					turretPitch -= md->m_barrelArtPitch;
 				}
 				m_drawnTurretPitch[tslot] = turretPitch;
 				Matrix3D turretPitchXfrm(1);
