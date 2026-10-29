@@ -13793,38 +13793,71 @@ TEST(a_cleaner_counts_only_scans_that_find_it_stuck_short_of_its_hazard)
 }
 
 
-/** AI.cpp: a team that loses a fight stops at the first ground on its way home that none of the
-	 fight's guns reach, a step past it, rather than walking the whole map back to its base. */
+/** AI.cpp: a team that loses a fight stops at the first ground none of the fight's guns reach, a step
+	 past it, rather than walking the whole map back to its base; on the road home unless a way 45 or 90
+	 degrees off it gets out more than a step sooner. */
 TEST(a_losing_team_falls_back_out_of_reach_not_home)
 {
 	Real x = 0.0f, y = 0.0f;
+	const Real map[] = { -5000.0f, -5000.0f, 5000.0f, 5000.0f };
 
 	// home is 2000 east; one gun at the fight reaching 150: covered up to 150, first clear sample at
 	// 180, one 60 step past it
 	const Real oneGun[] = { 0.0f, 0.0f, 150.0f };
-	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, oneGun, 1, &x, &y ) );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, oneGun, 1, map, &x, &y ) );
 	CHECK_NEAR( 240.0f, x, 0.01f );
 	CHECK_NEAR( 0.0f, y, 0.01f );
 
-	// a second gun further down the road home (200..600 covered) pushes the stop past its reach too:
-	// the gap at 180 is clear, but the step past it is not, and a stop inside a reach is no stop
+	// a second gun further down the road home (200..600 covered): along the road the gap at 180 is clear
+	// but the step past it is not, and the first stop is 720, past the second gun.  45 degrees off the
+	// road it is out at 240 without passing it, which beats 720 by more than a step
 	const Real twoGuns[] = { 0.0f, 0.0f, 150.0f,  400.0f, 0.0f, 200.0f };
-	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, twoGuns, 2, &x, &y ) );
-	CHECK_NEAR( 720.0f, x, 0.01f );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, twoGuns, 2, map, &x, &y ) );
+	CHECK_NEAR( 169.706f, x, 0.01f );
+	CHECK_NEAR( 169.706f, y, 0.01f );
+
+	// ... unless the map ends 100 to the north: that way walks off it, and the way 45 degrees south is taken
+	const Real northEdge[] = { -5000.0f, -5000.0f, 5000.0f, 100.0f };
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, twoGuns, 2, northEdge, &x, &y ) );
+	CHECK_NEAR( 169.706f, x, 0.01f );
+	CHECK_NEAR( -169.706f, y, 0.01f );
+
+	// a gun beside the road leaves the road alone: out at 240 along it, no side gets out a step sooner
+	const Real sideGun[] = { 0.0f, 0.0f, 150.0f,  0.0f, 300.0f, 200.0f };
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, sideGun, 2, map, &x, &y ) );
+	CHECK_NEAR( 240.0f, x, 0.01f );
+	CHECK_NEAR( 0.0f, y, 0.01f );
 
 	// any direction: home to the south-west
-	CHECK( aiRetreatFallbackPoint( 1000.0f, 1000.0f, 0.0f, 1000.0f, 60.0f, NULL, 0, &x, &y ) );
+	CHECK( aiRetreatFallbackPoint( 1000.0f, 1000.0f, 0.0f, 1000.0f, 60.0f, NULL, 0, map, &x, &y ) );
 	CHECK_NEAR( 880.0f, x, 0.01f );
 	CHECK_NEAR( 1000.0f, y, 0.01f );
 
 	// guns covering the whole road: home, and FALSE says so
 	const Real bigGun[] = { 0.0f, 0.0f, 5000.0f };
-	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, bigGun, 1, &x, &y ) );
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, bigGun, 1, map, &x, &y ) );
 	CHECK_NEAR( 2000.0f, x, 0.01f );
 
 	// a fight on the doorstep: no room short of home either
-	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 100.0f, 0.0f, 60.0f, NULL, 0, &x, &y ) );
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 100.0f, 0.0f, 60.0f, NULL, 0, map, &x, &y ) );
 	CHECK_NEAR( 100.0f, x, 0.01f );
+}
+
+
+/** AI.cpp: a unit walking at a known defence is caught while the next stretch of its walk only reaches
+	 the slack round the gun, before it is in reach (AIPlayer::holdAtDefences). */
+TEST(a_walk_into_a_known_defence_is_seen_before_it_is_in_reach)
+{
+	// a gun at the origin reaching 200, the edge 30 past it, the walk looked at 120 ahead.  Straight at it
+	// from 300 the stretch ends at 180, inside the edge; walking away, or from 400 (ends at 280), not yet
+	CHECK( aiWalkEntersReach( 300.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	CHECK( !aiWalkEntersReach( 300.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	CHECK( !aiWalkEntersReach( 400.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	// walking past: 240 off the gun at the nearest is outside the edge, 220 off is inside it
+	CHECK( !aiWalkEntersReach( 50.0f, 240.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	CHECK( aiWalkEntersReach( 50.0f, 220.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	// already in reach: that is a fight, and the retreat's to judge
+	CHECK( !aiWalkEntersReach( 150.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
 }
 
 

@@ -1391,32 +1391,88 @@ static Bool gunsReach( Real x, Real y, const Real *guns, Int gunCount )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Where a force that is losing stops falling back: walking from (fromX, fromY) towards home in
-	* steps, the first spot no gun in guns[] reaches with one more step of clear ground past it, and
-	* that next step is where it stands, so the edge of a reach is never the place.  guns holds x, y
-	* and reach for each of gunCount guns.  FALSE, with home in the answer, when the line never leaves
-	* their reach before it gets home. */
+/** How far a force at (fromX, fromY) walks along (dirX, dirY), a unit vector, in steps, to the first
+	* spot no gun reaches with one more step of clear ground past it, that next step included; -1 when it
+	* is not out by maxWalk, or walks off the map (bounds: low x, low y, high x, high y) first. */
+static Real walkOutOfReach( Real fromX, Real fromY, Real dirX, Real dirY, Real maxWalk, Real step,
+														const Real *guns, Int gunCount, const Real *bounds )
+{
+	for( Real along = step; along + step < maxWalk; along += step )
+	{
+		const Real nextX = fromX + dirX * (along + step);
+		const Real nextY = fromY + dirY * (along + step);
+		if( nextX < bounds[ 0 ] || nextY < bounds[ 1 ] || nextX > bounds[ 2 ] || nextY > bounds[ 3 ] )
+			return -1.0f;
+		if( !gunsReach( fromX + dirX * along, fromY + dirY * along, guns, gunCount ) &&
+				!gunsReach( fromX + dirX * (along + step), fromY + dirY * (along + step), guns, gunCount ) )
+			return along + step;
+	}
+	return -1.0f;
+}
+
+/** Where a force that is losing stops falling back: the first spot no gun in guns[] reaches with one
+	* more step of clear ground past it, and that next step is where it stands, so the edge of a reach is
+	* never the place.  guns holds x, y and reach for each of gunCount guns.  FALSE, with home in the
+	* answer, when no way leaves their reach before it has walked as far as home is.
+	*
+	* The way out is the road home, or 45 or 90 degrees off it when that gets out of reach more than a
+	* step sooner.  Home alone walked a force past the guns whenever they stood between it and home, the
+	* Gatling Cannons by Tournament Desert's middle docks among them, and one in seven units a Hard China
+	* pulled out of a fight there died to a building within fifteen seconds of the order.  A way that walks
+	* off the map (bounds) is no way out; ground the pathfinder cannot stand on is its to move to the
+	* nearest that it can, as with any move. */
 //-------------------------------------------------------------------------------------------------
 Bool aiRetreatFallbackPoint( Real fromX, Real fromY, Real homeX, Real homeY, Real step,
-														 const Real *guns, Int gunCount, Real *outX, Real *outY )
+														 const Real *guns, Int gunCount, const Real *bounds, Real *outX, Real *outY )
 {
 	*outX = homeX;
 	*outY = homeY;
 	const Real dx = homeX - fromX;
 	const Real dy = homeY - fromY;
 	const Real homeDist = (Real)sqrt( dx * dx + dy * dy );
-	for( Real along = step; along + step < homeDist; along += step )
+	if( homeDist <= 0.0f )
+		return FALSE;
+	const Real hx = dx / homeDist;
+	const Real hy = dy / homeDist;
+	const Real HALF_ROOT_TWO = 0.70710678f;		// cos and sin of 45 degrees, no trig in logic
+	const Real ways[ 5 ][ 2 ] =
 	{
-		const Real x = fromX + dx * (along + step) / homeDist;
-		const Real y = fromY + dy * (along + step) / homeDist;
-		if( gunsReach( fromX + dx * along / homeDist, fromY + dy * along / homeDist, guns, gunCount ) ||
-				gunsReach( x, y, guns, gunCount ) )
-			continue;
-		*outX = x;
-		*outY = y;
-		return TRUE;
+		{ hx, hy },
+		{ HALF_ROOT_TWO * (hx - hy), HALF_ROOT_TWO * (hx + hy) },
+		{ HALF_ROOT_TWO * (hx + hy), HALF_ROOT_TWO * (hy - hx) },
+		{ -hy, hx },
+		{ hy, -hx }
+	};
+	Int best = -1;
+	Real bestWalk = 0.0f;
+	for( Int w = 0; w < 5; ++w )
+	{
+		const Real walk = walkOutOfReach( fromX, fromY, ways[ w ][ 0 ], ways[ w ][ 1 ], homeDist, step, guns, gunCount, bounds );
+		if( walk >= 0.0f && (best < 0 || walk + step < bestWalk) )
+		{
+			best = w;
+			bestWalk = walk;
+		}
 	}
-	return FALSE;
+	if( best < 0 )
+		return FALSE;
+	*outX = fromX + ways[ best ][ 0 ] * bestWalk;
+	*outY = fromY + ways[ best ][ 1 ] * bestWalk;
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool aiWalkEntersReach( Real x, Real y, Real dirX, Real dirY, Real gunX, Real gunY, Real reach, Real edge, Real lookahead )
+{
+	const Real toX = gunX - x;
+	const Real toY = gunY - y;
+	const Real along = toX * dirX + toY * dirY;
+	if( toX * toX + toY * toY <= reach * reach || along <= 0.0f )
+		return FALSE;
+	const Real ahead = along > lookahead ? lookahead : along;
+	const Real nearX = x + dirX * ahead - gunX;
+	const Real nearY = y + dirY * ahead - gunY;
+	return nearX * nearX + nearY * nearY <= edge * edge;
 }
 
 //-------------------------------------------------------------------------------------------------

@@ -377,10 +377,16 @@ Real aiArmyAdvantage( const Real *myValue, Int myKinds, const Real *theirValue, 
 	* 'power' is a stand-in for damage per second - the threat value the data already carries. */
 Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPower );
 
-/** Where a force losing a fight stops: the first spot on its line home that none of the fight's
-	* guns reach (x, y, reach triples), plus one step.  FALSE and home when there is none short of it. */
+/** Where a force losing a fight stops: the first spot on its line home, or 45 or 90 degrees off it, that
+	* none of the fight's guns reach (x, y, reach triples), plus one step, on the map (bounds: low x, low y,
+	* high x, high y).  FALSE and home when there is none short of it. */
 Bool aiRetreatFallbackPoint( Real fromX, Real fromY, Real homeX, Real homeY, Real step,
-														 const Real *guns, Int gunCount, Real *outX, Real *outY );
+														 const Real *guns, Int gunCount, const Real *bounds, Real *outX, Real *outY );
+
+/** A unit at (x, y) walking along (dirX, dirY), a unit vector, is about to walk into a gun at (gunX, gunY):
+	* it is outside the gun's reach, heading towards it, and the next lookahead of its walk comes within edge
+	* of it. */
+Bool aiWalkEntersReach( Real x, Real y, Real dirX, Real dirY, Real gunX, Real gunY, Real reach, Real edge, Real lookahead );
 
 /** A force holding where it fell back to: stay, go back to the fight it left, or give up and go home. */
 enum AIFallbackDecision { AIFALLBACK_HOLD, AIFALLBACK_RESUME, AIFALLBACK_GO_HOME };

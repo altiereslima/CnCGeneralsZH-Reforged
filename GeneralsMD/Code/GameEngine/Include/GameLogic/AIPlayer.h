@@ -789,6 +789,8 @@ protected:
 	Bool waveGoes(Real power, UnsignedInt heldFrames);	///< what is parked, worth this, leaves now
 	void buyEarlyIncome(void);										///< the first drop zone and black market, ahead of the army
 	void keepSiegeBehind(void);										///< artillery out with a wave trails its front unit
+	void holdAtDefences(void);										///< ground units stop at the edge of a known defence's reach until ours there outweigh it; guns that outreach one shell it
+	Real edgeRatio(const Object *gun, Real reach, const Coord3D *from);	///< the fight where a unit at from would walk into a gun's reach
 	Bool leavesToFinish(const Object *obj) const;	///< a fighter the last push takes off guard, as against a worker or a scout
 	/** Every enemy unit this AI has seen and not since lost track of: what it was, whose, and where and
 		* when it was last in sight.  An army that walks back into the fog is still an army.  A row goes when
@@ -857,8 +859,9 @@ protected:
 	void leaveTacticsAlone(ObjectID unit);
 	Bool isFallingBack(ObjectID unit);		///< holding at a safe spot after a lost fight, for doRetreats to send back
 	void measureFight(const Coord3D *centre, Bool countHolders, Real *myHealth, Real *myPower,
-		Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns, Real *advantage = NULL);
-	Real fightRatio(const Coord3D *centre, Bool countHolders, Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns);	///< the exchange around centre, by the units in it when the rung weighs them
+		Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns, Real *advantage = NULL, Real *defencePower = NULL);
+	Real fightRatio(const Coord3D *centre, Bool countHolders, Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns,
+		Real *defencePower = NULL);	///< the exchange around centre, by the units in it when the rung weighs them; defencePower is the part of the enemy's that is buildings outside our base
 	Bool doFallback(Team *team);		///< TRUE when it sent the team's holders back or home on this pass
 	void pullOutRanked(Team *team, Bool inFight, Real ratio);	///< veterans and up leave earlier than the team, to a repair or heal pad
 	void releaseMended(void);		///< pulled-out veterans and let-out patients standing idle again become recruitable
