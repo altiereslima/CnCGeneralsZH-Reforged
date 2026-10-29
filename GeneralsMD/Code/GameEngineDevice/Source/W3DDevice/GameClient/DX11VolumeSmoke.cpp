@@ -154,24 +154,28 @@ const float Extinction = 0.16f;			// per world unit at density 1
 // soot (FireAdvectPass).  Heat is 300 K + 1200 K a unit, so 1 is a 1500 K flame.
 const float FireBurnRate = 5.0f;		// a second, of the fuel in a cell hot enough to burn
 const float FireIgnition = 0.45f;		// heat, about 840 K
-const float FireRich = 2.0f;			// fuel at which a cell's air is used up: a diffusion flame burns on its envelope
-const float FireSootYield = 0.4f;		// soot a unit of fuel burned leaves, the more the richer it burns: a building's fire smokes dark
+const float FireRich = 1.5f;			// fuel at which a cell's air is used up: a diffusion flame burns on its envelope
+const float FireSootYield = 2.0f;		// soot a unit of fuel burned rich or quenched leaves: a building's fire smokes dark (0.4 and 0.8 left no smoke to see)
+const float FireQuench = 3.0f;			// a second: unburned fuel that has cooled under the ignition turns to smoke
+const float FireTongueRise = 1.2f;		// flame heights a second the tongues climb (FireMarchPass)
 const float FireRadiation = 1.0f;		// heat a second a sooty cell radiates away at 1500 K, going as T^4
-const float FireSootBurn = 1.0f;		// a second: soot burns away where it is hotter than about 1100 K (at 1.5 little left the tips)
+const float FireSootBurn = 0.5f;		// a second: soot burns away where it is hotter than about 1100 K and has air (at 1.5 little left the tips)
 const float FireExpansion = 0.5f;		// cells a second of outflow a unit of fuel burned makes, the gas expanding
 const float FireHeatHalfLife = 0.5f;	// mixing with the air round it, seconds
-const float FireSootHalfLife = 0.75f;	// as a building's blast's: the fire's smoke thins as it rises
+const float FireSootHalfLife = 1.0f;	// the fire's smoke thins as it rises: gone about 3 s off the flame, as a building blast's
 // Boussinesq's lift, g (T - T0) / T0, is 42 x 4 units/s^2 at heat 1; the cells cannot hold the
-// mixing that holds a real flame back, so it is taken at 0.15 of that.
-// ponytail: the 0.15 is by eye against the stock flames' height; measure it if a flame reads wrong.
-const float FireLift = 42.0f * 4.0f * 0.15f;
+// mixing that holds a real flame back, so it is taken at 0.3 of that.  (At 0.15 the smoke off the
+// tips rose 6 to 10 units a second and the wind laid it along the ground; a real plume over a 5 m
+// fire climbs at about 7 m/s, 30 units.)
+// ponytail: the 0.3 is by eye against the stock flames' height; measure it if a flame reads wrong.
+const float FireLift = 42.0f * 4.0f * 0.3f;
 const float FireExit = 4.0f;			// units/s: the gas leaving a burning surface
 const float FireTurbulence = 10.0f;		// units/s^2: the sub-cell eddies' kick in hot gas (at 60 it tore the flames apart before they lit)
 const float FireVorticity = 5.0f;		// confinement in the fire tier: more than a blast's 3, so the sheet curls into tongues
-const float FirePilot = 1.0f;			// a burning surface's heat (about 1500 K), so its fuel lights where it leaves
+const float FirePilot = 0.6f;			// a pyrolysing surface's heat (about 1000 K), so its fuel lights where it leaves (at 1500 K the puff itself glowed as a ball)
 const float FireSurfaceSoot = 0.3f;		// soot the surface gives off with each unit of fuel: what glows at a flame's foot
 const float FireWarmSeconds = 0.6f;		// a new fire's slab runs this long under the billboards before taking them
-const float FireGain = 1.0f;			// a 1500 K body's light against the scene's white (at 2 the flames burned out to yellow balls)
+const float FireGain = 1.5f;			// a 1500 K body's light against the scene's white (at 2, before the tongues, the flames burned out to yellow balls)
 const float FireExposure = 0.6f;		// the black body's brightness is taken to this power: 800 K is a hundredth of 1500 K's
 const float FireEndFade = 1.5f;
 
@@ -1089,6 +1093,12 @@ void main(uint3 id : SV_DispatchThreadID)
         float3 back = cell - Vel.Load(int4(id, 0)).xyz * dt;
         vt = Vel.SampleLevel(Linear, uvwOf(back, slab), 0);
         d = Den.SampleLevel(Linear, uvwOf(back, slab), 0);
+        // The smoke climbs at a plume's speed while it is warm, about 20 units a second over the
+        // cells' own flow: a plume a few cells wide keeps its momentum, which the cells' trilinear
+        // advection smears into the still air round it, and without this the soot stalled at the
+        // tips and the wind laid it along the ground.
+        float climb = 20 / volume.z * saturate(vt.w / 0.15);
+        d.x = Den.SampleLevel(Linear, uvwOf(back - float3(0, 0, climb * dt), slab), 0).x;
         vt.z += dt * Fire3[slab].x * vt.w;	// hot gas rises
         float3 grad = 0.5 * float3(w(c + int3(1, 0, 0), slab) - w(c - int3(1, 0, 0), slab),
             w(c + int3(0, 1, 0), slab) - w(c - int3(0, 1, 0), slab),
@@ -1099,8 +1109,9 @@ void main(uint3 id : SV_DispatchThreadID)
         vt.xyz /= 1 + Forces.w * length(vt.xyz) * dt;
         // the eddies the cells are too coarse to hold, where the gas is hot: a curl-free kick on a
         // noise rising with the flame, so the flame sheet folds and its top breaks into licks
+        // (on eddies a third of the site's flame across, so a tall flame folds on its own scale)
         if (vt.w > 0.1) {
-            float3 q = cell / 2.5 + float3(0, 0, -Step.y * 2.5);
+            float3 q = cell * Fire3[slab].w + float3(0, 0, -Step.y * 2.5);
             float3 kick = float3(valueNoise(q, 51), valueNoise(q + 5.7, 53), valueNoise(q + 2.9, 57)) - 0.5;
             vt.xyz += kick * (Fire3[slab].y * saturate(vt.w) * dt);
         }
@@ -1123,11 +1134,14 @@ void main(uint3 id : SV_DispatchThreadID)
         float k = (1 - r2) * (1 - r2);
         // a burning edge gives its gas off in patches that come and go, not as one smooth puff: the
         // patches are what break the flame into tongues with dark gaps between them
-        float patch = valueNoise(cell / 1.3 + float3(i * 7.3, i * 3.1, -Step.y * 4), slab * 31 + i);
-        patch = 0.3 + 1.4 * patch;
+        // (at 1.3 cells a patch was as wide as the puff, so it only dimmed the whole flame)
+        float patch = valueNoise(cell / 0.7 + float3(i * 7.3, i * 3.1, -Step.y * 4), slab * 31 + i);
+        patch = 0.1 + 1.8 * patch * patch;
         d.x += motion.w * k * dt * patch;
         d.y += heat.y * k * dt * patch;
-        vt.w = max(vt.w, heat.x * k);
+        // the surface's heat stands flat over the puff, not peaked in its middle: a peak hot enough to
+        // light the puff's edge glowed as a round ball of its own
+        vt.w = max(vt.w, heat.x * saturate(2.5 * k));
         vt.xyz = lerp(vt.xyz, motion.xyz, saturate(k * heat.z));
     }
     // It burns: the fuel turns into heat and soot, the soot burns away where it is hottest (what is
@@ -1137,10 +1151,20 @@ void main(uint3 id : SV_DispatchThreadID)
     d.y -= burn * dt;
     vt.w += fire.y * burn * dt;
     d.x += fire.z * burn * dt * saturate(d.y / fire2.x + 0.25);
-    d.x *= exp(-fire2.z * dt * smoothstep(0.65, 0.95, vt.w));
+    // The fuel the flame carries past its tip, where the gas has cooled under the ignition, never
+    // burns: a building's fire is short of air, and its unburned pyrolysate condenses into the dark
+    // smoke that leaves the flame tips.
+    float quench = d.y * min(Fire3[slab].z * (1 - smoothstep(fire.w - 0.2, fire.w, vt.w)) * dt, 1);
+    d.y -= quench;
+    d.x += fire.z * quench;
+    // soot burns away only where it is hot and has air: in a fuel-rich core it survives
+    d.x *= exp(-fire2.z * dt * smoothstep(0.65, 0.95, vt.w) * saturate(1.5 - d.y / fire2.x));
     float t = 0.2 + 0.8 * vt.w, t2 = t * t;
     vt.w -= dt * fire2.y * (1 - exp(-2 * d.x)) * max(t2 * t2 - 0.0016, 0);
-    vt.w = clamp(vt.w * Keep.x, 0, 2.2);
+    // Mixing with the air round it cools the narrow, fast flame quickly and the wide plume over it
+    // slowly (a plume's excess heat falls off as its height to the -5/3, so most of the fall is near
+    // the flame): the smoke stays warm enough to climb off the tips instead of stalling at them.
+    vt.w = clamp(vt.w * pow(Keep.x, pow(clamp(vt.w, 0.1, 1), 0.7)), 0, 2.2);
     // units push the flame and its smoke; the dust a rotor lifts is no fuel
     float fuel = d.y;
     applyMovers(vt, d, cell, slab, dt);
@@ -1148,8 +1172,10 @@ void main(uint3 id : SV_DispatchThreadID)
     d = min(d, 4);
     // no cell outruns 24 cells a second, and nothing undefined survives a step: one bad cell spread
     // through the slab in a few steps
+    // (NaN fails every comparison, so the exponent is tested: FXC may not fold that away)
     float speed = length(vt.xyz);
-    if (speed > 24) vt.xyz *= 24 / speed;
+    if ((asuint(speed) & 0x7f800000) == 0x7f800000) vt.xyz = 0;
+    else if (speed > 24) vt.xyz *= 24 / speed;
     float rim = fireWalls(cell);
     d *= lerp(0.9, 1, rim);
     vt.w *= lerp(0.9, 1, rim);
@@ -1295,7 +1321,21 @@ float4 main(float4 position : SV_Position) : SV_Target
         float react = dd.y / (1 + dd.y / FireLook.z) * smoothstep(FireLook.y - 0.05, FireLook.y + 0.05, heat);
         color += transmittance * FireTint.rgb * react * rim * stepLength / Box.w;
         float n = Noise.SampleLevel(Wrap, cell / 7 + float3(Slab.x * 0.37, 0, -Camera.w * 0.05), 0);
-        float soot = max(dd.x - (1 - n) * 0.3 * (1 - saturate(dd.x * 1.2)), 0);
+        float soot = max(dd.x - (1 - n) * 0.12 * (1 - saturate(dd.x * 1.2)), 0);
+        // The tongues.  A flame's burning sheet is far thinner than a cell and wrinkles in the eddies
+        // the cells cannot hold, so its heat varies under the cell's mean; that variation is drawn
+        // here, on noise stretched up the flow and climbing with it (Extra: its scale in world units
+        // and its rise).  The hot base holds together, the cooler upper flame breaks into tongues
+        // with clear gaps, and a black body's light falls so steeply with its heat that a gap goes dark.
+        float3 world = Box.xyz + (cell + 0.5) * Box.w;
+        float3 tq = float3(world.xy * Extra.x, world.z * Extra.y - Camera.w * Extra.z) + Slab.x * 0.37;
+        float tn = Noise.SampleLevel(Wrap, tq, 0) * 0.7 + Noise.SampleLevel(Wrap, tq * 2.3 + 0.41, 0) * 0.3;
+        // (the cooler the gas, the higher up the flame it is, and the sparser its tongues)
+        float tip = 1 - smoothstep(0.8, 1.5, heat);
+        float tongue = saturate((tn - lerp(0.2, 0.55, tip)) * 3);
+        float broken = smoothstep(0.3, 0.6, heat) * lerp(0.75, 1, tip);
+        heat *= lerp(1, 0.2 + 0.95 * tongue, broken);
+        soot *= lerp(1, 0.1 + 0.9 * tongue, broken);
         float sigma = soot * rim * Slab.w;
         if (sigma <= 0) continue;
         float sun = Light.SampleLevel(Linear, uvw, 0);
@@ -1484,7 +1524,9 @@ std::vector<Coord3D> pendingSparks;
 // The list before the last read is kept too, so a building that died just after a read still has its
 // footprint when its death's smoke asks for it.
 // Each also keeps the boxes of its model's biggest meshes (readParts, Part).
-struct Solid { float x, y, top, major, minor, angle, tall; bool box; ObjectID id; Part parts[MaxParts]; unsigned partCount; };
+// `burns`: a building whose fires the fire slabs take; a wall or a junk prop (CarJunk01 is a
+// STRUCTURE DEFENSIVE_WALL) keeps the game's own flame.
+struct Solid { float x, y, top, major, minor, angle, tall; bool box, burns; ObjectID id; Part parts[MaxParts]; unsigned partCount; };
 std::vector<Solid> solids, lastSolids;
 int solidsFrame = -100000;
 // The fires: their sites (VolumeFireCore), the systems whose billboards a fire slab draws, the
@@ -1494,10 +1536,16 @@ VolumeFire::Fires fires;
 std::unordered_set<int> fireTaken;
 std::unordered_set<unsigned> fireEmitting;	// systems the last fire step laid fuel for: only these give up their billboards
 // The surface each burning building or wreck burns on (readSurface), by ObjectID.
+// Its up-facing triangles too, nine floats each, which layFloor lays into the fire's slab as the
+// floor its flames stand on.
 struct SurfacePoint { float x, y, z, nx, ny, nz; };
-struct FireSurface { unsigned key = 0; std::vector<SurfacePoint> points; };
+struct FireSurface { unsigned key = 0; std::vector<SurfacePoint> points; std::vector<float> roofs; };
 std::unordered_map<unsigned, FireSurface> fireSurfaces;
-const unsigned MaxSurfacePoints = 4096;
+// (a past-the-cap model keeps its first roofs and loses the rest of its floor: the stock buildings
+// measured here have under 1200 surface points in all)
+const unsigned MaxSurfacePoints = 4096, MaxRoofTriangles = 16384;
+// Each fire slab's floor as layFloor last laid it, in cells over the slab's bottom, a column a cell.
+std::vector<float> fireFloors[MaxSlabs];
 // The surface points each fire system's fuel comes off, picked once per surface and bone (a search
 // over thousands of points every step for every emitter would cost a millisecond a frame).
 struct SurfacePick { unsigned key; float bone[3]; unsigned count; SurfacePoint points[4]; };
@@ -1995,15 +2043,19 @@ void scheduleFire(const Volume &volume, unsigned slab, DrawConstants *draw)
 	// buildings only: a wreck or prop sits in the height map on a slope, and its mesh points under the
 	// ground left CarJunk01 without a flame; its bone does fine
 	const FireSurface *surface = own && surfaceFound != fireSurfaces.end() && !surfaceFound->second.points.empty() ? &surfaceFound->second : nullptr;
-	for (const VolumeFire::Emitter &e : list) {
+	for (size_t index = 0; index < list.size(); ++index) {
+		const VolumeFire::Emitter &e = list[index];
 		if (surface) {
 			// The fuel comes off the mesh itself: the up-facing faces and the wall tops nearest the
 			// bone within the fire's reach, half a cell out along their normals, so the flame's foot
 			// follows the roof, the walls and the broken edges.  None in reach: no fuel (no fire in
 			// empty air), whatever the bone says.
+			// Picked once a system and model: the bone is the youngest particle, which climbs between
+			// bursts, and picking again as it moved redid the scan most steps and walked the foot up the wall.
+			// (again when it is seen a cell lower: the first sample can be a particle that has climbed
+			// off its bone, and the lowest seen is the bone)
 			SurfacePick &pick = surfacePicks[e.id];
-			const float moved = std::fabs(pick.bone[0] - e.x) + std::fabs(pick.bone[1] - e.y) + std::fabs(pick.bone[2] - e.z);
-			if (pick.key != surface->key || moved > cell) {
+			if (pick.key != surface->key || e.z < pick.bone[2] - cell) {
 				pick.key = surface->key;
 				pick.bone[0] = e.x; pick.bone[1] = e.y; pick.bone[2] = e.z;
 				pick.count = 0;
@@ -2028,25 +2080,43 @@ void scheduleFire(const Volume &volume, unsigned slab, DrawConstants *draw)
 					pick.count = (std::min)(pick.count + 1, 4u);
 				}
 			}
-			const float kW = e.kW * VolumeFire::puff(e, seconds) / (pick.count ? pick.count : 1);
-			bool laid = false;
-			for (unsigned k = 0; k < pick.count; ++k) {
+			// The puffs are shared, so every system gets one before any gets four: four each fed only seven
+			// systems of a War Factory's and left the rest burning as billboards beside the volume.
+			const unsigned left = MaxPuffs > count ? MaxPuffs - count : 0, systemsLeft = unsigned(list.size() - index);
+			const unsigned points = (std::min)(pick.count, (std::max)(left / systemsLeft, 1u));
+			// the first `points` of its picks that are in free air, and the system's heat over those
+			float kept[4][3];
+			unsigned keptCount = 0;
+			for (unsigned k = 0; k < pick.count && keptCount < points; ++k) {
 				const SurfacePoint &p = pick.points[k];
 				const float x = p.x + p.nx * 0.6f * cell, y = p.y + p.ny * 0.6f * cell, z = p.z + p.nz * 0.6f * cell;
 				const float cx = (x - volume.origin[0]) / cell - 0.5f, cy = (y - volume.origin[1]) / cell - 0.5f, cz = (z - volume.origin[2]) / cell - 0.5f;
 				if (cx < 2 || cy < 2 || cx > shape.gx - 3.0f || cy > shape.gy - 3.0f || cz < 0 || cz > shape.gz - 8.0f) continue;
 				// in free air, as layFloor lays this slab: over the ground, and on the building's own
 				// footprint over its lowest mesh (a pad or a floor inside it would be zeroed each step)
-				float floorTop = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(x, y, NULL) : volume.origin[2];
-				if (footprintTop > -1e8f && onFootprint(x, y)) floorTop = (std::max)(floorTop, footprintTop);
 				// (the centre over the surface is enough: its 2-cell sphere reaches free cells; half a cell
 				// over it skipped every puff of a car on a slope, whose mesh sinks into the height map)
-				if (z < floorTop) continue;
-				// two cells at least: at 1.5 the pilot's heat at the nearest cell centre fell under the
-				// ignition and nothing lit
-				const float radius = (std::min)((std::max)(0.7f * e.radius / cell, 2.0f), 4.0f), rate = VolumeFire::emitterRate(kW, radius, cell);
+				// The floor layFloor laid, the building's own mesh in it: a point under another roof is out.
+				const std::vector<float> &floor = fireFloors[slab];
+				if (floor.size() == shape.gx * shape.gy) {
+					const unsigned column = unsigned(cy + 0.5f) * shape.gx + unsigned(cx + 0.5f);
+					if ((z - volume.origin[2]) / cell < floor[column] - 0.25f) continue;
+				} else {
+					float floorTop = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(x, y, NULL) : volume.origin[2];
+					if (footprintTop > -1e8f && onFootprint(x, y)) floorTop = (std::max)(floorTop, footprintTop);
+					if (z < floorTop) continue;
+				}
+				kept[keptCount][0] = cx; kept[keptCount][1] = cy; kept[keptCount][2] = cz;
+				++keptCount;
+			}
+			const float kW = e.kW * VolumeFire::puff(e, seconds) / (keptCount ? keptCount : 1);
+			// two cells at least: at 1.5 the pilot's heat at the nearest cell centre fell under the
+			// ignition and nothing lit
+			const float radius = (std::min)((std::max)(0.7f * e.radius / cell, 2.0f), 4.0f), rate = VolumeFire::emitterRate(kW, radius, cell);
+			bool laid = false;
+			for (unsigned k = 0; k < keptCount; ++k) {
 				const unsigned before = count;
-				emit(slab, count, { cx, cy, cz, radius, 0, 0, FireExit / cell, rate * FireSurfaceSoot, FirePilot, rate, 0.15f });
+				emit(slab, count, { kept[k][0], kept[k][1], kept[k][2], radius, 0, 0, FireExit / cell, rate * FireSurfaceSoot, FirePilot, rate, 0.15f });
 				laid = laid || count > before;	// past MaxPuffs emit lays nothing
 			}
 			if (laid && !draw) fireEmitting.insert(e.id);
@@ -2077,7 +2147,8 @@ void scheduleFire(const Volume &volume, unsigned slab, DrawConstants *draw)
 	sim.Volumes[slab][1] = (float)count;
 	const float fire[4] = { FireBurnRate, VolumeFire::HeatPerFuel, FireSootYield, FireIgnition };
 	const float fire2[4] = { FireRich, FireRadiation, FireSootBurn, FireExpansion };
-	const float fire3[4] = { FireLift / cell, FireTurbulence / cell, 0, 0 };
+	const float flame = volume.site >= 0 && volume.site < (int)fires.sites.size() ? (std::max)(fires.sites[volume.site].flame, 12.0f) : 18.0f;
+	const float fire3[4] = { FireLift / cell, FireTurbulence * (std::min)(flame / 18.0f, 2.5f) / cell, FireQuench, cell / (0.3f * flame) };
 	std::memcpy(sim.Fire[slab], fire, sizeof(fire));
 	std::memcpy(sim.Fire2[slab], fire2, sizeof(fire2));
 	std::memcpy(sim.Fire3[slab], fire3, sizeof(fire3));
@@ -2090,7 +2161,10 @@ void scheduleFire(const Volume &volume, unsigned slab, DrawConstants *draw)
 		std::memset(draw->Dust, 0, sizeof(draw->Dust));
 		std::memset(draw->Blast, 0, sizeof(draw->Blast));
 		std::memset(draw->Effects, 0, sizeof(draw->Effects));
-		std::memset(draw->Extra, 0, sizeof(draw->Extra));
+		// the tongues' noise (FireMarchPass): a flame across a tile, two and a half tall, rising at
+		// about a flame height a second
+		const float tongues[4] = { 1.0f / flame, 1.0f / (2.5f * flame), FireTongueRise / 2.5f, 0 };
+		std::memcpy(draw->Extra, tongues, sizeof(tongues));
 		std::memcpy(draw->Look, look, sizeof(look));
 		std::memcpy(draw->FireLook, fireLook, sizeof(fireLook));
 		std::memcpy(draw->FireTint, fireTint, sizeof(fireTint));
@@ -2721,6 +2795,38 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 			continue;
 		const float roof = (solid.top - volume.origin[2]) / cell, base = solid.top - solid.tall;
 		const float c = std::cos(solid.angle), s = std::sin(solid.angle);
+		// A fire's own building, once its mesh is read, stands as its mesh does: every up-facing
+		// triangle laid into the columns whose middles it covers, at its height there, so the roof,
+		// a broken floor and the ground plate are the floor and the flames stand on them.  (The boxes
+		// and the footprint rule below are wider and taller than the mesh: the fuel off its surface lay
+		// inside them, or the building's top went missing.)
+		auto surfaceFound = burning ? fireSurfaces.find((unsigned)solid.id) : fireSurfaces.end();
+		if (surfaceFound != fireSurfaces.end() && !surfaceFound->second.roofs.empty()) {
+			const std::vector<float> &t = surfaceFound->second.roofs;
+			for (size_t i = 0; i + 8 < t.size(); i += 9) {
+				float px[3], py[3], pz[3];
+				for (unsigned k = 0; k < 3; ++k) {
+					px[k] = (t[i + k * 3] - volume.origin[0]) / cell - 0.5f;
+					py[k] = (t[i + k * 3 + 1] - volume.origin[1]) / cell - 0.5f;
+					pz[k] = (t[i + k * 3 + 2] - volume.origin[2]) / cell;
+				}
+				const float area = (px[1] - px[0]) * (py[2] - py[0]) - (px[2] - px[0]) * (py[1] - py[0]);
+				if (std::fabs(area) < 1e-6f) continue;
+				const int x0 = (std::max)(0, (int)std::ceil((std::min)((std::min)(px[0], px[1]), px[2])));
+				const int x1 = (std::min)(int(shape.gx) - 1, (int)std::floor((std::max)((std::max)(px[0], px[1]), px[2])));
+				const int y0 = (std::max)(0, (int)std::ceil((std::min)((std::min)(py[0], py[1]), py[2])));
+				const int y1 = (std::min)(int(shape.gy) - 1, (int)std::floor((std::max)((std::max)(py[0], py[1]), py[2])));
+				for (int y = y0; y <= y1; ++y)
+					for (int x = x0; x <= x1; ++x) {
+						const float w1 = ((x - px[0]) * (py[2] - py[0]) - (px[2] - px[0]) * (y - py[0])) / area;
+						const float w2 = ((px[1] - px[0]) * (y - py[0]) - (x - px[0]) * (py[1] - py[0])) / area;
+						if (w1 < 0 || w2 < 0 || w1 + w2 > 1) continue;
+						float &height = heights[y * shape.gx + x];
+						height = (std::max)(height, pz[0] + w1 * (pz[1] - pz[0]) + w2 * (pz[2] - pz[0]));
+					}
+			}
+			continue;
+		}
 		const int x0 = (std::max)(0, int((solid.x - reach - volume.origin[0]) / cell)), x1 = (std::min)(int(shape.gx) - 1, int((solid.x + reach - volume.origin[0]) / cell));
 		const int y0 = (std::max)(0, int((solid.y - reach - volume.origin[1]) / cell)), y1 = (std::min)(int(shape.gy) - 1, int((solid.y + reach - volume.origin[1]) / cell));
 		for (int y = y0; y <= y1; ++y)
@@ -2749,8 +2855,10 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 					if (onFootprint && lowest < 1e8f) height = (std::max)(height, (base + lowest - volume.origin[2]) / cell);
 					continue;
 				}
+				// (a fire's own building with no mesh kept stands nowhere: its roof's fuel points lay inside
+				// a footprint laid to its top, every step zeroed them, and the slab stayed empty)
 				const bool inside = solid.box ? std::fabs(along) <= major && std::fabs(side) <= minor : dx * dx + dy * dy <= major * major;
-				if (inside) height = (std::max)(height, roof);
+				if (inside && !burning) height = (std::max)(height, roof);
 			}
 	}
 	// a blast on a building goes off on its roof, not inside it
@@ -2758,6 +2866,7 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 		const unsigned column = unsigned(volume.blast[1]) * shape.gx + unsigned(volume.blast[0]);
 		volume.blast[2] = (std::max)(volume.blast[2], heights[column] + 0.5f);
 	}
+	if (volume.kind == Fire && slab < MaxSlabs) fireFloors[slab] = heights;	// scheduleFire's: no fuel laid inside the floor
 	const D3D11_BOX region = { 0, slab * shape.gy, 0, shape.gx, (slab + 1) * shape.gy, 1 };
 	context->UpdateSubresource(tier.floor, 0, &region, heights.data(), shape.gx * sizeof(float), 0);
 }
@@ -3130,7 +3239,9 @@ MeshModelClass *meshModelOf(RenderObjClass *object)
 {
 	if (!object || object->Is_Hidden() || object->Class_ID() != RenderObjClass::CLASSID_MESH) return nullptr;
 	MeshModelClass *model = ((MeshClass *)object)->Peek_Model();
-	return model && model->Get_Vertex_Count() > 0 && model->Get_Polygon_Count() > 0 ? model : nullptr;
+	// (a skin's vertices are in its bones' space, so its transform puts them in the wrong place)
+	return model && !model->Get_Flag(MeshGeometryClass::SKIN) && model->Get_Vertex_Count() > 0 && model->Get_Polygon_Count() > 0
+		? model : nullptr;
 }
 
 // Its models' key: their names and sizes, hashed.
@@ -3149,6 +3260,7 @@ unsigned surfaceKey(Drawable *drawable)
 void readSurface(Drawable *drawable, FireSurface &surface)
 {
 	surface.points.clear();
+	surface.roofs.clear();
 	forEachMesh(drawable, [&](RenderObjClass *mesh) {
 		MeshModelClass *model = meshModelOf(mesh);
 		if (!model) return;
@@ -3168,13 +3280,19 @@ void readSurface(Drawable *drawable, FireSurface &surface)
 			const float area2 = n.Length();
 			if (area2 < 0.5f) continue;	// slivers and specks
 			n /= area2;
-			if (n.Z > 0.35f)
+			if (n.Z > 0.35f) {
 				surface.points.push_back({ (a.X + b.X + c.X) / 3, (a.Y + b.Y + c.Y) / 3, (a.Z + b.Z + c.Z) / 3, n.X, n.Y, n.Z });
-			else if (n.Z > -0.35f) {
-				// a wall: the middle of its top edge, where the flame licks over it
+				if (surface.roofs.size() < MaxRoofTriangles * 9)
+					surface.roofs.insert(surface.roofs.end(), { a.X, a.Y, a.Z, b.X, b.Y, b.Z, c.X, c.Y, c.Z });
+			} else if (n.Z > -0.35f) {
+				// a wall: the middle of its top edge, where the flame licks over it.  Only a triangle
+				// with a level top edge has one: of a wall quad's two, the other's two highest corners
+				// are a vertical edge, whose middle is halfway up the wall.
 				const Vector3 *lowest = a.Z <= b.Z && a.Z <= c.Z ? &a : b.Z <= c.Z ? &b : &c;
+				const float high = (std::max)((std::max)(a.Z, b.Z), c.Z);
 				const Vector3 top = (a + b + c - *lowest) * 0.5f;
-				surface.points.push_back({ top.X, top.Y, top.Z, n.X, n.Y, n.Z });
+				if (high - top.Z < 0.25f)
+					surface.points.push_back({ top.X, top.Y, top.Z, n.X, n.Y, n.Z });
 			}
 		}
 	});
@@ -3212,6 +3330,7 @@ void gatherSolids(int now)
 		solid.angle = object->getOrientation();
 		solid.tall = geometry.getMaxHeightAbovePosition();
 		solid.box = geometry.getGeomType() == GEOMETRY_BOX;
+		solid.burns = !object->isKindOf(KINDOF_DEFENSIVE_WALL);
 		solid.id = object->getID();
 		readParts(object, solid);
 		solids.push_back(solid);
@@ -3309,6 +3428,7 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 		}
 		++it;
 		if (!tall && tallSystems.count(id)) continue;	// the tall air's now
+		if (fireTaken.count(id)) continue;	// a burning building's smoke, its fire slab's soot instead
 		const bool dusty = airLookOf(system->getTemplate(), system).dust;
 		const float fade = system->getStealthFade();
 		unsigned inside = 0, outside = 0;
@@ -3572,7 +3692,7 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 // at its middle a third of a second after the fall) left its dirt and dust skirt as tan lobes beside
 // the column for 6 s and more, its dust laid so thick that the halved DustHalfLife still left it opaque.
 // Its stock puff (BuggyMissileExplosionSmoke) lives 3.3 s.
-float lifeOf(Kind kind) { return kind == TankDeath ? 4.25f : kind == Structure ? 3.0f : kind == Nuclear ? 90.0f : 4.5f; }
+float lifeOf(Kind kind) { return kind == TankDeath ? 4.25f : kind == Structure ? 3.0f : kind == Nuclear ? 90.0f : 12.0f; }
 float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : 2.0f * scale; }
 float joinRadius(const Volume &volume)
 {
@@ -3735,7 +3855,7 @@ void placeFire(Volume &volume, int site, int now, int born)
 					volume.origin[1] + side * j / 6.0f, NULL));
 	volume.origin[2] = (std::max)(lowest, floorZ - 3.0f * cell) - cell;
 	volume.seed = unsigned(int(cx) * 73856093) ^ unsigned(int(cy) * 19349663) ^ unsigned(now * 83492791);
-	if (fireClaims++ < 8)
+	if (fireClaims++ < 16)
 		DEBUG_LOG(("VOLSMOKE: frame %d, fire slab for %s %u at (%.0f, %.0f), %.0f units across at %.1f a cell, flame %.0f\n", now,
 			building ? "building" : s.object ? "object" : "loose fires", s.object, cx, cy, side, cell, flame));
 }
@@ -3760,10 +3880,11 @@ bool takeFire(ParticleSystem *system)
 		object = found->second ? found->second : key;
 	}
 	const unsigned owner = ownerOf(object);
-	// ponytail: a wreck's or a prop's small fire (CarJunk01) keeps the game's flame, which reads well at
-	// its size; since the tongues it burned out to nothing in its 1.5-unit cells.  Give it its own
-	// turbulence scale if wrecks are to burn in the volume again.
-	const bool building = owner && structureAt(Coord3D(), (ObjectID)owner) != nullptr;
+	// ponytail: a wreck's or a prop's small fire (CarJunk01, a STRUCTURE DEFENSIVE_WALL) keeps the
+	// game's flame, which reads well at its size; since the tongues it burned out to nothing in its
+	// 1.5-unit cells.  Give it its own turbulence scale if wrecks are to burn in the volume again.
+	const Solid *own = owner ? structureAt(Coord3D(), (ObjectID)owner) : nullptr;
+	const bool building = own && own->burns;
 	if (!usable() || state.fireRefused || !TierShapes[2].slabs || !TheGameLogic || !building || movingObjects.count(owner)) {
 		fireTaken.erase(id);
 		return false;
@@ -3824,6 +3945,38 @@ bool takeFire(ParticleSystem *system)
 	return true;
 }
 
+// A burning building's own smoke (SmolderingSmoke on its Smoke bones), this frame (Takes): hidden
+// while a warm fire slab burns on the building, whose soot off the flame tips is the column now;
+// the air's copy of it is gone too (stepAir skips fireTaken).  Given back the frame the slab goes.
+bool hideFireSmoke(ParticleSystem *system)
+{
+	const int id = (int)system->getSystemID();
+	if (std::strncmp(system->getTemplate()->getName().str(), "SmolderingSmoke", 15) || !TheGameLogic) return false;
+	unsigned object = system->getAttachedObject() != INVALID_ID ? (unsigned)system->getAttachedObject() : 0u;
+	if (!object && system->getAttachedDrawable() != INVALID_DRAWABLE_ID) {
+		auto found = fireOwners.find(DrawableKey | (unsigned)system->getAttachedDrawable());
+		if (found != fireOwners.end()) object = found->second ? found->second : found->first;
+	}
+	const int now = (int)TheGameLogic->getFrame();
+	const TierShape &shape = TierShapes[2];
+	bool hide = false;
+	for (unsigned slot = shape.first; object && slot < shape.first + shape.slabs && !hide; ++slot) {
+		const Volume &volume = volumes[slot];
+		hide = volume.live && volume.kind == Fire && volume.site >= 0 && volume.site < (int)fires.sites.size()
+			&& fires.sites[volume.site].object == object && fires.sites[volume.site].fuelEnd < 0
+			&& now - volume.born >= (int)(FireWarmSeconds * LOGICFRAMES_PER_SECOND);
+		// and only while it burns some of the site's fuel: a slab whose every system kept its billboard
+		// has no soot either, and the building would smoke not at all
+		bool burning = false;
+		for (auto it = fireEmitting.begin(); hide && !burning && it != fireEmitting.end(); ++it)
+			burning = fires.siteOf(*it) == volume.site;
+		hide = hide && burning;
+	}
+	if (hide) fireTaken.insert(id);
+	else fireTaken.erase(id);
+	return hide;
+}
+
 // Once a logic frame, outside the logic window (Gather): systems that are gone leave their sites, a
 // site whose last one went burns out, a wreck that drives off gives its slab up, and every fire
 // slab's end follows its site's.
@@ -3835,6 +3988,9 @@ void gatherFires(int now)
 			fires.forget(id, now);
 			fireTaken.erase((int)id);
 		}
+	// and the smoke systems hideFireSmoke hid, which no site knows
+	for (auto it = fireTaken.begin(); it != fireTaken.end();)
+		it = TheParticleSystemManager->findParticleSystem((ParticleSystemID)*it) ? std::next(it) : fireTaken.erase(it);
 	// whose drawable each art-hung fire burns on
 	if (fireOwners.size() > 4096) fireOwners.clear();	// ponytail: drawables gone long ago; asked again
 	for (unsigned key : pendingOwners) {
@@ -3917,6 +4073,7 @@ void gatherFires(int now)
 		if (known && surface.key == key) continue;
 		surface.key = key;
 		readSurface(drawable, surface);
+		volumes[slot].floorFrame = -100000;	// its floor is the new mesh's, the next step
 		static unsigned surfacesLogged = 0;
 		if (surfacesLogged++ < 12)
 			DEBUG_LOG(("VOLSMOKE: frame %d, fire surface of object %u (%s): %u points in %.2f ms\n", now, owner,
@@ -3945,6 +4102,7 @@ bool Takes(ParticleSystem *system)
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
 	// a building's or a wreck's fire burns in a fire slab, or keeps its billboards; never the air's
 	if (isFire(system)) return takeFire(system);
+	if (hideFireSmoke(system)) return true;
 	const int id = (int)system->getSystemID();
 	if (takenSystems.count(id)) return !airOutside.count(id);
 	// A blast is told from loose billboard systems; trails, streaks, a building's smoke and every
@@ -4445,8 +4603,8 @@ void Render(const HazardCloud::Camera &camera)
 			schedule(volume, slabOf(slot), t0, &draw);
 			const float left = (float)(volume.life - (now - volume.born)) / LOGICFRAMES_PER_SECOND;
 			draw.Slab[0] = (float)slabOf(slot);
-			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (volume.kind == Nuclear ? 3.0f
-				: volume.kind == Fire ? FireEndFade : ShortEndFade)));
+			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (volume.kind == TankDeath || volume.kind == Structure ? ShortEndFade
+				: volume.kind == Fire ? FireEndFade : 3.0f)));
 			// a fire comes up over its warm-up, under the billboards it then takes from
 			if (volume.kind == Fire) draw.Slab[1] *= (std::min)(1.0f, t0 / FireWarmSeconds);
 			draw.Slab[2] = volume.kind == Fire ? fireStepCells : stepCells;
