@@ -1802,6 +1802,7 @@ GameEngineDevice/Include/W3DDevice/GameClient/SunShadowCasterCull.h
 GameEngineDevice/Include/W3DDevice/GameClient/TerrainTex.h
 GameEngineDevice/Include/W3DDevice/GameClient/TileData.h
 GameEngineDevice/Include/W3DDevice/GameClient/VolumeFireCore.h
+GameEngineDevice/Include/W3DDevice/GameClient/VolumeShockCore.h
 GameEngineDevice/Include/W3DDevice/GameClient/VolumeSmoke.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DAssetManager.h
 GameEngineDevice/Include/W3DDevice/GameClient/W3DAssetManagerExposed.h

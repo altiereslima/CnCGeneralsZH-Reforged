@@ -45,6 +45,12 @@
 // shell drawn from the timeline, and a billowy noise eroding the surface so the cap reads as
 // cauliflower.
 //
+// Every blast sends a front out through every smoke it reaches: the other blasts' slabs, the fires,
+// the air and the tall air.  The front moves the smoke where the advect pass reads it from, thins
+// what it stretches and mixes away, and leaves eddies behind it (shockShift, VolumeShockCore): a
+// Scud lands in the last one's smoke and pushes it aside, a second nuke scatters the first's cloud,
+// whose cap then lets go of its shape.
+//
 // Nothing here is read by the logic or draws a random number: every variation is an integer hash.
 // The D3D9 and SDL3 paths, -headless and every run with the setting Off keep the billboards, and
 // with it Off Takes, Hides and Render return before touching anything.  With it on, every
@@ -81,6 +87,8 @@
 #include "Common/DrawModule.h"
 #include "W3DDevice/GameClient/VolumeSmoke.h"
 #include "W3DDevice/GameClient/VolumeFireCore.h"
+#include "W3DDevice/GameClient/VolumeShockCore.h"
+#include "GameLogic/PartitionManager.h"
 #include "Platform/HazardCloud.h"
 #include "Platform/HazardCloudCore.h"
 #include "dx11backend.h"
@@ -111,6 +119,7 @@ const unsigned MaxVolumes = 38;		// all three tiers' slabs at High, the small ti
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
 const unsigned MaxPuffs = 28;	// a tank's 28 (base, jets, stem, dark base masses and their rims); PUFFS in the HLSL is the same
 const unsigned MaxMovers = 16;		// High's; Low takes the nearest 8
+const unsigned MaxShocks = 16;		// blast fronts running at once (VolumeShockCore), High's; Low takes the newest 8; SHOCKS in the HLSL is the same
 const unsigned NoiseSide = 32;
 
 // The VolumeSmoke setting, Low and High (Off draws nothing).  Low keeps High's grids, since every
@@ -169,6 +178,9 @@ const float ShortEndFade = 1.5f;		// seconds a tank's, a building's, a launch's 
 // At most this many at once (Low, High), on free slabs only: past that a shot keeps the game's own flash.
 const float MuzzleHeatHalfLife = 0.07f, MuzzleLife = 1.6f, MuzzleEndFade = 0.6f;
 const unsigned MuzzleCap[3] = { 0, 3, 6 };
+// A nuclear cap another blast has let go of (VolumeShock::capHold) is free smoke, thinning out at this
+// half-life, and its volume ends this long after.
+const float NukeDisperseHalfLife = 4.0f, NukeDisperseLife = 8.0f;
 const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
@@ -268,16 +280,25 @@ struct SimConstants {
 	float Cap[MaxSlabs][4];
 	float Stem[MaxSlabs][4];
 	float Puffs[MaxSlabs * MaxPuffs * 3][4];
-	float Origins[MaxSlabs][4];		// each slab's world corner, for the movers below
+	// each slab's world corner, for the movers and the blast fronts below; w, which fronts reach the
+	// slab this step, a bit each (a float holds the 16 bits exactly)
+	float Origins[MaxSlabs][4];
 	float MoverCount[4];
 	float Movers[MaxMovers * 4][4];	// the units that push the air this step, in world units (Mover)
 	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest), its cold dust's weight, its ground dust kept, its heat kept, its heat kept on top of Keep.x (a gun's; 1 for the rest)
-	// A fire's slab (FireFields, after Thin in its programs' cbuffer only): burn rate, heat a unit of
-	// fuel gives, soot yield, ignition heat; the fuel that starves it, radiation, soot burn,
-	// expansion; its lift in cells/s^2 at heat 1.
+	// A fire's slab (read by the fire tier's programs only): burn rate, heat a unit of fuel gives, soot
+	// yield, ignition heat; the fuel that starves it, radiation, soot burn, expansion; its lift in
+	// cells/s^2 at heat 1.
 	float Fire[MaxSlabs][4];
 	float Fire2[MaxSlabs][4];
 	float Fire3[MaxSlabs][4];
+	// The blast fronts running this step (shockShift), world units: the centre and the front's radius;
+	// its width, its particle speed a second, the share it mixes away a second, its stir in units/s^2.
+	float ShockCount[4];
+	float Shocks[MaxShocks * 2][4];
+	// A nuclear cap's soot and stem dust kept this step once they leave its shape (MushroomPass):
+	// CapSpillHalfLife, stretched to NukeDisperseHalfLife as another blast loosens the cap.
+	float Spill[MaxSlabs][4];
 };
 
 struct DrawConstants {
@@ -351,6 +372,7 @@ float valueNoise(float3 x, uint seed)
 const char *const Prelude = R"HLSL(
 #define PUFFS 28
 #define VOLS 24
+#define SHOCKS 16
 cbuffer Sim : register(b0)
 {
     float4 Step;
@@ -370,6 +392,12 @@ cbuffer Sim : register(b0)
     float4 MoverCount;
     float4 Movers[16 * 4];
     float4 Thin[VOLS];
+    float4 Fire[VOLS];
+    float4 Fire2[VOLS];
+    float4 Fire3[VOLS];
+    float4 ShockCount;
+    float4 Shocks[SHOCKS * 2];
+    float4 Spill[VOLS];
 };
 SamplerState Linear : register(s0);
 float3 uvwOf(float3 cell, uint slab)
@@ -457,7 +485,6 @@ const char *const MoverPass = R"HLSL(
 #define JET 1
 #define ROTOR 2
 #define WALKER 3
-#define SHOCK 4
 float3 pullTowards(float3 v, float3 target, float k) { return lerp(v, target, saturate(k)); }
 void applyMovers(inout float4 vt, inout DEN d, float3 cell, uint slab, float dt)
 {
@@ -543,14 +570,51 @@ void applyMovers(inout float4 vt, inout DEN d, float3 cell, uint slab, float dt)
         } else if (kind == WALKER) {
             float k = 1 - saturate(length(off) / (a.w * 2 + size));
             vt.xyz = pullTowards(vt.xyz, v, 0.4 * k);
-        } else {
-            // a blast's front: a shell racing outwards, pushing what it passes
-            float r = length(off);
-            float shell = exp(-pow((r - a.w) / max(e.w, size), 2));
-            if (shell < 0.02) continue;
-            vt.xyz += off / max(r, 1e-3) * (f.y / size) * shell * saturate(dt * 12);
         }
     }
+}
+// The blast fronts (VolumeShockCore): this step's shift of the smoke by the fronts passing the cell,
+// in cells, for the advect pass's backtrace.  A front is a pressure pulse, which the projection would
+// take out of the velocity, so it moves the smoke where it is read from instead and never enters the
+// flow; `kept` is the density the cell keeps (the shell's stretching, a compressible flow's
+// continuity, and what it mixes away), `stir` the eddy kick behind the front in units/s^2.
+// Origins.w says which fronts reach this slab.  A front is never thinner than the grid holds; its
+// displacement is kept when it is widened, and its shift is held to 1.5 cells a step.
+float3 shockShift(float3 cell, uint slab, float dt, inout float kept, inout float stir)
+{
+    float size = Volumes[slab].z;
+    float3 world = Origins[slab].xyz + (cell + 0.5) * size;
+    float3 shift = 0;
+    float spread = 0;
+    uint mask = (uint)Origins[slab].w;
+    while (mask) {
+        uint i = firstbitlow(mask);
+        mask &= mask - 1;
+        float4 a = Shocks[i * 2], b = Shocks[i * 2 + 1];
+        float wide = max(b.x, 1.5 * size);
+        float3 off = world - a.xyz;
+        float r = length(off);
+        float x = (r - a.w) / wide;
+        if (abs(x) > 3) continue;
+        float g = exp(-x * x);
+        float moveBy = b.y * (b.x / wide) * g * dt;
+        float rr = max(r, size);
+        shift += off / rr * moveBy;
+        spread += moveBy * (2 / rr - 2 * x / wide);
+        kept *= exp(-b.z * g * dt);
+        stir += b.w * g;
+    }
+    float moved = length(shift) / size;
+    float held = moved > 1.5 ? 1.5 / moved : 1;
+    // the stretching as the shift really made it; exp, so a squeeze and the stretch after it cancel
+    kept *= clamp(exp(-spread * held), 0.5, 1.5);
+    return shift / size * held;
+}
+// the eddies a front leaves behind it, cells/s
+float3 shockStir(float3 cell, float stir, float dt, float size)
+{
+    float3 q = cell / 3 + float3(0, 0, -Step.y * 0.5);
+    return (float3(valueNoise(q, 61), valueNoise(q + 4.3, 67), valueNoise(q + 8.9, 71)) - 0.5) * (stir * dt / size);
 }
 )HLSL";
 
@@ -586,7 +650,9 @@ void main(uint3 id : SV_DispatchThreadID)
     if (volume.w > 0.5) {
         PresOut[id] = 0;
     } else {
-        float3 back = cell - Vel.Load(int4(id, 0)).xyz * dt;
+        // the blast fronts move the smoke as they pass (shockShift)
+        float shockKept = 1, stir = 0;
+        float3 back = cell - Vel.Load(int4(id, 0)).xyz * dt - shockShift(cell, slab, dt, shockKept, stir);
         vt = Vel.SampleLevel(Linear, uvwOf(back, slab), 0);
         DEN carried = Den.SampleLevel(Linear, uvwOf(back, slab), 0);
         DEN settled = Den.SampleLevel(Linear, uvwOf(back + float3(0, 0, Step.z * dt), slab), 0);	// dust settles
@@ -602,6 +668,8 @@ void main(uint3 id : SV_DispatchThreadID)
         d.w = settled.w * Keep.z;
         d.x *= keep;
 #endif
+        d *= shockKept;	// every channel, so a cell's grey goes with its soot
+        if (stir > 0) vt.xyz += shockStir(cell, stir, dt, volume.z);
         // Heat lifts, fading out under the ceiling, where a rising cap stops and spreads.
         float lift = Forces.x * vt.w * saturate((shape.z - cell.z) / max(shape.z * 0.3, 1));
 #ifdef AIR
@@ -712,7 +780,8 @@ void main(uint3 id : SV_DispatchThreadID)
 // foot.  The cells are drawn towards that shape at Stem.w a second and never set to it, so the
 // flow still rolls and smears them.  Left to the flow alone the cap spread thin and the noise ate
 // it inside twelve seconds, while the dust it dropped buried the base.  Soot that leaves the cap
-// and dust that leaves the stem thin out (Keep.w), so the shape stays a mushroom and the surge is
+// and dust that leaves the stem thin out (Spill.x, CapSpillHalfLife; slower while another blast's
+// front has loosened the cap, so what it pushed off drifts aside), so the shape stays a mushroom and the surge is
 // a ring that passes: the stem's dust, heavy, fell out of it and spread over the whole plateau.  The heat is the cap's, hottest in its middle
 // and its lumps, so the fireball glows from inside and its rim burns red.
 const char *const MushroomPass = R"HLSL(
@@ -737,12 +806,12 @@ const char *const MushroomPass = R"HLSL(
         float soot = cap.x * inCap * smoothstep(0.5, 2.5, overGround), dust = stem.x * inStem;
         if (soot > d.x) d.x += (soot - d.x) * rate;
         if (dust > d.y) d.y += (dust - d.y) * rate;
-        d.x *= lerp(Keep.w, 1, saturate((1.3 - surface) * 3));
-        d.y *= lerp(Keep.w, 1, saturate(inStem * 3));
+        d.x *= lerp(Spill[slab].x, 1, saturate((1.3 - surface) * 3));
+        d.y *= lerp(Spill[slab].x, 1, saturate(inStem * 3));
         // white-yellow in the middle, orange-red at the rim, the lumps hotter than the folds between
         vt.w = max(vt.w, power.z * inCap * (1 - 0.6 * saturate(e)) * (0.5 + 1.0 * lumps));
         vt.z = lerp(vt.z, shape.w, 0.15 * inStem);
-    } else if (cap.x > 0) d *= Keep.w;
+    } else if (cap.x > 0) d *= Spill[slab].x;
 )HLSL";
 
 const char *const AdvectPassEnd = R"HLSL(
@@ -1100,10 +1169,9 @@ float4 main(float4 position : SV_Position) : SV_Target
 }
 )HLSL";
 
-// The fire tier's own programs.  Its cbuffer gains FireFields after Thin (makeTier splices them into
-// the Prelude's text for this tier only, so the blasts' and the air's programs keep their text and
-// their cached code); density is soot and fuel, and the fuel is never drawn.
-const char *const FireFields = "    float4 Fire[VOLS];\n    float4 Fire2[VOLS];\n    float4 Fire3[VOLS];\n";
+// The fire tier's own programs (the Prelude's Fire arrays are theirs; every program declares them,
+// so the blast fronts after them sit at one offset); density is soot and fuel, and the fuel is never
+// drawn.
 
 // A fire's box fades only at its sides and its top: the building it burns on sits in its middle.
 const char *const FireWalls = R"HLSL(
@@ -1145,7 +1213,9 @@ void main(uint3 id : SV_DispatchThreadID)
     if (volume.w > 0.5) {
         PresOut[id] = 0;
     } else {
-        float3 back = cell - Vel.Load(int4(id, 0)).xyz * dt;
+        // a blast front blows the flame and its smoke over as it passes (shockShift), the fuel too
+        float shockKept = 1, stir = 0;
+        float3 back = cell - Vel.Load(int4(id, 0)).xyz * dt - shockShift(cell, slab, dt, shockKept, stir);
         vt = Vel.SampleLevel(Linear, uvwOf(back, slab), 0);
         d = Den.SampleLevel(Linear, uvwOf(back, slab), 0);
         // The smoke climbs at a plume's speed while it is warm, about 20 units a second over the
@@ -1154,6 +1224,8 @@ void main(uint3 id : SV_DispatchThreadID)
         // tips and the wind laid it along the ground.
         float climb = 20 / volume.z * saturate(vt.w / 0.15);
         d.x = Den.SampleLevel(Linear, uvwOf(back - float3(0, 0, climb * dt), slab), 0).x;
+        d *= shockKept;
+        if (stir > 0) vt.xyz += shockStir(cell, stir, dt, volume.z);
         vt.z += dt * Fire3[slab].x * vt.w;	// hot gas rises
         float3 grad = 0.5 * float3(w(c + int3(1, 0, 0), slab) - w(c - int3(1, 0, 0), slab),
             w(c + int3(0, 1, 0), slab) - w(c - int3(0, 1, 0), slab),
@@ -1514,6 +1586,10 @@ struct Volume {
 	int site = -1;						// a fire's site in `fires`
 	bool frozen = false;				// a fire off the screen: not stepped this frame
 	int placed = 0;						// when a fire's box was last laid
+	// A nuclear cap's hold on its shape (VolumeShock::capHold) and how far other blasts' fronts have
+	// moved its middle; under 0.05 the cap is let go, free smoke.
+	float hold = 1;
+	float capPushed = 0;
 };
 
 struct Tier {
@@ -1575,12 +1651,17 @@ struct WorldBox { float low[3], high[3]; int frame; };
 std::vector<WorldBox> airBoxes, tallBoxes;
 unsigned airFed = 0, airLeftOut = 0;
 // The units pushing the air this logic frame, nearest the camera first (MoverPass), and the blast
-// fronts still running out.
-enum MoverKind { MoverVehicle, MoverJet, MoverRotor, MoverWalker, MoverShock };
+// fronts still running out (shockShift): each with the slot of the volume it started with, if any,
+// and whether Gather has seen its place is not in the drawn player's shroud (until then it pushes
+// nothing, so smoke never shows an unscouted blast).
+enum MoverKind { MoverVehicle, MoverJet, MoverRotor, MoverWalker };
 struct Mover { float m[4][4]; float distance; };
 std::vector<Mover> movers;
-struct Shock { float at[3], speed, strength, seconds; int born; };
+struct Shock { float at[3]; VolumeShock::ShockClass c; int born; int owner, ownerBorn; bool checked; };
 std::vector<Shock> shocks;
+// The fronts this step uploads (fillShocks), in upload order, with their state now.
+struct Front { const Shock *shock; float age, radius, width, speed; };
+std::vector<Front> fronts;
 unsigned moverPeak = 0;
 // Every ground vehicle near the camera, standing or moving, this logic frame and the one before,
 // so a tank dying now finds its hull: where it stands, its heading and its template's box.
@@ -1660,8 +1741,11 @@ unsigned slabOf(unsigned slot) { return slot - TierShapes[tierOf(slot)].first; }
 void releaseState();
 void pruneSets();
 void boxOf(const Volume &volume, const TierShape &shape, float low[3], float high[3]);
-void addShock(const Coord3D &where, float speed, float strength, float seconds, int now);
+void addShock(const Coord3D &where, const VolumeShock::ShockClass &c, int now, int owner = -1);
 void fillMovers();
+void fillShocks(int now);
+float shockMask(const float low[3], const float high[3], float cell, int slot);
+float joinRadius(const Volume &volume);
 const Solid *structureAt(const Coord3D &where, ObjectID id);
 void clearFires();
 
@@ -1681,6 +1765,7 @@ bool requested()
 		tallSystems.clear();
 		movers.clear();
 		shocks.clear();
+		fronts.clear();
 		pendingSparks.clear();
 		pendingHits.clear();
 		ownedHits.clear();
@@ -1839,14 +1924,7 @@ bool makeTier(DX11BackendClass *backend, ID3D11Device *device, Tier &tier, const
 	const std::string header = std::string(air ? "#define AIR 1\n" : "") + "#define GX " + std::to_string(shape.gx)
 		+ "\n#define GY " + std::to_string(shape.gy) + "\n#define GZ " + std::to_string(shape.gz) + "\n#define SLABS "
 		+ std::to_string(shape.slabs) + "\n" + Grid;
-	std::string prelude = header + Prelude;
-	if (fire) {
-		// the fire's fields at the end of the Sim cbuffer, after Thin, as SimConstants holds them
-		const std::string thin = "float4 Thin[VOLS];\n";
-		const size_t at = prelude.find(thin);
-		if (at == std::string::npos) return false;
-		prelude.insert(at + thin.size(), FireFields);
-	}
+	const std::string prelude = header + Prelude;
 	static const char *const names[ProgramCount] = { "volsmoke curl", "volsmoke advect", "volsmoke divergence",
 		"volsmoke jacobi", "volsmoke project", "volsmoke light", "volsmoke scroll" };
 	static const char *const fireNames[ProgramCount] = { "volfire curl", "volfire advect", "volfire divergence",
@@ -2940,6 +3018,18 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// rather than one burned-out white; full once it has cooled to embers in smoke
 		soot[3] = 0.9f + 1.3f * smoothstep01(t, 1.0f, 4.0f);
 		dust[0] = 0.55f; dust[1] = 0.48f; dust[2] = 0.41f;	// the stem and the surge, grey-brown
+		// Another blast's front has moved the cap (holdCaps): it is drawn back to its shape more slowly,
+		// and once let go it is free smoke with every shape and source off.  All of them together: the
+		// bomb's ring, the stem's inflow and the hot core switch on where a slab has no cap.
+		if (volume.hold < 1.0f) {
+			stem[3] *= volume.hold;
+			cap[0] *= volume.hold;
+			if (volume.hold < 0.05f) {
+				for (float *field : { cap, stem, shape, power, motion }) std::memset(field, 0, 16);
+				shape[2] = 1000.0f;		// no ceiling: the freed smoke keeps its lift
+				collarOpacity = shellOpacity = 0;	// drawn shapes, not smoke: they go with the cap
+			}
+		}
 	}
 	sim.Volumes[slab][1] = (float)count;
 	if (draw) {
@@ -3117,6 +3207,7 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 	sim.Sun[3] = Extinction;
 	sim.Wind[0] = WindX;
 	sim.Wind[1] = WindY;
+	fillShocks(now);
 	float settle = 0;
 	for (unsigned slab = 0; slab < tier.shape.slabs; ++slab) {
 		const Volume &volume = volumes[tier.shape.first + slab];
@@ -3132,6 +3223,10 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		// A tank's thins once its column has died down, so it is gone as soon as the game's own.
 		if (volume.kind == TankDeath && volume.live && secondsSince(volume, now) > TankSootThinFrom)
 			sim.Thin[slab][0] = std::pow(0.5f, dt / TankSootHalfLife);
+		// a nuclear cap another blast let go of thins out as free smoke, and while it is only loosened what
+		// the front pushed off it drifts aside instead of fading at the cap's own spill rate
+		if (volume.kind == Nuclear && volume.hold < 0.05f) sim.Thin[slab][0] = std::pow(0.5f, dt / NukeDisperseHalfLife);
+		sim.Spill[slab][0] = std::pow(0.5f, dt / (CapSpillHalfLife + (NukeDisperseHalfLife - CapSpillHalfLife) * (1 - volume.hold)));
 		const bool rolls = (volume.kind == Structure && !volume.standing) || volume.kind == Launch || volume.kind == Muzzle;
 		// (not a bomb's: its small mushroom's stem would fall out of it)
 		// (a tank's: its dark base masses slump slowly onto the ground, which eats them; the weight goes
@@ -3148,7 +3243,13 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		sim.Thin[slab][3] = volume.kind == Muzzle ? std::pow(0.5f, dt / MuzzleHeatHalfLife)
 			: fireballCools ? std::pow(0.5f, dt / FireballHalfLife) : 1.0f;
 		for (unsigned i = 0; i < 3; ++i) sim.Origins[slab][i] = volume.origin[i];
+		sim.Origins[slab][3] = 0;
 		if (!volume.live) continue;
+		{
+			float low[3], high[3];
+			boxOf(volume, tier.shape, low, high);
+			sim.Origins[slab][3] = shockMask(low, high, volume.cell, int(tier.shape.first + slab));
+		}
 		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
 		schedule(volume, slab, secondsSince(volume, now), nullptr);
 		// ponytail: one settling speed a tier, its last volume's cell (a gun's small cells left out,
@@ -3222,7 +3323,7 @@ bool takeAir(ParticleSystem *system)
 	if (system->getPriority() == DEATH_EXPLOSION && !system->isSystemForever() && TheGameLogic) {
 		Coord3D where;
 		system->getPosition(&where);
-		addShock(where, 110.0f, 40.0f, 0.8f, (int)TheGameLogic->getFrame());
+		addShock(where, VolumeShock::AirExplosion, (int)TheGameLogic->getFrame());
 	}
 	pruneSets();
 	takenSystems.insert((int)system->getSystemID());
@@ -3258,16 +3359,153 @@ bool airClip(const Volume &volume, const Tier &tier, const std::vector<WorldBox>
 	return true;
 }
 
-// A blast front, from a blast this took: it runs out at `speed` and pushes for `seconds`.  One a
-// place: a blast's many systems start one front.
-void addShock(const Coord3D &where, float speed, float strength, float seconds, int now)
+// A blast front, from a blast this took or a system that starts one (VolumeShock::frontOf), `owner`
+// the slot of the volume it started with (that volume born now).  One a place: a blast's many
+// systems start one front, which keeps the class that pushes hardest and the first volume one of
+// them started; two blasts that each started a volume keep a front each.
+void addShock(const Coord3D &where, const VolumeShock::ShockClass &c, int now, int owner)
 {
-	for (const Shock &shock : shocks) {
+	for (Shock &shock : shocks) {
 		const float dx = shock.at[0] - where.x, dy = shock.at[1] - where.y;
-		if (now - shock.born < 6 && dx * dx + dy * dy < 60.0f * 60.0f) return;
+		if (now - shock.born >= 6 || dx * dx + dy * dy >= 60.0f * 60.0f || (owner >= 0 && shock.owner >= 0)) continue;
+		if (c.push > shock.c.push) shock.c = c;
+		if (owner >= 0) { shock.owner = owner; shock.ownerBorn = now; }
+		return;
 	}
-	if (shocks.size() >= 8) shocks.erase(shocks.begin());
-	shocks.push_back({ { where.x, where.y, where.z }, speed, strength, seconds, now });
+	if (shocks.size() >= MaxShocks) shocks.erase(shocks.begin());
+	shocks.push_back({ { where.x, where.y, where.z }, c, now, owner, now, false });
+}
+
+// A nuclear trigger that joined a live nuclear volume (a second flare inside its first seconds):
+// its front, started on first sight with no volume, is that volume's, so it does not tear the cap it
+// is part of apart.
+void adoptFront(const Coord3D &where, int slot, int now)
+{
+	for (Shock &shock : shocks) {
+		const float dx = shock.at[0] - where.x, dy = shock.at[1] - where.y;
+		if (shock.owner < 0 && now - shock.born < 6 && dx * dx + dy * dy < 60.0f * 60.0f) {
+			shock.owner = slot;
+			shock.ownerBorn = volumes[slot].born;
+		}
+	}
+}
+
+// This step's fronts into the constants, the newest first, up to the setting's count (High 16, Low
+// 8).  A front Gather has not yet checked against the shroud, or past its time, pushes nothing.
+void fillShocks(int now)
+{
+	fronts.clear();
+	const size_t cap = level == 2 ? MaxShocks : MaxShocks / 2;
+	for (auto it = shocks.rbegin(); it != shocks.rend() && fronts.size() < cap; ++it) {
+		const float age = float(now - it->born) / LOGICFRAMES_PER_SECOND;
+		if (!it->checked || age < 0 || age > it->c.seconds) continue;
+		const float radius = VolumeShock::frontRadius(it->c, age);
+		fronts.push_back({ &*it, age, radius, VolumeShock::frontWidth(radius), VolumeShock::peakSpeed(it->c, age) });
+	}
+	sim.ShockCount[0] = (float)fronts.size();
+	for (size_t i = 0; i < fronts.size(); ++i) {
+		const Front &front = fronts[i];
+		const Shock &shock = *front.shock;
+		float *a = sim.Shocks[i * 2], *b = sim.Shocks[i * 2 + 1];
+		for (unsigned k = 0; k < 3; ++k) a[k] = shock.at[k];
+		a[3] = front.radius;
+		b[0] = front.width;
+		b[1] = front.speed;
+		b[2] = VolumeShock::mixRate(shock.c, front.age);
+		b[3] = VolumeShock::stirAccel(shock.c, front.age);
+	}
+}
+
+// Whether a front leaves this volume alone: its own blast's (the slot's tenant then, not a later
+// one), or one born beside it in the same moment (the shell that killed a tank): their timelines push
+// their own smoke, and the tank's fan is laid where the shell's front would blow it away.
+bool spares(const Volume &volume, int slot, const Shock &shock)
+{
+	if (shock.owner == slot && shock.ownerBorn == volume.born) return true;
+	if (std::abs(volume.born - shock.born) > 10) return false;
+	const float dx = shock.at[0] - (volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell);
+	const float dy = shock.at[1] - (volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell);
+	return dx * dx + dy * dy <= joinRadius(volume) * joinRadius(volume);
+}
+
+// Which of this step's fronts reach a box, a bit each (Origins.w): a front reaches it where its shell,
+// three widths each side of the front and never thinner than 1.5 cells, meets the box.  `slot` is the
+// volume's, or -1 for the air.
+float shockMask(const float low[3], const float high[3], float cell, int slot)
+{
+	unsigned mask = 0;
+	for (size_t i = 0; i < fronts.size(); ++i) {
+		const Front &front = fronts[i];
+		const Shock &shock = *front.shock;
+		if (slot >= 0 && spares(volumes[slot], slot, shock)) continue;
+		const float reach = 3.0f * (std::max)(front.width, 1.5f * cell);
+		float nearest = 0, farthest = 0;
+		for (unsigned k = 0; k < 3; ++k) {
+			const float a = low[k] - shock.at[k], b = high[k] - shock.at[k];
+			const float n = a > 0 ? a : b < 0 ? b : 0.0f, f = (std::max)(std::fabs(a), std::fabs(b));
+			nearest += n * n;
+			farthest += f * f;
+		}
+		const float inner = (std::max)(front.radius - reach, 0.0f), outer = front.radius + reach;
+		if (nearest <= outer * outer && farthest >= inner * inner) mask |= 1u << i;
+	}
+	return (float)mask;
+}
+
+// An air particle inside a front this step moves with it, so the cells the air lays under it
+// (AirTakeUp) follow the push instead of pulling the smoke back where it was.  A client particle:
+// nothing in the logic reads where one is.  At most three quarters of an air cell a step.
+void nudge(Particle *p, float dt, float cell)
+{
+	Coord3D &at = p->m_pos;
+	float shift[3] = {};
+	for (const Front &front : fronts) {
+		const Shock &shock = *front.shock;
+		const float d[3] = { at.x - shock.at[0], at.y - shock.at[1], at.z - shock.at[2] };
+		const float r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+		const float inner = (std::max)(front.radius - 3.0f * front.width, 0.0f), outer = front.radius + 3.0f * front.width;
+		if (r2 > outer * outer || r2 < inner * inner) continue;
+		const float r = std::sqrt(r2);
+		const float move = front.speed * VolumeShock::profile(r, front.radius, front.width) * dt / (std::max)(r, 1.0f);
+		for (unsigned k = 0; k < 3; ++k) shift[k] += d[k] * move;
+	}
+	const float moved = std::sqrt(shift[0] * shift[0] + shift[1] * shift[1] + shift[2] * shift[2]), most = 0.75f * cell;
+	const float scale = moved > most ? most / moved : 1.0f;
+	at.x += shift[0] * scale;
+	at.y += shift[1] * scale;
+	at.z += shift[2] * scale;
+}
+
+// How firmly each nuclear cap still holds its shape: the fronts of other blasts that pass its middle
+// move it, and once moved CapRelease units it is let go for good (schedule), its volume ending
+// NukeDisperseLife seconds on.  Once a logic frame, from Gather.
+void holdCaps(int now)
+{
+	static int last = -1;
+	const int frames = last < 0 || now <= last ? 1 : (std::min)(now - last, 4);
+	last = now;
+	for (unsigned slot = 0; slot < MaxVolumes; ++slot) {
+		Volume &volume = volumes[slot];
+		if (!volume.live || volume.kind != Nuclear || volume.hold < 0.05f) continue;
+		const float t = secondsSince(volume, now);
+		const float capZ = volume.blast[2] + 2.0f + 20.0f * (1 - std::exp(-t / 3.2f));	// schedule's
+		const float middle[3] = { volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell,
+			volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell, volume.origin[2] + (capZ + 0.5f) * volume.cell };
+		for (const Shock &shock : shocks) {
+			const float age = float(now - shock.born) / LOGICFRAMES_PER_SECOND;
+			if (!shock.checked || age < 0 || age > shock.c.seconds || spares(volume, (int)slot, shock)) continue;
+			const float d[3] = { middle[0] - shock.at[0], middle[1] - shock.at[1], middle[2] - shock.at[2] };
+			volume.capPushed += VolumeShock::shiftAt(shock.c, age, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]),
+				(float)frames / LOGICFRAMES_PER_SECOND);
+		}
+		volume.hold = VolumeShock::capHold(volume.capPushed);
+		if (volume.hold < 0.05f) {
+			volume.life = (std::min)(volume.life, now - volume.born + int(NukeDisperseLife * LOGICFRAMES_PER_SECOND));
+			static unsigned released = 0;
+			if (released++ < 8)
+				DEBUG_LOG(("VOLSMOKE: frame %d, nuclear cap %u let go: other blasts moved it %.0f units\n", now, slot, volume.capPushed));
+		}
+	}
 }
 
 // The units that push the air, read from the client's drawables once a logic frame: where each
@@ -3358,21 +3596,24 @@ void collectMovers(int now)
 		found.push_back(mover);
 	}
 	seen.swap(next);
+	// The blast fronts: past their time they go, and a new one pushes only once its place is seen not to
+	// be in the shroud of the player whose view is drawn (a read outside the window; nothing is decided
+	// in the logic by it).
+	const Int seer = TheObserverCamera.getShroudPlayerIndex();
 	for (auto it = shocks.begin(); it != shocks.end();) {
 		const float age = (float)(now - it->born) / LOGICFRAMES_PER_SECOND;
-		if (age > it->seconds) { it = shocks.erase(it); continue; }
-		Mover mover = {};
-		float (&m)[4][4] = mover.m;
-		const float radius = it->speed * age;
-		for (unsigned i = 0; i < 3; ++i) m[0][i] = it->at[i];
-		m[0][3] = radius;
-		m[1][3] = MoverShock;
-		m[2][3] = 10.0f + 0.15f * radius;
-		m[3][1] = it->strength * std::exp(-age / (it->seconds * 0.4f));
-		mover.distance = 0;	// fronts first: they are few and short
-		found.push_back(mover);
+		if (age > it->c.seconds) { it = shocks.erase(it); continue; }
+		if (!it->checked) {
+			const Coord3D at = { it->at[0], it->at[1], it->at[2] };
+			if (seer >= 0 && ThePartitionManager && ThePartitionManager->getShroudStatusForPlayer(seer, &at) == CELLSHROUD_SHROUDED) {
+				it = shocks.erase(it);
+				continue;
+			}
+			it->checked = true;
+		}
 		++it;
 	}
+	holdCaps(now);
 	const size_t cap = level == 2 ? MaxMovers : MaxMovers / 2;
 	if (found.size() > cap)
 		std::nth_element(found.begin(), found.begin() + cap, found.end(),
@@ -3636,6 +3877,7 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 	sim.Volumes[0][0] = 1;
 	sim.Volumes[0][2] = cell;
 	sim.Volumes[0][3] = volume.reset ? 1.0f : 0.0f;
+	fillShocks(now);	// before the particles, which the fronts move (nudge)
 	if (moved) {
 		for (unsigned i = 0; i < 3; ++i) sim.Motion[0][i] = shift[i];
 		upload(context, tier.simConstants, &sim, sizeof(sim));
@@ -3695,6 +3937,9 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 		// a ballistic or cruise missile's exhaust is a white billowing plume; a rocket's, a thin grey trail
 		const bool plume = trail && (std::strstr(named, "Scud") || std::strstr(named, "Neutron") || std::strstr(named, "Tomahawk"));
 		bool chained = false;
+		// the blast fronts passing its particles move them (nudge)
+		if (!fronts.empty())
+			for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) nudge(p, dt, cell);
 		// A rocket's ribbon is laid straight: its points scatter off the fire line (EA's MissileExhaust,
 		// which feeds it, throws each point sideways at up to 0.2 a frame), so the ribbon drew a regular
 		// sine wiggle a few units wide where the rocket itself flies within a unit of a straight line
@@ -3879,17 +4124,23 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 		const float b[3] = { centre[0] + s.r * cell, centre[1] + s.r * cell, centre[2] + s.r * cell };
 		grow(a, b);
 	}
-	if (!smokeBoxes.empty())	// only where the air already holds smoke
+	if (!smokeBoxes.empty()) {	// only where the air already holds smoke
 		for (const Mover &mover : movers) {
 			const float (&m)[4][4] = mover.m;
-			const int kind = int(m[1][3] + 0.5f);
-			if (kind != MoverRotor && kind != MoverShock) continue;
-			const float reach = kind == MoverRotor ? m[0][3] * 3.0f : m[0][3] + 20.0f;
-			const float bottom = kind == MoverRotor ? m[0][2] - m[2][2] : m[0][2] - 20.0f;
-			const float a[3] = { m[0][0] - reach, m[0][1] - reach, bottom };
+			if (int(m[1][3] + 0.5f) != MoverRotor) continue;
+			const float reach = m[0][3] * 3.0f;
+			const float a[3] = { m[0][0] - reach, m[0][1] - reach, m[0][2] - m[2][2] };
 			const float b[3] = { m[0][0] + reach, m[0][1] + reach, m[0][2] + 20.0f };
 			grow(a, b);
 		}
+		// a front carries smoke out to its shell's far side
+		for (const Front &front : fronts) {
+			const float reach = front.radius + 3.0f * front.width;
+			const float a[3] = { front.shock->at[0] - reach, front.shock->at[1] - reach, front.shock->at[2] - 20.0f };
+			const float b[3] = { front.shock->at[0] + reach, front.shock->at[1] + reach, front.shock->at[2] + reach };
+			grow(a, b);
+		}
+	}
 	// two soot half-lives on, what is left of a box's smoke is under a quarter and fading
 	while (!smokeBoxes.empty() && now - smokeBoxes.front().frame > int(2 * AirSootHalfLife * LOGICFRAMES_PER_SECOND))
 		smokeBoxes.erase(smokeBoxes.begin());
@@ -3914,6 +4165,11 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 	sim.Wind[3] = TrailEddy;
 	sim.Shape[0][2] = 1000.0f;	// no ceiling
 	for (unsigned i = 0; i < 3; ++i) sim.Origins[0][i] = volume.origin[i];
+	{
+		float gridLow[3], gridHigh[3];
+		boxOf(volume, shape, gridLow, gridHigh);
+		sim.Origins[0][3] = shockMask(gridLow, gridHigh, cell, -1);
+	}
 	fillMovers();
 	upload(context, tier.simConstants, &sim, sizeof(sim));
 	context->CSSetConstantBuffers(0, 1, &tier.simConstants);
@@ -4469,6 +4725,23 @@ bool startMuzzle(ParticleSystem *system, const Coord3D &where, float gunScale, i
 bool Takes(ParticleSystem *system)
 {
 	if (!requested() || !system || TheGlobalData->m_classicGraphics) return false;
+	// A system that starts a blast front of its own on first sight, whatever it draws as: the Scud's
+	// warheads (all additive, so they start no volume), the stock shock rings, a nuke's flare even when
+	// it joins the nuke before it.  A volume's own front is added with its volume, and merges with this.
+	{
+		static std::unordered_map<const ParticleSystemTemplate *, const VolumeShock::ShockClass *> frontTemplates;
+		const ParticleSystemTemplate *tmplate = system->getTemplate();
+		auto known = frontTemplates.find(tmplate);
+		if (known == frontTemplates.end()) known = frontTemplates.emplace(tmplate, VolumeShock::frontOf(tmplate->getName().str())).first;
+		// (a system hung on an object or a drawable has a local position, so only loose ones)
+		if (known->second && TheGameLogic && usable() && system->getAttachedObject() == INVALID_ID
+				&& system->getAttachedDrawable() == INVALID_DRAWABLE_ID
+				&& firstSeen.emplace((int)system->getSystemID(), (int)TheGameLogic->getFrame()).second) {
+			Coord3D where;
+			system->getPosition(&where);
+			addShock(where, *known->second, (int)TheGameLogic->getFrame());
+		}
+	}
 	// a building's or a wreck's fire burns in a fire slab, or keeps its billboards; never the air's
 	if (isFire(system)) return takeFire(system);
 	if (hideFireSmoke(system)) return true;
@@ -4661,6 +4934,7 @@ bool Takes(ParticleSystem *system)
 		pruneSets();
 		takenSystems.insert(id);
 		if (volume.kind == Muzzle) gunSystems[unsigned(&volume - volumes)].push_back(id);
+		if (volume.kind == Nuclear && kind.trigger) adoptFront(where, int(&volume - volumes), now);
 		++joinedCount;
 		return true;
 	}
@@ -4802,7 +5076,7 @@ bool Takes(ParticleSystem *system)
 	// pushing out from the hull's middle blew its own fire into a dome and the dust round it into
 	// rings, where a real one bursts out along the hull and up (schedule).
 	if (type == Nuclear) {
-		addShock(where, 420.0f, 220.0f, 2.5f, now);
+		addShock(where, VolumeShock::Nuclear, now, (int)slot);
 		// The flash: a pulse of the game's own dynamic light, so the ground, the buildings and the
 		// smoke round the blast light up white and fall back over 0.3 s.  A
 		// display light, like an FX list's LightPulse: nothing of it reaches the logic.  Not for the
@@ -4814,8 +5088,9 @@ bool Takes(ParticleSystem *system)
 			TheDisplay->createLightPulse(&at, &white, 250.0f, 450.0f, 0, LOGICFRAMES_PER_SECOND * 3 / 10);
 		}
 	}
-	else if (type == Structure) addShock(where, 140.0f, volume.standing ? 30.0f : 50.0f, 1.0f, now);
-	else if (type != TankDeath && type != Launch) addShock(where, 160.0f * kind.scale, 70.0f * kind.scale, 1.0f, now);
+	else if (type == Structure) addShock(where, volume.standing ? VolumeShock::StructureStage : VolumeShock::StructureFall, now, (int)slot);
+	else if (type != TankDeath && type != Launch)
+		addShock(where, kind.scale >= 3.0f ? VolumeShock::NukeCannon : VolumeShock::shell(kind.scale), now, (int)slot);
 	pruneSets();
 	takenSystems.insert(id);
 	if (claimedCount++ < 8)
@@ -5262,6 +5537,7 @@ void Reset()
 	tallSystems.clear();
 	movers.clear();
 	shocks.clear();
+	fronts.clear();
 	solids.clear();
 	lastSolids.clear();
 	solidsFrame = -100000;

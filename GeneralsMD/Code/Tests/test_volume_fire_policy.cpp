@@ -3,6 +3,7 @@
 // building's boxes, and the sites' life following their systems.
 #include "test_harness.h"
 #include "W3DDevice/GameClient/VolumeFireCore.h"
+#include "W3DDevice/GameClient/VolumeShockCore.h"
 
 #include <cmath>
 #include <vector>
@@ -167,4 +168,71 @@ TEST(volume_fire_caps_a_site_at_its_emitters_and_keeps_its_peak_flame)
 	const int alone = one.sample({ 1, 9, 100, 100, 0, 20, 4 }, 0);
 	one.sample({ 1, 9, 100, 100, 0, 2, 4 }, 601);
 	CHECK(one.heat(alone, 602, 60) > heatRelease(19, 4));
+}
+
+// The blast fronts' half (VolumeShockCore.h): a point a front passes is moved by the displacement
+// the front carries, the shell cut at three widths loses next to nothing, a passage mixes away its
+// share, and the templates that start a front of their own.
+TEST(volume_shock_passage_moves_a_point_by_the_fronts_displacement)
+{
+	using namespace VolumeShock;
+	// a point well past the fireball, met before the front starts to die out (age under 0.6 T), where
+	// the particle speed is under its cap: the first nuke's cap seen from the second's ground zero, a
+	// Scud's earlier smoke, a bomb's neighbour
+	const struct { ShockClass c; float r; } cases[] = { { Nuclear, 390.0f }, { Scud, 100.0f }, { shell(2.0f), 120.0f } };
+	for (const auto &one : cases) {
+		const float meet = one.r / one.c.speed;
+		CHECK(meet < 0.6f * one.c.seconds);
+		CHECK(peakSpeed(one.c, meet) < MaxPeakSpeed);
+		double moved = 0;
+		const float dt = 1.0f / 600.0f;
+		for (float age = 0; age < one.c.seconds; age += dt) moved += shiftAt(one.c, age, one.r, dt);
+		// D falls as the front runs through the point, so the sum sits within a few per cent of D there
+		CHECK_NEAR((float)moved, displacement(one.c, meet), 0.05f * displacement(one.c, meet));
+	}
+	// the second nuke moves the first's cap about half its 160-unit radius
+	CHECK(displacement(Nuclear, 390.0f / Nuclear.speed) > 70.0f);
+	CHECK(displacement(Nuclear, 390.0f / Nuclear.speed) < 100.0f);
+	// past three widths the shell is cut: erfc(3), about two parts in a hundred thousand
+	CHECK_EQ(profile(100.0f + 3.01f * 25.0f, 100.0f, 25.0f), 0.0f);
+	CHECK(std::erfc(3.0) < 1e-4);
+	// a front is gone at its end
+	CHECK_EQ(displacement(Scud, Scud.seconds), 0.0f);
+}
+
+TEST(volume_shock_passage_mixes_away_its_share)
+{
+	using namespace VolumeShock;
+	for (const ShockClass &c : { Nuclear, Scud, shell(1.0f) }) {
+		const float age = 0.3f * c.seconds;
+		const float width = frontWidth(frontRadius(c, age));
+		// the rate over the shell's passage time, w sqrt(pi) / speed, keeps 1 - f
+		const float kept = std::exp(-mixRate(c, age) * width * SqrtPi / c.speed);
+		CHECK_NEAR(kept, 1.0f - dispersed(c, age), 1e-4f);
+		CHECK(dispersed(c, age) <= c.disperse);
+	}
+	// a Scud next to an earlier puff thins it by about a tenth, a nuke over the other's cap by half
+	CHECK_NEAR(dispersed(Scud, 100.0f / Scud.speed), 0.13f, 0.03f);
+	CHECK_NEAR(dispersed(Nuclear, 390.0f / Nuclear.speed), 0.55f, 0.06f);
+	// a cap lets go once moved CapRelease units, and holds while barely touched
+	CHECK_EQ(capHold(0.0f), 1.0f);
+	CHECK_EQ(capHold(CapRelease), 0.0f);
+	CHECK(capHold(10.0f) > 0.8f);
+}
+
+TEST(volume_shock_templates_that_start_a_front)
+{
+	using namespace VolumeShock;
+	// the Scud's warheads are additive and start no volume, so the name is what starts their front
+	CHECK(frontOf("ScudMissleExplosionArms") == &Scud);
+	CHECK(frontOf("ScudMissleLauncherExplosionArms") == &Scud);
+	CHECK(frontOf("NukeCannonBlastWave") == &NukeCannon);
+	CHECK(frontOf("NukeFlare") == &Nuclear);
+	CHECK(frontOf("NukeGLAFlare") == &Nuclear);
+	for (const char *name : { "NukeShockwave", "ArtilleryBarrageShockwave", "MammothTankExplosionShockwave",
+			"StructureToppleShockwave", "CarpetBombWave", "MOABDustWave" })
+		CHECK(frontOf(name) == &StockShock);
+	for (const char *name : { static_cast<const char *>(nullptr), "", "ScudMissleLenzFlare", "TankStruckSparks",
+			"WaveSplashRight01", "DamWavesOutward", "NukeMushroomCap" })
+		CHECK(frontOf(name) == nullptr);
 }
