@@ -2464,8 +2464,9 @@ void W3DDisplay::draw( void )
 		// the particle update below is the only thing that retires a particle system, so skipping
 		// it with the draw stacked up every system the match made in the meantime, all of them to
 		// start emitting at once on return (TheSuperHackers #2709 reproduce it with Propaganda
-		// Towers).  Same bookkeeping as the lost-device branch below.
+		// Towers).  Same bookkeeping as the lost-device branch below, and the light pulses' with it.
 		TheParticleSystemManager->update();
+		stepDynamicLights();
 		return;
 	}
 #endif
@@ -2812,9 +2813,11 @@ AGAIN:
 			// read the client transform while it is still valid.  There is no updateViews here and
 			// nothing to draw the result of, so a frame's worth of stale transforms costs nothing.
 			// Not beside a tick (phase 4's pictures drawn again), which may be making systems.
+			// The light pulses fade and park only in the render as well (RTS3DScene::stepDynamicLights).
 			//
 			if (!drawAgain)
 				TheParticleSystemManager->update();
+			stepDynamicLights();
 		}
 
 		Debug_Statistics::End_Statistics();	//record number of polygons rendered in RenderTargetTextures.
@@ -3040,6 +3043,12 @@ AGAIN:
 				}
 			}
 		}
+		else
+		{
+			// A replay's fast forward and a seek draw one frame a game second, and only the draw
+			// faded and parked the light pulses, so the frame after a seek was lit by its muzzle flashes.
+			stepDynamicLights();
+		}
 #ifdef DEBUG_LOGGING
 		if (tOverlapStart)
 			TheOverlapWindowMS += w3dElapsedMS( tOverlapStart, Clock_Ticks() );
@@ -3174,6 +3183,11 @@ void W3DDisplay::createLightPulse( const Coord3D *pos, const RGBColor *color,
 	//theDynamicLight->setDonut(donut);
 	// (gth) CNC3 enable far attenuation.  C&C3 defaults to disabled.  Must enable to match Generals. MW 8-06-03
 	theDynamicLight->Set_Flag(LightClass::FAR_ATTENUATION,true);
+}
+
+void W3DDisplay::stepDynamicLights( void )
+{
+	m_3DScene->stepDynamicLights();
 }
 
 void W3DDisplay::toggleLetterBox(void)

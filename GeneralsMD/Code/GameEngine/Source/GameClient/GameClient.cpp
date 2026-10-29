@@ -1014,7 +1014,7 @@ void GameClient::update( void )
 				TheClientDrawMS = (Real)((double)(drawEnd - drawStart) * 1000.0 / (double)freq);
 #endif
 		}
-		else if( TheParticleSystemManager )
+		else
 		{
 			//
 			// The particle manager is updated from inside the draw, and its update is the only thing
@@ -1028,7 +1028,11 @@ void GameClient::update( void )
 			// the same bookkeeping a rendered run does, on a run that has no picture.  The same seed
 			// ends with 138 systems instead of 26,811, and the run takes 19.1s against 18.8 and 19.0.
 			//
-			TheParticleSystemManager->update();
+			if( TheParticleSystemManager )
+				TheParticleSystemManager->update();
+			// The light pulses are the same story: only the render faded and parked them, so a headless
+			// match kept every muzzle flash of the match switched on, and each new one walked them all.
+			TheDisplay->stepDynamicLights();
 		}
 	}
 

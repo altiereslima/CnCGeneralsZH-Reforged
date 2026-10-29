@@ -2089,6 +2089,26 @@ void RTS3DScene::parkSpentDynamicLights(void)
 }
 
 //=============================================================================
+// RTS3DScene::stepDynamicLights
+//=============================================================================
+/** The lights' half of Customized_Render, in its order, for a pass whose draw is skipped: -headless,
+	* the undrawn stretch of -jumpToFrame, a minimised window, a lost device, a replay's fast forward and
+	* seek (29 passes in 30 skip the draw).  Only the render stepped a light's fade and parked it, so
+	* those runs kept every light pulse of the match switched on and getADynamicLight walked all of
+	* them for each new one: 28 to 37% of the main thread late in a
+	* headless match, and a -jumpToFrame's first drawn frame lit by every muzzle flash of the jump.  The
+	* fade counts logic frames and is gated on the client frame, so a later render steps nothing twice,
+	* and a light the terrain still holds is not spent and waits for it. */
+//=============================================================================
+void RTS3DScene::stepDynamicLights(void)
+{
+	parkSpentDynamicLights();
+	RefRenderObjListIterator dynaLightIt(&m_dynamicLightList);
+	for (dynaLightIt.First(); !dynaLightIt.Is_Done(); dynaLightIt.Next())
+		dynaLightIt.Peek_Obj()->On_Frame_Update();
+}
+
+//=============================================================================
 // RTS3DScene::removeDynamicLight
 //=============================================================================
 /** Removes a dynamic light. */
