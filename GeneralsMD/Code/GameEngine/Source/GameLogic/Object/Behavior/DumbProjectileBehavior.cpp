@@ -63,11 +63,12 @@
 const Int DEFAULT_MAX_LIFESPAN = 10 * LOGICFRAMES_PER_SECOND;
 
 // A StraightWhenClear shell whose barrel is raised steeper than this slope is being lobbed, and takes
-// the barrel's arc on open ground too. It is the barrel against level ground and not against the line
-// to the victim: a tank's barrel cannot dip, so a target close below it stands well under the barrel,
-// and measured that way a Paladin's shot 28 away and 13 degrees down went back to EA's arc. A tank's
-// barrel sits within 3 degrees of level (the logic does not tilt the hull on a slope); a Fire Base's
-// stands 38 to 57 degrees up. The tangent of 8 degrees.
+// the barrel's arc on open ground too. It is the barrel against level ground, or against the line to
+// the victim when that climbs: a barrel that cannot dip (the Overlord's) stands well over a target close
+// below it, and measured against the line a Paladin's shot 28 away and 13 degrees down went back to
+// EA's arc, while a Crusader's barrel that pitches 12 degrees up at a tank on a ridge is aiming, not
+// lobbing. A level barrel sits within 3 degrees of level (the logic does not tilt the hull on a slope);
+// a Fire Base's stands 38 to 57 degrees up. The tangent of 8 degrees.
 const Real STRAIGHT_SHOT_MAX_BARREL_SLOPE = 0.1405f;
 
 //-----------------------------------------------------------------------------
@@ -493,6 +494,8 @@ Bool DumbProjectileBehavior::calcFlightPath(Bool recalcNumSegments)
 	targetVector.Z = controlPoints[3].z - controlPoints[0].z;
 
 	Real targetDistance = targetVector.Length();
+	Real targetRun = sqrtf( sqr( targetVector.X ) + sqr( targetVector.Y ) );
+	Real targetSlope = (targetRun > 0.0f) ? targetVector.Z / targetRun : 0.0f;
 	targetVector.Normalize();
 	Vector3 firstPointAlongLine = targetVector * (targetDistance * d->m_firstPercentIndent );
 	Vector3 secondPointAlongLine = targetVector * (targetDistance * d->m_secondPercentIndent );
@@ -508,7 +511,7 @@ Bool DumbProjectileBehavior::calcFlightPath(Bool recalcNumSegments)
 	controlPoints[1].z = highestInterveningTerrain + d->m_firstHeight;
 	controlPoints[2].z = highestInterveningTerrain + d->m_secondHeight;
 
-	if( d->m_straightWhenClear && m_launchSlope < STRAIGHT_SHOT_MAX_BARREL_SLOPE
+	if( d->m_straightWhenClear && m_launchSlope < max( targetSlope, 0.0f ) + STRAIGHT_SHOT_MAX_BARREL_SLOPE
 		&& ThePartitionManager->isClearLineOfSightTerrain( NULL, controlPoints[0], NULL, controlPoints[3] ) )
 	{
 		// A cannon shell flies the line to its victim. The arc above was ten over the highest ground on the

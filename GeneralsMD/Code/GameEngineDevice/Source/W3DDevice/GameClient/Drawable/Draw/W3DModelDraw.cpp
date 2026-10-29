@@ -1060,6 +1060,7 @@ W3DModelDrawModuleData::W3DModelDrawModuleData() :
 	m_okToChangeModelColor(false),
   m_particlesAttachedToAnimatedBones(false),
 	m_animationsRequirePower(true),
+	m_stabilizedTurretPitch(false),
 #ifdef CACHE_ATTACH_BONE
 	m_attachToDrawableBoneOffsetValid(false),
 #endif
@@ -1255,6 +1256,7 @@ void W3DModelDrawModuleData::buildFieldParse(MultiIniFieldParse& p)
 		{ "RecoilSettleSpeed",	INI::parseVelocityReal, NULL, offsetof(W3DModelDrawModuleData, m_recoilSettle) },
 		{ "OkToChangeModelColor",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_okToChangeModelColor) },
 		{ "AnimationsRequirePower",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_animationsRequirePower) },
+		{ "StabilizedTurretPitch",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_stabilizedTurretPitch) },
 		{ "ParticlesAttachedToAnimatedBones",	INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_particlesAttachedToAnimatedBones) },
 		{ "MinLODRequired",		INI::parseStaticGameLODLevel,	NULL,	offsetof(W3DModelDrawModuleData, m_minLODRequired) },
 		{ "ProjectileBoneFeedbackEnabledSlots", INI::parseBitString32, TheWeaponSlotTypeNames, offsetof(W3DModelDrawModuleData, m_projectileBoneFeedbackEnabledSlots) },
@@ -1794,6 +1796,8 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	{
 		m_weaponRecoilInfoVec[i].clear();
 	}
+	for (i = 0; i < MAX_TURRETS; ++i)
+		m_drawnTurretPitch[i] = 0.0f;
 	m_needRecalcBoneParticleSystems = false;
 	m_fullyObscuredByShroud = false;
 	m_groundMotionPos.zero();
@@ -2936,6 +2940,26 @@ void W3DModelDraw::handleClientTurretPositioning()
 			{
 				if (m_curState)
 					turretPitch += tur.m_turretArtPitch;
+				// The logic aims from a hull that never tilts; the drawn one lies on the ground and rocks when
+				// it fires. A stabilized gun takes that tilt along its own heading off, and the pitch the art
+				// gave the bone (a Paladin's barrel is modelled 5 degrees up), so the drawn barrel stands at
+				// the logic's pitch against level ground, down the line its shell flies.
+				if (getW3DModelDrawModuleData()->m_stabilizedTurretPitch && m_renderObject && obj)
+				{
+					Vector3 heading(cosf(turretAngle), sinf(turretAngle), 0.0f);
+					Vector3 drawn = m_renderObject->Get_Transform().Rotate_Vector(heading);
+					Vector3 logic = obj->getTransformMatrix()->Rotate_Vector(heading);
+					turretPitch -= atan2f(drawn.Z, sqrtf(drawn.X * drawn.X + drawn.Y * drawn.Y))
+						- atan2f(logic.Z, sqrtf(logic.X * logic.X + logic.Y * logic.Y));
+					Int restBone;
+					const Matrix3D* rest = m_curState->findPristineBone(tur.m_turretPitchNameKey, &restBone);
+					if (rest)
+					{
+						Vector3 restX = rest->Get_X_Vector();
+						turretPitch -= atan2f(restX.Z, sqrtf(restX.X * restX.X + restX.Y * restX.Y));
+					}
+				}
+				m_drawnTurretPitch[tslot] = turretPitch;
 				Matrix3D turretPitchXfrm(1);
 				turretPitchXfrm.Rotate_Y(-turretPitch);
 				if (m_renderObject)
@@ -3039,6 +3063,17 @@ void W3DModelDraw::handleClientRecoil()
 
 				Matrix3D gunXfrm;
 				gunXfrm.Make_Identity();
+				// A barrel that is also its turret's pitch bone (a Crusader's, a Battlemaster's: the art has
+				// no other bone to pitch) keeps the pitch while it recoils, back along the pitched barrel.
+				// This matrix replaces the bone's whole control, so without it every shot snapped it level.
+				for (Int tslot = 0; tslot < MAX_TURRETS; ++tslot)
+				{
+					if (m_curState->m_turrets[tslot].m_turretPitchBone == barrels[i].m_recoilBone)
+					{
+						gunXfrm.Rotate_Y( -m_drawnTurretPitch[tslot] );
+						break;
+					}
+				}
 				gunXfrm.Translate_X( -recoils[i].m_shift );
 				//DEBUG_ASSERTLOG(recoils[i].m_shift==0.0f,("adjust bone %d by %f\n",recoils[i].m_recoilBone,recoils[i].m_shift));
 

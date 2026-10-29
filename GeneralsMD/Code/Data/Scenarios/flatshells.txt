@@ -1,0 +1,69 @@
+# Tank guns pitched onto their target: one tank per lane, each shooting an unarmed target, on the
+# generated map shellpaths.txt uses, whose lanes include a slope up and one down. The tallies give
+# when each target lost health and how much, so two builds can be set side by side for hit timing
+# and damage.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 900
+#     -scenario flatshells -logPrefix flatshells_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  AmericaTankCrusader            1   500 500
+30    spawn      1  AmericaVehicleDozer            1   630 500
+30    spawn      0  AmericaTankPaladin             1   850 1600
+30    spawn      1  CarCamaro                      1   850 1470
+30    spawn      0  GLATankScorpion                1   750 1680
+30    spawn      1  CarTaxiCab04                   1   750 1570
+30    spawn      0  ChinaTankOverlord              1   1150 1720
+30    spawn      1  CarTaxiCab02                   1   1150 1650
+30    spawn      0  ChinaTankBattleMaster          1   560 650
+30    spawn      1  ChinaVehicleDozer              1   810 650
+
+60    attack     0  AmericaTankCrusader            1  AmericaVehicleDozer
+60    attack     0  AmericaTankPaladin             1  CarCamaro
+60    attack     0  GLATankScorpion                1  CarTaxiCab04
+60    attack     0  ChinaTankOverlord              1  CarTaxiCab02
+60    attack     0  ChinaTankBattleMaster          1  ChinaVehicleDozer
+
+62    tally      1  AmericaVehicleDozer
+62    tally      1  CarCamaro
+62    tally      1  CarTaxiCab04
+62    tally      1  CarTaxiCab02
+62    tally      1  ChinaVehicleDozer
+70    tally      1  AmericaVehicleDozer
+70    tally      1  CarCamaro
+70    tally      1  CarTaxiCab04
+70    tally      1  CarTaxiCab02
+70    tally      1  ChinaVehicleDozer
+80    tally      1  AmericaVehicleDozer
+80    tally      1  CarCamaro
+80    tally      1  CarTaxiCab04
+80    tally      1  CarTaxiCab02
+80    tally      1  ChinaVehicleDozer
+100   tally      1  AmericaVehicleDozer
+100   tally      1  CarCamaro
+100   tally      1  CarTaxiCab04
+100   tally      1  CarTaxiCab02
+100   tally      1  ChinaVehicleDozer
+130   tally      1  AmericaVehicleDozer
+130   tally      1  CarCamaro
+130   tally      1  CarTaxiCab04
+130   tally      1  CarTaxiCab02
+130   tally      1  ChinaVehicleDozer
+160   tally      1  AmericaVehicleDozer
+160   tally      1  CarCamaro
+160   tally      1  CarTaxiCab04
+160   tally      1  CarTaxiCab02
+160   tally      1  ChinaVehicleDozer
+220   tally      1  AmericaVehicleDozer
+220   tally      1  CarCamaro
+220   tally      1  CarTaxiCab04
+220   tally      1  CarTaxiCab02
+220   tally      1  ChinaVehicleDozer
+400   tally      1  AmericaVehicleDozer
+400   tally      1  CarCamaro
+400   tally      1  CarTaxiCab04
+400   tally      1  CarTaxiCab02
+400   tally      1  ChinaVehicleDozer

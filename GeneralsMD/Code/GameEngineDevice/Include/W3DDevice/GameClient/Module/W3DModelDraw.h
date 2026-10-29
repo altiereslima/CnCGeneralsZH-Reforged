@@ -308,6 +308,7 @@ public:
 	ModelConditionFlags								m_ignoreConditionStates;
 	Bool															m_okToChangeModelColor;
 	Bool															m_animationsRequirePower;///< Should UnderPowered disable type pause animations in this draw module?
+	Bool															m_stabilizedTurretPitch;	///< draw a pitch bone at the logic's pitch against level ground, whatever the drawn hull's tilt
 #ifdef CACHE_ATTACH_BONE
 	mutable Bool											m_attachToDrawableBoneOffsetValid;
 #endif
@@ -531,6 +532,7 @@ private:
 	Int														m_hexColor;
 	Int														m_whichAnimInCurState;						///< the index of the currently playing anim in cur state (if any)
 	WeaponRecoilInfoVec						m_weaponRecoilInfoVec[WEAPONSLOT_COUNT];
+	Real													m_drawnTurretPitch[MAX_TURRETS];		///< the pitch handleClientTurretPositioning gave each turret's pitch bone this frame
 	Bool													m_needRecalcBoneParticleSystems;
 	Coord3D												m_groundMotionPos;								///< where stepGroundMotion last saw the unit
 	Real													m_groundMotionAngle;

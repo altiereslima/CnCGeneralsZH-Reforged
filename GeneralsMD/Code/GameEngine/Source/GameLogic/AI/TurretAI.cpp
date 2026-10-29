@@ -210,6 +210,7 @@ TurretAIData::TurretAIData()
 	m_initiallyDisabled = false;
 	m_firesWhileTurning = FALSE;
 	m_isAllowsPitch = false;
+	m_aimFromMuzzle = false;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -258,6 +259,7 @@ void TurretAIData::buildFieldParse(MultiIniFieldParse& p)
 		{ "TurretSweepSpeedModifier",TurretAIData::parseTurretSweepSpeed,	NULL, NULL },
 		{ "ControlledWeaponSlots",	parseTWS,															NULL, offsetof( TurretAIData, m_turretWeaponSlots ) },
 		{ "AllowsPitch",						INI::parseBool,												NULL, offsetof( TurretAIData, m_isAllowsPitch ) },
+		{ "AimFromMuzzle",					INI::parseBool,												NULL, offsetof( TurretAIData, m_aimFromMuzzle ) },
 #ifdef INTER_TURRET_DELAY
 		{ "InterTurretDelay",				INI::parseDurationUnsignedInt,				NULL, offsetof( TurretAIData, m_interTurretDelay ) },
 #endif
@@ -1225,6 +1227,24 @@ StateReturnType TurretAIAimTurretState::update()
 			Coord3D landing = enemyPosition;
 			landing.z += bodyMiddleHeight;
 			desiredPitch = turret->getTurretPitch() + shot->getBallisticLaunchPitch( launchPos, landing ) - barrelPitch;
+			if( desiredPitch < turret->getMinPitch() )
+			{
+				desiredPitch = turret->getMinPitch();
+			}
+		}
+		// A tank gun points down the line its shell flies, from the muzzle to the middle of the target. EA's
+		// aim below runs from the top of the tank to the target's feet, six degrees under the shell's line
+		// at 50 away. The pitch is the barrel's own, so the drawn barrel lies on the line; the launch bone
+		// is not the measure, since a Crusader's points 2.5 degrees under its barrel and laid on the line
+		// it left the barrel that much over it. The drawn hull tilts and the logic's does not, which the
+		// draw module takes off (StabilizedTurretPitch).
+		else if( turret->isAimFromMuzzle() )
+		{
+			Matrix3D launchTransform(true);
+			Coord3D launchPos;
+			Weapon::calcProjectileLaunchPosition( obj, turretWeapon->getWeaponSlot(), turretWeapon->getCurBarrel(), launchTransform, launchPos );
+			Real run = sqrtf( sqr( enemyPosition.x - launchPos.x ) + sqr( enemyPosition.y - launchPos.y ) );
+			desiredPitch = ATan2( enemyPosition.z + bodyMiddleHeight - launchPos.z, run );
 			if( desiredPitch < turret->getMinPitch() )
 			{
 				desiredPitch = turret->getMinPitch();
