@@ -1443,15 +1443,21 @@ const float StreakGain[2] = { 0.45f, 0.75f };
 // pillars that read as beams of light; the photos' plumes are white where the sun is on them and grey
 // on their shadow side.
 const float TrailTag = 1.25f, TrailTagSpan = 0.5f;
-const float RocketGrey = 0.8f;			// a rocket's trail is grey: its particle's own colour times this
+// A rocket's trail is grey and wispy, after the RPG-7 photo: its particle's own colour times this, and
+// a little thicker than its ribbon's opacity asks, since a ribbon a unit wide spreads over cells seven
+// units across (at 0.55 with EA's additive fire line hidden the trail was gone)
+const float RocketGrey = 0.55f, RocketGain = 1.6f;
+const int RibbonSmoothPoints = 4;		// a rocket ribbon's points averaged either side (stepAir)
+const float RocketFlameLead = 0.5f;		// a rocket's flame laid this many frames' travel ahead of its logic position, at the drawn tail
 // A ballistic or cruise missile's plume (the Scud's, the nuclear missile's, the Tomahawk's) opens out
 // wider with age than a rocket's trail, and is thicker, so it shades itself and its edge billows.
 const float PlumeSpread = 3.0f, PlumeGain = 1.6f;
-// The flame at the nozzle: a trail's puffs younger than NozzleAge of their life are hot, and a trail
-// cell's heat dies within a few hundredths of a second (AdvectPass), so only the nozzle glows, short
-// and bright (fireColour is orange at 1.2 and white-yellow at 1.8).
-const float NozzleAge = 0.05f;
-const float NozzleHeat[2] = { 1.2f, 1.8f };	// a rocket's, a missile's
+// The flame at the nozzle: a small hot ball at each rocket's tail, read off its drawable
+// (gatherNozzles), and a trail cell's heat dies within a few hundredths of a second (AdvectPass), so
+// only the nozzle glows, short and bright (fireColour is orange at 1.2 and white-yellow at 1.8).  Laid
+// on the ribbon's newest points it burned where the ribbon starts, a rocket's length behind it.
+const float NozzleHeat[2] = { 1.6f, 1.8f };	// a rocket's, a missile's
+const float NozzleSoot = 6.0f;			// the smoke that glows there (at 2 it did not show)
 const float NozzleGlow = 2.0f;			// the air's flame against the scene's white (a blast's soot[3])
 // A trail's smoke half-life in the air and the tall air (the brightness tells its cells): a Rocket
 // Buggy salvo's goes in a couple of seconds, a Scud Storm's columns hang on as rocket smoke does.
@@ -1584,6 +1590,8 @@ std::vector<Hull> hulls, lastHulls;
 // in ParticleSystemReforged.ini).  A system cannot be made in Takes, which runs inside the particle
 // manager's own loop, so Gather makes them next frame, outside the logic window.
 std::vector<Coord3D> pendingSparks;
+struct Nozzle { float x, y, z; bool big; int frames; };	// a rocket's tail in flight (gatherNozzles)
+std::vector<Nozzle> nozzles;
 // The same for a shell striking armour (TankStruckSmoke, which FX_DamageTankStruck turns away from
 // the attacker: `along` is the shot's heading).
 struct PendingHit { Coord3D at; float along[2]; };
@@ -3197,7 +3205,8 @@ AirLook airLookOf(const ParticleSystemTemplate *tmplate, ParticleSystem *system)
 	// as a sphere into cells seven units across lay on the ground in front of the gun as a flat
 	// tan disc, where the game's own puff is soft grey and drifts.
 	look.scrap = system->getPriority() == DEBRIS_TRAIL || std::strstr(name, "Debris") || std::strstr(name, "Shrapnel")
-		|| std::strstr(name, "Shard") || std::strstr(name, "Muzzle");
+		|| std::strstr(name, "Shard") || std::strstr(name, "Muzzle")
+		|| !std::strncmp(name, "ReforgedRocket", 14);	// gatherNozzles' billboards (as smoke in the air the backblast puff did not show)
 	airLooks[tmplate] = look;
 	return look;
 }
@@ -3686,25 +3695,47 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 		// a ballistic or cruise missile's exhaust is a white billowing plume; a rocket's, a thin grey trail
 		const bool plume = trail && (std::strstr(named, "Scud") || std::strstr(named, "Neutron") || std::strstr(named, "Tomahawk"));
 		bool chained = false;
-		for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) {
+		// A rocket's ribbon is laid straight: its points scatter off the fire line (EA's MissileExhaust,
+		// which feeds it, throws each point sideways at up to 0.2 a frame), so the ribbon drew a regular
+		// sine wiggle a few units wide where the rocket itself flies within a unit of a straight line
+		// (logged off the drawables).  Each point is taken as the mean of its neighbours along the
+		// ribbon, fewer towards its ends, so the head stays on the rocket.
+		static std::vector<Coord3D> straight;
+		straight.clear();
+		const bool straighten = trail && streak && !plume;
+		if (straighten) {
+			static std::vector<Coord3D> raw;
+			raw.clear();
+			for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) raw.push_back(*p->getPosition());
+			const int count = (int)raw.size();
+			for (int i = 0; i < count; ++i) {
+				const int reach = (std::min)((std::min)(i, count - 1 - i), RibbonSmoothPoints);
+				Coord3D mean = { 0, 0, 0 };
+				for (int k = i - reach; k <= i + reach; ++k) { mean.x += raw[k].x; mean.y += raw[k].y; mean.z += raw[k].z; }
+				const float n = 2.0f * reach + 1.0f;
+				straight.push_back({ mean.x / n, mean.y / n, mean.z / n });
+			}
+		}
+		unsigned index = 0;
+		for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext, ++index) {
 			const float alpha = (std::min)(p->getAlpha() * fade * AirCoverage, 0.95f);
 			if (alpha < 0.02f) { chained = false; continue; }
-			const Coord3D *at = p->getPosition();
+			const Coord3D *at = straighten ? &straight[index] : p->getPosition();
 			// at most 8 cells, so a sphere reaches 27 bricks at most (AirTileEntries)
 			// (a ribbon's spheres are laid along its links too, so it may go thinner without breaking up).
 			// A trail's particle is a puff of its own size, hashed from the particle, wider the older it
 			// is: a Scud Storm's columns stood as straight pillars of one width all the way up.
-			float puff = 1.0f, thick = 1.0f, heat = 0.0f;
+			float puff = 1.0f, thick = 1.0f;
 			if (trail) {
 				// the particle's address is the same for its whole life (a client-side look, nothing to replay)
 				const unsigned h = (p->getPersonality() ^ unsigned(reinterpret_cast<uintptr_t>(p) >> 4)) * 2654435761u;
 				const float age = p->m_lifetime ? (std::min)((std::max)(1.0f - (float)p->getLifetimeLeft() / (float)p->m_lifetime, 0.0f), 1.0f) : 0.0f;
 				puff = (0.65f + 0.8f * ((h >> 8) & 255) / 255.0f) * (1.0f + (plume ? PlumeSpread : TrailSpread) * age);
-				thick = (0.55f + 0.9f * ((h >> 16) & 255) / 255.0f) * std::pow(1.0f - age, TrailAgeFade) * (plume ? PlumeGain : 1.0f);
-				// the flame at the nozzle: the newest puff burns, the rest of the trail is cold smoke
-				if (p->m_lifetime && age < NozzleAge) heat = plume ? NozzleHeat[1] : NozzleHeat[0];
+				thick = (0.55f + 0.9f * ((h >> 16) & 255) / 255.0f) * std::pow(1.0f - age, TrailAgeFade) * (plume ? PlumeGain : RocketGain);
 			}
-			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * (streak ? 0.6f : 0.8f)) * puff, cell * 8.0f);
+			// (a straightened rocket ribbon at 0.6 of a cell passed between the cells' middles and laid
+			// next to nothing)
+			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * (straighten ? 0.9f : streak ? 0.6f : 0.8f)) * puff, cell * 8.0f);
 			// inside the box less its faded rim
 			const float rim = 4.0f * cell;
 			if (at->x < low[0] + rim || at->x > high[0] - rim || at->y < low[1] + rim || at->y > high[1] - rim
@@ -3727,7 +3758,7 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 			const float grey = launchPuff ? TrailTag + TrailTagSpan : trail ? TrailTag + TrailTagSpan * (plume ? 1.0f : luma * RocketGrey) : luma;
 			const float dx = at->x - look.x, dy = at->y - look.y;
 			const Source here = { (at->x - low[0]) / cell - 0.5f, (at->y - low[1]) / cell - 0.5f, (at->z - low[2]) / cell - 0.5f,
-				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy, heat };
+				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy, 0.0f };
 			if (chained) {
 				const Source &last = found.back();
 				const float gap = std::sqrt((here.x - last.x) * (here.x - last.x) + (here.y - last.y) * (here.y - last.y)
@@ -3764,6 +3795,19 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 					system->getTemplate()->getName().str()));
 		} else if (outside && !inside) airOutside.insert(id);
 		else airOutside.erase(id);
+	}
+	// The nozzle flames, at the tail of each rocket in the box (gatherNozzles): a small hot ball of
+	// trail smoke, so its heat dies with the trail's in a few frames once the rocket has moved on and
+	// it glows only where the rocket is.  A rocket's first frames burn bigger, the launch flash.
+	for (const Nozzle &nozzle : nozzles) {
+		if (nozzle.x < low[0] + 4 * cell || nozzle.x > high[0] - 4 * cell || nozzle.y < low[1] + 4 * cell || nozzle.y > high[1] - 4 * cell
+				|| nozzle.z < low[2] || nozzle.z > high[2] - 4 * cell)
+			continue;
+		const bool launch = nozzle.frames < 3;
+		const float dx = nozzle.x - look.x, dy = nozzle.y - look.y;
+		found.push_back({ (nozzle.x - low[0]) / cell - 0.5f, (nozzle.y - low[1]) / cell - 0.5f, (nozzle.z - low[2]) / cell - 0.5f,
+			(nozzle.big ? 1.5f : 1.1f) * (launch ? 1.4f : 1.0f), NozzleSoot, 0.0f, TrailTag + TrailTagSpan, dx * dx + dy * dy,
+			NozzleHeat[nozzle.big ? 1 : 0] + (launch ? 0.5f : 0.0f) });
 	}
 	const size_t cap = air.particles;
 	if (found.size() > cap) {
@@ -4464,6 +4508,28 @@ bool Takes(ParticleSystem *system)
 		}
 	}
 	if (takenSystems.count(id)) return !airOutside.count(id);
+	// A rocket's glow and its launch flash are the air's nozzle flame now (gatherNozzles): the lens
+	// flare on its exhaust (MissileLenzflare and the rest) burned as two orange dots fifty pixels
+	// behind the rocket, and the launch flash (MissileBackblast, the Stinger's and the TOW's) as a
+	// yellow-white blob as big as the soldier.
+	{
+		const char *name = system->getTemplate()->getName().str();
+		const bool flare = std::strstr(name, "MissileLenzflare") || std::strstr(name, "MissileExhaustLenzflare");
+		const bool flash = std::strstr(name, "MissileBackblast") && !std::strstr(name, "Clouds");
+		// and EA's fire line, the additive streak behind a rocket (MissileExhaust and its kin): with
+		// its points thrown sideways each frame it was the bright white rope with the sine wiggle; the
+		// air's grey ribbon, fed from it and laid straight, is the trail now
+		const bool fireLine = system->isUsingStreak() && system->getShaderType() == ParticleSystemInfo::ADDITIVE
+			&& std::strstr(name, "MissileExhaust") && !std::strstr(name, "Scud") && !std::strstr(name, "Tomahawk") && !std::strstr(name, "Neutron");
+		// and the white ribbon fed from it, whose points it throws off the line (ReforgedRocketTrail
+		// rides the rocket in its place)
+		const bool ribbon = !std::strcmp(name, "MissileExhaustTrail");
+		if ((flare || flash || fireLine || ribbon) && usable()) {
+			pruneSets();
+			takenSystems.insert(id);
+			return true;
+		}
+	}
 	// A blast is told from loose billboard systems; trails, streaks, a building's smoke and every
 	// other smoke or dust go to the air.
 	// A loose ground-aligned system is let as far as a tank's blast: the stock ring a tank's death
@@ -4799,6 +4865,64 @@ void attachDebrisDust(int now)
 	}
 }
 
+// The rockets and missiles in flight, read off their drawables once a logic frame: where the tail
+// is and which way it points, for the air's nozzle flame (stepAir), which the stock lens flare drew
+// fifty pixels behind the rocket where its exhaust ribbon starts.  A small rocket fired near the
+// ground also gets a white backblast puff behind its launcher on its second frame, when its heading
+// is known (the Tunnel Defender's has no launch FX at all, and the Tank Hunter's and the Missile
+// Defender's is a yellow-white flash).  Client particles only; nothing goes back to the logic.
+void gatherNozzles(int now)
+{
+	if (!TheGameClient) return;
+	static std::unordered_map<DrawableID, std::pair<Coord3D, int>> last, next;
+	next.clear();
+	nozzles.clear();
+	if (!TheParticleSystemManager) return;
+	const ParticleSystemTemplate *puff = TheParticleSystemManager->findTemplate("ReforgedRocketBackblastPuff");
+	const ParticleSystemTemplate *trail = TheParticleSystemManager->findTemplate("ReforgedRocketTrail");
+	const ParticleSystemTemplate *flame = TheParticleSystemManager->findTemplate("ReforgedRocketFlame");
+	for (Drawable *drawable = TheGameClient->firstDrawable(); drawable; drawable = drawable->getNextDrawable()) {
+		if (!drawable->isKindOf(KINDOF_PROJECTILE) || !drawable->getTemplate()) continue;
+		const char *name = drawable->getTemplate()->getName().str();
+		if (!std::strstr(name, "Missile") && !std::strstr(name, "Missle") && !std::strstr(name, "Rocket")) continue;
+		if (drawable->isDrawableEffectivelyHidden() || drawable->getFullyObscuredByShroud()) continue;
+		const Coord3D at = *drawable->getPosition();
+		auto seen = last.find(drawable->getID());
+		const int frames = seen == last.end() ? 0 : seen->second.second + 1;
+		next[drawable->getID()] = { at, frames };
+		const bool big = std::strstr(name, "Scud") || std::strstr(name, "Neutron") || std::strstr(name, "Tomahawk") || std::strstr(name, "Nuke");
+		// A small rocket's trail and flame are client billboards riding the rocket itself, after the
+		// RPG-7 photo: a short bright flame at the tail and a thin grey wisp laid straight along its
+		// path.  The air's cells, seven units across, could draw neither: a ribbon a unit wide laid
+		// next to nothing, and the flame came out as an orange ball a rocket's length behind.
+		if (seen == last.end()) {
+			if (!big && trail)
+				if (ParticleSystem *system = TheParticleSystemManager->createParticleSystem(trail)) system->attachToDrawable(drawable);
+			continue;
+		}
+		const float dx = at.x - seen->second.first.x, dy = at.y - seen->second.first.y, dz = at.z - seen->second.first.z;
+		const float length = std::sqrt(dx * dx + dy * dy + dz * dz);
+		if (length < 0.5f) continue;
+		const float ux = dx / length, uy = dy / length, uz = dz / length;
+		if (big) nozzles.push_back({ at.x - ux * 8.0f, at.y - uy * 8.0f, at.z - uz * 8.0f, big, frames });
+		// The flame is laid afresh each frame where the rocket is drawn: a system hung on the rocket
+		// emits where the rocket stood when the particles last moved, a frame and a half behind the
+		// drawn model, the gap EA's flare showed too.
+		else if (flame) {
+			const Coord3D where = { at.x + dx * RocketFlameLead, at.y + dy * RocketFlameLead, at.z + dz * RocketFlameLead };
+			if (ParticleSystem *system = TheParticleSystemManager->createParticleSystem(flame)) system->setPosition(&where);
+		}
+		const float ground = TheTerrainRenderObject ? TheTerrainRenderObject->getHeightMapHeight(at.x, at.y, NULL) : at.z;
+		if (frames == 1 && !big && puff && at.z - ground < 40.0f)
+			if (ParticleSystem *system = TheParticleSystemManager->createParticleSystem(puff)) {
+				// behind the launcher, which is where the rocket was a frame ago less its tube
+				const Coord3D where = { seen->second.first.x - ux * 10.0f, seen->second.first.y - uy * 10.0f, seen->second.first.z - uz * 10.0f };
+				system->setPosition(&where);
+			}
+	}
+	last.swap(next);
+}
+
 void Gather()
 {
 	if (!requested() || !TheGameLogic || TheGlobalData->m_classicGraphics || LogicThread::isInsideWindow()) return;
@@ -4824,6 +4948,7 @@ void Gather()
 		pendingSparks.clear();
 	}
 	attachDebrisDust(now);
+	gatherNozzles(now);
 	ownedHits.erase(std::remove_if(ownedHits.begin(), ownedHits.end(), [now](const OwnedHit &hit) { return hit.frame < now - 8; }),
 		ownedHits.end());
 	// A shell striking armour: one dense burst of sparks out of the point where it struck, in a cone
@@ -5121,6 +5246,7 @@ void Render(const HazardCloud::Camera &camera)
 void Reset()
 {
 	pendingSparks.clear();	// before the early return: a burst queued as the setting went Off
+	nozzles.clear();
 	pendingHits.clear();
 	ownedHits.clear();
 	gunSystems.clear();
