@@ -128,6 +128,11 @@ const float HeatHalfLife = 1.8f;
 const float DustHalfLife = 6.0f;
 const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
 const float StructureSootHalfLife = 7.0f;	// a building's blast's soot, as the air's
+// A tank's soot from 5 s on, once its column is falling: with its 10 s life it is gone from the play
+// camera about 8 s after the death, as the game's billboard column (ReforgedTankSmoke, 1.5 s of
+// puffs living 5 to 6 s) is.  It used to hang for half a minute; thinned from 3 s at 1.2 it was
+// gone in 4, sooner than the game's own.
+const float TankSootThinFrom = 5.0f, TankSootHalfLife = 1.5f;
 const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
@@ -1605,7 +1610,13 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// Low's came out a round dome.  Long hulls do not use it.
 		const float fanScale = 0.5f + 0.5f * reach / 36.0f;
 		for (unsigned j = 0; j < jets; ++j) {
-			auto field = [&](unsigned f) { return unit(1000 + 16 * j + f); };
+			// The tilt, azimuth, height and across-start hashes are shared by each jet and its mirror across the
+			// middle, so both flanks of the fan come out alike; drawn per jet one flank grew taller and
+			// thicker than the other, and on the Overlord its left read as smoke.
+			const unsigned pair = (std::min)(j, jets - 1 - j);
+			auto field = [&](unsigned f) {
+				return unit(1000 + 16 * ((f == 1 || f == 3 || f == 4 || f == 6) ? pair : j) + f);
+			};
 			// a jet stops once it has slowed to a fifth of its speed: lingering at the top it heated a
 			// round ball there
 			const float age = t - 0.06f * field(0), slows = 0.18f;
@@ -1641,7 +1652,9 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			// they carried their own smoke up into a mushroom's cap.
 			const float tilt = (1 - shortHull) * 0.7f * std::pow(std::fabs(side), 1.1f) + shortHull * 0.55f * fanScale * std::fabs(side)
 				+ 0.04f * (field(1) - 0.5f);
-			const float azimuth = (side < 0 ? 3.14159265f : 0.0f) + (field(3) - 0.5f) * 0.9f;
+			// mirrored, so a pair leans the same way across the hull (a shared offset added to both
+			// twisted the fan into an S from above)
+			const float swing = (field(3) - 0.5f) * 0.9f, azimuth = side < 0 ? 3.14159265f - swing : swing;
 			const float ca = std::cos(azimuth), cc = std::sin(azimuth);
 			const float dz = std::cos(tilt);
 			const float curvedHeight = (0.75f + 0.25f * centre * centre) * (1 - 0.3f * (1 - centre * centre * centre * centre) * field(4));
@@ -1715,19 +1728,19 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// the default 1.6 once the flare is over; about a third of a second of white, as long as
 		// the jets run, and no longer, so several tanks dying at once do not white out the view
 		soot[3] = 1.6f + 4.2f * std::exp(-t / 0.22f);
-		// Dark soot hugging the hull: four thick, barely glowing puffs on its flanks, a hull's width
-		// out from its axis, just over the base fire and outside the jets' roots, drifting outward
-		// and a little up, so the bright core stands in red-brown smoke as in the photo and the
-		// fan's top stays clear of it.  Heat 0.6 burns only a dull red (fireColour starts at 0.5).
-		// Heat is the hottest emitter's, so laid half a hull's width out, inside the jets, the
-		// soot burned as bright as they did and nothing dark showed.
-		// 22 a second for 0.6 s: at 45 for 0.8 s a fight's three dead tanks hung under big black clouds.
-		if (t < 0.6f) {
-			const float fade = 1 - t / 0.6f;
+		// Dark soot banked on the hull: two thick lobes at each end, just past the jets' roots and
+		// over the base fire, which edges them red, so the bright core stands between near-black
+		// lobes as in the photo and the fan's top stays clear of them.  Heat 0.3 does not glow at all
+		// (fireColour starts at 0.5).  Heat is the hottest emitter's, so laid inside the jets' roots
+		// the soot burned as bright as they did; laid round the hull's sides as well (pass 12) the
+		// lobes closed into a dark ring round the fire from the play camera.  Kept low and short (0.5
+		// s), so a fight's dead tanks do not hang under black clouds.
+		if (t < 0.5f) {
+			const float fade = 1 - t / 0.5f;
 			for (unsigned k = 0; k < 4; ++k) {
-				const float s = (k < 2 ? -0.55f : 0.55f) * (0.85f + 0.3f * unit(980 + k)), side = (k & 1) ? 1.0f : -1.0f;
-				onHull(s * L, side * W * 1.05f, H * (0.6f + 0.3f * unit(984 + k)), (std::max)(W * 0.8f, 2.2f) * (1 + t),
-					s * 3.0f * fade, side * 3.0f * fade, 2.0f, 22.0f * fade, 0.6f, 3.0f * fade, 0.2f);
+				const float s = k < 2 ? -1.0f : 1.0f, side = (k & 1) ? 1.0f : -1.0f;
+				onHull(s * L * (1.0f + 0.15f * unit(980 + k)), side * W * 0.35f, H * (0.45f + 0.25f * unit(984 + k)),
+					(std::max)(W * 0.7f, 2.2f) * (1 + t), s * 4.0f * fade, side * 1.5f * fade, 1.5f, 40.0f * fade, 0.3f, 2.0f * fade, 0.2f);
 			}
 		}
 		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.
@@ -1749,9 +1762,11 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 				onHull((unit(910 + p) - 0.5f) * L * 1.4f, (unit(920 + p) - 0.5f) * W * 0.8f, H * 0.6f, 2.4f, 0, 0, 12.0f,
 					12.0f, 1.7f, 2.0f, 0.3f);
 		}
-		// the hull burning: a thick black column for half a minute off its whole length
-		if (t > 0.8f && t < 28.0f) {
-			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 18.0f ? 1 - (t - 18.0f) / 10.0f : 1.0f;
+		// The hull burning: a black column off its whole length for about seven seconds, which with
+		// the soot thinning (TankSootHalfLife) and the volume's 10 s life is gone about as soon as
+		// the game's own billboard column (ReforgedTankSmoke).  At half a minute it outlived the wreck.
+		if (t > 0.8f && t < 7.0f) {
+			const float rise = (std::min)((t - 0.8f) / 1.5f, 1.0f), fall = t > 4.0f ? 1 - (t - 4.0f) / 3.0f : 1.0f;
 			for (int end = -1; end <= 1; end += 2)
 				onHull(end * L * 0.45f, 0, 0.5f, (std::max)(W * 0.9f, 2.2f), 0, 0, 12.0f, 2.7f * rise * fall, 1.0f, 0.05f, 0.25f);
 		}
@@ -2158,6 +2173,9 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		// A building's smoke thins with a half-life of its own: a blast's soot otherwise stays as laid,
 		// and a War Factory's had piled into a dark wall across the frame by the next building's fall.
 		sim.Thin[slab][0] = volume.kind == Structure ? std::pow(0.5f, dt / StructureSootHalfLife) : 1.0f;
+		// A tank's thins once its column has died down, so it is gone as soon as the game's own.
+		if (volume.kind == TankDeath && volume.live && secondsSince(volume, now) > TankSootThinFrom)
+			sim.Thin[slab][0] = std::pow(0.5f, dt / TankSootHalfLife);
 		for (unsigned i = 0; i < 3; ++i) sim.Origins[slab][i] = volume.origin[i];
 		if (!volume.live) continue;
 		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
@@ -2840,7 +2858,7 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 
 // How long each kind lives, in seconds, how big its cell is, how far and how long after its blast
 // another system of the same FX joins it, and which of those it takes.
-float lifeOf(Kind kind) { return kind == TankDeath ? 36.0f : kind == Structure ? 24.0f : kind == Nuclear ? 90.0f : 12.0f; }
+float lifeOf(Kind kind) { return kind == TankDeath ? 10.0f : kind == Structure ? 24.0f : kind == Nuclear ? 90.0f : 12.0f; }
 float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : 2.0f * scale; }
 float joinRadius(const Volume &volume)
 {
@@ -2998,6 +3016,9 @@ bool Takes(ParticleSystem *system)
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
 		const char *joiner = system->getTemplate()->getName().str();
 		if (volume.kind == Nuclear && !alpha && !std::strstr(joiner, "Nuke") && !std::strstr(joiner, "MOAB")) continue;
+		// sparks off the shells still hitting a dead tank (TankStruckSparks) stay the game's own
+		// billboards: taken, the fire swallowed the only hot sparks near it
+		if (volume.kind == TankDeath && !alpha && std::strstr(joiner, "Spark")) continue;
 		if (system->isSystemForever()) continue;
 		if (kind.trigger && (kindNow == TankDeath) != (volume.kind == TankDeath)) continue;
 		if (kind.trigger && (kindNow == Nuclear) != (volume.kind == Nuclear)) continue;
