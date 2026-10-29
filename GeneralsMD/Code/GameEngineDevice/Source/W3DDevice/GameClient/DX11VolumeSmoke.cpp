@@ -125,15 +125,16 @@ const float Vorticity = 3.0f;
 const float Drag = 0.045f;				// per cell/s of speed
 const float VelocityHalfLife = 3.0f;
 const float HeatHalfLife = 1.8f;
-const float DustHalfLife = 6.0f;
+const float DustHalfLife = 3.0f;			// (6 halved: a fallen War Factory's tan lobes lay beside it for 10 s)
 const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
-const float StructureSootHalfLife = 1.5f;	// a building's blast's soot: at 7 a fall's smoke was on screen for 14 s, at 3 for 7 to 10
-// A tank's soot from 2.5 s on, once its column is falling: its black column is gone from the play
-// camera about 4 s after the death and a thin smoulder fades out by 7 s (the volume lives 8.5, so its
-// own 3 s end fade starts as the smoulder's ends and does not dim it twice).  The
-// owner halved it (2026-10-29) from 8 and 14 s, which had matched the game's billboard column
+const float StructureSootHalfLife = 0.75f;	// a building's blast's soot: at 7 a fall's smoke was on screen for 14 s, at 3 for 7 to 10, at 1.5 for 5 to 6
+// A tank's soot from 1.25 s on, once its column is falling: its black column is gone from the play
+// camera about 2 s after the death and a thin smoulder fades out by 3.5 s (the volume lives 4.25, its
+// end fade 1.5 s for a tank, so it starts as the smoulder's ends and does not dim it twice).  The
+// owner halved it twice (2026-10-29) from 8 and 14 s, which had matched the game's billboard column
 // (ReforgedTankSmoke, 1.5 s of puffs living 5 to 6 s); before that it hung for half a minute.
-const float TankSootThinFrom = 2.5f, TankSootHalfLife = 0.75f;
+const float TankSootThinFrom = 1.25f, TankSootHalfLife = 0.375f;
+const float ShortEndFade = 1.5f;		// seconds a tank's or a building's volume fades over at its end; the rest 3
 const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
@@ -1008,10 +1009,10 @@ const unsigned AirTileEntries = 27;		// brick list room a particle: a sphere of 
 const float AirExtinction = 0.04f;		// per world unit at density 1: the air's smoke is thinner than a blast's
 // seconds, once no particle holds it up: a damaged building's SmokeFaction* puffs live 2 to 5.3 s
 // and StructureDamagedSmoke's 1.5 s, and at 7 the air kept them on screen for twice as long again
-const float AirSootHalfLife = 1.5f;		// (halved again from 3 at the owner's word: a fast game)
+const float AirSootHalfLife = 0.75f;	// (halved from 3 and twice again at the owner's word: a fast game)
 // The air's dust thins on its own clock, apart from a blast's DustHalfLife: a tan lobe of dust stood
-// beside a fallen War Factory long after its smoke had gone at the shared 6 s
-const float AirDustHalfLife = 2.0f;
+// beside a fallen War Factory long after its smoke had gone at the shared 6 s (2, halved again)
+const float AirDustHalfLife = 1.0f;
 const float AirTakeUp = 8.0f;			// a second: how fast the cells under a particle reach its smoke
 const float AirCoverage = 0.7f;			// a billboard's opacity at its centre, against its alpha
 // A sphere's falloff, the trilinear blur of a few cells and the noise take most of the opacity a
@@ -1032,11 +1033,12 @@ const float TrailBright = 1.7f;
 // (a Tomahawk's and a Scud's jet smoke lives 2 s, a Rocket Buggy's 1.2 s, so at 3 a Tomahawk's arc
 // over Heartland Shield was on screen for 5 to 6 s where stock's is gone in 3; a cell holds what its
 // particle laid while it lives, so the half-life is what follows the particle's 2 s: at 1.5 the arc
-// still showed 4.5 s after the launch)
-const float TrailHalfLife[2] = { 0.5f, 0.5f };
+// still showed 4.5 s after the launch; 0.5 halved again, the owner's third halving)
+const float TrailHalfLife[2] = { 0.25f, 0.25f };
 // and so a trail's particle lays less the older it is (by (1 - age)^TrailAgeFade), so its cells sink
-// with it over its life and are gone about half a second after it: at a fixed rate the arc showed 5 s
-const float TrailAgeFade = 1.5f;
+// with it over its life and are gone soon after it: at a fixed rate the arc showed 5 s, at 1.5 about
+// 3.5 s after the launch on film, and at 3 a trail is down to a tenth by half its particle's life
+const float TrailAgeFade = 3.0f;
 // A trail's particle stands for more smoke the older it is, spread wider: the end of a column
 // farthest from the missile is up to this much wider than its head, so it opens out as it ages.
 const float TrailSpread = 1.5f;
@@ -1762,11 +1764,12 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// its place and pushes the air it lays into a slow roll, at half that rate over a third more
 		// width: laid still and thick it saturated into a black cut-out with a hard edge, where thinner
 		// smoke keeps the march's billows inside it and a soft rim.
-		if (t < 0.95f) {
-			const float fade = 1 - t / 0.95f, swell = 1 + 0.7f * (std::min)(t / 0.6f, 1.0f);
+		// (halved a second time to 0.48 s, at the owner's word: a fast game)
+		if (t < 0.48f) {
+			const float fade = 1 - t / 0.48f, swell = 1 + 0.7f * (std::min)(t / 0.3f, 1.0f);
 			for (unsigned k = 0; k < 4; ++k) {
 				// the inner pair waits for the jets to stop: laid in their roots it burned at their heat
-				if (!(k & 1) && t < 0.35f) continue;
+				if (!(k & 1) && t < 0.25f) continue;
 				const float wander = 6.2831853f * unit(988 + k) + t * (2.0f + 1.5f * unit(992 + k));
 				const float s = (k < 2 ? -1.0f : 1.0f) * ((k & 1) ? 1.05f : 0.7f) * (0.95f + 0.1f * unit(980 + k))
 					+ 0.12f * std::sin(wander);
@@ -1789,31 +1792,31 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		}
 		// the cook-off pops, two to four, each a hot orange puff out of a hatch somewhere on the hull
 		const unsigned pops = 2 + unsigned(unit(900) * 2.99f);
-		float when = 0.45f;	// all of them inside the first 3.5 s, as the column
+		float when = 0.22f;	// all of them inside the first 1.75 s, as the column
 		for (unsigned p = 0; p < pops; ++p) {
-			when += 0.25f + 0.5f * unit(901 + p);
+			when += 0.12f + 0.25f * unit(901 + p);
 			const float age = t - when;
-			if (age >= 0 && age < 0.2f)
+			if (age >= 0 && age < 0.15f)
 				onHull((unit(910 + p) - 0.5f) * L * 1.4f, (unit(920 + p) - 0.5f) * W * 0.8f, H * 0.6f, 2.4f, 0, 0, 12.0f,
 					12.0f, 1.7f, 2.0f, 0.3f);
 		}
-		// The hull burning: a black column off its whole length for about three seconds, which with
-		// the soot thinning (TankSootHalfLife) is gone about 4 s after the death, half as long as the
-		// game's own billboard column (ReforgedTankSmoke), as the owner asked for a fast game.  At half
-		// a minute it outlived the wreck.
-		if (t > 0.5f && t < 3.5f) {
-			const float rise = (std::min)((t - 0.5f) / 0.75f, 1.0f), fall = t > 2.0f ? 1 - (t - 2.0f) / 1.5f : 1.0f;
+		// The hull burning: a black column off its whole length for about a second and a half, which
+		// with the soot thinning (TankSootHalfLife) is gone about 2 s after the death, a quarter as
+		// long as the game's own billboard column (ReforgedTankSmoke), as the owner asked for a fast
+		// game (halved twice, from 0.5-3.5 s and 0.8-7 s).  At half a minute it outlived the wreck.
+		if (t > 0.25f && t < 1.75f) {
+			const float rise = (std::min)((t - 0.25f) / 0.38f, 1.0f), fall = t > 1.0f ? 1 - (t - 1.0f) / 0.75f : 1.0f;
 			for (int end = -1; end <= 1; end += 2)
 				onHull(end * L * 0.45f, 0, 0.5f, (std::max)(W * 0.9f, 2.2f), 0, 0, 12.0f, 2.7f * rise * fall, 1.0f, 0.05f, 0.25f);
 		}
 		// Then the wreck smoulders: a thin grey wisp off one end and a glowing ember in the hull,
-		// flickering, from 3 s, fading out over its last two seconds to nothing at 7 s.  With nothing
+		// flickering, from 1.5 s, fading out over its last second to nothing at 3.5 s.  With nothing
 		// after the column the wreck went dead straight after a big blast.
-		if (t > 3.0f && t < 7.0f) {
-			const float in = (std::min)((t - 3.0f) / 0.5f, 1.0f), out = t > 5.0f ? 1 - (t - 5.0f) / 2.0f : 1.0f;
-			// (at a tenth and a third of these the soot thinning took the wisp before it showed; twice
-			// the pass-16 rate, since the thinning's half-life was halved with everything else)
-			onHull(L * 0.35f, 0, 0.6f, (std::max)(W * 0.6f, 2.0f), 0, 0, 6.0f, 6.4f * in * out, 0.9f, 0.15f, 0.2f);
+		if (t > 1.5f && t < 3.5f) {
+			const float in = (std::min)((t - 1.5f) / 0.25f, 1.0f), out = t > 2.5f ? 1 - (t - 2.5f) : 1.0f;
+			// (at a tenth and a third of these the soot thinning took the wisp before it showed; four
+			// times the pass-16 rate, since the thinning's half-life was halved twice with the rest)
+			onHull(L * 0.35f, 0, 0.6f, (std::max)(W * 0.6f, 2.0f), 0, 0, 6.0f, 12.8f * in * out, 0.9f, 0.15f, 0.2f);
 			const float flicker = 0.5f + 0.5f * std::sin(t * 11.0f + 6.2831853f * unit(970)) * std::sin(t * 4.3f);
 			// the flicker in its size: heat holds the hottest it has seen for a while, so a flicker in
 			// heat read as a slow sag, and at 1.95 the ember burned as hot as a cook-off pop
@@ -1936,8 +1939,8 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// half its radius into the ground so only a low lens of it stands over it, and the eight
 		// overlap into one sheet the shape of the footprint.  Standing on the ground, the same
 		// bodies stood round the building as a ring of grey balls.  A standing building drops none.
-		if (!standing && t > 0.1f && t < 1.8f) {
-			const float fade = 1 - (t - 0.1f) / 1.7f, pour = 1.0f;	// (to 3 s, the dust still lay round the ruin at 10)
+		if (!standing && t > 0.05f && t < 0.9f) {
+			const float fade = 1 - (t - 0.05f) / 0.85f, pour = 1.0f;	// (to 3 s, the dust still lay round the ruin at 10; 1.8 s, halved)
 			for (unsigned k = 0; k < 8; ++k) {
 				const bool end = k >= 4;
 				const float s = (k & 1) ? 1.0f : -1.0f, along = (k & 2) ? 0.5f : -0.5f;
@@ -1952,11 +1955,11 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			}
 		}
 		// The ruin burning: a column off the ground its two biggest meshes stood on, leaning with the
-		// wind, done by 4.5 s: the game is fast, and the owner halved it again from 7.5 s (stock's
-		// StructureTransition*Smoke lives 6.7 s), where it had hung on for fifteen at first and hidden
-		// the next fight.  Its fire goes out with it.
-		if (!standing && t > 0.8f && t < 4.5f) {
-			const float rise = (std::min)((t - 0.8f) / 0.8f, 1.0f), fall = t > 2.0f ? 1 - (t - 2.0f) / 2.5f : 1.0f;
+		// wind, done by 2.25 s: the game is fast, and the owner halved it from 7.5 s and again from 4.5
+		// (stock's StructureTransition*Smoke lives 6.7 s), where it had hung on for fifteen at first and
+		// hidden the next fight.  Its fire goes out with it.
+		if (!standing && t > 0.4f && t < 2.25f) {
+			const float rise = (std::min)((t - 0.4f) / 0.4f, 1.0f), fall = t > 1.0f ? 1 - (t - 1.0f) / 1.25f : 1.0f;
 			for (unsigned i = 0; i < (std::min)(partCount, 2u); ++i) {
 				const Part &p = parts[big[i]];
 				onFootprint(p.along, p.across, 0.6f, (std::max)((std::min)(p.halfAlong, p.halfAcross) * 0.6f, 2.0f), 0, 0, 12.0f,
@@ -2907,18 +2910,18 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 
 // How long each kind lives, in seconds, how big its cell is, how far and how long after its blast
 // another system of the same FX joins it, and which of those it takes.
-float lifeOf(Kind kind) { return kind == TankDeath ? 8.5f : kind == Structure ? 6.0f : kind == Nuclear ? 90.0f : 12.0f; }
+float lifeOf(Kind kind) { return kind == TankDeath ? 4.25f : kind == Structure ? 3.0f : kind == Nuclear ? 90.0f : 12.0f; }
 float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : 2.0f * scale; }
 float joinRadius(const Volume &volume)
 {
 	if (volume.kind == Structure) return (std::max)(volume.hull[2], volume.hull[3]) * volume.cell + 40.0f;
 	return volume.kind == Nuclear ? 500.0f : volume.kind == TankDeath ? 60.0f : 30.0f * volume.scale;
 }
-// A tank's volume past 3.5 s holds only its smoulder, so it gives its slab up before any new blast does.
+// A tank's volume past 1.75 s holds only its smoulder, so it gives its slab up before any new blast does.
 int rankOf(const Volume &volume)
 {
 	if (volume.kind == TankDeath && volume.live && TheGameLogic
-			&& 2 * ((int)TheGameLogic->getFrame() - volume.born) > 7 * LOGICFRAMES_PER_SECOND)
+			&& 4 * ((int)TheGameLogic->getFrame() - volume.born) > 7 * LOGICFRAMES_PER_SECOND)
 		return -1;
 	return volume.kind == TankDeath || volume.kind == Structure ? 2 : volume.scale >= 2.0f ? 1 : 0;
 }
@@ -3212,7 +3215,7 @@ bool Takes(ParticleSystem *system)
 				volume.partCount ? volume.parts[0].bottom * cell : 0.0f, volume.partCount ? volume.parts[0].top * cell : 0.0f));
 	}
 	volume.born = now;
-	volume.life = int((type == Structure && volume.standing ? 4.0f : lifeOf(type)) * LOGICFRAMES_PER_SECOND);
+	volume.life = int((type == Structure && volume.standing ? 2.0f : lifeOf(type)) * LOGICFRAMES_PER_SECOND);
 	// its front through the air round it, in world units a second.  A tank's has none: a sphere
 	// pushing out from the hull's middle blew its own fire into a dome and the dust round it into
 	// rings, where a real one bursts out along the hull and up (schedule).
@@ -3462,7 +3465,7 @@ void Render(const HazardCloud::Camera &camera)
 			schedule(volume, slabOf(slot), t0, &draw);
 			const float left = (float)(volume.life - (now - volume.born)) / LOGICFRAMES_PER_SECOND;
 			draw.Slab[0] = (float)slabOf(slot);
-			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / 3.0f));
+			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (volume.kind == TankDeath || volume.kind == Structure ? ShortEndFade : 3.0f)));
 			draw.Slab[2] = stepCells;
 			draw.Slab[3] = Extinction;
 			upload(context, state.drawConstants, &draw, sizeof(draw));
