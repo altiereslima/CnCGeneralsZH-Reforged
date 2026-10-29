@@ -1139,6 +1139,10 @@ unsigned moverPeak = 0;
 // so a tank dying now finds its hull: where it stands, its heading and its template's box.
 struct Hull { float x, y, heading, major, minor, tall; };
 std::vector<Hull> hulls, lastHulls;
+// Where a tank's blast started since the last Gather, for its death sparks (ReforgedTankDeathSparks
+// in ParticleSystemReforged.ini).  A system cannot be made in Takes, which runs inside the particle
+// manager's own loop, so Gather makes them next frame, outside the logic window.
+std::vector<Coord3D> pendingSparks;
 // The structures the smoke flows round, read by Gather every two seconds outside the logic
 // thread's window (the render runs inside it, where walking the object list is a counted read).
 // A structure goes in once the player whose view is drawn has seen it, so smoke parting round
@@ -1175,6 +1179,7 @@ bool requested()
 		tallSystems.clear();
 		movers.clear();
 		shocks.clear();
+		pendingSparks.clear();
 		hulls.clear();
 		lastHulls.clear();
 		solids.clear();
@@ -1748,6 +1753,8 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		if (t < 1.8f) {
 			const float fade = 1 - t / 1.8f, swell = 1 + 0.5f * (std::min)(t / 1.2f, 1.0f);
 			for (unsigned k = 0; k < 4; ++k) {
+				// the inner pair waits for the jets to stop: laid in their roots it burned at their heat
+				if (!(k & 1) && t < 0.35f) continue;
 				const float s = (k < 2 ? -1.0f : 1.0f) * ((k & 1) ? 1.05f : 0.7f) * (0.95f + 0.1f * unit(980 + k));
 				const float across = ((k & 1) ? 0.3f : -0.3f) * W;
 				onHull(s * L, across, H * (0.4f + 0.2f * unit(984 + k)), (std::max)(W * 0.9f, 2.6f) * swell,
@@ -3027,9 +3034,10 @@ bool Takes(ParticleSystem *system)
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
 		const char *joiner = system->getTemplate()->getName().str();
 		if (volume.kind == Nuclear && !alpha && !std::strstr(joiner, "Nuke") && !std::strstr(joiner, "MOAB")) continue;
-		// sparks off the shells still hitting a dead tank (TankStruckSparks) stay the game's own
-		// billboards: taken, the fire swallowed the only hot sparks near it
-		if (volume.kind == TankDeath && !alpha && std::strstr(joiner, "Spark")) continue;
+		// Sparks stay the game's own billboards, a dead tank's own (ReforgedTankDeathSparks) and the
+		// shells' still hitting it (TankStruckSparks): taken, the fire swallowed the only hot sparks
+		// near it.  A building's fall nearby would take them too.
+		if ((volume.kind == TankDeath || volume.kind == Structure) && !alpha && std::strstr(joiner, "Spark")) continue;
 		if (system->isSystemForever()) continue;
 		if (kind.trigger && (kindNow == TankDeath) != (volume.kind == TankDeath)) continue;
 		if (kind.trigger && (kindNow == Nuclear) != (volume.kind == Nuclear)) continue;
@@ -3133,6 +3141,8 @@ bool Takes(ParticleSystem *system)
 		if (hullsLogged++ < 8)
 			DEBUG_LOG(("VOLSMOKE: frame %d, tank hull %s, %.0f by %.0f by %.0f units, heading %.2f\n", now,
 				found ? "found" : "not found", volume.hull[2] * 2 * cell, volume.hull[3] * 2 * cell, volume.hull[4] * cell, heading));
+		// its sparks, started by Gather outside the particle loop this runs in
+		pendingSparks.push_back({ where.x, where.y, (std::min)(where.z, ground) + volume.hull[4] * cell * 0.8f });
 	}
 	if (type == Structure) {
 		const float cell = volume.cell, heading = building ? building->angle : hashUnit(volume.seed, 7) * 6.2831853f;
@@ -3202,6 +3212,19 @@ void Gather()
 	gatherSolids(now);	// every two seconds, so a blast that starts finds its buildings
 	// every frame, idle or not, so a tank that dies now finds its hull; never where no volume can be
 	if (Direct3D11_Present_Is_Enabled()) collectMovers(now);
+	// A dead tank's hot sparks: client particles only, the client's random stream, no logic state.
+	if (!pendingSparks.empty() && TheParticleSystemManager) {
+		const ParticleSystemTemplate *sparks = TheParticleSystemManager->findTemplate("ReforgedTankDeathSparks");
+		static unsigned sparksLogged = 0;
+		if (sparksLogged++ < 4)
+			DEBUG_LOG(("VOLSMOKE: frame %d, %u tank death spark burst(s), template %s\n", now, (unsigned)pendingSparks.size(),
+				sparks ? "found" : "missing"));
+		if (sparks)
+			for (const Coord3D &at : pendingSparks)
+				if (ParticleSystem *system = TheParticleSystemManager->createParticleSystem(sparks))
+					system->setPosition(&at);
+		pendingSparks.clear();
+	}
 }
 
 void Render(const HazardCloud::Camera &camera)
@@ -3419,6 +3442,7 @@ void Render(const HazardCloud::Camera &camera)
 
 void Reset()
 {
+	pendingSparks.clear();	// before the early return: a burst queued as the setting went Off
 	if (!requested()) return;
 	for (Volume &volume : volumes) volume = Volume();
 	airVolume = Volume();
