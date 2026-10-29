@@ -137,6 +137,15 @@ const float Drag = 0.045f;				// per cell/s of speed
 const float VelocityHalfLife = 3.0f;
 const float HeatHalfLife = 1.8f;
 const float DustHalfLife = 3.0f;			// (6 halved: a fallen War Factory's tan lobes lay beside it for 10 s)
+// Dust lying on the ground thins on a clock of its own (AdvectPass keeps a slab's share a step): 0.38 s
+// is the 0.97 a step at 60 every blast had, and a fallen building's ground roll died where it was
+// laid under it.  A building's fall and a launch roll out along the ground on the longer one.
+const float GroundDustHalfLife = 0.38f, GroundRollHalfLife = 1.5f;
+// Cold dust's weight in cells/s^2 at density 1, over the shared Weight: a building's ground roll
+// slumps and spreads as a gravity current (about 5 cells/s two cells deep at 10; at 20 it lay as a
+// flat sheet), and a shell's thrown dirt falls back out of the air; at the shared 1 a Rocket Buggy's
+// dirt fountains stood beside a fallen War Factory as tan fingers for ten seconds.
+const float RollWeight = 10.0f, DirtWeight = 30.0f;
 const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
 const float StructureSootHalfLife = 0.75f;	// a building's blast's soot: at 7 a fall's smoke was on screen for 14 s, at 3 for 7 to 10, at 1.5 for 5 to 6
 // A tank's soot from 1.25 s on, once its column is falling: its black column is gone from the play
@@ -145,7 +154,7 @@ const float StructureSootHalfLife = 0.75f;	// a building's blast's soot: at 7 a 
 // owner halved it twice (2026-10-29) from 8 and 14 s, which had matched the game's billboard column
 // (ReforgedTankSmoke, 1.5 s of puffs living 5 to 6 s); before that it hung for half a minute.
 const float TankSootThinFrom = 1.25f, TankSootHalfLife = 0.375f;
-const float ShortEndFade = 1.5f;		// seconds a tank's or a building's volume fades over at its end; the rest 3
+const float ShortEndFade = 1.5f;		// seconds a tank's, a building's, a launch's or a shell's volume fades over at its end; the rest 3
 const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
@@ -183,7 +192,7 @@ const DXGI_FORMAT VelocityFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;	// xyz cells/
 const DXGI_FORMAT DensityFormat = DXGI_FORMAT_R16G16_FLOAT;			// soot, dust
 const DXGI_FORMAT ScalarFormat = DXGI_FORMAT_R16_FLOAT;
 
-enum Kind { TankDeath, Shell, Airburst, Nuclear, Air, Structure, Fire };
+enum Kind { TankDeath, Shell, Airburst, Nuclear, Air, Structure, Fire, Launch };
 
 template <class T> void drop(T *&object)
 {
@@ -248,7 +257,7 @@ struct SimConstants {
 	float Origins[MaxSlabs][4];		// each slab's world corner, for the movers below
 	float MoverCount[4];
 	float Movers[MaxMovers * 4][4];	// the units that push the air this step, in world units (Mover)
-	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest)
+	float Thin[MaxSlabs][4];		// a blast's soot kept over this step (a building's thins; 1 for the rest), its cold dust's weight, its ground dust kept
 	// A fire's slab (FireFields, after Thin in its programs' cbuffer only): burn rate, heat a unit of
 	// fuel gives, soot yield, ignition heat; the fuel that starves it, radiation, soot burn,
 	// expansion; its lift in cells/s^2 at heat 1.
@@ -297,7 +306,8 @@ float walls(float3 cell)
 float walls(float3 cell)
 {
     float2 across = (cell.xy - float2(GX - 1, GY - 1) * 0.5) / (GX * 0.5 - 1);
-    return (1 - smoothstep(0.6, 1.0, length(across))) * smoothstep(0, 10, GZ - 1 - cell.z);
+    // (from 0.6 of the way out a building's ground roll was gone by one and a half footprints)
+    return (1 - smoothstep(0.8, 1.0, length(across))) * smoothstep(0, 10, GZ - 1 - cell.z);
 }
 #endif
 uint hash(uint3 v)
@@ -580,7 +590,16 @@ void main(uint3 id : SV_DispatchThreadID)
 #endif
         // Heat lifts, fading out under the ceiling, where a rising cap stops and spreads.
         float lift = Forces.x * vt.w * saturate((shape.z - cell.z) / max(shape.z * 0.3, 1));
+#ifdef AIR
+        lift *= 1 - trail;	// a nozzle's flame lights its trail, it does not lift it
+#endif
         vt.z += dt * (lift - Forces.y * d.y);	// soot is light; dust and dirt are what weigh
+#ifndef AIR
+        // Cold dust is heavier than the air round it (Thin.y a slab's own weight on it): a fallen
+        // building's slumps and runs out along the ground as a gravity current, and a shell's thrown
+        // dirt falls back out of the air instead of standing as fingers over the crater.
+        vt.z -= dt * Thin[slab].y * d.y * (1 - saturate(vt.w));
+#endif
         float3 grad = 0.5 * float3(w(c + int3(1, 0, 0), slab) - w(c - int3(1, 0, 0), slab),
             w(c + int3(0, 1, 0), slab) - w(c - int3(0, 1, 0), slab),
             w(c + int3(0, 0, 1), slab) - w(c - int3(0, 0, 1), slab));
@@ -599,7 +618,11 @@ void main(uint3 id : SV_DispatchThreadID)
         }
 #endif
         vt.xyz *= Keep.y;
+#ifdef AIR
+        vt.w *= lerp(Keep.x, Wind.z * Wind.z * Wind.z, trail);	// a trail's heat is its nozzle's, gone in a few frames
+#else
         vt.w *= Keep.x;
+#endif
         d.y *= Keep.z;
 #ifndef AIR
         d.x *= Thin[slab].x;	// a building's smoke thins out as it spreads
@@ -615,8 +638,10 @@ void main(uint3 id : SV_DispatchThreadID)
         float3 flow = float3(skirtFlow(cell, slab), 0) + jitterAt(id) * power.x * 0.2;
         vt.xyz = lerp(vt.xyz, flow, 0.6 * layer * reach);
     }
+    // (thinning to nothing past the footprint: a building's footprint of a dozen cells laid it as a
+    // disc with a hard round rim)
     if (power.w > 0 && rho < blast.w * 1.6)
-        d.y = max(d.y, power.w * layer * (0.5 + valueNoise(cell / 2, slab + 5)));
+        d.y = max(d.y, power.w * layer * (1 - smoothstep(blast.w, blast.w * 1.6, rho)) * (0.5 + valueNoise(cell / 2, slab + 5)));
     // A shock front: a ring of dust racing out along the ground, far past the fireball, slowing
     // as it goes (Motion: front radius, its speed, its dust).  Buildings in its way stop it.
     float4 motion = Motion[slab];
@@ -740,6 +765,7 @@ const char *const AdvectPassEnd = R"HLSL(
             float soot = what.x * k, dust = what.y * k;
             if (soot > d.x) { d.x += (soot - d.x) * rate; d.z += (soot * what.z - d.z) * rate; }
             if (dust > d.y) { d.y += (dust - d.y) * rate; d.w += (dust * what.z - d.w) * rate; }
+            vt.w = max(vt.w, what.w * k);	// a nozzle's flame
         }
     }
 #endif
@@ -762,7 +788,13 @@ const char *const AdvectPassEnd = R"HLSL(
     if (solid(c, slab)) { vt = 0; d = 0; }
     else {
         vt.xyz = noPenetration(vt.xyz, c, slab);
+#ifdef AIR
         if (solid(c - int3(0, 0, 1), slab)) d.y *= 0.97;
+#else
+        // a slab's own share of the dust on the ground kept a step (Thin.z): at 0.97 a step dust
+        // touching the ground halved in 0.4 s, so a collapse's ground roll died where it was laid
+        if (solid(c - int3(0, 0, 1), slab)) d.y *= Thin[slab].z;
+#endif
     }
     VelOut[id] = vt;
     DenOut[id] = d;
@@ -1006,8 +1038,9 @@ float4 main(float4 position : SV_Position) : SV_Target
         // patches: it keeps most of its smoke, only its edge billows with a noise twice as fine.
         float trail = saturate((dd.z / max(dd.x, 0.01) - 1.02) / 0.2);
         if (trail > 0) {
+            // lumped, a cauliflower edge, not an even tube (the coarse noise pushes the fine about)
             float fine = Noise.SampleLevel(Wrap, cell / 4 + float3(0.43, 0.17, -Camera.w * 0.08), 0);
-            eroded = lerp(eroded, total * saturate(0.6 + 0.7 * fine), trail);
+            eroded = lerp(eroded, total * saturate(0.3 + 1.2 * (fine + 0.4 * (n - 0.5))), trail);
         }
 #else
         float eroded = max(total - (1 - n) * 0.45 * (1 - saturate(total * 1.2)), 0);
@@ -1029,12 +1062,20 @@ float4 main(float4 position : SV_Position) : SV_Target
         float heat = Vel.SampleLevel(Linear, uvw, 0).w;
         float height = saturate(cell.z / 24);
 #ifdef AIR
-        // each cell's own grey, carried with its soot from the particles that made it
+        // each cell's own grey, carried with its soot from the particles that made it; a trail's is its
+        // grey over TrailTag (1.25, over 0.5 of span): a missile's plume white, a rocket's trail grey,
+        // with less sky in their shade, so the sunlit side is white and the far side shows the shadow
         float3 albedo = (Soot.rgb * dd.z + Dust.rgb * dd.w) / total;
+        // (weighed in only by the tag itself: a trail mixed with a puff's smoke, between 1.02 and the
+        // tag, would take the trail's darkest grey and draw a dark seam between them)
+        float ratio = dd.z / max(dd.x, 0.01), trailGrey = saturate((ratio - 1.25) / 0.5);
+        albedo = lerp(albedo, (0.3 + 0.65 * trailGrey) * (dd.x / total) + Dust.rgb * dd.w / total, saturate((ratio - 1.02) / 0.23));
+        float shade = Look.x * (1 - 0.45 * trail);
 #else
         float3 albedo = (Soot.rgb * dd.x + Dust.rgb * dd.y + float3(0.92, 0.93, 0.95) * shell) / total;
+        float shade = Look.x;
 #endif
-        float3 lit = albedo * tint * (Look.x + 0.12 * height + Look.z * sun * phase);
+        float3 lit = albedo * tint * (shade + 0.12 * height + Look.z * sun * phase);
         float3 source = (lit + fireColour(heat) * Soot.w * (dd.x / total)) * sigma;
         float through = exp(-sigma * stepLength);
         color += transmittance * (source - source * through) / sigma;
@@ -1381,11 +1422,23 @@ const float AirGain = 4.0f;
 // in the tall air, where one trail coming down alone is seen across and its cells are wider
 // (1.8 in the tall air made a Tomahawk's arc over Heartland Shield a thick white arch that hung on)
 const float StreakGain[2] = { 0.45f, 0.75f };
-// A missile's white jet smoke against a cloud's grey puff: the billboard is the texture's white times
-// the particle's colour, unlit, so a sunlit cell needs more of the puff's albedo to match it.  At 1.8
-// with the old density cap a Scud's trail came down mid grey and could not be seen; at 2.4 the Scud
-// Storm's columns stood as glowing pillars.
-const float TrailBright = 1.7f;
+// A trail's cells carry their grey in the brightness channel over TrailTag (TrailTag + TrailTagSpan
+// times a grey of 0 to 1), which is what tells them from a puff's cells in the passes (AdvectPass and
+// MarchPass hold the same two numbers), and the march takes their albedo from that grey.  A fixed 1.7
+// times the puff's albedo (TrailBright, and 2.4 before it) left a Scud Storm's columns as even bright
+// pillars that read as beams of light; the photos' plumes are white where the sun is on them and grey
+// on their shadow side.
+const float TrailTag = 1.25f, TrailTagSpan = 0.5f;
+const float RocketGrey = 0.8f;			// a rocket's trail is grey: its particle's own colour times this
+// A ballistic or cruise missile's plume (the Scud's, the nuclear missile's, the Tomahawk's) opens out
+// wider with age than a rocket's trail, and is thicker, so it shades itself and its edge billows.
+const float PlumeSpread = 3.0f, PlumeGain = 1.6f;
+// The flame at the nozzle: a trail's puffs younger than NozzleAge of their life are hot, and a trail
+// cell's heat dies within a few hundredths of a second (AdvectPass), so only the nozzle glows, short
+// and bright (fireColour is orange at 1.2 and white-yellow at 1.8).
+const float NozzleAge = 0.05f;
+const float NozzleHeat[2] = { 1.2f, 1.8f };	// a rocket's, a missile's
+const float NozzleGlow = 2.0f;			// the air's flame against the scene's white (a blast's soot[3])
 // A trail's smoke half-life in the air and the tall air (the brightness tells its cells): a Rocket
 // Buggy salvo's goes in a couple of seconds, a Scud Storm's columns hang on as rocket smoke does.
 // (a Tomahawk's and a Scud's jet smoke lives 2 s, a Rocket Buggy's 1.2 s, so at 3 a Tomahawk's arc
@@ -1960,6 +2013,12 @@ TemplateKind kindOfTemplate(const ParticleSystemTemplate *tmplate, ParticleSyste
 		kind = { true, Shell, 1.6f };
 	else if (alpha && std::strstr(name, "BuggyMissileExplosionSmoke"))
 		kind = { true, Shell, 1.0f };
+	// a missile's launch: the Scud Storm's, the Scud Launcher's and the Tomahawk's ignition cloud, the
+	// nuclear missile's
+	else if (alpha && !std::strcmp(name, "ScudStormIgnitionCloud"))
+		kind = { true, Launch, 1.0f };
+	else if (alpha && !std::strcmp(name, "NeutronMissleLaunch"))
+		kind = { true, Launch, 1.3f };
 	// a building's death and its damaged stages (FX_Structure*Death, TransitionDamageFX), and
 	// FX_SmallStructureDeath's
 	else if (alpha && std::strstr(name, "Smoke") && (!std::strncmp(name, "StructureTransition", 19)
@@ -2586,6 +2645,17 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 						14.0f * fade * pour, 0.35f);
 			}
 		}
+		// The ground roll: the collapse's dust thrown out along the ground from under the whole
+		// footprint, a sheet the pressure keeps (the skirt's source), cold and heavy (RollWeight), so
+		// it hugs the terrain and runs out two to three footprints before it thins.  Pushed out from
+		// under the walls alone, the flow had nowhere to go but up: a push outwards on every side is a
+		// source, which the pressure takes out unless it is told otherwise.
+		if (!standing && t < 1.8f) {
+			blast[3] = (std::max)(L, W) * 0.9f;
+			// (at 14 it ran into the box's round rim as one flat disc)
+			power[0] = 10.0f * (t < 0.8f ? 1.0f : 1 - (t - 0.8f) / 1.0f);
+			power[3] = 1.2f * (1 - t / 1.8f);
+		}
 		// The ruin burning: a column off the ground its two biggest meshes stood on, leaning with the
 		// wind, done by 2.25 s: the game is fast, and the owner halved it from 7.5 s and again from 4.5
 		// (stock's StructureTransition*Smoke lives 6.7 s), where it had hung on for fifteen at first and
@@ -2599,6 +2669,40 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 			}
 		}
 		soot[3] = 1.6f + 2.4f * std::exp(-t / 0.3f);
+	} else if (volume.kind == Launch) {
+		// A missile leaving its silo or its launcher, after the launch photos: a short white-yellow
+		// flash at the nozzle, then a white, sunlit cloud that rolls out sideways along the ground
+		// and the pad, billowing, with a hard shadow side.  Cold exhaust and steam, so it glows only
+		// in the flash and lifts only a little; gone with the trail's spirit, in about four seconds.
+		auto unit = [&](unsigned salt) { return hashUnit(volume.seed, salt); };
+		flash = t < 0.12f ? 6.0f * (1 - t / 0.12f) : 0.0f;
+		flashWide = 2.0f;
+		flashTall = 2.5f;
+		soot[0] = 0.9f; soot[1] = 0.9f; soot[2] = 0.92f; soot[3] = 1.2f;
+		dust[0] = 0.9f; dust[1] = 0.89f; dust[2] = 0.86f;
+		shade = 0.3f;
+		sunShare = 1.0f;
+		// the pad's footprint: what the cloud rolls out of, along the ground (the skirt)
+		blast[3] = 5.0f;
+		if (t < 1.6f) {
+			power[0] = 16.0f * (t < 0.6f ? 1.0f : 1 - (t - 0.6f) / 1.0f);
+			power[3] = 1.6f * (1 - t / 1.6f);
+		}
+		// billows rolling out low from the pad, warm enough to heave up a little as they go, so the
+		// cloud is lumpy rather than a flat sheet; and the exhaust column over the pad, widening
+		if (t < 1.0f) {
+			const float fade = 1 - t;
+			for (unsigned k = 0; k < 8; ++k) {
+				const float azimuth = (k + unit(800 + k)) * 6.2831853f / 8.0f, out = 3.0f + 6.0f * t * (0.7f + 0.6f * unit(810 + k));
+				const float ca = std::cos(azimuth), sa = std::sin(azimuth), push = 10.0f * fade;
+				emit(slab, count, { bx + ca * out, by + sa * out, bz + 1.0f, 2.5f + 2.0f * t, ca * push, sa * push, 1.0f,
+					3.0f * fade, 0.35f, 4.0f * fade, 0.3f });
+			}
+		}
+		if (t < 1.2f) {
+			const float fade = 1 - t / 1.2f;
+			emit(slab, count, { bx, by, bz + 2.0f + 6.0f * t, 2.0f + 2.5f * t, 0, 0, 6.0f, 4.0f * fade, 0.3f, 0, 0.2f });
+		}
 	} else if (volume.kind == Shell || volume.kind == Airburst) {
 		const bool ground = volume.kind == Shell;
 		// a flash shorter than a frame at 30, white-orange
@@ -2616,8 +2720,10 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// glows nor climbs away as an orange ball
 		if (t < 0.2f) power[1] = volume.onHull ? 1.2f : 1.6f;
 		if (t < 0.3f) power[2] = volume.onHull ? 0.4f : 1.1f;
-		// the dirt fountain: a hollow cone of jets 10 to 20 m up, falling back in 3 to 6 s
-		if (ground && t < 6.0f) {
+		// the dirt fountain: a hollow cone of jets 10 to 20 m up, thrown for its first second and
+		// falling back under its own weight (DirtWeight); thrown for 6 s, a Rocket Buggy salvo's
+		// fountains stood beside a fallen War Factory as tan fingers after everything else had gone
+		if (ground && t < 1.0f) {
 			const float speed = std::sqrt(2.0f * Gravity * 50.0f * volume.scale) / volume.cell;
 			for (unsigned j = 0; j < 10; ++j) {
 				float jet[6];
@@ -2862,6 +2968,8 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 			}
 	}
 	// a blast on a building goes off on its roof, not inside it
+	// (a launch's too: laid under a Scud Storm's silo, its billows were inside the building and only
+	// a flat white sheet lay on the roof)
 	if (volume.reset && volume.kind != Airburst && volume.kind != Structure && volume.kind != Fire) {
 		const unsigned column = unsigned(volume.blast[1]) * shape.gx + unsigned(volume.blast[0]);
 		volume.blast[2] = (std::max)(volume.blast[2], heights[column] + 0.5f);
@@ -2905,6 +3013,10 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		// A tank's thins once its column has died down, so it is gone as soon as the game's own.
 		if (volume.kind == TankDeath && volume.live && secondsSince(volume, now) > TankSootThinFrom)
 			sim.Thin[slab][0] = std::pow(0.5f, dt / TankSootHalfLife);
+		const bool rolls = (volume.kind == Structure && !volume.standing) || volume.kind == Launch;
+		// (not a bomb's: its small mushroom's stem would fall out of it)
+		sim.Thin[slab][1] = rolls ? RollWeight : volume.kind == Shell && volume.scale < 2.0f ? DirtWeight : 0.0f;
+		sim.Thin[slab][2] = std::pow(0.5f, dt / (rolls ? GroundRollHalfLife : GroundDustHalfLife));
 		for (unsigned i = 0; i < 3; ++i) sim.Origins[slab][i] = volume.origin[i];
 		if (!volume.live) continue;
 		layFloor(context, tier, slab, volumes[tier.shape.first + slab], now);
@@ -3410,7 +3522,7 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 	layFloor(context, tier, 0, volume, now);
 
 	// The particles, as spheres in cells.
-	struct Source { float x, y, z, r, soot, dust, bright, distance; };
+	struct Source { float x, y, z, r, soot, dust, bright, distance, heat; };	// distance sorts on the CPU, heat goes to the GPU
 	static std::vector<Source> found;
 	found.clear();
 	float low[3], high[3];
@@ -3439,10 +3551,16 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 		// line of blobs.  Spheres are laid along each link as well, and the ribbon's bright jet smoke
 		// is taken thicker and paler than a cloud's puff, or it read as a faint brown haze.
 		const bool streak = system->isUsingStreak();
-		// a missile's trail (the nuclear missile's is puffs) and its launch cloud, both white
+		// A missile's trail (the nuclear missile's is puffs).  A launcher's backblast and ignition
+		// cloud (MissileBackblastClouds, the Patriot's) is a white puff laid whole for its particles'
+		// life: taken as a trail it sank with their age and was gone before it showed.
 		const char *named = system->getTemplate()->getName().str();
-		const bool trail = streak || system->getPriority() == WEAPON_TRAIL || ((std::strstr(named, "Missile") || std::strstr(named, "Missle")
-			|| std::strstr(named, "Ignition")) && !std::strstr(named, "Explosion"));
+		const bool launchPuff = (std::strstr(named, "Backblast") || std::strstr(named, "Ignition") || std::strstr(named, "Launch"))
+			&& !std::strstr(named, "Explosion");
+		const bool trail = !launchPuff && (streak || system->getPriority() == WEAPON_TRAIL
+			|| ((std::strstr(named, "Missile") || std::strstr(named, "Missle")) && !std::strstr(named, "Explosion")));
+		// a ballistic or cruise missile's exhaust is a white billowing plume; a rocket's, a thin grey trail
+		const bool plume = trail && (std::strstr(named, "Scud") || std::strstr(named, "Neutron") || std::strstr(named, "Tomahawk"));
 		bool chained = false;
 		for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) {
 			const float alpha = (std::min)(p->getAlpha() * fade * AirCoverage, 0.95f);
@@ -3452,13 +3570,15 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 			// (a ribbon's spheres are laid along its links too, so it may go thinner without breaking up).
 			// A trail's particle is a puff of its own size, hashed from the particle, wider the older it
 			// is: a Scud Storm's columns stood as straight pillars of one width all the way up.
-			float puff = 1.0f, thick = 1.0f;
+			float puff = 1.0f, thick = 1.0f, heat = 0.0f;
 			if (trail) {
 				// the particle's address is the same for its whole life (a client-side look, nothing to replay)
 				const unsigned h = (p->getPersonality() ^ unsigned(reinterpret_cast<uintptr_t>(p) >> 4)) * 2654435761u;
-				const float age = p->m_lifetime ? 1.0f - (float)p->getLifetimeLeft() / (float)p->m_lifetime : 0.0f;
-				puff = (0.65f + 0.8f * ((h >> 8) & 255) / 255.0f) * (1.0f + TrailSpread * (std::min)((std::max)(age, 0.0f), 1.0f));
-				thick = (0.55f + 0.9f * ((h >> 16) & 255) / 255.0f) * std::pow(1.0f - (std::min)((std::max)(age, 0.0f), 1.0f), TrailAgeFade);
+				const float age = p->m_lifetime ? (std::min)((std::max)(1.0f - (float)p->getLifetimeLeft() / (float)p->m_lifetime, 0.0f), 1.0f) : 0.0f;
+				puff = (0.65f + 0.8f * ((h >> 8) & 255) / 255.0f) * (1.0f + (plume ? PlumeSpread : TrailSpread) * age);
+				thick = (0.55f + 0.9f * ((h >> 16) & 255) / 255.0f) * std::pow(1.0f - age, TrailAgeFade) * (plume ? PlumeGain : 1.0f);
+				// the flame at the nozzle: the newest puff burns, the rest of the trail is cold smoke
+				if (p->m_lifetime && age < NozzleAge) heat = plume ? NozzleHeat[1] : NozzleHeat[0];
 			}
 			const float radius = (std::min)((std::max)(p->getSize() * 0.6f, cell * (streak ? 0.6f : 0.8f)) * puff, cell * 8.0f);
 			// inside the box less its faded rim
@@ -3477,10 +3597,13 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 			// the density whose optical depth through the sphere's middle is the particle's opacity
 			const float density = AirGain * (streak ? StreakGain[g] : 1.0f) * thick * -std::log(1.0f - alpha) / (2.0f * radius * AirExtinction);
 			const RGBColor *colour = p->getColor();
-			const float grey = (std::min)(1.0f, 0.3f * colour->red + 0.59f * colour->green + 0.11f * colour->blue) * (trail ? TrailBright : 1.0f);
+			const float luma = (std::min)(1.0f, 0.3f * colour->red + 0.59f * colour->green + 0.11f * colour->blue);
+			// a trail's cells carry their grey above TrailTag, which is what tells them in the passes
+			// (a launch puff is tagged white too: a puff's own grey is at most the air's 0.5 albedo)
+			const float grey = launchPuff ? TrailTag + TrailTagSpan : trail ? TrailTag + TrailTagSpan * (plume ? 1.0f : luma * RocketGrey) : luma;
 			const float dx = at->x - look.x, dy = at->y - look.y;
 			const Source here = { (at->x - low[0]) / cell - 0.5f, (at->y - low[1]) / cell - 0.5f, (at->z - low[2]) / cell - 0.5f,
-				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy };
+				radius / cell, dusty ? 0.0f : density, dusty ? density * 0.6f : 0.0f, grey, dx * dx + dy * dy, heat };
 			if (chained) {
 				const Source &last = found.back();
 				const float gap = std::sqrt((here.x - last.x) * (here.x - last.x) + (here.y - last.y) * (here.y - last.y)
@@ -3491,7 +3614,8 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 					const float u = (float)k / links;
 					found.push_back({ from.x + (here.x - from.x) * u, from.y + (here.y - from.y) * u, from.z + (here.z - from.z) * u,
 						from.r + (here.r - from.r) * u, from.soot + (here.soot - from.soot) * u, from.dust + (here.dust - from.dust) * u,
-						from.bright + (here.bright - from.bright) * u, from.distance + (here.distance - from.distance) * u });
+						from.bright + (here.bright - from.bright) * u, from.distance + (here.distance - from.distance) * u,
+						from.heat + (here.heat - from.heat) * u });
 				}
 			}
 			found.push_back(here);
@@ -3559,7 +3683,7 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 	packed.assign((std::max)(found.size(), (size_t)1) * 8, 0.0f);
 	for (size_t n = 0; n < found.size(); ++n) {
 		const Source &s = found[n];
-		const float values[8] = { s.x, s.y, s.z, s.r, s.soot, s.dust, s.bright, 0 };
+		const float values[8] = { s.x, s.y, s.z, s.r, s.soot, s.dust, s.bright, s.heat };
 		std::memcpy(&packed[n * 8], values, sizeof(values));
 	}
 	upload(context, state.sources[g], packed.data(), packed.size() * sizeof(float));
@@ -3692,8 +3816,14 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 // at its middle a third of a second after the fall) left its dirt and dust skirt as tan lobes beside
 // the column for 6 s and more, its dust laid so thick that the halved DustHalfLife still left it opaque.
 // Its stock puff (BuggyMissileExplosionSmoke) lives 3.3 s.
-float lifeOf(Kind kind) { return kind == TankDeath ? 4.25f : kind == Structure ? 3.0f : kind == Nuclear ? 90.0f : 12.0f; }
-float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : 2.0f * scale; }
+// A shell's or a rocket's (scale under 2) lives 4 s, a bomb's 12 for its small mushroom.  A building's
+// fall 3.5, its ground roll the half second past the old 3.  A launch's 4, its cloud's roll.
+float lifeOf(Kind kind, float scale)
+{
+	return kind == TankDeath ? 4.25f : kind == Structure ? 3.5f : kind == Nuclear ? 90.0f : kind == Launch ? 4.0f
+		: kind == Shell && scale < 2.0f ? 4.0f : 12.0f;
+}
+float cellOf(Kind kind, float scale) { return kind == TankDeath ? 3.0f : kind == Nuclear ? 10.0f : kind == Launch ? 4.0f * scale : 2.0f * scale; }
 float joinRadius(const Volume &volume)
 {
 	if (volume.kind == Structure) return (std::max)(volume.hull[2], volume.hull[3]) * volume.cell + 40.0f;
@@ -3705,7 +3835,7 @@ int rankOf(const Volume &volume)
 	if (volume.kind == TankDeath && volume.live && TheGameLogic
 			&& 4 * ((int)TheGameLogic->getFrame() - volume.born) > 7 * LOGICFRAMES_PER_SECOND)
 		return -1;
-	return volume.kind == TankDeath || volume.kind == Structure ? 2 : volume.scale >= 2.0f ? 1 : 0;
+	return volume.kind == TankDeath || volume.kind == Structure ? 2 : volume.scale >= 2.0f || volume.kind == Launch ? 1 : 0;
 }
 
 // The structure Gather saw, this read or the one before: the one named, or with none named the one
@@ -4184,7 +4314,7 @@ bool Takes(ParticleSystem *system)
 		// shells landing on it in its first second and a half: an Overlord's BuggyMissileExplosion
 		// fireballs floated over the cloud as separate flat sprites.
 		if (volume.kind == Structure && !structural && system->getPriority() != DEATH_EXPLOSION && (alpha || seen > volume.born + 45)) continue;
-		if ((volume.kind == Shell || volume.kind == Airburst) && !alpha) continue;
+		if ((volume.kind == Shell || volume.kind == Airburst || volume.kind == Launch) && !alpha) continue;	// a launch's flare is the nozzle's
 		// a nuclear blast's fire cards are its own FX's only, not a shell's that lands in its reach
 		const char *joiner = system->getTemplate()->getName().str();
 		if (volume.kind == Nuclear && !alpha && !std::strstr(joiner, "Nuke") && !std::strstr(joiner, "MOAB")) continue;
@@ -4196,6 +4326,7 @@ bool Takes(ParticleSystem *system)
 		if (kind.trigger && (kindNow == TankDeath) != (volume.kind == TankDeath)) continue;
 		if (kind.trigger && (kindNow == Nuclear) != (volume.kind == Nuclear)) continue;
 		if (kind.trigger && (kindNow == Structure) != (volume.kind == Structure)) continue;
+		if (kind.trigger && (kindNow == Launch) != (volume.kind == Launch)) continue;
 		// A building falling a second after its last damaged stage blew is a blast of its own: its
 		// loose death FX go to the fall, the stage's systems hung on the building to the stage.  The
 		// rubble stage's systems, hung on the building in the frame its death FX goes off, join the
@@ -4226,6 +4357,9 @@ bool Takes(ParticleSystem *system)
 	fresh.kind = type;
 	fresh.onHull = onHull;
 	fresh.scale = kind.scale;
+	// a Scud Storm's silo throws the big cloud; a Scud Launcher's or a Tomahawk's truck (the same
+	// ScudStormIgnitionCloud) a smaller one
+	if (type == Launch && kind.scale < 1.2f && !structureAt(where, INVALID_ID)) fresh.scale = 0.6f;
 	const int rank = rankOf(fresh);
 
 	// A free slab, else the one of the lowest rank whose blast is oldest; a new blast of a lower
@@ -4250,13 +4384,14 @@ bool Takes(ParticleSystem *system)
 	volume = fresh;
 	volume.live = true;
 	volume.reset = true;
-	volume.cell = cellOf(type, kind.scale);
+	volume.cell = cellOf(type, volume.scale);
 	// A building's box is about two and a half footprints across, so the cell goes with its size: 3
 	// units for an American power plant, about 6.5 for a War Factory or a Particle Cannon.  None
 	// seen (a building this player has not scouted), a 40 unit one at a hashed heading.
 	const float extent = building ? (building->box ? (std::max)(building->major, building->minor) : building->major) : 40.0f;
 	if (type == Structure) {
-		volume.cell = (std::min)((std::max)(extent * 0.105f, 3.0f), 8.0f);
+		// (at 0.105 and 8 the box held a ground roll to one and a half footprints)
+		volume.cell = (std::min)((std::max)(extent * 0.125f, 3.0f), 9.5f);
 		if (building) where = { building->x, building->y, building->top - building->tall };
 	}
 	const float sideX = shape.gx * volume.cell, sideY = shape.gy * volume.cell;
@@ -4328,7 +4463,7 @@ bool Takes(ParticleSystem *system)
 				volume.partCount ? volume.parts[0].bottom * cell : 0.0f, volume.partCount ? volume.parts[0].top * cell : 0.0f));
 	}
 	volume.born = now;
-	volume.life = int((type == Structure && volume.standing ? 2.0f : lifeOf(type)) * LOGICFRAMES_PER_SECOND);
+	volume.life = int((type == Structure && volume.standing ? 2.0f : lifeOf(type, volume.scale)) * LOGICFRAMES_PER_SECOND);
 	// its front through the air round it, in world units a second.  A tank's has none: a sphere
 	// pushing out from the hull's middle blew its own fire into a dome and the dust round it into
 	// rings, where a real one bursts out along the hull and up (schedule).
@@ -4346,12 +4481,13 @@ bool Takes(ParticleSystem *system)
 		}
 	}
 	else if (type == Structure) addShock(where, 140.0f, volume.standing ? 30.0f : 50.0f, 1.0f, now);
-	else if (type != TankDeath) addShock(where, 160.0f * kind.scale, 70.0f * kind.scale, 1.0f, now);
+	else if (type != TankDeath && type != Launch) addShock(where, 160.0f * kind.scale, 70.0f * kind.scale, 1.0f, now);
 	pruneSets();
 	takenSystems.insert(id);
 	if (claimedCount++ < 8)
 		DEBUG_LOG(("VOLSMOKE: frame %d, %s volume %u for '%s' at (%.0f, %.0f, %.0f), %.0f units wide\n", now,
-			type == TankDeath ? "tank" : type == Shell ? "shell" : type == Airburst ? "airburst" : type == Structure ? "structure" : "nuclear", slot,
+			type == TankDeath ? "tank" : type == Shell ? "shell" : type == Airburst ? "airburst" : type == Structure ? "structure"
+				: type == Launch ? "launch" : "nuclear", slot,
 			system->getTemplate()->getName().str(), where.x, where.y, where.z, sideX));
 	return true;
 }
@@ -4568,7 +4704,7 @@ void Render(const HazardCloud::Camera &camera)
 			}
 			draw.Box[3] = grid.cell;
 			// the particles' own colour times what their textures average to, by eye against the billboards
-			const float soot[4] = { 0.5f, 0.49f, 0.48f, 0 }, dust[4] = { 0.8f, 0.66f, 0.48f, 0 };
+			const float soot[4] = { 0.5f, 0.49f, 0.48f, NozzleGlow }, dust[4] = { 0.8f, 0.66f, 0.48f, 0 };
 			std::memcpy(draw.Soot, soot, sizeof(soot));
 			std::memcpy(draw.Dust, dust, sizeof(dust));
 			std::memset(draw.Blast, 0, sizeof(draw.Blast));
@@ -4603,7 +4739,9 @@ void Render(const HazardCloud::Camera &camera)
 			schedule(volume, slabOf(slot), t0, &draw);
 			const float left = (float)(volume.life - (now - volume.born)) / LOGICFRAMES_PER_SECOND;
 			draw.Slab[0] = (float)slabOf(slot);
-			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (volume.kind == TankDeath || volume.kind == Structure ? ShortEndFade
+			const bool shortLived = volume.kind == TankDeath || volume.kind == Structure || volume.kind == Launch
+				|| (volume.kind == Shell && volume.scale < 2.0f);
+			draw.Slab[1] = (std::min)(1.0f, (std::max)(0.0f, left / (shortLived ? ShortEndFade
 				: volume.kind == Fire ? FireEndFade : 3.0f)));
 			// a fire comes up over its warm-up, under the billboards it then takes from
 			if (volume.kind == Fire) draw.Slab[1] *= (std::min)(1.0f, t0 / FireWarmSeconds);
