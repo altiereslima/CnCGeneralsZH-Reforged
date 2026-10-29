@@ -7,8 +7,8 @@
 //
 // A tank's death is an ammunition cook-off, laid out on the dying hull's own box (its template's
 // length, width and height and its heading, read from the drawable).  Orange flame and black soot
-// burst out low along the hull and roll along the ground off both ends over a skirt of pale dust,
-// a ragged plume of fire, white in the middle and orange at its edges, fans up out of the hull
+// burst out low along the hull and roll along the ground off both ends between near-black masses
+// banked on its long flanks, a ragged plume of fire, white in the middle and orange at its edges, fans up out of the hull
 // top in thirteen jets, the middle one tallest, on High twice as high as the band is long, and
 // cools to grey-brown smoke, two to four
 // smaller pops follow over a few seconds, and then the hull burns: a thick black column for half
@@ -109,7 +109,7 @@ struct TierShape { unsigned gx, gy, gz, slabs, first; };
 TierShape TierShapes[3] = { { 48, 48, 40, 24, 0 }, { 96, 96, 80, 2, 24 }, { 32, 32, 48, 12, 26 } };
 const unsigned MaxVolumes = 38;		// all three tiers' slabs at High, the small tier's first, the fires' last
 const unsigned MaxSlabs = 24;		// the constant arrays' length, the same in both tiers
-const unsigned MaxPuffs = 28;	// a tank's 28 (base, jets, stem, soot, skirt); PUFFS in the HLSL is the same
+const unsigned MaxPuffs = 28;	// a tank's 24 (base, jets, stem, dark base masses); PUFFS in the HLSL is the same
 const unsigned MaxMovers = 16;		// High's; Low takes the nearest 8
 const unsigned NoiseSide = 32;
 
@@ -151,7 +151,7 @@ const float GroundDustHalfLife = 0.38f, GroundRollHalfLife = 1.5f;
 // slumps and spreads as a gravity current (about 5 cells/s two cells deep at 10; at 20 it lay as a
 // flat sheet), and a shell's thrown dirt falls back out of the air; at the shared 1 a Rocket Buggy's
 // dirt fountains stood beside a fallen War Factory as tan fingers for ten seconds.
-const float RollWeight = 10.0f, DirtWeight = 30.0f;
+const float RollWeight = 10.0f, DirtWeight = 30.0f, TankMassWeight = 0.2f;
 const float CapSpillHalfLife = 1.0f;	// a nuclear cap's soot once the flow has carried it out of the cap
 const float StructureSootHalfLife = 0.75f;	// a building's blast's soot: at 7 a fall's smoke was on screen for 14 s, at 3 for 7 to 10, at 1.5 for 5 to 6
 // A tank's soot from 1.25 s on, once its column is falling: its black column is gone from the play
@@ -2314,7 +2314,12 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 				hx * va - hy * vc, hy * va + hx * vc, vz, sootRate, heat, dustRate, push });
 		};
 		auto unit = [&](unsigned salt) { return hashUnit(volume.seed, salt); };
-		dust[0] = 0.70f; dust[1] = 0.62f; dust[2] = 0.50f;	// sunlit, fire-lit dust, warm against the tan ground
+		// The dust channel carries the near-black soot masses at the base (below): it never glows (the
+		// march lights fire by the soot's share of a cell alone), so laid beside the fire it stays a
+		// dark mass in front of it, where soot laid there burned with the fire's heat and read as haze.
+		// So the tank's dust is dark brown-black; what dust the jets and the base band carry darkens
+		// with it.  (Pale, 0.70/0.62/0.50, it was the sunlit skirt of passes 6-17.)
+		dust[0] = 0.10f; dust[1] = 0.085f; dust[2] = 0.075f;
 		// The base: orange flame and black soot bursting out low along the whole hull, rolling off
 		// both ends and a little to the sides, held down by the dust in it.  The four towards the
 		// ends do not glow (heat 0.5, where fireColour starts), so the hot middle sits between dark
@@ -2346,7 +2351,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		const float reach = (std::min)((std::max)(2.2f * (2.3f * L + 1.7f * W), 12.0f), TierShapes[0].gz - 20.0f);
 		// an odd count, so one jet stands straight up the middle: with fourteen the two middle ones
 		// leaned apart and notched the top into a heart
-		const unsigned jets = 13;	// with the base, the stem, the soot and the skirt, the 28 a slab holds
+		const unsigned jets = 13;	// with the base, the stem and the four dark base masses, 24 of the 28 a slab holds
 		// A shorter reach (Low's, or a very small hull's on High) fans a short hull's rays less and
 		// from less of its length, so its fan is as tall for its width as High's: at High's angles
 		// Low's came out a round dome.  Long hulls do not use it.
@@ -2470,45 +2475,27 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// the default 1.6 once the flare is over; about a third of a second of white, as long as
 		// the jets run, and no longer, so several tanks dying at once do not white out the view
 		soot[3] = 1.6f + 4.2f * std::exp(-t / 0.22f);
-		// Dark soot banked on the hull: four big lobes lying low along its length, two over each
-		// half from the jets' roots out past the end, which the base fire edges red, so the bright
-		// core stands between near-black masses as in the photo and the fan's top stays clear of
-		// them.  They swell for nearly a second, past the flash, and the column takes over.  Heat
-		// 0.3 does not glow at all (fireColour starts at 0.5).  Heat is the hottest emitter's, so laid
-		// inside the jets' roots the soot burned as bright as they did; laid round the hull's sides
-		// as well (pass 12) the lobes closed into a dark ring round the fire from the play camera;
-		// small and gone in half a second (pass 13) they hid behind the fire from the side.  Laid at
-		// 0.75 to 1 of the hull's height, over the base band's glow, with no dust in them (dust is lit
-		// pale): lower and dusty they glowed inside the band and read as haze from the side.
-		// 22 a second at most and half as wide again by 0.6 s: at 45 and nearly twice as wide they
-		// rolled into one black ball over the wreck from the play camera.  Each lobe wanders round
-		// its place and pushes the air it lays into a slow roll, at half that rate over a third more
-		// width: laid still and thick it saturated into a black cut-out with a hard edge, where thinner
-		// smoke keeps the march's billows inside it and a soft rim.
-		// (halved a second time to 0.48 s, at the owner's word: a fast game)
-		if (t < 0.48f) {
-			const float fade = 1 - t / 0.48f, swell = 1 + 0.7f * (std::min)(t / 0.3f, 1.0f);
+		// Near-black masses banked at the base, as in the photo, in front of the fire with flame
+		// showing between them: two on each long flank near the middle, thick (opaque in a few cells)
+		// and laid in the dust channel, which never glows, so the base band's heat beside them does
+		// not light them.  Soot lobes (passes 12-17) burned with whatever heat they sat in and read as
+		// haze from the side, wherever along the hull they were put.  Two a side and off the ends, no
+		// ring from the play camera (round the whole hull, pass 12, they closed into one).  Pushed out
+		// slowly, swelling by half, gone in about a second: heavy, they slump onto the ground, which
+		// eats the dust lying on it (GroundDustHalfLife).
+		// (at 70 a second over a hull and a half for 0.85 s they closed round the wreck into a black
+		// ring from the play camera and lay on as a dark disc)
+		if (t > 0.05f && t < 0.75f) {
+			const float fade = 1 - (t - 0.05f) / 0.7f, swell = 1 + 0.4f * (std::min)(t / 0.4f, 1.0f);
 			for (unsigned k = 0; k < 4; ++k) {
-				// the inner pair waits for the jets to stop: laid in their roots it burned at their heat
-				if (!(k & 1) && t < 0.25f) continue;
+				const float s = (k < 2 ? -0.35f : 0.35f) * (0.85f + 0.3f * unit(980 + k)), side = (k & 1) ? 1.0f : -1.0f;
 				const float wander = 6.2831853f * unit(988 + k) + t * (2.0f + 1.5f * unit(992 + k));
-				const float s = (k < 2 ? -1.0f : 1.0f) * ((k & 1) ? 1.05f : 0.7f) * (0.95f + 0.1f * unit(980 + k))
-					+ 0.12f * std::sin(wander);
-				const float across = ((k & 1) ? 0.3f : -0.3f) * W + 0.25f * W * std::cos(wander * 1.3f);
-				onHull(s * L, across, H * (0.75f + 0.25f * unit(984 + k)) + 0.6f * std::sin(wander * 0.7f),
-					(std::max)(W * 0.9f, 2.6f) * 1.3f * swell * (0.85f + 0.3f * unit(996 + k)),
-					s * 2.5f * fade + 3.0f * std::cos(wander), across * 0.3f * fade + 3.0f * std::sin(wander), 1.5f,
-					11.0f * fade * fade, 0.3f, 0.0f, 0.35f);
-			}
-		}
-		// Pale dust lifted along the ground on both sides of the hull, pushed out low, no ring.  From
-		// a third of a second, once the soot lobes stand: lifted at once it veiled them from the side.
-		if (t > 0.3f && t < 1.2f) {
-			const float fade = 1 - (t - 0.3f) / 0.9f;
-			for (unsigned k = 0; k < 4; ++k) {
-				const float s = k < 2 ? -0.7f : 0.7f, side = (k & 1) ? 1.0f : -1.0f;
-				onHull(s * L * (1.0f + 0.4f * unit(960 + k)), side * W * 1.1f, 0.5f, (std::max)(W * 0.9f, 2.5f),
-					s * 4.0f * fade, side * 6.0f * fade, 0.5f, 0, 0, 10.0f * fade, 0.3f);
+				// (at 0.4 and at 0.75 to 0.95 of the hull's height they lay black on the black hull's side
+				// and did not show from the side: the photo's stand against the flame, so these stand at
+				// the hull's top, in front of the fan's foot)
+				onHull(s * L, side * W * (1.0f + 0.1f * unit(984 + k)), H * (1.0f + 0.2f * unit(986 + k)) + 0.3f * std::sin(wander),
+					(std::max)(W * 0.8f, 2.4f) * swell * (0.85f + 0.3f * unit(996 + k)),
+					s * 2.0f * fade + 1.5f * std::cos(wander), side * 2.0f * fade, 0.8f, 0, 0.3f, 45.0f * fade * fade, 0.3f);
 			}
 		}
 		// the cook-off pops, two to four, each a hot orange puff out of a hatch somewhere on the hull
@@ -3117,7 +3104,10 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 			sim.Thin[slab][0] = std::pow(0.5f, dt / TankSootHalfLife);
 		const bool rolls = (volume.kind == Structure && !volume.standing) || volume.kind == Launch || volume.kind == Muzzle;
 		// (not a bomb's: its small mushroom's stem would fall out of it)
-		sim.Thin[slab][1] = rolls ? RollWeight : volume.kind == Shell && volume.scale < 2.0f ? DirtWeight : 0.0f;
+		// (a tank's: its dark base masses slump slowly onto the ground, which eats them; the weight goes
+		// with the dust's density, and at RollWeight or 1.5 the thick masses fell flat before they showed)
+		sim.Thin[slab][1] = rolls ? RollWeight : volume.kind == TankDeath ? TankMassWeight
+			: volume.kind == Shell && volume.scale < 2.0f ? DirtWeight : 0.0f;
 		sim.Thin[slab][2] = std::pow(0.5f, dt / (rolls ? GroundRollHalfLife : GroundDustHalfLife));
 		// its heat kept over this step on top of the tier's (a gun's fireball goes in a few frames)
 		sim.Thin[slab][3] = volume.kind == Muzzle ? std::pow(0.5f, dt / MuzzleHeatHalfLife) : 1.0f;
