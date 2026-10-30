@@ -185,6 +185,12 @@ const unsigned MuzzleCap[3] = { 0, 3, 6 };
 // LoosenedSpillHalfLife, the 4 s it had before the released cloud was slowed: a cap that stays
 // loosened keeps that spill for the rest of its 90 s.
 const float NukeDisperseHalfLife = 10.0f, NukeDisperseLife = 18.0f, LoosenedSpillHalfLife = 4.0f;
+// A rotor's column under its disc, units/s down (MoverPass), the same at any height; the sheet along
+// the ground and the dust ring take it as close as the ground is.  Air particles in a jet's or a
+// rotor's wake move at this share of its speed there (nudge).
+const float RotorWash = 45.0f, WakeNudge = 0.5f;
+// How much of a jet's path its wake lasts over, seconds (MoverPass's JET_WAKE).
+const float JetWake = 2.5f;
 const float ShadeLight = 0.26f;			// the light smoke keeps where the sun does not reach it
 const float SunShare = 0.75f;			// and what the sun adds where it does
 const float Extinction = 0.16f;			// per world unit at density 1
@@ -489,7 +495,48 @@ const char *const MoverPass = R"HLSL(
 #define JET 1
 #define ROTOR 2
 #define WALKER 3
+// what a second of a wake's clean air mixes away where it is thickest: a jet's tube keeps under a
+// tenth of the smoke it passes, so the lane it cuts reads from the game's camera (at 1.0 over 1.5 s
+// it kept half, and a stem's rising dust closed that as a slight pinch)
+#define JET_MIX 2.0
+#define ROTOR_MIX 0.8
+// A jet's wake lasts over this much of its path, seconds (JetWake in the C++).  Every jet in the game
+// flies under a risen nuclear cap, at 100 units over the ground against its underside's 165 to 200, so
+// this cuts the stem and a low cap.  A wake drawn 8 times as far up to reach the cap cut no lane either.
+#define JET_WAKE 2.5
 float3 pullTowards(float3 v, float3 target, float k) { return lerp(v, target, saturate(k)); }
+// How much of mover i's wake is clean air at this point, 0 to 1: a jet's tube over the last JET_WAKE s
+// of its path, widening as it ages (its vortex pair spreads) and fading out, or a rotor's column under
+// its disc.  Never thinner than 1.5 cells.
+float wakeCore(uint i, float3 world, float size)
+{
+    float4 a = Movers[i * 4], b = Movers[i * 4 + 1];
+    uint kind = (uint)(b.w + 0.5);
+    if (kind == JET) {
+        float3 path = b.xyz * JET_WAKE;
+        float along = dot(a.xyz - world, path) / max(dot(path, path), 1e-3);
+        if (along < 0 || along > 1) return 0;
+        float3 r = world - (a.xyz - path * along);
+        float tube = max(a.w, 1.5 * size) * (1 + 2 * along);
+        return exp(-dot(r, r) / (tube * tube)) * (1 - along);
+    }
+    if (kind == ROTOR) {
+        float below = a.z - world.z;
+        float columnR = max(a.w * 1.2 + max(below, 0) * 0.15, 1.5 * size);
+        float rho = length(world.xy - a.xy);
+        if (below < -a.w * 0.5 || rho >= columnR) return 0;
+        return (1 - rho / columnR) * (below < 0 ? 0.3 : 1);
+    }
+    return 0;
+}
+// the most of any wake's clean air at this point (MushroomPass: a nuclear cap lays no soot there)
+float wakeHole(float3 world, float size)
+{
+    float hole = 0;
+    uint count = (uint)MoverCount.x;
+    for (uint i = 0; i < count; ++i) hole = max(hole, wakeCore(i, world, size));
+    return hole;
+}
 void applyMovers(inout float4 vt, inout DEN d, float3 cell, uint slab, float dt)
 {
     uint count = (uint)MoverCount.x;
@@ -517,44 +564,59 @@ void applyMovers(inout float4 vt, inout DEN d, float3 cell, uint slab, float dt)
             }
         } else if (kind == JET) {
             // A body of air dragged along its last 0.3 s, two counter-rotating vortices off the wing
-            // tips over its last 1.5 s with the downwash between them, all fading with its height.
-            float3 path = b.xyz * 1.5;		// from the nose back over 1.5 s
+            // tips over its last JET_WAKE s with the downwash between them, and the clean air it drags
+            // in mixing the smoke thin along its path.  All at any height, a nuclear cap's included:
+            // only the downwash's reach to the ground fades as it flies higher.  In cells coarser
+            // than its wings the pair is laid 1.5 cells apart with the same circulation, wider and
+            // weaker, where at the real span it fell between the cells' middles.
+            float3 path = b.xyz * JET_WAKE;		// from the nose back
             float along = dot(-off, path) / max(dot(path, path), 1e-3);
             if (along < -0.05 || along > 1.05) continue;
+            d *= exp(-JET_MIX * wakeCore(i, world, size) * dt);
             float s = saturate(along);
             float3 r = world - (a.xyz - path * s);
-            float span = a.w;
+            float span = a.w, wide = max(span, 1.5 * size);
             float2 side = normalize(float2(-path.y, path.x) + float2(1e-4, 0));
             float lateral = dot(r.xy, side);
-            if (abs(lateral) > span * 3 || r.z > span * 3) continue;
-            float fade = exp(-e.z / 150) * (1 - s);
-            if (s < 0.2 && dot(r, r) < span * span) vt.xyz = pullTowards(vt.xyz, v * 0.5, 0.4 * fade);
+            if (abs(lateral) > wide * 3 || r.z > wide * 3) continue;
+            float fade = 1 - s;
+            // the body held to 20 cells/s: half a jet's speed in 2-unit cells is 50, which the
+            // backtrace smears into a streak
+            float3 body = v * 0.5;
+            body *= min(1, 20 / max(length(body), 1e-3));
+            if (s < 0.3 / JET_WAKE && dot(r, r) < wide * wide) vt.xyz = pullTowards(vt.xyz, body, 0.4 * fade);
             float strength = length(b.xyz) * 0.12 / size * f.y;
             for (int tip = -1; tip <= 1; tip += 2) {
-                float2 rr = float2(lateral - tip * span, r.z);
-                float rho = max(length(rr), span * 0.25);
-                float swirl = strength * span * 0.5 / rho * exp(-rho * rho / (span * span * 2.5));
+                float2 rr = float2(lateral - tip * wide, r.z);
+                float rho = max(length(rr), wide * 0.25);
+                float swirl = strength * span * 0.5 / rho * exp(-rho * rho / (wide * wide * 2.5));
                 float2 t = float2(-rr.y, rr.x) / rho * tip;
                 vt.xyz = pullTowards(vt.xyz, vt.xyz + (float3(side * t.x, t.y) * swirl), 0.5 * fade);
             }
             // the sheet pushed down between the tips, reaching the ground under a low pass
-            if (abs(lateral) < span && r.z < 0)
-                vt.z = lerp(vt.z, -strength * 0.6, saturate(0.4 * fade * exp(r.z / 90)));
+            if (abs(lateral) < wide && r.z < 0)
+                vt.z = lerp(vt.z, -strength * 0.6, saturate(0.4 * fade * exp(-e.z / 150) * exp(r.z / 90)));
         } else if (kind == ROTOR) {
-            // A rotor's downwash: a column 1.2 radii wide under the disc, as strong as the ground is
-            // close; at the ground it turns into a thin sheet running outwards and lifts a ring of
-            // dust about two radii out.
-            float R = a.w, height = e.z, close = f.y;
+            // A rotor's downwash at any height: a column under the disc, 1.2 radii wide and spreading
+            // as it falls, its speed (f.x, units/s) falling as it widens since the momentum it carries
+            // down is kept, thinning the smoke it carries with the clean air drawn through the disc.
+            // As close as the ground is (f.y) it turns there into a thin sheet running outwards and
+            // lifts a ring of dust about two radii out.
+            float R = a.w, close = f.y;
             float2 flat = off.xy;
             float rho = length(flat);
             float below = a.z - world.z;
             if (rho > R * 5 || below < -R) continue;
-            float wash = 45.0 / size * close;
-            float columnR = R * 1.2 + max(below, 0) * 0.15;
+            float columnR = max(R * 1.2 + max(below, 0) * 0.15, 1.5 * size);
             if (below > -R * 0.5 && rho < columnR && overGround > size * 1.5) {
                 float k = (1 - rho / columnR) * (below < 0 ? 0.3 : 1);
-                vt.xyz = pullTowards(vt.xyz, float3(vt.xy * 0.5, -wash), 0.6 * k);
+                float narrow = R * 1.2 / columnR;
+                vt.xyz = pullTowards(vt.xyz, float3(vt.xy * 0.5, -f.x / size * narrow * narrow), 0.6 * k);
             }
+            d *= exp(-ROTOR_MIX * wakeCore(i, world, size) * dt);
+            float wash = f.x / size * close;
+            // (none from one too high to reach the ground: both would still hold the air there still)
+            if (close <= 0) continue;
             float sheet = 1 - smoothstep(size, size * 3 + 8, overGround);
             if (sheet > 0 && rho > R * 0.3) {
                 float2 outwards = flat / rho * wash * min(1.6, R * 1.2 / rho);
@@ -804,12 +866,17 @@ const char *const MushroomPass = R"HLSL(
         float overGround = cell.z - groundAt((int2)cell.xy, slab);
         float stemR = stem.y * (1 + 0.8 * exp(-overGround / 2)) * (0.8 + 0.4 * lumps);
         float inStem = (1 - smoothstep(0.6, 1.0, rho / stemR)) * (1 - smoothstep(stem.z - 2, stem.z + 1, cell.z));
-        float rate = saturate(stem.w * dt);
         // no soot laid on the ground itself: the skirt carried the fireball's foot out over the
         // terrain as a brown wash
         float soot = cap.x * inCap * smoothstep(0.5, 2.5, overGround), dust = stem.x * inStem;
-        if (soot > d.x) d.x += (soot - d.x) * rate;
-        if (dust > d.y) d.y += (dust - d.y) * rate;
+        // A jet's tube and a rotor's column are clean air the shape is not laid into again while the
+        // wake lasts: laid back at Stem.w, the tunnel a jet cut through the cap closed on the next step.
+        // Only asked where the shape has something to lay: most of the slab is outside it or full.
+        if (soot > d.x || dust > d.y) {
+            float rate = saturate(stem.w * dt) * saturate(1 - 3 * wakeHole(Origins[slab].xyz + (cell + 0.5) * volume.z, volume.z));
+            if (soot > d.x) d.x += (soot - d.x) * rate;
+            if (dust > d.y) d.y += (dust - d.y) * rate;
+        }
         d.x *= lerp(Spill[slab].x, 1, saturate((1.3 - surface) * 3));
         d.y *= lerp(Spill[slab].x, 1, saturate(inStem * 3));
         // white-yellow in the middle, orange-red at the rim, the lumps hotter than the folds between
@@ -3466,9 +3533,13 @@ float shockMask(const float low[3], const float high[3], float cell, int slot)
 	return (float)mask;
 }
 
-// An air particle inside a front this step moves with it, so the cells the air lays under it
-// (AirTakeUp) follow the push instead of pulling the smoke back where it was.  A client particle:
-// nothing in the logic reads where one is.  At most three quarters of an air cell a step.
+// An air particle inside a front or a wake this step moves with it, so the cells the air lays under
+// it (AirTakeUp) follow the push instead of pulling the smoke back where it was: out along a front's
+// radius; down a rotor's column and out along the ground under it, and off a jet's path and down with
+// its vortex pair, at WakeNudge of the wake's speed there (stand-ins for MoverPass's fields, not
+// copies).  A client particle: nothing in the logic reads where one is.  At most three quarters of an
+// air cell a step.
+std::vector<const Mover *> wakers;	// the jets and rotors among the movers this step (stepAir)
 void nudge(Particle *p, float dt, float cell)
 {
 	Coord3D &at = p->m_pos;
@@ -3483,6 +3554,51 @@ void nudge(Particle *p, float dt, float cell)
 		const float move = front.speed * VolumeShock::profile(r, front.radius, front.width) * dt / (std::max)(r, 1.0f);
 		for (unsigned k = 0; k < 3; ++k) shift[k] += d[k] * move;
 	}
+	for (const Mover *mover : wakers) {
+		const float (&m)[4][4] = mover->m;
+		if (int(m[1][3] + 0.5f) == MoverRotor) {
+			const float R = m[0][3], below = m[0][2] - at.z;
+			const float dx = at.x - m[0][0], dy = at.y - m[0][1], rho2 = dx * dx + dy * dy;
+			if (below <= 0 || rho2 >= 25.0f * R * R) continue;
+			const float rho = std::sqrt(rho2), columnR = (std::max)(R * 1.2f + below * 0.15f, 1.5f * cell);
+			if (rho < columnR) {
+				const float narrow = R * 1.2f / columnR;
+				shift[2] -= WakeNudge * m[3][0] * narrow * narrow * (1 - rho / columnR) * dt;
+			}
+			// as close as the ground is, the column turns there into a sheet running outwards, out to
+			// five radii.  Without it smoke under a hover only sank to the floor below and stayed: the
+			// particles the air lays its cells under never left the column.
+			if (m[3][1] > 0 && rho > R * 0.3f) {
+				const float over = at.z - TheTerrainRenderObject->getHeightMapHeight(at.x, at.y, NULL);
+				const float sheet = 1 - smoothstep01(over, cell, cell * 3 + 8), reach = 1 - smoothstep01(rho, R * 3, R * 5);
+				const float out = WakeNudge * m[3][0] * m[3][1] * (std::min)(1.6f, R * 1.2f / rho) * sheet * reach * dt / rho;
+				shift[0] += dx * out;
+				shift[1] += dy * out;
+			}
+		} else {
+			const float path[3] = { m[1][0] * JetWake, m[1][1] * JetWake, m[1][2] * JetWake };
+			const float length2 = path[0] * path[0] + path[1] * path[1] + path[2] * path[2];
+			if (length2 < 1.0f) continue;
+			const float s = ((m[0][0] - at.x) * path[0] + (m[0][1] - at.y) * path[1] + (m[0][2] - at.z) * path[2]) / length2;
+			if (s < 0 || s > 1) continue;
+			const float r[3] = { at.x - (m[0][0] - path[0] * s), at.y - (m[0][1] - path[1] * s), at.z - (m[0][2] - path[2] * s) };
+			const float tube = (std::max)(m[0][3], 1.5f * cell) * (1 + 2 * s);	// MoverPass's wakeCore
+			const float core = std::exp(-(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]) / (tube * tube)) * (1 - s);
+			if (core < 0.01f) continue;
+			// the vortex speed MoverPass gives it, 0.12 of the jet's
+			const float push = WakeNudge * 0.12f * std::sqrt(length2) / JetWake * core * dt;
+			const float across = std::sqrt(r[0] * r[0] + r[1] * r[1]);
+			if (across > 0.01f) {
+				shift[0] += r[0] / across * push;
+				shift[1] += r[1] / across * push;
+			}
+			shift[2] -= push;
+		}
+	}
+	// Nothing pushed down past 1.5 cells over the ground (MoverPass's column stops there too): a cell
+	// laid in the terrain is solid and zeroed, so smoke sunk under a hovering helicopter was gone.
+	if (shift[2] < 0)
+		shift[2] = (std::max)(shift[2], (std::min)(TheTerrainRenderObject->getHeightMapHeight(at.x, at.y, NULL) + 1.5f * cell - at.z, 0.0f));
 	const float moved = std::sqrt(shift[0] * shift[0] + shift[1] * shift[1] + shift[2] * shift[2]), most = 0.75f * cell;
 	const float scale = moved > most ? most / moved : 1.0f;
 	at.x += shift[0] * scale;
@@ -3580,13 +3696,13 @@ void collectMovers(int now)
 			// rotor bone would give the real disc
 			if (drawable->isKindOf(KINDOF_PRODUCED_AT_HELIPAD) || speed < 60.0f) {
 				const float radius = (std::max)(major, 15.0f) * 1.1f;
-				const float close = (std::min)(1.0f, 1.6f - height / (6.0f * radius));
-				if (close <= 0.0f) continue;
 				m[0][2] = at.z + tall * 0.8f;
 				m[0][3] = radius;
 				m[1][3] = MoverRotor;
 				m[2][2] = height;
-				m[3][1] = close;
+				// its column at any height; the sheet and the dust ring along the ground as close as it is
+				m[3][0] = RotorWash;
+				m[3][1] = (std::max)((std::min)(1.0f, 1.6f - height / (6.0f * radius)), 0.0f);
 				priority = 0.25f;	// the one that shows most: kept before the rest
 			} else {
 				m[0][3] = (std::max)(major * 0.8f, 12.0f);
@@ -3922,6 +4038,11 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 	found.clear();
 	float low[3], high[3];
 	boxOf(volume, shape, low, high);
+	wakers.clear();
+	for (const Mover &mover : movers) {
+		const int kind = int(mover.m[1][3] + 0.5f);
+		if (kind == MoverJet || kind == MoverRotor) wakers.push_back(&mover);
+	}
 	for (auto it = systems.begin(); it != systems.end();) {
 		const int id = *it;
 		ParticleSystem *system = TheParticleSystemManager->findParticleSystem((ParticleSystemID)id);
@@ -3957,8 +4078,8 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 		// a ballistic or cruise missile's exhaust is a white billowing plume; a rocket's, a thin grey trail
 		const bool plume = trail && (std::strstr(named, "Scud") || std::strstr(named, "Neutron") || std::strstr(named, "Tomahawk"));
 		bool chained = false;
-		// the blast fronts passing its particles move them (nudge)
-		if (!fronts.empty())
+		// the blast fronts and the wakes passing its particles move them (nudge)
+		if (!fronts.empty() || !wakers.empty())
 			for (Particle *p = system->getFirstParticle(); p; p = p->m_systemNext) nudge(p, dt, cell);
 		// A rocket's ribbon is laid straight: its points scatter off the fire line (EA's MissileExhaust,
 		// which feeds it, throws each point sideways at up to 0.2 a frame), so the ribbon drew a regular
@@ -4147,11 +4268,29 @@ void stepAir(ID3D11DeviceContext *context, unsigned g, int now, float dt, float 
 	if (!smokeBoxes.empty()) {	// only where the air already holds smoke
 		for (const Mover &mover : movers) {
 			const float (&m)[4][4] = mover.m;
-			if (int(m[1][3] + 0.5f) != MoverRotor) continue;
-			const float reach = m[0][3] * 3.0f;
-			const float a[3] = { m[0][0] - reach, m[0][1] - reach, m[0][2] - m[2][2] };
-			const float b[3] = { m[0][0] + reach, m[0][1] + reach, m[0][2] + 20.0f };
-			grow(a, b);
+			const int kind = int(m[1][3] + 0.5f);
+			if (kind == MoverRotor) {
+				const float reach = m[0][3] * 3.0f;
+				const float a[3] = { m[0][0] - reach, m[0][1] - reach, m[0][2] - m[2][2] };
+				const float b[3] = { m[0][0] + reach, m[0][1] + reach, m[0][2] + 20.0f };
+				grow(a, b);
+			} else if (kind == MoverJet) {
+				// its wake over the last JetWake s of its path, down to the ground under it, where that
+				// meets smoke: a whole pass grown into the box widened the march for nothing
+				const float reach = 3.0f * (std::max)(m[0][3], 1.5f * cell);
+				float a[3], b[3];
+				for (unsigned i = 0; i < 3; ++i) {
+					const float tail = m[0][i] - m[1][i] * JetWake;
+					a[i] = (std::min)(m[0][i], tail) - reach;
+					b[i] = (std::max)(m[0][i], tail) + reach;
+				}
+				a[2] = (std::min)(a[2], m[0][2] - m[2][2]);
+				bool meets = false;
+				for (const WorldBox &box : smokeBoxes)
+					meets = meets || (a[0] <= box.high[0] && b[0] >= box.low[0] && a[1] <= box.high[1] && b[1] >= box.low[1]
+						&& a[2] <= box.high[2] && b[2] >= box.low[2]);
+				if (meets) grow(a, b);
+			}
 		}
 		// a front carries smoke out to its shell's far side
 		for (const Front &front : fronts) {
