@@ -76,7 +76,7 @@ yet. [CHANGELOG.md](CHANGELOG.md) has the measurements behind every line.
 | Modern water, under Options > Water Style: waves that catch the sun, foam at the shore and off boat hulls; Classic stays the default | `main` |
 | Volumetric hazard clouds, under Options > Cloud Style: toxin, anthrax and nuclear fields as moving smoke at their real size and length; Classic stays the default | `main` |
 | Fire burns: 182 kinds of flame start white-hot and cool through yellow, orange and red to soot | `main` |
-| Warm Light and Haze, Team Color Glow and Water Foam, three Direct3D 11 looks, off until ticked; the haze costs 0.4 ms a frame | `main` |
+| Warm Light and Haze, Team Color Glow and Water Foam, three Direct3D 11 looks, off until ticked | `main` |
 | Explosion, lit smoke and cloud shaders ship with the game, and one nobody recorded is built beside the game instead of stopping the picture | `main` |
 
 ![A night fight in a river valley under blue moonlight: an explosion and a burning patch of ground light the trees around them while an A-10 and Comanches cross overhead](.github/media/night-fire.jpg)

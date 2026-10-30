@@ -15866,7 +15866,7 @@ GUI:MapLight
 END
 
 TOOLTIP:MapLight
-"Haritayı daha sıcak aydınlatıp daha uzun gölgeler düşüren alçak bir ikindi güneşi ve alçak zeminin üstünde duran, içinden geçen uçakların araladığı hafif bir pus. Yalnızca Direct3D 11. Bir sonraki haritada uygulanır."
+"Haritayı daha sıcak aydınlatıp daha uzun gölgeler düşüren alçak bir ikindi güneşi ve alçak zeminin üstünde kımıldamadan duran hafif bir pus. Yalnızca Direct3D 11. Bir sonraki haritada uygulanır."
 END
 
 GUI:TeamGlow

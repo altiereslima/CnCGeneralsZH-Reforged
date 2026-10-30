@@ -1473,7 +1473,7 @@ GUI:MapLight
 END
 
 TOOLTIP:MapLight
-"A low afternoon sun that lights the map warmer and casts longer shadows, and a light haze lying over low ground that aircraft part as they fly through it. Direct3D 11 only. Applies from the next map."
+"A low afternoon sun that lights the map warmer and casts longer shadows, and a light haze lying still over low ground. Direct3D 11 only. Applies from the next map."
 END
 
 GUI:TeamGlow

@@ -702,7 +702,7 @@ public:
 	Bool m_lanLobbyOnStart;						///< -lanlobby: open the LAN lobby instead of stopping at the main menu
 	Bool m_skirmishLobbyOnStart;			///< -skirmishlobby: open the skirmish staging room instead of stopping at the main menu
 	Bool m_optionsMenuOnStart;				///< -optionsmenu: open the options screen over the main menu at startup
-	Bool m_mapLight;								///< "MapLight": warm low sun, ground haze and aircraft wakes (Direct3D 11, client only)
+	Bool m_mapLight;								///< "MapLight": warm low sun and a still ground haze (Direct3D 11, client only)
 	Bool m_teamGlow;								///< "TeamGlow": bright house colour glows (Direct3D 11, client only)
 	Bool m_waterFoam;								///< "WaterFoam": foam, shore band and the sun's shadow on water (Direct3D 11, client only)
 

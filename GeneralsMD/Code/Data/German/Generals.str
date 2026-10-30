@@ -14994,7 +14994,7 @@ GUI:MapLight
 END
 
 TOOLTIP:MapLight
-"Eine tief stehende Nachmittagssonne taucht die Karte in wärmeres Licht und wirft längere Schatten, und über tiefem Gelände liegt ein leichter Dunst, den Flugzeuge beim Durchfliegen teilen. Nur mit Direct3D 11. Gilt ab der nächsten Karte."
+"Eine tief stehende Nachmittagssonne taucht die Karte in wärmeres Licht und wirft längere Schatten, und über tiefem Gelände liegt reglos ein leichter Dunst. Nur mit Direct3D 11. Gilt ab der nächsten Karte."
 END
 
 GUI:TeamGlow

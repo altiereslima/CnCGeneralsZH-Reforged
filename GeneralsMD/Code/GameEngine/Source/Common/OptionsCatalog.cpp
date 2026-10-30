@@ -587,7 +587,7 @@ const OptionDef TheOptionCatalog[] =
 
 	// Three Direct3D 11 looks, all off by default; the menu greys them under -d3d9.  Warm light is a
 	// low late afternoon sun put into each map's lights as the map loads (WorldHeightMap), so it waits
-	// for the next map, and a light haze over low ground that aircraft part, pushed every frame
+	// for the next map, and a light still haze over low ground, pushed every frame
 	// (W3DShaderManager).  Team glow marks a house colour mesh as it is recoloured for its side,
 	// which happens as a map's models are made.  On Options > Graphics.
 	{ "MapLight",									OPT_WND( "CheckMapLight" ), "GUI:MapLight",

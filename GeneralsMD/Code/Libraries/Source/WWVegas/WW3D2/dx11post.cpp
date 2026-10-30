@@ -128,8 +128,10 @@ static float HazeStrength = 0.0f;
 static float HazeReach = 1.0f;
 static float HazeWater = -1.0e6f;
 
+static float HazeSun[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+
 void DX11Post_Set_Haze(const float colour[3], float top, float thickness, float strength, float reach,
-	float water)
+	float water, const float toward_sun[3], float warmth)
 {
 	HazeWater = water;
 	HazeColour[0] = colour[0];
@@ -139,53 +141,10 @@ void DX11Post_Set_Haze(const float colour[3], float top, float thickness, float 
 	HazeThickness = thickness;
 	HazeStrength = strength;
 	HazeReach = reach;
-}
-
-static float HazeFieldRect[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-static float HazeMotion[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-static float HazeSun[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
-static unsigned char HazeFieldTexels[DX11_POST_HAZE_FIELD_SIZE * DX11_POST_HAZE_FIELD_SIZE];
-static bool HazeFieldDirty = false;
-
-void DX11Post_Set_Haze_Motion(const float field_rect[4], float drift_x, float drift_y,
-	float noise_scale, float stir, const float toward_sun[3], float warmth)
-{
-	memcpy(HazeFieldRect, field_rect, sizeof(HazeFieldRect));
-	HazeMotion[0] = drift_x;
-	HazeMotion[1] = drift_y;
-	HazeMotion[2] = noise_scale;
-	HazeMotion[3] = stir;
 	HazeSun[0] = toward_sun[0];
 	HazeSun[1] = toward_sun[1];
 	HazeSun[2] = toward_sun[2];
 	HazeSun[3] = warmth;
-}
-
-void DX11Post_Set_Haze_Field(const unsigned char * texels)
-{
-	memcpy(HazeFieldTexels, texels, sizeof(HazeFieldTexels));
-	HazeFieldDirty = true;
-}
-
-static float HazeWakeInfo[4] = { 0.0f, 1.0f, 1.0f, 0.0f };
-static float HazeWakeEnds[DX11_POST_HAZE_WAKE_LIMIT][4];
-static float HazeWakeShape[DX11_POST_HAZE_WAKE_LIMIT][4];
-static float HazeClock[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-
-void DX11Post_Set_Haze_Wakes(const float (*segments)[8], unsigned count, float arm_width, float open_soft,
-	float seconds)
-{
-	HazeClock[0] = seconds;
-	if (count > DX11_POST_HAZE_WAKE_LIMIT) {
-		count = DX11_POST_HAZE_WAKE_LIMIT;
-	}
-	for (unsigned index = 0; index < count; ++index) {
-		memcpy(HazeWakeEnds[index], &segments[index][0], sizeof(HazeWakeEnds[0]));
-		memcpy(HazeWakeShape[index], &segments[index][4], sizeof(HazeWakeShape[0]));
-	}
-	HazeWakeInfo[0] = static_cast<float>(count);
-	HazeWakeInfo[1] = arm_width;
-	HazeWakeInfo[2] = open_soft;
 }
 
 static ID3D11ShaderResourceView * HazeShroudSource = NULL;
@@ -195,31 +154,6 @@ void DX11Post_Set_Haze_Shroud(ID3D11ShaderResourceView * view, const float rect[
 {
 	HazeShroudSource = view;
 	memcpy(HazeShroudRect, rect, sizeof(HazeShroudRect));
-}
-
-/** A single channel eight bit texture of size by size for the haze, made on first use; false
-	when the device refused it. */
-static bool make_haze_texture(ID3D11Device * device, unsigned size, ID3D11Texture2D ** texture,
-	ID3D11ShaderResourceView ** view)
-{
-	if (*texture != NULL) {
-		return true;
-	}
-	D3D11_TEXTURE2D_DESC description;
-	ZeroMemory(&description, sizeof(description));
-	description.Width = size;
-	description.Height = size;
-	description.MipLevels = 1;
-	description.ArraySize = 1;
-	description.Format = DXGI_FORMAT_R8_UNORM;
-	description.SampleDesc.Count = 1;
-	description.Usage = D3D11_USAGE_DEFAULT;
-	description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-	if (FAILED(device->CreateTexture2D(&description, NULL, texture))) {
-		return false;
-	}
-	device->CreateShaderResourceView(*texture, NULL, view);
-	return true;
 }
 
 static DX11PostWarp Warps[DX11_POST_WARP_LIMIT];
@@ -268,20 +202,10 @@ struct PostConstantBlock
 	float Haze[4];
 	float HazeColour[4];
 	float WorldFromClip[16];
-	// Then the disturbance field's world rectangle (origin, one over size), the wind's drift so far,
-	// the noise scale and the field's strength, and the way toward the sun with its warmth.
-	float HazeField[4];
-	float HazeMotion[4];
+	// Then the way toward the sun with its warmth.
 	float HazeSun[4];
 	// The shroud light's world rectangle (origin, one over size).
 	float HazeShroudRect[4];
-	// The aircraft wakes: their count, arm width and opening ease, then each segment's ends and
-	// its shape.
-	float HazeWakeInfo[4];
-	float HazeWakeEnds[DX11_POST_HAZE_WAKE_LIMIT][4];
-	float HazeWakeShape[DX11_POST_HAZE_WAKE_LIMIT][4];
-	// The picture's clock in seconds, in x.
-	float HazeClock[4];
 };
 
 // A triangle big enough to cover the screen, made out of nothing.  No vertex buffer and no input
@@ -563,42 +487,15 @@ static const char * const AO_SCENE_SHADER_BODY =
 // Oasis's low plateau takes: the bank under it went milky at the full amount, and still a little
 // at 0.62.
 //
-// The layer is not even.  Four points along the last stretch of the eye's ray inside the layer
-// read two octaves of value noise drifting with the wind, each at its own height so the patches
-// part with parallax as the camera moves.  Their mean, eased so the patches have soft edges and
-// clear gaps, scales the amount between 0.65 and 1.35 of the even layer (one on average, so a
-// map's average haze is what it was; 0.3 to 1.7 went to a flat milky plate on the low bank), and
-// the dense patches come out a touch paler, which keeps them apart from the map's darker cloud
-// shadows.  The disturbance field (t2, DX11Post_Set_Haze_Field) clears the haze where something
-// went through, read at the same four points along the ray: looking down that is the ground under
-// the pixel, and across a far bank the ray passes through the lane only partly, so a lane there
-// thins instead of standing up as a wall with a doorway in it.  The clearing eases in over a wide
-// band and takes less with distance; its slope pushes the noise outward by up to HAZE_SWIRL world
-// units and piles a faint extra on the rim (a bright rim read as a crater's edge).
+// The layer is not even, and it holds still: nothing moves it.  Four points along the last stretch
+// of the eye's ray inside the layer read two octaves of value noise fixed to the world, each at its
+// own height so the patches part with parallax as the camera moves.  Their mean, eased so the
+// patches have soft edges and clear gaps, scales the amount between 0.65 and 1.35 of the even layer
+// (one on average, so a map's average haze is what it was; 0.3 to 1.7 went to a flat milky plate on
+// the low bank), and the dense patches come out a touch paler, which keeps them apart from the
+// map's darker cloud shadows.
 //
-// Aircraft disturb the haze in a wedge, the Mach cone or a boat's wake seen from above: its point
-// at the aircraft, two arms spreading back along its recent path (DX11Post_Set_Haze_Wakes, a few
-// segments, so a turn bends the wedge).  Nothing is drawn on top: the wedge is a mask that moves
-// the haze already there.  A pixel's distance behind the aircraft along the path and its distance
-// off the path decide it.  Along each arm, where the second is the first times the half-angle's
-// tangent plus a drift outward with age (HAZE_WAKE_DRIFT), sits a wingtip vortex: it pushes the
-// haze outward (HAZE_WAKE_PUSH world units) and rolls it along the arm, the two sides turning
-// opposite ways on the picture's clock (HAZE_WAKE_ROLL, HAZE_WAKE_SPIN), smearing wider as it ages
-// (HAZE_WAKE_SMEAR).  Curl noise breaks the push up (HAZE_WAKE_TURB), and inside the wake a finer
-// grain of haze rides the same displacement (HAZE_WAKE_GRAIN), so what shows is haze texture
-// bending and parting.  Inside the arms the lane tears open (HAZE_WAKE_TATTER_SCALE noise, eased
-// so the torn holes clear right down to the ground and the rest keeps HAZE_WAKE_TATTER_KEEP of the
-// clearing) and fills back in from the sides after HAZE_WAKE_FILL_FROM of the wake's life.  The
-// haze the vortices push out piles on them (HAZE_WAKE_PILE, up to twice the haze there), and they
-// lift a little more out of the layer below (HAZE_WAKE_LIFT of the full layer, in clumps of the
-// fine grain), which is what still shows over a bank where the haze is too thin for a clearing in
-// it to read.  A pixel whose foot on a segment falls past either end belongs to the next segment
-// and is skipped.  A hovering helicopter's segments are rings instead: the same vortex pushed radially outward and
-// rolling round the ring, the disc inside cleared, travelling out as the ring ages.  A weaker
-// segment (an aircraft higher over the haze) spreads its vortices wider, up to HAZE_WAKE_HIGH_SOFT
-// more at nothing, so a high pass reads soft and a low one sharp.
-//
-// The shroud has already darkened the ground under the haze by its light (t3, the very texture the
+// The shroud has already darkened the ground under the haze by its light (t2, the very texture the
 // terrain multiplies by, through the terrain's own mapping, so the two cannot disagree; a copy read
 // through W3DShroud::getShroudLevel did, by cells and by a stair-step edge), so the haze takes
 // that light too, its colour once and its amount three times over: in the fog
@@ -613,41 +510,12 @@ static const char * const HAZE_SHADER_BODY =
 	"    float4 Haze : packoffset(c13);\n"
 	"    float4 HazeColour : packoffset(c14);\n"
 	"    row_major float4x4 WorldFromClip : packoffset(c15);\n"
-	"    float4 HazeField : packoffset(c19);\n"
-	"    float4 HazeMotion : packoffset(c20);\n"
-	"    float4 HazeSun : packoffset(c21);\n"
-	"    float4 HazeShroudRect : packoffset(c22);\n"
-	"    float4 HazeWakeInfo : packoffset(c23);\n"
-	"    float4 HazeWakeEnds[" DX11_POST_HAZE_WAKE_LIMIT_TEXT "] : packoffset(c24);\n"
-	"    float4 HazeWakeShape[" DX11_POST_HAZE_WAKE_LIMIT_TEXT "] : packoffset(" DX11_POST_HAZE_WAKE_SHAPE_REGISTER_TEXT ");\n"
-	"    float4 HazeClock : packoffset(" DX11_POST_HAZE_CLOCK_REGISTER_TEXT ");\n"
+	"    float4 HazeSun : packoffset(c19);\n"
+	"    float4 HazeShroudRect : packoffset(c20);\n"
 	"};\n"
-	"Texture2D HazeStir : register(t2);\n"
-	"Texture2D HazeShroud : register(t3);\n"
-	"static const float HAZE_FIELD_TEXEL = 1.0 / " DX11_POST_HAZE_FIELD_SIZE_TEXT ".0;\n"
-	"static const float HAZE_SWIRL = 140.0;\n"
-	"static const float HAZE_RIM_GAIN = 1.5;\n"
+	"Texture2D HazeShroud : register(t2);\n"
+	"static const float HAZE_PATCH = 1.0 / 320.0;\n"
 	"static const float HAZE_LOW_CAP = 0.5;\n"
-	"static const float HAZE_WAKE_PILE = 1.0;\n"
-	"static const float HAZE_WAKE_LIFT = 0.8;\n"
-	"static const float HAZE_WAKE_TATTER_KEEP = 0.45;\n"
-	"static const float HAZE_WAKE_HOLD = 0.55;\n"
-	"static const float HAZE_WAKE_GONE = 0.85;\n"
-	"static const float HAZE_WAKE_END_SCALE = 1.0 / 20.0;\n"
-	"static const float HAZE_WAKE_END_BREAK = 0.3;\n"
-	"static const float HAZE_WAKE_SIDE_SOFT = 0.6;\n"
-	"static const float HAZE_WAKE_HIGH_SOFT = 1.5;\n"
-	"static const float HAZE_WAKE_DRIFT = 16.0;\n"
-	"static const float HAZE_WAKE_SMEAR = 2.5;\n"
-	"static const float HAZE_WAKE_PUSH = 24.0;\n"
-	"static const float HAZE_WAKE_ROLL = 14.0;\n"
-	"static const float HAZE_WAKE_SPIN = 5.0;\n"
-	"static const float HAZE_WAKE_FILL_FROM = 0.25;\n"
-	"static const float HAZE_WAKE_TURB_SCALE = 1.0 / 18.0;\n"
-	"static const float HAZE_WAKE_TURB = 18.0;\n"
-	"static const float HAZE_WAKE_TATTER_SCALE = 1.0 / 14.0;\n"
-	"static const float HAZE_WAKE_GRAIN = 1.0 / 22.0;\n"
-	"static const float HAZE_WAKE_GRAIN_SHOW = 0.8;\n"
 	"\n"
 	"float haze_hash(float2 p)\n"
 	"{\n"
@@ -664,11 +532,6 @@ static const char * const HAZE_SHADER_BODY =
 	"    float c = haze_hash(cell + float2(0.0, 1.0));\n"
 	"    float d = haze_hash(cell + float2(1.0, 1.0));\n"
 	"    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);\n"
-	"}\n"
-	"\n"
-	"float haze_stir(float2 at)\n"
-	"{\n"
-	"    return HazeStir.SampleLevel(Sampler, at, 0.0).r;\n"
 	"}\n"
 	"\n"
 	"float4 main(VertexOutput input) : SV_TARGET\n"
@@ -690,101 +553,17 @@ static const char * const HAZE_SHADER_BODY =
 	"    bank = bank * bank * (3.0 - 2.0 * bank);\n"
 	"    amount *= bank;\n"
 	"\n"
-	"    float2 field = (world.xy - HazeField.xy) * HazeField.zw;\n"
-	"    float2 slope = float2(haze_stir(field + float2(HAZE_FIELD_TEXEL, 0.0)) - haze_stir(field - float2(HAZE_FIELD_TEXEL, 0.0)),\n"
-	"        haze_stir(field + float2(0.0, HAZE_FIELD_TEXEL)) - haze_stir(field - float2(0.0, HAZE_FIELD_TEXEL)));\n"
-	"\n"
-	"    float2 warp = float2(0.0, 0.0);\n"
-	"    float wakeClear = 0.0;\n"
-	"    float wakeStir = 0.0;\n"
-	"    float endBreak = (haze_noise(world.xy * HAZE_WAKE_END_SCALE + 11.0) - 0.5) * HAZE_WAKE_END_BREAK;\n"
-	"    for (int wake = 0; wake < " DX11_POST_HAZE_WAKE_LIMIT_TEXT "; ++wake)\n"
-	"    {\n"
-	"        if (wake >= (int)HazeWakeInfo.x) break;\n"
-	"        float4 ends = HazeWakeEnds[wake];\n"
-	"        float4 shape = HazeWakeShape[wake];\n"
-	"        float2 outward;\n"
-	"        float2 across;\n"
-	"        float off;\n"
-	"        float edge;\n"
-	"        float age;\n"
-	"        float hand;\n"
-	"        if (shape.y < 0.0)\n"
-	"        {\n"
-	"            float2 fromCentre = world.xy - ends.zw;\n"
-	"            off = length(fromCentre);\n"
-	"            outward = fromCentre / max(off, 0.001);\n"
-	"            across = float2(-outward.y, outward.x);\n"
-	"            edge = shape.x;\n"
-	"            age = shape.w;\n"
-	"            hand = 1.0;\n"
-	"        }\n"
-	"        else\n"
-	"        {\n"
-	"            float2 back = ends.xy - ends.zw;\n"
-	"            float2 fromNear = world.xy - ends.zw;\n"
-	"            float span2 = max(dot(back, back), 0.0001);\n"
-	"            float along = dot(fromNear, back) / span2;\n"
-	"            if (along < 0.0 || along > 1.0) continue;\n"
-	"            float behind = shape.x + along * sqrt(span2);\n"
-	"            float2 sideways = fromNear - back * along;\n"
-	"            off = length(sideways);\n"
-	"            outward = sideways / max(off, 0.001);\n"
-	"            across = back * rsqrt(span2);\n"
-	"            hand = (back.x * fromNear.y - back.y * fromNear.x) >= 0.0 ? 1.0 : -1.0;\n"
-	"            age = behind * shape.w;\n"
-	"            edge = behind * shape.y + age * HAZE_WAKE_DRIFT;\n"
-	"        }\n"
-	"        float fade = (1.0 - smoothstep(HAZE_WAKE_HOLD, HAZE_WAKE_GONE, age + endBreak)) * shape.z;\n"
-	"        if (fade <= 0.0) continue;\n"
-	"        float spread = HazeWakeInfo.y * (1.0 + age * HAZE_WAKE_SMEAR) * (1.0 + HAZE_WAKE_HIGH_SOFT * (1.0 - shape.z));\n"
-	"        float arm = (off - edge) / spread;\n"
-	"        float vortex = exp(-arm * arm) * fade;\n"
-	"        float roll = sin(arm * 2.2 - HazeClock.x * HAZE_WAKE_SPIN * hand);\n"
-	"        warp += outward * vortex * HAZE_WAKE_PUSH * (1.0 - 0.5 * age) + across * vortex * roll * HAZE_WAKE_ROLL * hand;\n"
-	"        float lane = saturate((edge * (1.0 - smoothstep(HAZE_WAKE_FILL_FROM, 1.0, age)) - off + endBreak * spread)\n"
-	"            / max(HazeWakeInfo.z, spread * HAZE_WAKE_SIDE_SOFT));\n"
-	"        wakeClear = max(wakeClear, lane * fade);\n"
-	"        wakeStir = max(wakeStir, vortex);\n"
-	"    }\n"
-	"    float wakeTouch = saturate(wakeStir + wakeClear);\n"
-	"    if (wakeTouch > 0.001)\n"
-	"    {\n"
-	"        float2 t = world.xy * HAZE_WAKE_TURB_SCALE + HazeClock.x * 0.7;\n"
-	"        float2 curl = float2(haze_noise(t + float2(0.0, 0.5)) - haze_noise(t - float2(0.0, 0.5)),\n"
-	"            haze_noise(t - float2(0.5, 0.0)) - haze_noise(t + float2(0.5, 0.0)));\n"
-	"        warp += curl * HAZE_WAKE_TURB * wakeTouch;\n"
-	"        float tatter = haze_noise((world.xy - warp) * HAZE_WAKE_TATTER_SCALE + HazeClock.x * 0.3);\n"
-	"        wakeClear *= lerp(HAZE_WAKE_TATTER_KEEP, 1.0, smoothstep(0.3, 0.7, tatter));\n"
-	"    }\n"
-	"\n"
 	"    float3 ray = world.xyz - eye.xyz;\n"
 	"    float entry = (eye.z > Haze.x && abs(ray.z) > 0.0001) ? saturate((Haze.x - eye.z) / ray.z) : 0.0;\n"
-	"    float2 shove = slope * HAZE_SWIRL * HazeMotion.z;\n"
 	"    float patches = 0.0;\n"
-	"    float stir = 0.0;\n"
 	"    for (int tap = 0; tap < 4; ++tap)\n"
 	"    {\n"
 	"        float3 at = eye.xyz + ray * lerp(entry, 1.0, ((float)tap + 0.5) * 0.25);\n"
-	"        float2 q = (at.xy - warp - HazeMotion.xy) * HazeMotion.z - shove + at.z * 0.011;\n"
+	"        float2 q = at.xy * HAZE_PATCH + at.z * 0.011;\n"
 	"        patches += haze_noise(q) * 0.7 + haze_noise(q * 2.7 + 17.0) * 0.3;\n"
-	"        stir += haze_stir((at.xy - HazeField.xy) * HazeField.zw);\n"
 	"    }\n"
 	"    float dense = smoothstep(0.28, 0.72, patches * 0.25);\n"
 	"    amount *= lerp(0.65, 1.35, dense);\n"
-	"    float fine = 0.0;\n"
-	"    if (wakeTouch > 0.001)\n"
-	"    {\n"
-	"        float2 grain = (world.xy - warp - HazeMotion.xy * 0.5) * HAZE_WAKE_GRAIN;\n"
-	"        fine = haze_noise(grain) * 0.6 + haze_noise(grain * 2.3 + 31.0) * 0.4;\n"
-	"        amount *= lerp(1.0, 0.4 + 1.2 * fine, wakeTouch * HAZE_WAKE_GRAIN_SHOW);\n"
-	"    }\n"
-	"\n"
-	"    float clear = max(HazeMotion.w * smoothstep(0.05, 0.6, stir * 0.25), wakeClear) * lerp(1.0, 0.6, reach);\n"
-	"    float rim = saturate(length(slope) * HAZE_RIM_GAIN) * (1.0 - clear);\n"
-	"    float pushed = wakeStir * (1.0 - clear);\n"
-	"    amount *= (1.0 - clear) * (1.0 + 0.12 * rim + HAZE_WAKE_PILE * pushed);\n"
-	"    amount += HAZE_WAKE_LIFT * Haze.z * HAZE_LOW_CAP * saturate(below * 4.0) * bank * pushed * smoothstep(0.3, 0.8, fine);\n"
 	"\n"
 	"    float2 look = ray.xy * rsqrt(max(dot(ray.xy, ray.xy), 0.0001));\n"
 	"    float2 sun = HazeSun.xy * rsqrt(max(dot(HazeSun.xy, HazeSun.xy), 0.0001));\n"
@@ -1040,8 +819,6 @@ DX11PostProcessClass::DX11PostProcessClass()
 	, Occluded(false)
 	, Hazed(false)
 	, HazeRefused(false)
-	, HazeFieldTexture(NULL)
-	, HazeFieldView(NULL)
 	, HazeShroudView(NULL)
 {
 	memset(HazeWorldFromClip, 0, sizeof(HazeWorldFromClip));
@@ -1083,12 +860,8 @@ bool DX11PostProcessClass::Initialise(DX11DeviceClass * device)
 void DX11PostProcessClass::Shutdown()
 {
 	Release_Targets();
-	release_interface(reinterpret_cast<IUnknown **>(&HazeFieldView));
-	release_interface(reinterpret_cast<IUnknown **>(&HazeFieldTexture));
 	HazeShroudView = NULL;
 	HazeShroudSource = NULL;
-	// A new device starts without it, so the next upload has to make it.
-	HazeFieldDirty = true;
 	release_interface(reinterpret_cast<IUnknown **>(&ConstantBuffer));
 	release_interface(reinterpret_cast<IUnknown **>(&RasterizerState));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthState));
@@ -1456,13 +1229,6 @@ bool DX11PostProcessClass::Haze_Scene(ID3D11ShaderResourceView * depth,
 	}
 	memcpy(HazeWorldFromClip, world_from_clip, sizeof(HazeWorldFromClip));
 
-	if (HazeFieldDirty) {
-		if (make_haze_texture(Device->Get_Device(), DX11_POST_HAZE_FIELD_SIZE, &HazeFieldTexture, &HazeFieldView)) {
-			Device->Get_Context()->UpdateSubresource(HazeFieldTexture, 0, NULL, HazeFieldTexels,
-				DX11_POST_HAZE_FIELD_SIZE, 0);
-		}
-		HazeFieldDirty = false;
-	}
 	// Borrowed for this frame only: the shroud's texture (and so its mirror) can be freed by the
 	// next map or a shroud reset, and a frame that set none draws with none.
 	HazeShroudView = HazeShroudSource;
@@ -1577,16 +1343,10 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	block.HazeColour[2] = HazeColour[2];
 	block.HazeColour[3] = HazeWater;
 	memcpy(block.WorldFromClip, HazeWorldFromClip, sizeof(block.WorldFromClip));
-	memcpy(block.HazeField, HazeFieldRect, sizeof(block.HazeField));
-	memcpy(block.HazeMotion, HazeMotion, sizeof(block.HazeMotion));
 	memcpy(block.HazeSun, HazeSun, sizeof(block.HazeSun));
 	// the program reads only the sun's bearing, so its z says whether a shroud texture is bound
 	block.HazeSun[2] = (HazeShroudView != NULL) ? 1.0f : 0.0f;
 	memcpy(block.HazeShroudRect, HazeShroudRect, sizeof(block.HazeShroudRect));
-	memcpy(block.HazeWakeInfo, HazeWakeInfo, sizeof(block.HazeWakeInfo));
-	memcpy(block.HazeWakeEnds, HazeWakeEnds, sizeof(block.HazeWakeEnds));
-	memcpy(block.HazeWakeShape, HazeWakeShape, sizeof(block.HazeWakeShape));
-	memcpy(block.HazeClock, HazeClock, sizeof(block.HazeClock));
 	memcpy(mapped.pData, &block, sizeof(block));
 	context->Unmap(ConstantBuffer, 0);
 
@@ -1620,17 +1380,16 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	const bool haze = (pass.Shader == HazeShader);
 	if (haze) {
 		// The same buffer at b1 as well, where the haze program reads its own fields of it, and
-		// the disturbance field at t2 (none yet reads as an unstirred field).
+		// the shroud at t2.
 		context->PSSetConstantBuffers(1, 1, &ConstantBuffer);
-		ID3D11ShaderResourceView * haze_resources[2] = { HazeFieldView, HazeShroudView };
-		context->PSSetShaderResources(2, 2, haze_resources);
+		context->PSSetShaderResources(2, 1, &HazeShroudView);
 	}
 
 	context->Draw(FULL_SCREEN_VERTEX_COUNT, 0);
 
 	if (haze) {
-		ID3D11ShaderResourceView * no_haze_resources[2] = { NULL, NULL };
-		context->PSSetShaderResources(2, 2, no_haze_resources);
+		ID3D11ShaderResourceView * no_haze_resource = NULL;
+		context->PSSetShaderResources(2, 1, &no_haze_resource);
 	}
 
 	// The texture this pass read is the target the next one writes, and D3D11 unbinds a resource

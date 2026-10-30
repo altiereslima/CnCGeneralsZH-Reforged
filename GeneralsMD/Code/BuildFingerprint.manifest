@@ -87,9 +87,7 @@ Data/Cinema/filterbw.txt
 Data/Cinema/firelook.txt
 Data/Cinema/geproto_alpine.txt
 Data/Cinema/geproto_glow.txt
-Data/Cinema/geproto_hazemove.txt
 Data/Cinema/geproto_oasis.txt
-Data/Cinema/geproto_wake.txt
 Data/Cinema/gpu1m_battle.txt
 Data/Cinema/gunfx.txt
 Data/Cinema/headlights.txt
@@ -300,9 +298,7 @@ Data/Scenarios/geproto_alpine.txt
 Data/Scenarios/geproto_fogedge.txt
 Data/Scenarios/geproto_glow.txt
 Data/Scenarios/geproto_hazefog.txt
-Data/Scenarios/geproto_hazemove.txt
 Data/Scenarios/geproto_oasis.txt
-Data/Scenarios/geproto_wake.txt
 Data/Scenarios/givemoney.txt
 Data/Scenarios/glowbase.txt
 Data/Scenarios/glowfight.txt
