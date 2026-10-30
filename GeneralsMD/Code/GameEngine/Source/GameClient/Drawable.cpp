@@ -590,6 +590,7 @@ void Drawable::takeLookForDraw( void )
 	look.hasSelectionColor = selection != NULL;
 	if( selection )
 		look.selectionColor = *selection;
+	look.position = *getPosition();
 }
 
 //-------------------------------------------------------------------------------------------------

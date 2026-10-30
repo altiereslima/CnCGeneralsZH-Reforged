@@ -187,6 +187,7 @@ public:
 	Object *findObjectByID( ObjectID id );								///< Given an ObjectID, return a pointer to the object.
  	Object *getFirstObject( void );									///< Returns the "first" object in the world. When used with the object method "getNextObject()", all objects in the world can be iterated.
 	ObjectID allocateObjectID( void );							///< Returns a new unique object id
+	void growObjectLookupForTick( void );						///< LogicThread's sync point: room for the next tick's objects, so it never reallocates the lookup beside the render
 
 	// super hack
 	void startNewGame( Bool loadSaveGame );

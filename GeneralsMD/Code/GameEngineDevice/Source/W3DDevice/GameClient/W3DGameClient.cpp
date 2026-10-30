@@ -49,6 +49,8 @@
 #include "GameClient/GameClient.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/RayEffect.h"
+#include "GameLogic/GameLogic.h"
+#include "GameLogic/Object.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DGameClient.h"
 #include "W3DDevice/GameClient/W3DStatusCircle.h"
@@ -229,6 +231,14 @@ void W3DGameClient::adjustLOD( Int adj )
 //-------------------------------------------------------------------------------------------------
 void W3DGameClient::notifyTerrainObjectMoved(Object *obj)
 {
+	// LOGIC-THREAD.md: drawTrees reads the trees beside the tick, so a push or a topple waits for its
+	// end and takes the unit as it stands then.  A unit the tick destroyed pushes nothing.
+	const ObjectID id = obj->getID();
+	LOGIC_AFTER_TICK( [this, id]() {
+		Object *mover = TheGameLogic->findObjectByID( id );
+		if( mover )
+			notifyTerrainObjectMoved( mover );
+	} );
 	if (TheTerrainRenderObject) {
 		TheTerrainRenderObject->unitMoved(obj);
 	}

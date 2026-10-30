@@ -545,8 +545,11 @@ public:
 		UnsignedInt			tintStatus;
 		Vector3					tintColor;
 		Vector3					selectionColor;
+		Coord3D					position;
 	};
 	void takeLookForDraw( void );
+	/** Where it stood at the sync point, for the draw's own walks of the drawables: the Thing's cache moves with the tick. */
+	const Coord3D *getPositionForDraw( void ) const { return &m_lookForDraw.position; }
 
 	void colorFlash( const RGBColor *color, UnsignedInt decayFrames = DEF_DECAY_FRAMES, UnsignedInt attackFrames = 0, UnsignedInt sustainAtPeak = FALSE );  ///< flash a drawable in the color specified for a short time
 	void colorTint( const RGBColor *color );	 ///< tint this drawable the color specified

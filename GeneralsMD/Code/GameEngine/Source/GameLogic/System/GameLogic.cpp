@@ -5434,6 +5434,18 @@ void GameLogic::addObjectToLookupTable( Object *obj )
 }  // end addObjectToLookupTable
 
 // ------------------------------------------------------------------------------------------------
+/** A tick beside the render (LogicThread's startOverlap) makes its objects in room grown here, at the
+	sync point, so addObjectToLookupTable does not reallocate m_objVector under a reader on the main
+	thread.  Nothing observes the size past findObjectByID's bound, where a missing slot and a NULL one
+	answer alike.  ponytail: a tick making more than 4096 objects still grows it in place. */
+// ------------------------------------------------------------------------------------------------
+void GameLogic::growObjectLookupForTick( void )
+{
+	while( (UnsignedInt)m_nextObjID + 4096 >= m_objVector.size() )
+		m_objVector.resize( m_objVector.size() * 2, NULL );
+}
+
+// ------------------------------------------------------------------------------------------------
 /** Remove object from the ID lookup table */
 // ------------------------------------------------------------------------------------------------
 void GameLogic::removeObjectFromLookupTable( Object *obj )

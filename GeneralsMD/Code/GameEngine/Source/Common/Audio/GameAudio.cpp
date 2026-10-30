@@ -1429,6 +1429,8 @@ Bool AudioManager::shouldPlayLocally(const AudioEventRTS *audioEvent)
 //-------------------------------------------------------------------------------------------------
 AudioHandle AudioManager::allocateNewHandle( void )
 {
+	// the tick mints handles too (addAudioEvent), so a sound the render starts beside it shares the pool
+	LOGIC_WINDOW_READ( WINDOW_AUDIO_HANDLE );
 	// note, intenionally a post increment rather than a pre increment.
 	return theAudioHandlePool++;
 }

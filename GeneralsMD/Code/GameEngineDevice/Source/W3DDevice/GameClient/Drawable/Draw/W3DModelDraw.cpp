@@ -390,6 +390,8 @@ HAnimClass* W3DAnimationInfo::getAnimHandle() const
 		m_handle->Add_Ref();
 	return m_handle;
 #else
+	LogicThread::parkRender();
+	LOGIC_CENSUS( CENSUS_ASSET_LOAD );
 	HAnimClass* handle = W3DDisplay::m_assetManager->Get_HAnim(m_name.str());
 	DEBUG_ASSERTCRASH(handle, ("*** ASSET ERROR: animation %s not found\n",m_name.str()));
 	if (handle != NULL && m_naturalDurationInMsec < 0)
@@ -622,13 +624,14 @@ void ModelConditionInfo::validateCachedBones(RenderObjClass* robj, Real scale) c
 	if (m_validStuff & PRISTINE_BONES_VALID)
 		return;
 
+	// the render's call leaves the cache alone: the flag is already clear, so the map is not read, and
+	// beside a tick clearing it here raced the tick's fill
 	if (!isValidTimeToCalcLogicStuff())
-	{
-		m_pristineBones.clear();
-		m_validStuff &= ~PRISTINE_BONES_VALID;
 		return;
-	}
 
+	// R3: this cache and the asset manager below are the render's too, so a tick beside it parks it
+	// before it writes either
+	LogicThread::parkRender();
 	setFPMode();
 
 	BONEPOS_LOG(("Validating bones for %s: %s", m_modelName.str(), getDescription().str()));
@@ -756,6 +759,8 @@ void ModelConditionInfo::validateWeaponBarrelInfo() const
 		return;
 	}
 
+	// R3: a state the render switches to inside the window reads these
+	LogicThread::parkRender();
 	setFPMode();
 
 	for (int wslot = 0; wslot < WEAPONSLOT_COUNT; ++wslot)
@@ -900,12 +905,19 @@ void ModelConditionInfo::validateTurretInfo() const
 	if (m_validStuff & TURRETS_VALID)
 		return;
 
+	// the render's call leaves the bones alone: they are 0 until the flag is set, and beside a tick
+	// zeroing them here wiped the bones the tick had just found
+	if (!isValidTimeToCalcLogicStuff())
+		return;
+
+	// R3: as validateWeaponBarrelInfo
+	LogicThread::parkRender();
 	setFPMode();
 
 	for (int tslot = 0; tslot < MAX_TURRETS; ++tslot)
 	{
 		TurretInfo& tur = m_turrets[tslot];
-		if (!isValidTimeToCalcLogicStuff() || m_modelName.isEmpty())
+		if (m_modelName.isEmpty())
 		{
 			tur.m_turretAngleBone = 0;
 			tur.m_turretPitchBone = 0;
@@ -939,11 +951,8 @@ void ModelConditionInfo::validateTurretInfo() const
 		}	
 	}
 
-	if (isValidTimeToCalcLogicStuff())
-	{
-		m_validStuff |= TURRETS_VALID;
-	}
-} 
+	m_validStuff |= TURRETS_VALID;
+}
 
 //-------------------------------------------------------------------------------------------------
 const Matrix3D* ModelConditionInfo::findPristineBone(NameKeyType boneName, Int* boneIndex) const
@@ -3475,7 +3484,7 @@ void W3DModelDraw::lightHeadlights(const Vector3& cameraPosition)
 	for (size_t i = 0; i < s_headlightQueue.size(); ++i)
 	{
 		W3DModelDraw* draw = s_headlightQueue[i];
-		const Coord3D* pos = draw->getDrawable()->getPosition();
+		const Coord3D* pos = draw->getDrawable()->getPositionForDraw();
 		const Real dx = pos->x - cameraPosition.X, dy = pos->y - cameraPosition.Y, dz = pos->z - cameraPosition.Z;
 		nearest.push_back(std::make_pair(dx * dx + dy * dy + dz * dz, draw));
 	}
@@ -3700,6 +3709,7 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 		{
 			const W3DModelDrawModuleData* data = getW3DModelDrawModuleData();
 			Bool swapsTexture = !data->m_replaceTextureOld.isEmpty();
+			LOGIC_CENSUS( CENSUS_ASSET_LOAD );
 			m_renderObject = W3DDisplay::m_assetManager->Create_Render_Obj(newState->m_modelName.str(), draw->getScale(), m_hexColor,
 				swapsTexture ? data->m_replaceTextureOld.str() : NULL, swapsTexture ? data->m_replaceTextureNew.str() : NULL);
 			DEBUG_ASSERTCRASH(m_renderObject, ("*** ASSET ERROR: Model %s not found!\n",newState->m_modelName.str()));

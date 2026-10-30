@@ -50,6 +50,7 @@
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "d3dx9math.h"
 #include "Common/GlobalData.h"
+#include "Common/LogicThread.h"
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
 #include "WW3D2/statistics.h"
 #include "Common/Debug.h"
@@ -1551,6 +1552,15 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass & rinfo)
 					if (renderProjectedTerrainShadow(shadow, aaBox))
 						projectionCount++;
 					projector->Peek_Material_Pass()->UnInstall_Materials();
+
+					/* The objects the shadow falls on come from the partition, whose scans share iteration flags
+						 with the tick's (a desync) and whose modules the tick frees beside the render.  The window
+						 is open for every picture at every -logicthread setting, so the shadow falls on the
+						 terrain alone and every setting draws the same picture.
+						 ponytail: receivers lost for mods with SHADOW_PROJECTION (the fork's INI has none); the
+						 upgrade is the receivers gathered at W3DDisplay's takeReadsForRender. */
+					if (LogicThread::isInsideWindow())
+						continue;
 
 					SimpleObjectIterator *iter;
 					Object *obj;

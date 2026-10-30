@@ -201,6 +201,7 @@ public:
 	Bool updateTreePosition(DrawableID id, Coord3D location, Real angle);
 	void stepTrees(void);	///< W3DTreeBuffer::stepTrees, at the render's sync point
 	void takeWaypointsForRender(void);	///< W3DWaypointBuffer::takeReadsForRender, at the render's sync point
+	void takePropShroudForRender(void);	///< W3DPropBuffer::takeShroudForRender, at the render's sync point
 	void renderTrees(CameraClass * camera); ///< renders the tree buffer.
 	Int renderTreeShadowCasters(RenderInfoClass &sunInfo, CameraClass *sceneCamera, const SunShadowCasterCull &cull); ///< the trees drawn into the sun's map, counted
 

@@ -3440,6 +3440,9 @@ Object *PartitionManager::getClosestObjects(
 )
 {
 	//USE_PERF_TIMER(getClosestObjects)
+	// theIterFlag and each module's done flag below are shared by every scan; one from the render
+	// beside a tick lets the tick's own scan skip an object, so a different target and a desync
+	LOGIC_WINDOW_READ( WINDOW_PARTITION_ITERATE );
 
 #ifdef DUMP_PERF_STATS
 	if (TheGameLogic->getFrame() != s_gcoPerfFrame)

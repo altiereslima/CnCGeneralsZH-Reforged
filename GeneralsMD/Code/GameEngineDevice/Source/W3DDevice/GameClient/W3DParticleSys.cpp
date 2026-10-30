@@ -47,6 +47,7 @@
 #include "WW3D2/dx11runtime.h"
 #include "Platform/SunShadow.h"
 #include "Common/JobSystem.h"
+#include "Common/LogicThread.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/LifetimeUpdate.h"
@@ -1878,13 +1879,15 @@ void W3DParticleSystemManager::takeReadsForRender( void )
 
 /** The systems a pass draws from, walked again only when a particle update or anything else that
 	* adds or takes away a system or a particle has run since the last walk.  A system with no
-	* particles draws nothing and one the local player cannot see is skipped, so neither is kept. */
+	* particles draws nothing and one the local player cannot see is skipped, so neither is kept.
+	* Inside the window a new id means no walk: a system made there is filed when the window closes,
+	* so the walk would find what the sync point found, by way of the objects the tick is deleting. */
 void W3DParticleSystemManager::refreshFrameView( void )
 {
 	const UnsignedInt logicFrame = TheGameLogic->getFrame();
 	if (m_frameViewValid && m_frameViewLogicFrame == logicFrame && m_frameViewFrame == m_lastLogicFrameUpdate
 			&& m_frameViewParticles == m_particleCount && m_frameViewSystems == m_particleSystemCount
-			&& m_frameViewNextID == m_uniqueSystemID)
+			&& (m_frameViewNextID == m_uniqueSystemID || LogicThread::isInsideWindow()))
 		return;
 
 	m_frameView.clear();
