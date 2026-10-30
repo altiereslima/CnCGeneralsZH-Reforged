@@ -294,6 +294,7 @@ Data/Scenarios/explreel.txt
 Data/Scenarios/firelook.txt
 Data/Scenarios/flatshells.txt
 Data/Scenarios/fogleak.txt
+Data/Scenarios/gate60hz.txt
 Data/Scenarios/geproto_alpine.txt
 Data/Scenarios/geproto_fogedge.txt
 Data/Scenarios/geproto_glow.txt

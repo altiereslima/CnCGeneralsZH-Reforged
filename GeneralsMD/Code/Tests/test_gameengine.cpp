@@ -19125,6 +19125,15 @@ TEST(scenario_parses_a_particles_line)
 	// the same count and position rules as spawn, because it shares spawn's parse
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "30 particles 0 X 0 760 850", &action ), (Int)SCENARIO_PARSE_BAD_COUNT );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "30 particles 0 X 5 760", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	// the gate's top-up: seat, template and the object count it holds the world at
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "18000 topup 3 GLATankScorpion 2000", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TOPUP );
+	CHECK_EQ( action.slot, 3 );
+	CHECK( action.selector == "GLATankScorpion" );
+	CHECK_EQ( action.count, 2000 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "18000 topup 3 GLATankScorpion", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "18000 topup 3 GLATankScorpion none", &action ), (Int)SCENARIO_PARSE_BAD_COUNT );
 }
 
 // A queued order that is not an order would never end a list when given without shift, and an order

@@ -2103,16 +2103,16 @@ static void reportFrameTimeStats( void )
 						 theFrameTimes.countOver( 16.7f ), over16,
 						 theFrameTimes.countOver( 33.3f ), over33,
 						 theFrameTimes.countOver( 25.0f )));
-	// the same passes split for the logic thread plan: mean/p50/p99 of each part
-	#define PASS_SPLIT(h) (h).meanMS(), (h).percentileMS( 0.50f ), (h).percentileMS( 0.99f )
-	DEBUG_LOG(("HEADLESS PASSES TICK: %d | pass %.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f | render %.2f/%.2f/%.2f | logic %.2f/%.2f/%.2f ms mean/p50/p99\n",
+	// the same passes split for the logic thread plan: mean/p50/p99/p99.9 of each part
+	#define PASS_SPLIT(h) (h).meanMS(), (h).percentileMS( 0.50f ), (h).percentileMS( 0.99f ), (h).percentileMS( 0.999f )
+	DEBUG_LOG(("HEADLESS PASSES TICK: %d | pass %.2f/%.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f/%.2f | render %.2f/%.2f/%.2f/%.2f | logic %.2f/%.2f/%.2f/%.2f ms mean/p50/p99/p99.9\n",
 						 theTickPass.count(), PASS_SPLIT( theTickPass ), PASS_SPLIT( theTickSync ),
 						 PASS_SPLIT( theTickRender ), PASS_SPLIT( theTickLogic )));
-	DEBUG_LOG(("HEADLESS PASSES NOTICK: %d | pass %.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f | render %.2f/%.2f/%.2f ms mean/p50/p99\n",
+	DEBUG_LOG(("HEADLESS PASSES NOTICK: %d | pass %.2f/%.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f/%.2f | render %.2f/%.2f/%.2f/%.2f ms mean/p50/p99/p99.9\n",
 						 theRenderPass.count(), PASS_SPLIT( theRenderPass ), PASS_SPLIT( theRenderSync ),
 						 PASS_SPLIT( theRenderRender )));
-	DEBUG_LOG(("HEADLESS PASSES OVERLAPPED: %d | %.2f/%.2f/%.2f p99.9 %.2f ms mean/p50/p99, every pass with the tick beside the render\n",
-						 theOverlapped.count(), PASS_SPLIT( theOverlapped ), theOverlapped.percentileMS( 0.999f )));
+	DEBUG_LOG(("HEADLESS PASSES OVERLAPPED: %d | %.2f/%.2f/%.2f/%.2f ms mean/p50/p99/p99.9, every pass with the tick beside the render\n",
+						 theOverlapped.count(), PASS_SPLIT( theOverlapped )));
 	#undef PASS_SPLIT
 	if (TheGlobalData)
 	{
