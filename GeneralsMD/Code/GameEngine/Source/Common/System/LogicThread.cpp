@@ -492,9 +492,13 @@ void LogicThread::takeOverlapTimes( Real &tickMS, Real &waitMS )
 //-------------------------------------------------------------------------------------------------
 void LogicThread::init( void )
 {
-	// 0 unless the command line asks otherwise, since v3.3.0's crash reports showed the heap corrupted
-	// by the tick beside the render; -logicthread 1 hands it to its own thread
+	// the command line has the last word.  Off Windows the tick stays on the main thread: a macOS std::thread
+	// has a 512 KB stack, and a tick needs more
+#if defined(_WIN32)
+	char value[ 32 ] = "1";
+#else
 	char value[ 32 ] = "0";
+#endif
 	findEarlyCommandLineValue( L"-logicthread", value, sizeof(value) );
 	if( atoi( value ) == 0 )
 		return;

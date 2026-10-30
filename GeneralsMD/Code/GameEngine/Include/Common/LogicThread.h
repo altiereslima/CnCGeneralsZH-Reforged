@@ -39,10 +39,11 @@ class Drawable;
 class Player;
 
 /**
-	* `-logicthread 0`, the default since v3.3.0's crash reports, runs the tick on the main thread.
-	* `-logicthread 1` hands every tick to a dedicated thread; outside a network game the render draws
-	* beside it (phases 3 and 4), reading only the copies taken at the sync point, and in one the main
-	* thread waits for it (phase 5).
+	* `-logicthread 1`, the default on Windows, hands every tick to a dedicated thread; outside a network
+	* game the render draws beside it (phases 3 and 4), reading only the copies taken at the sync point,
+	* and in one the main thread waits for it (phase 5).  No option or saved setting reaches this.
+	* `-logicthread 0`, the default off Windows and otherwise for a desync hunt, runs the tick on the main
+	* thread.
 	* `-logicthread 2` adds jitter to the tick to shake out races.
 	*
 	* The census counts calls into the client made from the logic thread, one count per channel
