@@ -15045,26 +15045,6 @@ TOOLTIP:Smoke
 "Dumanın havada ne kadar asılı kaldığı ve ne kadar yoğun göründüğü. Oyundaki 1088 efektin 175'i duman. Çok Kalın, ölçüldüğünde yanan bir kolonun üstünde kare başına 0,7 ms tuttu. Oyun bir sonraki açılışında etkinleşir."
 END
 
-GUI:VolumeSmoke
-"Duman Simülasyonu"
-END
-
-GUI:VolumeSmoke0
-"Kapalı"
-END
-
-GUI:VolumeSmoke1
-"Düşük"
-END
-
-GUI:VolumeSmoke2
-"Yüksek"
-END
-
-TOOLTIP:VolumeSmoke
-"Duman ve toz düz resimler yerine hareket eden bir hava kütlesi olur: yuvarlanır, sıcakla yükselir, binaların etrafından dolaşır, geçen tank, jet ve helikopterler onu iter. Ekran kartına yük bindirir, zayıf kartta Kapalı bırak. Düşük, Yüksek'in yaklaşık üçte ikisi kadar yük getirir. Kabul Et'e bastığın an uygulanır, maç ortasında da."
-END
-
 GUI:ParticleBounce
 "Parçacıklar Yere Çarpar"
 END

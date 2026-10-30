@@ -204,8 +204,6 @@ NEW_CONTROLS = [
     (CHECK,  "CheckParticleShadows",   "GUI:ParticleShadows"),
     (LABEL,  "LabelSmoke",             "GUI:Smoke"),
     (COMBO,  "ComboBoxSmoke",          None),
-    (LABEL,  "LabelVolumeSmoke",       "GUI:VolumeSmoke"),
-    (COMBO,  "ComboBoxVolumeSmoke",    None),
     (CHECK,  "CheckParticleBounce",    "GUI:ParticleBounce"),
     (CHECK,  "CheckChromaLighting",    "GUI:ChromaLighting"),
     (LABEL,  "LabelAmbientVolume",     "GUI:AmbientVolume"),
@@ -384,7 +382,6 @@ GROUP_LAYOUT = [
         ("GUI:OptionsGroupParticles", [
             setting("LabelParticleCap", "ParticleCapSlider", "ValueParticleCap"),
             setting("LabelSmoke", "ComboBoxSmoke"),
-            setting("LabelVolumeSmoke", "ComboBoxVolumeSmoke"),
             ("check", "CheckParticleBounce"),
             ("check", "CheckSmokeFireLighting"),
             ("check", "CheckDebrisTrails")])]),

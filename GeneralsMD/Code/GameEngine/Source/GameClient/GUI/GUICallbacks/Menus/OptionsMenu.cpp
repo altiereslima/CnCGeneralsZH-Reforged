@@ -1153,16 +1153,6 @@ static void fillCatalogWidgets( void )
 			if (label) label->winHide(!supported);
 			if (!supported) continue;
 		}
-		if (strcmp(def.iniKey, "VolumeSmoke") == 0)
-		{
-			// the smoke volumes need what the hazard clouds need: Direct3D 11 presenting at level 11
-			const Bool supported = HazardCloud::Supported();
-			widget->winHide(!supported);
-			GameWindow *label = TheWindowManager->winGetWindowFromId(
-				NULL, NAMEKEY("OptionsMenu.wnd:LabelVolumeSmoke"));
-			if (label) label->winHide(!supported);
-			if (!supported) continue;
-		}
 
 		const Int value = clampOptionValue( def, def.get() );
 
@@ -1210,7 +1200,7 @@ static void readCatalogWidgets( OptionPreferences &out )
 			continue;
 
 		// A hidden, unfilled combo must not overwrite the player's opt-in.
-		if ((strcmp(def.iniKey, "CloudStyle") == 0 || strcmp(def.iniKey, "VolumeSmoke") == 0) && !HazardCloud::Supported())
+		if (strcmp(def.iniKey, "CloudStyle") == 0 && !HazardCloud::Supported())
 			continue;
 		if (strcmp(def.iniKey, "WaterStyle") == 0 && !ModernWater::Supported())
 			continue;

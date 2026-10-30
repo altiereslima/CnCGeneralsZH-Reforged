@@ -708,7 +708,6 @@ public:
 	void setPosition( const Coord3D *pos );			///< set the position of the particle system
 	void getPosition( Coord3D *pos );				///< get the position of the particle system
 	void setLocalTransform( const Matrix3D *matrix );	///< set the system's local transform
-	const Matrix3D *getLocalTransform( void ) const { return &m_localTransform; }	///< its orientation and position, as the FX that made it set them
 	void rotateLocalTransformX( Real x );				///< rotate local transform matrix
 	void rotateLocalTransformY( Real y );				///< rotate local transform matrix
 	void rotateLocalTransformZ( Real z );				///< rotate local transform matrix

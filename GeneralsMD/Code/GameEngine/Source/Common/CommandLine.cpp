@@ -1111,24 +1111,6 @@ Int parseNoSmokeFireLight(char *args[], int)
 	return 1;
 }
 
-/* -volsmoke [off|low|high]: the VolumeSmoke option for one run; bare, High. */
-Int parseVolumeSmoke(char *args[], int num)
-{
-	if (!TheWritableGlobalData) return 1;
-	TheWritableGlobalData->m_volumeSmoke = 2;
-	if (num > 1)
-	{
-		static const char *const levels[] = { "off", "low", "high" };
-		for (Int level = 0; level < 3; ++level)
-			if (strcasecmp(args[1], levels[level]) == 0)
-			{
-				TheWritableGlobalData->m_volumeSmoke = level;
-				return 2;
-			}
-	}
-	return 1;
-}
-
 /* -lighting <classic|reforged>: the LightingStyle option for one run, the before and after of any
 	 picture of it. */
 Int parseLightingStyle(char *args[], int num)
@@ -2919,7 +2901,6 @@ static CommandLineParam params[] =
 	{ "-smoothmotion", parseSmoothMotion },
 	{ "-nosmokefirelight", parseNoSmokeFireLight },
 	{ "-lighting", parseLightingStyle },
-	{ "-volsmoke", parseVolumeSmoke },
 	{ "-quickstart", parseQuickStart },
 	/* In every build: EA kept them to Debug and Internal, so a Release run could not skip the logo or the
 		 movies. */

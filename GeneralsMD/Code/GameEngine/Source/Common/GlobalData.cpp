@@ -1043,7 +1043,6 @@ GlobalData::GlobalData()
 	m_smoothMotionAnyDisplay = FALSE;
 	m_waterStyle = 0;				// classic by default; modern water is an explicit option
 	m_cloudStyle = 0;				// Classic by default; volumetric hazard clouds are opt-in
-	m_volumeSmoke = 0;			// off by default: the volumes cost GPU time a low-end card does not have
 	m_explosionDebrisTrails = TRUE;
 	m_shadowQuality = 1;					//medium, the 2048 map the shadows always had
 	m_graphicsQuality = TheGraphicsQualityAnchors[ STATIC_GAME_LOD_HIGH ];	//a preset moves it to its own step as the menu opens

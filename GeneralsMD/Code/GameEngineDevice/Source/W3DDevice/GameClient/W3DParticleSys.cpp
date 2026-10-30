@@ -61,9 +61,6 @@
 #include "GameClient/Drawable.h"
 #include "Platform/HazardCloudPolicy.h"
 #include "Platform/HazardCloud.h"
-#ifdef _WIN32
-#include "W3DDevice/GameClient/VolumeSmoke.h"
-#endif
 #include <array>
 #include <memory>
 #include <cmath>
@@ -1838,9 +1835,6 @@ void W3DParticleSystemManager::reset()
 	m_sunMapCasters.clear();
 	invalidateGroundFields();	// the object IDs it holds belong to the game that ended
 	resetGpuParticles();			// the client frame starts again, and every system is gone
-#ifdef _WIN32
-	VolumeSmoke::Reset();			// the system IDs start again from 1
-#endif
 }
 
 void W3DParticleSystemManager::invalidateGroundFields(bool fadeIn)
@@ -1871,9 +1865,6 @@ void W3DParticleSystemManager::releaseCloudResources()
 void W3DParticleSystemManager::releaseGpuResources()
 {
 	GpuParticles::ReleaseDevice();
-#ifdef _WIN32
-	VolumeSmoke::ReleaseDevice();
-#endif
 }
 
 /** LOGIC-THREAD.md phase 3.  A system's stealth fade asks its object's drawable, and a field asks for
@@ -2124,10 +2115,6 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 #endif
 		if (*((UnsignedInt *)sys->getParticleTypeName().str()) == 0x44554D53)
 			continue;
-#ifdef _WIN32
-		if (VolumeSmoke::Takes( sys ))
-			continue;	// a smoke volume draws it (-volsmoke)
-#endif
 
 		BillboardFill fill;
 		if (sys->isUsingStreak() || !sys->shouldBillboard() || sys->getVolumeParticleDepth() > 1
@@ -2221,9 +2208,6 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 		m_onScreenParticleCount += puddles;
 	}
 	drawGroundFields();
-#ifdef _WIN32
-	VolumeSmoke::Render( cloudCamera( rinfo.Camera ) );
-#endif
 
 	size_t nextFill = 0;
 	for (size_t v = 0; v < m_frameView.size(); ++v)
@@ -2247,10 +2231,6 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 		}
 #if ZH_MODERN_WATER
 		if (replaceLegacyVesselFoam(sys, m_frameView[ v ].owner))
-			continue;
-#endif
-#ifdef _WIN32
-		if (VolumeSmoke::Takes( sys ))
 			continue;
 #endif
 
@@ -2740,11 +2720,7 @@ void W3DParticleSystemManager::refreshGpuSystems( void )
 		ParticleSystem *sys = m_gpuSlots[ slot ].system;
 		if (sys == NULL)
 			continue;
-		Real fade = sys->getStealthFade();
-#ifdef _WIN32
-		if (VolumeSmoke::Hides( sys ))
-			fade = 0.0f;	// a smoke volume draws it (-volsmoke): no overflow billboards either
-#endif
+		const Real fade = sys->getStealthFade();
 		const Real shown = fade > 0.0f ? fade : 0.0f;
 		if (m_gpuFades[ slot ] != shown)
 		{

@@ -1542,8 +1542,6 @@ if(ZH_PLATFORM_POSIX)
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/(HazardCloudUnsupported|DX11HazardCloud)\\.cpp$")
   # The GPU particles have only a Direct3D 11 backend; GpuParticlesUnsupported answers for SDL3.
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11GpuParticles\\.cpp$")
-  # The -volsmoke smoke volumes are Direct3D 11's alone; W3DParticleSys calls them only on Windows.
-  list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11VolumeSmoke\\.cpp$")
   # The reach overlay's Direct3D 11 pass; W3DReachOverlay.cpp calls it only on Windows and draws the
   # fixed-function sheet without it.
   list(FILTER W3DDEVICE_SOURCES EXCLUDE REGEX "/DX11ReachOverlay\\.cpp$")
@@ -2236,13 +2234,6 @@ target_sources(test_hazard_cloud_policy PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudShader.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudFlow.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/HazardCloudUnsupported.cpp)
-
-# W3DDevice/GameClient/VolumeFireCore.h: the -volsmoke fires' template table, heat release, black
-# body and sites, device-free.
-add_lib_test(test_volume_fire_policy)
-target_include_directories(test_volume_fire_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Include)
-target_sources(test_volume_fire_policy PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Source/W3DDevice/GameClient/VolumeFireCore.cpp)
 
 add_lib_test(test_wwmath wwmath wwlib wwsaveload wwdebug)
 target_include_directories(test_wwmath PRIVATE ${WW}/WWLib ${WW}/WWSaveLoad ${WW}/Wwutil)
