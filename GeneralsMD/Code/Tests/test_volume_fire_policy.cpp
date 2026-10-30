@@ -248,6 +248,30 @@ TEST(volume_shock_nuclear_cloud_lasts_as_long_as_the_games_own)
 	CHECK(NukeDisperseLife >= NukeLife - NukeFadeFrom - 1.0f);
 }
 
+TEST(volume_shock_a_nuke_over_a_nukes_cloud_takes_its_slab)
+{
+	using namespace VolumeShock;
+	CHECK(nukeFlare("NukeFlare"));
+	CHECK(nukeFlare("NukeGLAFlare"));
+	CHECK(!nukeFlare("NukeMushroomCloudRing"));
+	CHECK(!nukeFlare("NukeBaikonurFlare"));
+	float shift[2];
+	// volshock's nuke 2, 148 units from nuke 1, stands in the box where it is
+	inheritShift(130.0f, -70.0f, 10.0f, shift);
+	CHECK_EQ(shift[0], 0.0f);
+	CHECK_EQ(shift[1], 0.0f);
+	// nuke 3, 434 from nuke 2: the box moves by whole cells to bring it InheritReach from the middle...
+	inheritShift(-430.0f, -60.0f, 10.0f, shift);
+	CHECK_EQ(shift[0], -23.0f);
+	CHECK_EQ(shift[1], -3.0f);
+	const float cap = 135.0f, wallFade = 384.0f;
+	const float fresh = std::hypot(-430.0f - shift[0] * 10.0f, -60.0f - shift[1] * 10.0f);
+	CHECK_NEAR(fresh, InheritReach, 10.0f);
+	CHECK(fresh + cap < wallFade);
+	// ...and the old cloud, now as far the other way, stays inside the walls' fade too
+	CHECK(std::hypot(shift[0] * 10.0f, shift[1] * 10.0f) + cap < wallFade);
+}
+
 TEST(volume_shock_templates_that_start_a_front)
 {
 	using namespace VolumeShock;

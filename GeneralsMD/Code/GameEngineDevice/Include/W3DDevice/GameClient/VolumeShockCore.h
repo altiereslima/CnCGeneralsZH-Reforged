@@ -45,6 +45,25 @@ inline int releasedLife(int life, int age, int framesPerSecond)
 	return end < life ? end : life;
 }
 
+// A nuke's flare first seen more than FlareJoinFrames after a live nuclear volume's birth is a new nuke,
+// not a part of it (its own mushroom systems join for longer, since they start later).
+const int FlareJoinFrames = 10;
+inline bool nukeFlare(const char *name) { return !std::strcmp(name, "NukeFlare") || !std::strcmp(name, "NukeGLAFlare"); }
+// A nuke within this of the middle of a live nuke's box takes that slab over as it stands, cloud and
+// flow, and goes off where it landed inside the box: its cap, 135 units across its radius, stays clear
+// of the box's walls, which fade from 384 units out.
+const float InheritReach = 200.0f;
+// One past that, with no slab free, takes it too, the nearest: the box moves under it in whole cells,
+// just far enough to bring it InheritReach from the middle.  Two nukes 449 units apart then both stand
+// inside the walls' fade, and the old cloud is off the box only past about 815.
+inline void inheritShift(float dx, float dy, float cell, float shift[2])
+{
+	const float distance = std::sqrt(dx * dx + dy * dy);
+	const float past = distance > InheritReach ? (distance - InheritReach) / distance : 0.0f;
+	shift[0] = std::floor(dx * past / cell + 0.5f);
+	shift[1] = std::floor(dy * past / cell + 0.5f);
+}
+
 // speed units/s, push units at the blast, r0 units (where D has halved), seconds it runs, the most of
 // the smoke one passage mixes away
 struct ShockClass { float speed, push, r0, seconds, disperse; };
@@ -76,7 +95,7 @@ inline const ShockClass *frontOf(const char *name)
 {
 	if (!name) return nullptr;
 	// a nuke's flare goes off at its impact, also when it joins a nuke before it and starts no volume
-	if (!std::strcmp(name, "NukeFlare") || !std::strcmp(name, "NukeGLAFlare")) return &Nuclear;
+	if (nukeFlare(name)) return &Nuclear;
 	if (!std::strcmp(name, "ScudMissleExplosionArms") || !std::strcmp(name, "ScudMissleLauncherExplosionArms")) return &Scud;
 	if (!std::strcmp(name, "NukeCannonBlastWave")) return &NukeCannon;
 	if (std::strstr(name, "Shockwave") || std::strstr(name, "BlastWave") || !std::strcmp(name, "CarpetBombWave")

@@ -1657,6 +1657,13 @@ struct Volume {
 	// moved its middle; under 0.05 the cap is let go, free smoke.
 	float hold = 1;
 	float capPushed = 0;
+	// A nuke that took over the slab of a nuke before it (heirOf): its own front pushes the old cloud,
+	// which fades as free smoke until oldCloudEnds, in the colour it had (oldCream), and the fields
+	// are still to move this many cells in the grid if the box moved under it (scrollInherited).
+	bool inherited = false;
+	int oldCloudEnds = 0;
+	float oldCream = 0;
+	int scroll[3] = {};
 };
 
 struct Tier {
@@ -3081,7 +3088,8 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		billows = smoothstep01(t, 5.0f, 9.0f) * (0.5f + 0.5f * fade);
 		spared = (std::max)(1 - smoothstep01(t, 4.0f, 8.0f), 1 - fade);
 		// dark smoke round the fire at first, cream once it is lit only by the sun, greyer as it goes
-		const float cream = smoothstep01(t, 3.0f, 12.0f), grey = smoothstep01(t, VolumeShock::NukeFadeFrom, VolumeShock::NukeLife);
+		// (one slab, one colour: a cloud inherited cream would have turned dark with the new fire's smoke)
+		const float cream = (std::max)(smoothstep01(t, 3.0f, 12.0f), volume.oldCream), grey = smoothstep01(t, VolumeShock::NukeFadeFrom, VolumeShock::NukeLife);
 		const float early[3] = { 0.32f, 0.22f, 0.16f }, lit[3] = { 0.88f, 0.84f, 0.78f }, late[3] = { 0.80f, 0.79f, 0.78f };
 		for (unsigned i = 0; i < 3; ++i) soot[i] = early[i] + (lit[i] - early[i]) * cream + (late[i] - lit[i]) * grey;
 		// the fire's gain low while the fireball is hottest, so its lumps and its cooler rim show
@@ -3259,7 +3267,7 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 	// a blast on a building goes off on its roof, not inside it
 	// (a launch's too: laid under a Scud Storm's silo, its billows were inside the building and only
 	// a flat white sheet lay on the roof)
-	if (volume.reset && volume.kind != Airburst && volume.kind != Structure && volume.kind != Fire) {
+	if ((volume.reset || (volume.inherited && now - volume.born < 2)) && volume.kind != Airburst && volume.kind != Structure && volume.kind != Fire) {
 		const unsigned column = unsigned(volume.blast[1]) * shape.gx + unsigned(volume.blast[0]);
 		volume.blast[2] = (std::max)(volume.blast[2], heights[column] + 0.5f);
 	}
@@ -3268,10 +3276,47 @@ void layFloor(ID3D11DeviceContext *context, const Tier &tier, unsigned slab, Vol
 	context->UpdateSubresource(tier.floor, 0, &region, heights.data(), shape.gx * sizeof(float), 0);
 }
 
+// A box moved under the nuke that inherited it (heirOf): the smoke stays where it is in the world, so
+// its fields move the other way in the grid, once.  By copies, so no program is added for it.
+void scrollInherited(ID3D11DeviceContext *context, Tier &tier)
+{
+	const TierShape &shape = tier.shape;
+	bool any = false;
+	for (unsigned slab = 0; slab < shape.slabs; ++slab) {
+		const int *s = volumes[shape.first + slab].scroll;
+		any = any || s[0] || s[1] || s[2];
+	}
+	if (!any) return;
+	unbindCompute(context);
+	const unsigned in = tier.current, out = 1 - in;
+	const float zero[4] = {};
+	context->ClearUnorderedAccessViewFloat(tier.velocity[1].write, zero);
+	context->ClearUnorderedAccessViewFloat(tier.density[out].write, zero);
+	context->ClearUnorderedAccessViewFloat(tier.pressure[0].write, zero);	// (the old place's)
+	for (unsigned slab = 0; slab < shape.slabs; ++slab) {
+		int (&s)[3] = volumes[shape.first + slab].scroll;
+		const int size[3] = { (int)shape.gx, (int)shape.gy, (int)shape.gz };
+		const int kept[3] = { size[0] - std::abs(s[0]), size[1] - std::abs(s[1]), size[2] - std::abs(s[2]) };
+		if (kept[0] > 0 && kept[1] > 0 && kept[2] > 0) {
+			const int from[3] = { (std::max)(s[0], 0), (std::max)(s[1], 0), (std::max)(s[2], 0) };
+			const UINT z = slab * shape.gz;
+			const D3D11_BOX box = { (UINT)from[0], (UINT)from[1], z + from[2],
+				UINT(from[0] + kept[0]), UINT(from[1] + kept[1]), z + from[2] + kept[2] };
+			const UINT x = (std::max)(-s[0], 0), y = (std::max)(-s[1], 0), toZ = z + (std::max)(-s[2], 0);
+			context->CopySubresourceRegion(tier.velocity[1].texture, 0, x, y, toZ, tier.velocity[0].texture, 0, &box);
+			context->CopySubresourceRegion(tier.density[out].texture, 0, x, y, toZ, tier.density[in].texture, 0, &box);
+		}
+		s[0] = s[1] = s[2] = 0;
+	}
+	context->CopyResource(tier.velocity[0].texture, tier.velocity[1].texture);
+	tier.current = out;
+}
+
 void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float seconds, const float sunToward[3], unsigned slabs)
 {
 	Tier &tier = state.tiers[t];
 	const bool fire = t == 2;
+	if (t == 1) scrollInherited(context, tier);
 	if (fire) fireEmitting.clear();	// scheduleFire names them again below
 	sim.Step[0] = dt;
 	sim.Step[1] = seconds;
@@ -3307,7 +3352,10 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 		// the front pushed off it drifts aside instead of fading at the cap's own spill rate
 		if (volume.kind == Nuclear && volume.hold < 0.05f) sim.Thin[slab][0] = std::pow(0.5f, dt / VolumeShock::NukeDisperseHalfLife);
 		else if (volume.kind == Nuclear && volume.live && secondsSince(volume, now) > VolumeShock::NukeFadeFrom) sim.Thin[slab][0] = std::pow(0.5f, dt / VolumeShock::NukeFadeHalfLife);
-		sim.Spill[slab][0] = std::pow(0.5f, dt / (CapSpillHalfLife + (LoosenedSpillHalfLife - CapSpillHalfLife) * (1 - volume.hold)));
+		// (an inherited cloud lies mostly outside the young cap: at the cap's own 1 s it was gone 3 s after
+		// the front that pushed it, so it fades as a cloud let go does, and at 1 s again for its last 3 s)
+		sim.Spill[slab][0] = std::pow(0.5f, dt / (now < volume.oldCloudEnds ? VolumeShock::NukeDisperseHalfLife
+			: CapSpillHalfLife + (LoosenedSpillHalfLife - CapSpillHalfLife) * (1 - volume.hold)));
 		const bool rolls = (volume.kind == Structure && !volume.standing) || volume.kind == Launch || volume.kind == Muzzle;
 		// (not a bomb's: its small mushroom's stem would fall out of it)
 		// (a tank's: its dark base masses slump slowly onto the ground, which eats them; the weight goes
@@ -3502,7 +3550,9 @@ void fillShocks(int now)
 // their own smoke, and the tank's fan is laid where the shell's front would blow it away.
 bool spares(const Volume &volume, int slot, const Shock &shock)
 {
-	if (shock.owner == slot && shock.ownerBorn == volume.born) return true;
+	// (an heir's too, the nuke's it took over from: that front passing its young cap let go of it, and
+	// with the old timeline gone neither nuke made a mushroom.  It still pushes the smoke: shockMask)
+	if (shock.owner == slot && (shock.ownerBorn == volume.born || volume.inherited)) return true;
 	if (std::abs(volume.born - shock.born) > 10) return false;
 	const float dx = shock.at[0] - (volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell);
 	const float dy = shock.at[1] - (volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell);
@@ -3518,7 +3568,8 @@ float shockMask(const float low[3], const float high[3], float cell, int slot)
 	for (size_t i = 0; i < fronts.size(); ++i) {
 		const Front &front = fronts[i];
 		const Shock &shock = *front.shock;
-		if (slot >= 0 && spares(volumes[slot], slot, shock)) continue;
+		// (an inherited slab takes its own nuke's front: that is what pushes the old cloud in it)
+		if (slot >= 0 && !volumes[slot].inherited && spares(volumes[slot], slot, shock)) continue;
 		const float reach = 3.0f * (std::max)(front.width, 1.5f * cell);
 		float nearest = 0, farthest = 0;
 		for (unsigned k = 0; k < 3; ++k) {
@@ -4411,6 +4462,27 @@ float joinRadius(const Volume &volume)
 	// a gun's own FX all go off at its muzzle bone, the ground ring under it
 	return volume.kind == Nuclear ? 500.0f : volume.kind == TankDeath ? 60.0f : volume.kind == Muzzle ? 14.0f : 30.0f * volume.scale;
 }
+// The live nuke whose slab a new nuke at `where` takes over, or -1: the one whose box's middle it is
+// within InheritReach of, or the nearest if no slab is free.  (Only nukes live in this tier.)
+int heirOf(const Coord3D &where, const TierShape &shape)
+{
+	int nearest = -1;
+	float best = 1e30f;
+	bool free = false;
+	for (unsigned slot = shape.first; slot < shape.first + shape.slabs; ++slot) {
+		const Volume &volume = volumes[slot];
+		if (!volume.live) {
+			free = true;
+			continue;
+		}
+		const float dx = where.x - (volume.origin[0] + shape.gx * volume.cell * 0.5f), dy = where.y - (volume.origin[1] + shape.gy * volume.cell * 0.5f);
+		if (dx * dx + dy * dy < best) {
+			best = dx * dx + dy * dy;
+			nearest = (int)slot;
+		}
+	}
+	return !free || best <= VolumeShock::InheritReach * VolumeShock::InheritReach ? nearest : -1;
+}
 // A tank's volume past 1.75 s holds only its smoulder, so it gives its slab up before any new blast does.
 // A gun's shot gives its slab up before anything.
 int rankOf(const Volume &volume)
@@ -5048,11 +5120,13 @@ bool Takes(ParticleSystem *system)
 	if (kindNow == TankDeath && building && !onBuilding) kindNow = Structure;
 	// A nuke's own mushroom systems are first seen when they come into view, not when they start: from
 	// the play camera its NukeMushroomCloudRing, 2 s on, was first seen 3.5 s on, started a nuke of its
-	// own, evicted the nuke before it and let go of its own nuke's cap.  Its flare keeps 180 frames.
-	const bool lateMushroom = kind.trigger && kindNow == Nuclear && std::strcmp(own, "NukeFlare") && std::strcmp(own, "NukeGLAFlare");
+	// own, evicted the nuke before it and let go of its own nuke's cap.  A flare is a new nuke, unless it
+	// goes off with the one it finds: at 180 frames a second nuke 3 s later joined, drew and pushed nothing.
+	const bool flare = VolumeShock::nukeFlare(own);
+	const bool lateMushroom = kind.trigger && kindNow == Nuclear && !flare;
 	for (const Volume &volume : volumes) {
 		if (!volume.live || volume.kind == Fire || seen < volume.born - 10
-				|| seen > volume.born + (volume.kind == Nuclear ? (lateMushroom ? 600 : 180)	// a nuke's stem comes 2 s after its flare
+				|| seen > volume.born + (volume.kind == Nuclear ? (flare ? VolumeShock::FlareJoinFrames : lateMushroom ? 600 : 180)	// a nuke's stem comes 2 s after its flare
 					: volume.kind == TankDeath || volume.kind == Structure ? 90 : 30)) continue;
 		// a gun's shot takes its own FX only, and they join nothing else (a tank firing beside a dead
 		// one keeps its shot)
@@ -5119,11 +5193,13 @@ bool Takes(ParticleSystem *system)
 	if (type == Launch && kind.scale < 1.2f && !structureAt(where, INVALID_ID)) fresh.scale = 0.6f;
 	const int rank = rankOf(fresh);
 
-	// A free slab, else the one of the lowest rank whose blast is oldest; a new blast of a lower
-	// rank than every live one is dropped instead.  Either way no billboards.
-	unsigned slot = shape.first;
-	while (slot < shape.first + shape.slabs && volumes[slot].live) ++slot;
-	if (slot == shape.first + shape.slabs) {
+	// A nuke over a live nuke's cloud takes its slab as it stands.  Otherwise a free slab, else the one
+	// of the lowest rank whose blast is oldest; a new blast of a lower rank than every live one is
+	// dropped instead.  Either way no billboards.
+	const int heir = type == Nuclear ? heirOf(where, shape) : -1;
+	unsigned slot = heir >= 0 ? (unsigned)heir : shape.first;
+	while (heir < 0 && slot < shape.first + shape.slabs && volumes[slot].live) ++slot;
+	if (heir < 0 && slot == shape.first + shape.slabs) {
 		slot = shape.first;
 		for (unsigned i = shape.first + 1; i < shape.first + shape.slabs; ++i)
 			if (rankOf(volumes[i]) < rankOf(volumes[slot])
@@ -5147,9 +5223,10 @@ bool Takes(ParticleSystem *system)
 			gunSystems.erase(shot);
 		}
 	}
+	const Volume before = volume;
 	volume = fresh;
 	volume.live = true;
-	volume.reset = true;
+	volume.reset = heir < 0 || before.reset;	// (an heir's fields stay: the first step would have cleared the old cloud)
 	volume.cell = cellOf(type, volume.scale);
 	// A building's box is about two and a half footprints across, so the cell goes with its size: 3
 	// units for an American power plant, about 6.5 for a War Factory or a Particle Cannon.  None
@@ -5163,6 +5240,14 @@ bool Takes(ParticleSystem *system)
 	const float sideX = shape.gx * volume.cell, sideY = shape.gy * volume.cell;
 	volume.origin[0] = where.x - sideX * 0.5f;
 	volume.origin[1] = where.y - sideY * 0.5f;
+	if (heir >= 0) {
+		float shift[2];
+		VolumeShock::inheritShift(where.x - (before.origin[0] + sideX * 0.5f), where.y - (before.origin[1] + sideY * 0.5f), volume.cell, shift);
+		for (unsigned i = 0; i < 2; ++i) {
+			volume.origin[i] = before.origin[i] + shift[i] * volume.cell;
+			volume.scroll[i] = before.scroll[i] + (int)shift[i];
+		}
+	}
 	// The box's floor under the lowest ground it covers, so smoke can run down into a valley; the
 	// terrain itself is laid into the grid as solid (layFloor).
 	float lowest = (std::min)(where.z, ground);
@@ -5175,6 +5260,18 @@ bool Takes(ParticleSystem *system)
 	volume.origin[2] = (std::max)(lowest, (std::min)(where.z, ground) - 3.0f * volume.cell) - volume.cell;
 	volume.blast[0] = (shape.gx - 1) * 0.5f;
 	volume.blast[1] = (shape.gy - 1) * 0.5f;
+	if (heir >= 0) {
+		const float up = std::floor((volume.origin[2] - before.origin[2]) / volume.cell + 0.5f);
+		volume.origin[2] = before.origin[2] + up * volume.cell;
+		volume.scroll[2] = before.scroll[2] + (int)up;
+		volume.blast[0] = (where.x - volume.origin[0]) / volume.cell - 0.5f;
+		volume.blast[1] = (where.y - volume.origin[1]) / volume.cell - 0.5f;
+		volume.inherited = true;
+		volume.oldCloudEnds = before.born + before.life - 3 * LOGICFRAMES_PER_SECOND;
+		volume.oldCream = (std::max)(before.oldCream, smoothstep01(secondsSince(before, now), 3.0f, 12.0f));
+		DEBUG_LOG(("VOLSMOKE: frame %d, nuke at (%.0f, %.0f) takes over slab %u from the nuke born at frame %d, the box moved (%d, %d, %d) cells\n",
+			now, where.x, where.y, slot, before.born, volume.scroll[0], volume.scroll[1], volume.scroll[2]));
+	}
 	// at the blast's height, but never under the ground: the ground turns its push
 	const float groundCell = (ground - volume.origin[2]) / volume.cell;
 	volume.ground = groundCell;
