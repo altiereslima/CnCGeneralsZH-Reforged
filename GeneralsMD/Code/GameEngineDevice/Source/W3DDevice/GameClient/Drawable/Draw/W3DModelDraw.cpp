@@ -4702,6 +4702,12 @@ void W3DModelDraw::updateProjectileClipStatus( UnsignedInt shotsRemaining, Unsig
 }
 
 //-------------------------------------------------------------------------------------------------
+Int W3DModelDraw::getProjectileClipFeedbackSlots() const
+{
+	return getW3DModelDrawModuleData()->m_projectileBoneFeedbackEnabledSlots;
+}
+
+//-------------------------------------------------------------------------------------------------
 void W3DModelDraw::updateDrawModuleSupplyStatus( Int , Int )
 {
 	// This level only cares if you have anything or not: the CARRYING condition, which

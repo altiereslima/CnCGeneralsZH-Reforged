@@ -757,6 +757,14 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 	}
 	*m = NULL;
 
+	m_clipFeedbackSlots = 0;
+	for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+	{
+		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+		if (di)
+			m_clipFeedbackSlots |= di->getProjectileClipFeedbackSlots();
+	}
+
 	const ModuleInfo& cuMI = thingTemplate->getClientUpdateModuleInfo();
 	if (cuMI.getCount())
 	{
@@ -6443,6 +6451,11 @@ void Drawable::setDrawableHidden( Bool hidden )
 //-------------------------------------------------------------------------------------------------
 void Drawable::updateDrawableClipStatus( UnsignedInt shotsRemaining, UnsignedInt maxShots, WeaponSlotType slot )
 {
+	// every armed object asks every frame; only a model with projectile bones on this slot answers,
+	// so the rest queue nothing. Those that do still ask every frame, which is what shows the bones
+	// again after a model state change rebuilt the render object
+	if ((m_clipFeedbackSlots & (1 << slot)) == 0)
+		return;
 	doClientWork( [this, shotsRemaining, maxShots, slot]() {
 		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
 		{
