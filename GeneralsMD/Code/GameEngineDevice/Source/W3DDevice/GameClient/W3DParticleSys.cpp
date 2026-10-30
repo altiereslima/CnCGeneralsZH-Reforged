@@ -807,6 +807,7 @@ static const Real	FIELD_BUBBLE_GAIN			= 0.6f;
 static const Real	FIELD_COVER						= 2.0f;		///< puddles per (radius / puddle size) squared
 static const Int	FIELD_MAX_PUDDLES			= 48;
 static const Real	FIELD_GAIN						= 0.7f;		///< of the template's brightest colour, a puddle
+static const Real	FIELD_GAIN_TOXIN			= 0.35f;	///< the same for a field that is not lit like radiation: at 0.7 a pool's middle added past white and hid the ground in it
 static const Int	FIELD_FADE_IN					= LOGICFRAMES_PER_SECOND / 2;			///< logic frames
 static const Int	FIELD_FADE_OUT				= 3 * LOGICFRAMES_PER_SECOND;			///< logic frames before the field object dies
 static const Int	FIELD_FADE_GONE				= FIELD_FADE_OUT;	///< logic frames, a field fogged over or whose object went early
@@ -1646,7 +1647,7 @@ static Int collectGroundFields( const AABoxClass &view, CameraClass &sceneCamera
 		{
 			const FieldPuddle &puddle = s_fieldPuddles[ i ];
 			const Real stack = puddle.overlap > FIELD_STACK ? FIELD_STACK / puddle.overlap : 1.0f;
-			const Real bright = FIELD_GAIN * draw.fade * puddle.bright * stack;
+			const Real bright = (draw.glowing ? FIELD_GAIN : FIELD_GAIN_TOXIN) * draw.fade * puddle.bright * stack;
 			const Real red = draw.color.red * bright, green = draw.color.green * bright, blue = draw.color.blue * bright;
 			const unsigned glowColor = DX8Wrapper::Convert_Color_Clamp( Vector4( red, green, blue, 1.0f ) );
 			unsigned stainColor = 0;
