@@ -66,6 +66,7 @@ public:
 	void xfer( Xfer *xfer );
 
 	void markBuilt( UnsignedInt frame ) { m_builtFrame = frame; m_built = TRUE; }
+	void markUnbuilt() { m_built = FALSE; }
 	Bool isBuilt() const { return m_built; }
 	UnsignedInt getBuiltFrame() const { return m_builtFrame; }
 

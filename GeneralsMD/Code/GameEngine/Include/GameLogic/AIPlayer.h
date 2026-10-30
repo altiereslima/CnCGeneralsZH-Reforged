@@ -829,7 +829,11 @@ protected:
 
 	/** What this player knows can shoot at each patch of the map, and what it has there itself. */
 	AIInfluenceMap	m_influence;
-	void rebuildInfluence(void);
+	AIInfluenceMap	m_influenceNext;		///< Hard's: what this round's objects have stamped so far; it becomes m_influence when the round ends
+	void updateInfluence(void);										///< Hard's map, one share of the objects a frame
+	void rebuildInfluence(void);									///< the whole map on one frame
+	void stampInfluence(AIInfluenceMap &map, const Object *obj);
+	void stampFireReports(AIInfluenceMap &map);
 	void ensureInfluence(void);										///< the map, no older than this rung reads it; below Hard this is what draws it
 	Bool hasTacticalMap(void) const;							///< Hard's map, for the reads the rungs below it do not make
 	Bool quietGround(const Coord3D *from, const Real *gun, Coord3D *spot);	///< where to go from here to be off the map's guns and clear of this one (x, y, reach, or NULL); FALSE when no way gets out

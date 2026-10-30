@@ -170,7 +170,7 @@ public:
 	UnsignedInt getFrameForClient( void ) const { return m_frameForClient; }	///< the frame the last tick ran, for the client's clock (LogicThread::runTick)
 	UnsignedInt getCRC( Int mode = CRC_CACHED, AsciiString deepCRCFileName = AsciiString::TheEmptyString );		///< Returns the CRC
 
-	void setObjectIDCounter( ObjectID nextObjID ) { m_nextObjID = nextObjID; }
+	void setObjectIDCounter( ObjectID nextObjID ) { m_nextObjID = nextObjID; m_nextObjIDFromSave = nextObjID; }
 	ObjectID getObjectIDCounter( void ) { return m_nextObjID; }
 
 	//-----------------------------------------------------------------------------------------------
@@ -429,6 +429,7 @@ private:
 	ObjectPointerList m_objectsToDestroy;										///< List of things that need to be destroyed at end of frame
 
 	ObjectID m_nextObjID;																		///< For allocating object id's
+	ObjectID m_nextObjIDFromSave;														///< The counter a save held, for loadPostProcess
 
 	void setDefaults( Bool loadSaveGame );									///< Set default values of class object
 	void processDestroyList( void );												///< Destroy all pending objects on the destroy list

@@ -14461,8 +14461,8 @@ Bool AIPlayer::doFallback( Team *team )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** How often each fighting unit is looked at.  This and the map's rung clock are on the frame and the
-	* player's slot, so there is no timer to save and every machine does it on the same frame. */
+/** How often each fighting unit is looked at.  This and the map's rung clock go by the frame and the
+	* object's ID, so there is no timer to save and every machine does it on the same frame. */
 static const Int TACTICS_RATE = LOGICFRAMES_PER_SECOND / 3;
 
 /** Kiting.  A unit steps back from something it outranges once that thing is inside its own reach
@@ -14913,6 +14913,82 @@ static Real firingHeight( const Object *obj )
 	* observerKnowsAbout, the same line every other decision here draws, so a gun it has never seen
 	* does not steer it and a bunker it saw once keeps doing so. */
 //----------------------------------------------------------------------------------------------------------
+void AIPlayer::stampInfluence( AIInfluenceMap &map, const Object *obj )
+{
+	if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_PROJECTILE ) )
+		return;
+	const Bool mine = obj->getControllingPlayer() == m_player;
+	const Relationship relation = m_player->getRelationship( obj->getTeam() );
+	// the friendly layer is for the tactics alone, so the rungs below Hard do not pay for it
+	if( (mine || relation == ALLIES) ? !getSkillProfile()->m_tacticalMicro : relation != ENEMIES )
+		return;
+	const Real power = aiCombatPower( obj );
+	if( power <= 0.0f )
+		return;
+	const Real range = groundAttackRange( obj );
+	if( range <= 0.0f )
+		return;
+	const Coord3D *pos = obj->getPosition();
+	if( mine || relation == ALLIES )
+		map.stampFriend( pos->x, pos->y, firingHeight( obj ), range, power );
+	else if( observerKnowsAbout( obj, m_player->getPlayerIndex() ) )
+		map.stampEnemy( pos->x, pos->y, firingHeight( obj ), range, power );
+}
+
+/** The guns it knows of only by their shells, where they stood at the last one. */
+void AIPlayer::stampFireReports( AIInfluenceMap &map )
+{
+	const Int me = m_player->getPlayerIndex();
+	for( size_t r = 0; r < m_fireReports.size(); ++r )
+	{
+		const FireReport &report = m_fireReports[ r ];
+		Object *shooter = reportedShooter( report );
+		if( shooter && !observerKnowsAbout( gunCarrier( shooter ), me ) )
+			map.stampEnemy( report.at.x, report.at.y, report.at.z, report.reach, report.power );
+	}
+}
+
+/** Stamping the whole map in one frame was 2 to 6 ms a player a second at minute 30, the largest of the
+	* burst frames the AI owned.  So on Hard's clock each object stamps once a round on the frame its ID falls
+	* on, into a map nobody reads, and that map takes over when the player's round ends: the map read is
+	* whole, its oldest stamp up to two rounds old where it used to be one. */
+void AIPlayer::updateInfluence( void )
+{
+	// the first look takes everything at once, so nothing reads a map that is not whole
+	if( !m_influence.isBuilt() )
+		rebuildInfluence();
+	// the first round, or a save from before there were two; a map that starts mid-round is short of
+	// objects and goes, and the first full round takes over
+	if( !m_influenceNext.isSized() )
+	{
+		m_influenceNext = m_influence;
+		m_influenceNext.clear();
+		m_influenceNext.markUnbuilt();
+	}
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+	const Int round = rungFrames( getSkillProfile()->m_influenceSeconds );
+	const UnsignedInt turn = now % (UnsignedInt)round;
+	// ponytail: one walk of every object a player a frame, about 10000 ID tests at minute 30; one
+	// shared list a frame if that ever shows beside the stamps
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+		if( (UnsignedInt)obj->getID() % (UnsignedInt)round == turn )
+			stampInfluence( m_influenceNext, obj );
+
+	if( (now + computeUpdatePhase( m_player->getPlayerIndex(), round )) % round == 0 )
+	{
+		if( m_influenceNext.isBuilt() )
+		{
+			stampFireReports( m_influenceNext );
+			std::swap( m_influence, m_influenceNext );
+			m_influence.markBuilt( now );
+		}
+		m_influenceNext.clear();
+		m_influenceNext.markBuilt( now );
+	}
+}
+
+/** The whole map on one frame: Hard's first look, and every draw below Hard. */
 void AIPlayer::rebuildInfluence( void )
 {
 	if( !m_influence.isSized() )
@@ -14932,50 +15008,22 @@ void AIPlayer::rebuildInfluence( void )
 	}
 
 	m_influence.clear();
-	const Int me = m_player->getPlayerIndex();
-	// the friendly layer is for the tactics alone, so the rungs below Hard do not pay for it
-	const Bool friends = getSkillProfile()->m_tacticalMicro;
 	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
-	{
-		if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_PROJECTILE ) )
-			continue;
-		const Bool mine = obj->getControllingPlayer() == m_player;
-		const Relationship relation = m_player->getRelationship( obj->getTeam() );
-		if( (mine || relation == ALLIES) ? !friends : relation != ENEMIES )
-			continue;
-		const Real power = aiCombatPower( obj );
-		if( power <= 0.0f )
-			continue;
-		const Real range = groundAttackRange( obj );
-		if( range <= 0.0f )
-			continue;
-		const Coord3D *pos = obj->getPosition();
-		if( mine || relation == ALLIES )
-			m_influence.stampFriend( pos->x, pos->y, firingHeight( obj ), range, power );
-		else if( observerKnowsAbout( obj, me ) )
-			m_influence.stampEnemy( pos->x, pos->y, firingHeight( obj ), range, power );
-	}
-	// and the guns it knows of only by their shells, where they stood at the last one
-	for( size_t r = 0; r < m_fireReports.size(); ++r )
-	{
-		const FireReport &report = m_fireReports[ r ];
-		Object *shooter = reportedShooter( report );
-		if( shooter && !observerKnowsAbout( gunCarrier( shooter ), me ) )
-			m_influence.stampEnemy( report.at.x, report.at.y, report.at.z, report.reach, report.power );
-	}
+		stampInfluence( m_influence, obj );
+	stampFireReports( m_influence );
 	m_influence.markBuilt( TheGameLogic->getFrame() );
 }
 
-/** Hard draws its map on the clock (doTactics), and everything below Hard draws it here, when it has
-	* something to read it for and it is older than the rung's m_influenceSeconds: rebuildInfluence is already
-	* a fifth of Hard's AI update, and a quiet match has nothing to read it for.  -notactics stays off the map
-	* altogether, and every read of one never drawn is nothing there. */
+/** Hard stamps its map over the frames of its clock (updateInfluence), and everything below Hard draws it
+	* here, when it has something to read it for and it is older than the rung's m_influenceSeconds: a whole
+	* draw costs 2 to 6 ms late in a match, and a quiet match has nothing to read it for.  -notactics stays off
+	* the map altogether, and every read of one never drawn is nothing there. */
 void AIPlayer::ensureInfluence( void )
 {
 	if( measuringWithoutTactics() )
 		return;
 	// ponytail: below Hard one whole walk of the objects on one frame, every two or four seconds at most while
-	// something asks; Hard's costs 2.38 ms on a late frame.  Stamp it over frames as Hard's when that lands
+	// something asks.  Stamp it over frames as Hard's if that ever shows in a tail
 	const AIDifficultyProfile *profile = getSkillProfile();
 	if( m_influence.isBuilt() && (profile->m_tacticalMicro ||
 			TheGameLogic->getFrame() - m_influence.getBuiltFrame() < (UnsignedInt)rungFrames( profile->m_influenceSeconds )) )
@@ -15169,6 +15217,21 @@ Bool AIPlayer::measuringWithoutTactics( void ) const
 		(ThePlayerList->getSlotIndex( m_player->getPlayerIndex() ) & 1) == TheGlobalData->m_noTacticsSlotParity;
 }
 
+/** Those of the player's objects whose turn in the look falls on this frame. */
+struct FireLookTurn
+{
+	UnsignedInt look;
+	UnsignedInt frameOfLook;
+	std::vector<Object *> units;
+};
+
+static void collectFireLookTurn( Object *obj, void *userData )
+{
+	FireLookTurn *turn = (FireLookTurn *)userData;
+	if( (UnsignedInt)obj->getID() % turn->look == turn->frameOfLook )
+		turn->units.push_back( obj );
+}
+
 void AIPlayer::doTactics( void )
 {
 	if( measuringWithoutTactics() )
@@ -15178,24 +15241,23 @@ void AIPlayer::doTactics( void )
 	const Bool tactics = getSkillProfile()->m_tacticalMicro;
 
 	if( tactics )
-	{
-		const Int rebuildRate = rungFrames( getSkillProfile()->m_influenceSeconds );
-		if( !m_influence.isBuilt() || (now + computeUpdatePhase( me, rebuildRate )) % rebuildRate == 0 )
-			rebuildInfluence();
-	}
+		updateInfluence();
 
 	answerFire();
 
-	if( (now + computeUpdatePhase( me, TACTICS_RATE )) % TACTICS_RATE != 0 )
-		return;
-
+	// each unit once every TACTICS_RATE frames, on the frame its ID falls on, not a whole army on one
 	if( tactics && m_baseCenterSet )
 	{
-		std::vector<Object *> units;
-		m_player->iterateObjects( collectObject, &units );
-		for( size_t i = 0; i < units.size(); ++i )
-			tacticsFor( units[ i ] );
+		FireLookTurn turn;
+		turn.look = TACTICS_RATE;
+		turn.frameOfLook = now % turn.look;
+		m_player->iterateObjects( collectFireLookTurn, &turn );
+		for( size_t i = 0; i < turn.units.size(); ++i )
+			tacticsFor( turn.units[ i ] );
 	}
+
+	if( (now + computeUpdatePhase( me, TACTICS_RATE )) % TACTICS_RATE != 0 )
+		return;
 
 	// ponytail: a linear list searched per unit, a few hundred rows at most; a map keyed on the ID if
 	// armies ever grow past that
@@ -15999,23 +16061,8 @@ AIFireAnswer AIPlayer::answerHit( Object *obj, Object *shooter, Object *gun )
 	return answer;
 }
 
-/** Those of the player's objects whose turn in the look falls on this frame. */
-struct FireLookTurn
-{
-	UnsignedInt look;
-	UnsignedInt frameOfLook;
-	std::vector<Object *> units;
-};
-
-static void collectFireLookTurn( Object *obj, void *userData )
-{
-	FireLookTurn *turn = (FireLookTurn *)userData;
-	if( (UnsignedInt)obj->getID() % turn->look == turn->frameOfLook )
-		turn->units.push_back( obj );
-}
-
 //----------------------------------------------------------------------------------------------------------
-/** The owner: "bu ai lar artik su influence map i falan biraz ciddiye alsinlar, hedef aliniyorlar hala
+/** The owner:"bu ai lar artik su influence map i falan biraz ciddiye alsinlar, hedef aliniyorlar hala
 	* devam ediyorlar ayni yerde."  A unit idle or parked under a long gun only acquires what it can see, a
 	* wave on its road only what its mood looks for, and one shooting a building stays on the building with
 	* a tower on it, and none of the rest of the AI asked who was hitting them.  So once in each of the rung's
@@ -18208,7 +18255,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 32;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders  11: the outward placement ring  12: the pressure level  13: falling back  14: gunship Chinooks and the boarding wait  15: transport Chinooks and the lent one  16: healer and raider Helixes  17: the seen-enemy ledger  18: the fist  19: the Ambulances  20: the last Ambulance lost  21: the purchase queue's reservation  22: the measured income  23: the Ambulances bought  24: the starting fortune  25: the factory backlog clocks  26: the personality  27: the team request inbox  28: the last aircraft refused for parking  29: the watched sites and the cooled spots  30: the factory backlog as a window of passes  31: the factories that let a unit out since the last pass  32: the guns known by their shells, the answers to fire
+	XferVersion currentVersion = 33;		// 2: scout 3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders  11: the outward placement ring  12: the pressure level  13: falling back  14: gunship Chinooks and the boarding wait  15: transport Chinooks and the lent one  16: healer and raider Helixes  17: the seen-enemy ledger  18: the fist  19: the Ambulances  20: the last Ambulance lost  21: the purchase queue's reservation  22: the measured income  23: the Ambulances bought  24: the starting fortune  25: the factory backlog clocks  26: the personality  27: the team request inbox  28: the last aircraft refused for parking  29: the watched sites and the cooled spots  30: the factory backlog as a window of passes  31: the factories that let a unit out since the last pass  32: the guns known by their shells, the answers to fire  33: the influence map being stamped
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -18741,6 +18788,10 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferUnsignedInt( &reading.frame );
 		}
 	}
+
+	// the influence map half stamped, or a loaded game's next map would be missing the round's first half
+	if( version >= 33 )
+		m_influenceNext.xfer( xfer );
 
 }  // end xfer
 
