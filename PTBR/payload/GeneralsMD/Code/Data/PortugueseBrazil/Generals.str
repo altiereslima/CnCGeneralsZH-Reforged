@@ -1479,7 +1479,7 @@ CONTROLBAR:Infa_ToolTipChinaScienceInfantryParadrop
 END
 
 CONTROLBAR:Infa_ToolTipChinaScienceRedGuardTraining
-"Todos os Minicanhoneiros serão produzidos como unidades de Elite"
+"Todos os Minicanhoneiros são produzidos três patentes acima de Veterano"
 END
 
 CONTROLBAR:Infa_ToolTipChinaUpgradeRedGuardCaptureBuilding
@@ -2107,11 +2107,11 @@ CONTROLBAR:ToolTipChinaScienceArtilleryBarrage
 END
 
 CONTROLBAR:ToolTipChinaScienceARtilleryTraining
-"Canhões Nucleares e Canhões Inferno são criados como veteranos."
+"Canhões Nucleares e Canhões Inferno são criados três patentes acima"
 END
 
 CONTROLBAR:ToolTipChinaScienceBattlemasterTraining
-"Todos os Battlemasters são criados como armas de elite"
+"Todos os Battlemasters são criados seis patentes acima"
 END
 
 CONTROLBAR:ToolTipChinaScienceCarpetBomb
@@ -2155,7 +2155,7 @@ CONTROLBAR:ToolTipChinaScienceOverlordTraining
 END
 
 CONTROLBAR:ToolTipChinaScienceRedGuardTraining
-"Todos os Guardas Vermelhos são criados como veteranos."
+"Todos os Guardas Vermelhos são criados três patentes acima, como Cabos"
 END
 
 CONTROLBAR:ToolTipChinaScienceTankHunterTraining
@@ -2579,7 +2579,7 @@ CONTROLBAR:ToolTipGLAScienceSneakAttack
 END
 
 CONTROLBAR:ToolTipGLAScienceTechnicalTraining
-"Todos os Técnicos são criados como veteranos."
+"Todos os Técnicos são criados três patentes acima"
 END
 
 CONTROLBAR:ToolTipGLASCUDAnthraxWarhead
@@ -5631,7 +5631,7 @@ GUI:BioFeatures_Pos3
 END
 
 GUI:BioFeatures_Pos4
-"Emperor \n Lançamento de Tanques \n Battlemasters veteranos \n Tanques mais baratos \n Aeronaves mais caras \n Sem Mísseis Nucleares nem Canhões Inferno"
+"Tanque Emperor \n Lançamento de Tanques \n Todos os tanques começam três patentes acima \n Tanques mais baratos \n Aeronaves mais caras \n Sem Canhões Nucleares nem Canhões Inferno"
 END
 
 GUI:BioFeatures_Pos5
@@ -5643,7 +5643,7 @@ GUI:BioFeatures_Pos6
 END
 
 GUI:BioFeatures_Pos7
-"Transporte de Tropas de Assalto \n Helix de Assalto \n Postos Avançados de Ataque \n Bunkers Fortificados \n Minicanhoneiros \n Black Lotus invade sistemas mais rapidamente \n Hackers invadem sistemas mais rapidamente \n Minicanhoneiros paraquedistas \n Toda a infantaria começa veterana"
+"Transporte de Tropas de Assalto \n Helix de Assalto \n Postos Avançados de Ataque \n Bunkers Fortificados \n Minicanhoneiros \n Black Lotus invade sistemas mais rapidamente \n Hackers invadem sistemas mais rapidamente \n Minicanhoneiros paraquedistas \n Toda a infantaria começa três patentes acima"
 END
 
 GUI:BioFeatures_Pos8
@@ -9604,6 +9604,10 @@ END
 
 GUI:SocketError
 "Falha de comunicação com a rede, verifique sua conexão."
+END
+
+GUI:SocketRedirected
+"O IP da rede local é %ls, mas o sistema colocou a conexão do jogo em %ls. Um túnel dividido de VPN ou um firewall a redirecionou, então ninguém na sua rede consegue ouvir você. Desative o túnel dividido para o jogo e tente de novo."
 END
 
 GUI:SortAlpha
@@ -15986,8 +15990,24 @@ RANK:NextRank
 "Próxima patente %d/%d XP"
 END
 
+RANK:PerkAURA_CAPTURE
+"Aura: captura edifícios %d%% mais rápido"
+END
+
+RANK:PerkAURA_DRILL
+"Aura: treina unidades até o grau %d"
+END
+
 RANK:PerkAURA_GUARD
 "Aura: %d%% menos dano recebido"
+END
+
+RANK:PerkAURA_MEND
+"Aura: cura %d,%02d%% por segundo"
+END
+
+RANK:PerkAURA_PACE
+"Aura: velocidade +%d%%"
 END
 
 RANK:PerkAURA_RADIUS
@@ -16006,24 +16026,68 @@ RANK:PerkAURA_SIGHT
 "Aura: visão +%d%%"
 END
 
+RANK:PerkAURA_SPOILS
+"Aura: eliminações por perto rendem %d%% do custo da vítima"
+END
+
+RANK:PerkAURA_STEADY
+"Aura: paralisia, PEM e subjugação %d%% mais curtas"
+END
+
 RANK:PerkDEATH_RALLY
 "Quando cai, aliados próximos recebem %d%% menos dano por 10 segundos"
+END
+
+RANK:PerkDESIGNATE
+"Marca o que atinge por %d segundos: todos atiram 50%% mais rápido nele"
+END
+
+RANK:PerkDESIGNATE_REVEAL
+"Sua marca revela alvos furtivos"
 END
 
 RANK:PerkDETECT
 "Detecta unidades furtivas a até %d"
 END
 
+RANK:PerkHEALTH
+"Vida +%d%%"
+END
+
+RANK:PerkLAST_STAND
+"Abaixo de 35%% de vida: cadência de tiro +%d%%"
+END
+
 RANK:PerkMEND
-"Fora de combate: cura %d%% por segundo"
+"Fora de combate: cura %d,%02d%% por segundo"
+END
+
+RANK:PerkRANGE
+"Alcance +%d%%"
+END
+
+RANK:PerkRATE_OF_FIRE
+"Cadência de tiro +%d%%"
+END
+
+RANK:PerkSALVAGE_CRATE
+"Deixa uma caixa de sucata quando cai"
 END
 
 RANK:PerkSCATTER
 "Dispersão da artilharia -%d%%"
 END
 
+RANK:PerkSCAVENGE
+"Suas eliminações rendem %d%% do custo da vítima"
+END
+
 RANK:PerkSIGHT
 "Visão +%d%%"
+END
+
+RANK:PerkSPEED
+"Velocidade +%d%%"
 END
 
 RANK:PerkSPOTTER
@@ -17603,7 +17667,7 @@ TOOLTIP:LANPlayer
 END
 
 TOOLTIP:LegacySound
-"O som do jogo original: sem eco no mapa, sem abafamento por distância, morros ou edifícios, sem atraso ou variação de tom em sons distantes e que passam, sem queda de volume após grandes explosões, sem limite de sons de batalha ou de respostas das unidades, sem limitador, sem ambiente do mapa e sem música acompanhando a batalha. Volume geral, dispositivo e caixas de som continuam valendo. Tem efeito na hora."
+"O som do jogo original: sem variação de tom em sons que passam, sem estrondo sônico do Aurora, sem limite de sons de batalha ou de respostas das unidades, sem limitador, sem ambiente do mapa e sem música acompanhando a batalha. Volume geral, dispositivo e caixas de som continuam valendo. Tem efeito na hora."
 END
 
 TOOLTIP:LightingStyle
@@ -17659,7 +17723,7 @@ TOOLTIP:MapHardSuccess
 END
 
 TOOLTIP:MapLight
-"Um sol baixo de fim de tarde que ilumina o mapa com tons mais quentes e projeta sombras mais longas, e uma névoa leve sobre as partes baixas que as aeronaves abrem ao atravessá-la. Só no Direct3D 11. Vale a partir do próximo mapa."
+"Um sol baixo de fim de tarde que ilumina o mapa com tons mais quentes e projeta sombras mais longas, e uma névoa leve e parada sobre as partes baixas. Só no Direct3D 11. Vale a partir do próximo mapa."
 END
 
 TOOLTIP:MapMaxBrutalSuccess
