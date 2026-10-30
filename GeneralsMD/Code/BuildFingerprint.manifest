@@ -460,6 +460,11 @@ Data/Scenarios/tunnelshortcut.txt
 Data/Scenarios/tunnelsplit.txt
 Data/Scenarios/tunnelunderfire.txt
 Data/Scenarios/tunnelwalk.txt
+Data/Scenarios/underfire_building.txt
+Data/Scenarios/underfire_cankill.txt
+Data/Scenarios/underfire_outgunned.txt
+Data/Scenarios/underfire_parked.txt
+Data/Scenarios/underfire_road.txt
 Data/Scenarios/v240_heli.txt
 Data/Scenarios/v240_hook.txt
 Data/Scenarios/v240_md.txt

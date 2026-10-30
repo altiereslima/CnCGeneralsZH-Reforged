@@ -830,12 +830,50 @@ protected:
 	/** What this player knows can shoot at each patch of the map, and what it has there itself. */
 	AIInfluenceMap	m_influence;
 	void rebuildInfluence(void);
+	void ensureInfluence(void);										///< the map, no older than this rung reads it; below Hard this is what draws it
+	Bool hasTacticalMap(void) const;							///< Hard's map, for the reads the rungs below it do not make
+	Bool quietGround(const Coord3D *from, const Real *gun, Coord3D *spot);	///< where to go from here to be off the map's guns and clear of this one (x, y, reach, or NULL); FALSE when no way gets out
+
+	/** A gun that has hit this player from past where its fights look or from the fog.  It goes on the map as
+		* if seen, where it stood at the last hit, and counts in the fights around that hit, for the rung's
+		* m_fireMemorySeconds.  The shell's arc is on the screen, so this tells the AI what it tells a player. */
+	struct FireReport
+	{
+		ObjectID		shooter;
+		Coord3D			at;					///< where the gun stood
+		Coord3D			hitAt;			///< where what it hit stood
+		Real				reach;
+		Real				power;
+		UnsignedInt	frame;			///< the last hit
+	};
+	std::vector<FireReport>	m_fireReports;
+	Object *reportedShooter(const FireReport &report) const;	///< NULL when it is dead, forgotten or no enemy now
+	void noteFire(const Object *shooter, const Object *gun, const Coord3D *hitAt);
+
+	/** A unit hit answers the gun that hit it, once in each of the rung's looks: AIPlayer::answerFire.  What it
+		* takes to get a gun is read once a look, by the first unit that has to ask, and holds for the rest. */
+	struct GunReading
+	{
+		ObjectID		gun;
+		Real				ours;					///< what is near the unit that read it and can hurt this gun
+		Real				cover;				///< what the map has covering the gun's own spot
+		Real				edge;					///< a fixed gun: the fight at the edge of its reach
+		UnsignedInt	frame;
+	};
+	std::vector<GunReading>	m_gunReadings;
+	void answerFire(void);
+	AIFireAnswer answerHit(Object *obj, Object *shooter, Object *gun);	///< decided and ordered
+	const GunReading &readGun(const Object *obj, const Object *gun);
+	void fightersNear(const Coord3D *at, Real radius, std::vector<Object *> *fighters);	///< our own who take orders here, in ObjectID order
+	void finishAnswers(void);											///< those done with a gun go back to what they were doing
+	Bool isAnsweringFire(ObjectID unit);
 
 	/** Hard's fighting units, one at a time: step back from what they outrange, climb onto ground
 		* that lengthens their guns, and take a hurt unit out of ground it cannot win on. */
 	virtual void doTactics(void);
 	void doTransports(void);	///< helicopters put riders who cannot shoot out down at the fight
 	Bool measuringWithoutTactics(void) const;	///< -notactics has this slot fight the old way
+	Bool fightsOnItsOwn(Object *obj);		///< armed, on the ground, and with no job of its own or base to guard: the tactics' and the answers' to order
 	void tacticsFor(Object *obj);
 	struct TacticalStep
 	{
@@ -852,16 +890,17 @@ protected:
 		Bool				fallingBack;			///< pulled out of a lost fight to a safe spot, and goes back once it is safe
 		Coord3D			fallbackFrom;			///< the fight it was pulled out of
 		UnsignedInt	fallbackFrame;		///< when it was pulled out
+		UnsignedInt	answerFrame;			///< when it was sent at a gun that hit it, 0 while it is not; target and origin are what it goes back to
 	};
 	std::vector<TacticalStep>	m_tactics;
 	TacticalStep *findTacticalStep(ObjectID unit);
 	TacticalStep *tacticalStepFor(ObjectID unit);		///< ... making the row if there is none
 	void leaveTacticsAlone(ObjectID unit);
-	Bool isFallingBack(ObjectID unit);		///< holding at a safe spot after a lost fight, for doRetreats to send back
+	Bool isFallingBack(ObjectID unit) const;		///< holding at a safe spot after a lost fight, for doRetreats to send back
 	void measureFight(const Coord3D *centre, Bool countHolders, Real *myHealth, Real *myPower,
 		Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns, Real *advantage = NULL, Real *defencePower = NULL);
 	Real fightRatio(const Coord3D *centre, Bool countHolders, Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns,
-		Real *defencePower = NULL);	///< the exchange around centre, by the units in it when the rung weighs them; defencePower is the part of the enemy's that is buildings outside our base
+		Real *defencePower = NULL);	///< the exchange around centre, by the units in it when the rung weighs them; defencePower is the part of the enemy's that stands outside our base and is a building or a gun known by its shells
 	Bool doFallback(Team *team);		///< TRUE when it sent the team's holders back or home on this pass
 	void pullOutRanked(Team *team, Bool inFight, Real ratio);	///< veterans and up leave earlier than the team, to a repair or heal pad
 	void releaseMended(void);		///< pulled-out veterans and let-out patients standing idle again become recruitable

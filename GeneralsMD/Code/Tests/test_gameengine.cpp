@@ -13394,6 +13394,14 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_counterCompositionWeight >= lower.m_counterCompositionWeight );
 		CHECK( upper.m_retreatTtkRatio >= lower.m_retreatTtkRatio );
 
+		// under fire: redraws the map and looks sooner, tells more of the group, wants better odds before
+		// going for a gun, and remembers a gun in the fog for longer
+		CHECK( upper.m_influenceSeconds < lower.m_influenceSeconds );
+		CHECK( upper.m_fireLookSeconds < lower.m_fireLookSeconds );
+		CHECK( upper.m_fireWordRadius > lower.m_fireWordRadius );
+		CHECK( upper.m_fireChargeOdds > lower.m_fireChargeOdds );
+		CHECK( upper.m_fireMemorySeconds > lower.m_fireMemorySeconds );
+
 		// capabilities only ever switch on as you climb, never off again
 		CHECK( upper.m_massBeforeAttacking >= lower.m_massBeforeAttacking );
 		CHECK( upper.m_retreatIndividualUnits >= lower.m_retreatIndividualUnits );
@@ -13909,6 +13917,169 @@ TEST(a_losing_team_falls_back_out_of_reach_not_home)
 	// a fight on the doorstep: no room short of home either
 	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 100.0f, 0.0f, 60.0f, NULL, 0, map, &x, &y ) );
 	CHECK_NEAR( 100.0f, x, 0.01f );
+}
+
+
+/** AI.cpp: the safe spot is picked from the whole map and not only the guns of the fight it left.  A gun the
+	 fight's list does not have, down the road home, moves the stop off the road as a gun in the list does. */
+TEST(a_losing_team_keeps_off_every_gun_on_the_map)
+{
+	Real x = 0.0f, y = 0.0f;
+	const Real bounds[] = { -1000.0f, -1000.0f, 3000.0f, 1000.0f };
+	AIInfluenceMap influence;
+	influence.reset( -1000.0f, -1000.0f, 4000.0f, 2000.0f, 60.0f );
+
+	// nothing on it: one step and the next, along the road
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y, &influence ) );
+	CHECK_NEAR( 120.0f, x, 0.01f );
+	CHECK_NEAR( 0.0f, y, 0.01f );
+
+	// a gun at 300 east reaching 200 covers the road from about 100 to 500; 45 degrees off it is clear at
+	// 120, and the list of the fight's guns is empty.  The same call without the map walks straight in
+	influence.stampEnemy( 300.0f, 0.0f, 0.0f, 200.0f, 900.0f );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y, &influence ) );
+	CHECK_NEAR( 84.853f, x, 0.01f );
+	CHECK_NEAR( 84.853f, y, 0.01f );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y ) );
+	CHECK_NEAR( 120.0f, x, 0.01f );
+
+	// the map all covered: home, and FALSE says so
+	influence.stampEnemy( 0.0f, 0.0f, 0.0f, 5000.0f, 900.0f );
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y, &influence ) );
+	CHECK_NEAR( 2000.0f, x, 0.01f );
+}
+
+
+/** AI.cpp: what a unit hit does about the gun, the owner's rule: answer it if it can, leave if not, and no
+	 running from what ours can kill. */
+TEST(a_unit_hit_answers_the_gun_or_leaves_its_ground)
+{
+	// already shooting the gun, or some other gun: stays on it, whatever the odds
+	CHECK_EQ( (Int)AIFIRE_CARRY_ON, (Int)aiAnswerFire( TRUE, FALSE, TRUE, TRUE, 0.0f, 9000.0f, 1.0f, TRUE, FALSE ) );
+	CHECK_EQ( (Int)AIFIRE_CARRY_ON, (Int)aiAnswerFire( FALSE, TRUE, TRUE, TRUE, 0.0f, 9000.0f, 1.0f, TRUE, FALSE ) );
+	// shooting a building under a tower it can reach, or standing idle in a gun's reach: shoots back,
+	// at any odds, since walking off takes longer than the shot
+	CHECK_EQ( (Int)AIFIRE_SHOOT_BACK, (Int)aiAnswerFire( FALSE, FALSE, TRUE, TRUE, 100.0f, 9000.0f, 1.0f, TRUE, TRUE ) );
+	// out of reach, with enough near it: goes, and a group that can kill the gun does not run from it
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 4800.0f, 2400.0f, 1.0f, TRUE, FALSE ) );
+	// a gun with nothing else on its ground and the map not yet drawn over it: goes
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 100.0f, 0.0f, 1.0f, TRUE, FALSE ) );
+	// out of reach and outgunned at the gun's spot, or no way to get at it: leaves
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 1600.0f, 4800.0f, 1.0f, TRUE, FALSE ) );
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, FALSE, 9000.0f, 900.0f, 1.0f, TRUE, FALSE ) );
+	// ... unless it may not.  With an order it stays on that order rather than walking
+	CHECK_EQ( (Int)AIFIRE_CARRY_ON, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 1600.0f, 4800.0f, 1.0f, FALSE, FALSE ) );
+	// and with none no rule leaves it standing under the shells: at the gun, or off its ground if it cannot get there
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 1600.0f, 4800.0f, 1.0f, FALSE, TRUE ) );
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, FALSE, 1600.0f, 4800.0f, 1.0f, FALSE, TRUE ) );
+	// the rungs' odds: Easy's go at what Hard's leave
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 3000.0f, 4800.0f, 0.6f, TRUE, FALSE ) );
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 3000.0f, 4800.0f, 1.0f, TRUE, FALSE ) );
+}
+
+
+/** AI.cpp: the owner's "no dance between two spots".  Sent back from a hold at a fight reading 1.1, between the
+	 retreat's even and Hard's 1.25 at a defence's edge, a team went in, took a hit, read 1.25 afresh, left, held
+	 and went in again, and going back restarted the hold's clock, so its cap never came. */
+TEST(a_unit_sent_at_a_gun_does_not_walk_to_and_fro)
+{
+	const Real margin = 1.25f;
+	const Real reading = 1.1f;
+	// what the hold's own rule sends back
+	CHECK_EQ( (Int)AIFALLBACK_RESUME, (Int)aiRetreatHoldDecision( TRUE, 300, reading, 1.0f, 300, 1800 ) );
+	// is not turned round by the reading either side of the odds
+	CHECK( reading < aiFireOddsNow( 1.25f, FALSE, margin ) );
+	CHECK( reading >= aiFireOddsNow( 1.25f, TRUE, margin ) );
+	// and one that does break off has had its try: its hold ends at home, not at the gun
+	CHECK( aiFireMayGoBack( FALSE ) );
+	CHECK( !aiFireMayGoBack( TRUE ) );
+}
+
+
+/** AI.cpp: a unit a step took away from a gun is done with that gun.  Pulled out hurt with the errand still
+	 open, it stood at its safe spot, read as idle, and was walked back to what had hurt it. */
+TEST(a_unit_pulled_out_hurt_is_not_sent_back_to_the_gun)
+{
+	CHECK( !aiFireAnswerOver( FALSE, FALSE, 600, 3600 ) );
+	CHECK( aiFireAnswerOver( FALSE, TRUE, 600, 3600 ) );			// a step took it, by its rejoin
+	CHECK( aiFireAnswerOver( TRUE, FALSE, 600, 3600 ) );			// the retreat took it
+	CHECK( aiFireAnswerOver( FALSE, FALSE, 3600, 3600 ) );		// gone off on something else by now
+}
+
+
+/** AI.cpp: who ends a hold.  The retreat ends those it looks at.  A hunter on the default team stood calm for
+	 forty seconds, out of every call-up, with nothing to send it on, and a rung with no retreat turned its unit
+	 back halfway to the quiet ground. */
+TEST(a_holder_nothing_sends_on_goes_free_once_it_has_stopped)
+{
+	const UnsignedInt hold = 600;
+	const UnsignedInt stale = 2400;
+	// the retreat's: only when it has lost track of it
+	CHECK( !aiHolderLetGo( TRUE, 2400, FALSE, hold, stale ) );
+	CHECK( aiHolderLetGo( TRUE, 2401, FALSE, hold, stale ) );
+	// nobody's: after the hold, and not while it is still walking there
+	CHECK( !aiHolderLetGo( FALSE, 600, FALSE, hold, stale ) );
+	CHECK( aiHolderLetGo( FALSE, 601, FALSE, hold, stale ) );
+	CHECK( !aiHolderLetGo( FALSE, 601, TRUE, hold, stale ) );
+	CHECK( aiHolderLetGo( FALSE, 2401, TRUE, hold, stale ) );
+}
+
+
+/** AI.cpp: the two ways a unit is kept from walking off.  A fight at home is fought, and a gun the retreat
+	 can see is the retreat's to judge, so a hit does not undo the fights it would hold.  A gun it cannot see,
+	 the long one past its radius or one in the fog, is this rule's; so is any gun on a rung with no retreat. */
+TEST(a_unit_hit_leaves_only_where_nothing_else_judges_the_fight)
+{
+	// home against a gun at home; at home under a long gun out past it is another matter, seen or not, since
+	// the retreat breaks off no fight at home and they stood there until they died
+	CHECK( !aiFireMayLeave( TRUE, TRUE, TRUE, FALSE, 500.0f, 300.0f ) );
+	CHECK( !aiFireMayLeave( TRUE, TRUE, TRUE, TRUE, 200.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( TRUE, FALSE, TRUE, FALSE, 500.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( TRUE, FALSE, TRUE, TRUE, 200.0f, 300.0f ) );
+	// known and within the retreat's look: not on a rung that retreats, yes on Easy
+	CHECK( !aiFireMayLeave( FALSE, FALSE, TRUE, TRUE, 200.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( FALSE, FALSE, FALSE, TRUE, 200.0f, 300.0f ) );
+	// past its look, or in the fog
+	CHECK( aiFireMayLeave( FALSE, FALSE, TRUE, TRUE, 301.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( FALSE, FALSE, TRUE, FALSE, 200.0f, 300.0f ) );
+}
+
+
+/** AI.cpp: the two small readings the answers rest on. */
+TEST(outgunned_and_recently_hit_read_as_they_say)
+{
+	CHECK( aiOutgunned( 100.0f, 200.0f, 1.0f ) );
+	CHECK( !aiOutgunned( 200.0f, 200.0f, 1.0f ) );
+	CHECK( !aiOutgunned( 0.0f, 0.0f, 1.0f ) );			// nothing there: nothing to lose to
+	CHECK( !aiOutgunned( 150.0f, 200.0f, 0.6f ) );
+
+	CHECK( aiRecentlyHit( 100, 110, 20 ) );
+	CHECK( aiRecentlyHit( 100, 120, 20 ) );
+	CHECK( !aiRecentlyHit( 100, 121, 20 ) );
+	// the stamp a body starts with is in the future, and an unsigned subtraction read it as just hit
+	CHECK( !aiRecentlyHit( 0xffffffffu, 110, 20 ) );
+}
+
+
+/** Every rung answers, and the ladder test holds the order.  Hard's map stays on its one-second clock and its
+	 look on the twenty-frame tactics clock, so nothing here costs Hard a new rate. */
+TEST(every_rung_answers_fire)
+{
+	TAiData data;
+	for( Int i = 0; i < AISKILL_COUNT; ++i )
+	{
+		const AIDifficultyProfile &rung = data.m_skill[ i ];
+		CHECK( rung.m_influenceSeconds > 0.0f );
+		CHECK( rung.m_fireLookSeconds > 0.0f );
+		CHECK( rung.m_fireWordRadius >= 0.0f );
+		CHECK( rung.m_fireChargeOdds > 0.0f );
+		CHECK( rung.m_fireMemorySeconds > 0.0f );
+	}
+	const AIDifficultyProfile &hard = data.m_skill[ AISKILL_BRUTAL ];
+	CHECK_EQ( 1.0f, hard.m_influenceSeconds );
+	CHECK_EQ( 20, (Int)(hard.m_fireLookSeconds * LOGICFRAMES_PER_SECOND + 0.5f) );
+	// Easy answers each hit alone
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_fireWordRadius );
 }
 
 

@@ -42,6 +42,7 @@
 #include "Common/STLTypedefs.h"
 
 class AIGroup;
+class AIInfluenceMap;
 class AttackPriorityInfo;
 class BuildListInfo;	
 class CommandButton;
@@ -280,6 +281,13 @@ struct AIDifficultyProfile
 	// Artillery that fires past its own sight
 	Int		m_artillerySpotters;						///< the side's spotters (AISideInfo m_spotter) added to a team that brings such a gun and no spotter
 	Real	m_artilleryShare;								///< the share of a side's attack teams with no such gun that are given one of its own (AISideInfo m_artillery)
+
+	// Coming under fire (AIPlayer::answerFire): what it does about a gun that is hitting it
+	Real	m_influenceSeconds;							///< how old its map of what can shoot where may be when it is read
+	Real	m_fireLookSeconds;							///< how often it looks at who is being hit, and so how late it answers
+	Real	m_fireWordRadius;								///< how far from a unit hit the rest of the group goes with it; 0 = each answers its own hit alone
+	Real	m_fireChargeOdds;								///< ours near the unit have to be worth this many times what covers the gun before they go for it
+	Real	m_fireMemorySeconds;						///< how long a gun that hit it stays on its map after it has lost sight of it
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -378,10 +386,60 @@ Real aiArmyAdvantage( const Real *myValue, Int myKinds, const Real *theirValue, 
 Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPower );
 
 /** Where a force losing a fight stops: the first spot on its line home, or 45 or 90 degrees off it, that
-	* none of the fight's guns reach (x, y, reach triples), plus one step, on the map (bounds: low x, low y,
-	* high x, high y).  FALSE and home when there is none short of it. */
+	* none of the fight's guns reach (x, y, reach triples) and that map, when given, has no enemy gun on,
+	* plus one step, on the ground (bounds: low x, low y, high x, high y).  FALSE and home when there is none
+	* short of it. */
 Bool aiRetreatFallbackPoint( Real fromX, Real fromY, Real homeX, Real homeY, Real step,
-														 const Real *guns, Int gunCount, const Real *bounds, Real *outX, Real *outY );
+														 const Real *guns, Int gunCount, const Real *bounds, Real *outX, Real *outY,
+														 const AIInfluenceMap *map = NULL );
+
+/** What a unit that has just been hit does about the gun that hit it. */
+enum AIFireAnswer
+{
+	AIFIRE_CARRY_ON,		///< it is already in a gunfight, or may not leave this one
+	AIFIRE_SHOOT_BACK,	///< the gun is in its reach: that is what it shoots now
+	AIFIRE_GO_KILL,			///< out of reach, and ours near it are enough: they go and get it
+	AIFIRE_LEAVE				///< out of reach, and ours are not enough: off the ground it covers
+};
+
+/** The rule.  A unit already shooting the gun or some other gun stays on it, and the retreat judges that
+	* fight.  One with the gun in reach turns on it.  Out of reach it goes when it can get at the gun and ours
+	* are not outgunned at the gun's own spot, and otherwise leaves if it may.  One that may not leave stays on
+	* the order it has, or with none, idle under the shells, goes for the gun at any odds and leaves if it cannot
+	* get at it.  ours and cover are in aiCombatPower's currency; odds is the rung's. */
+AIFireAnswer aiAnswerFire( Bool onTheGun, Bool fightingAGun, Bool canShootNow, Bool canGetAtIt, Real ours, Real cover, Real odds, Bool mayLeave, Bool idle );
+
+/** The odds a unit reads a gun at.  One already sent at it breaks off only well past the odds that sent it, so
+	* a reading either side of them does not turn it round halfway. */
+Real aiFireOddsNow( Real odds, Bool sentAtIt, Real margin );
+
+/** A unit that leaves a gun it was sent at has tried it.  Going back on the next good reading walked it to and
+	* fro for as long as the fight read between the odds that send and the odds that hold, so its hold ends at
+	* home. */
+Bool aiFireMayGoBack( Bool sentAtIt );
+
+/** A unit stops counting as sent at a gun once the retreat has it, or a step of its own took it away (a hurt
+	* unit pulled out, a kite), or the errand has run past the longest it can take.  Left on it, the hurt unit was
+	* walked back to the gun from its safe spot. */
+Bool aiFireAnswerOver( Bool retreatHasIt, Bool steppedAway, UnsignedInt framesOnIt, UnsignedInt maxFrames );
+
+/** A unit holding after it left a fight goes free.  The retreat ends the hold of those it looks at, and only
+	* one it has lost track of runs to staleFrames.  Nothing ends the others (a rung with no retreat, the default
+	* team): they hold holdFrames and go free once they have stopped walking, for the call-ups to have them. */
+Bool aiHolderLetGo( Bool retreatSeesIt, UnsignedInt heldFrames, Bool moving, UnsignedInt holdFrames, UnsignedInt staleFrames );
+
+/** Whether a unit may answer a gun by leaving.  A fight at home is fought, home being where a retreat goes,
+	* and a gun out past home that is shelling it is nothing the retreat will take up, so that one it may.
+	* Away from home, a gun the retreat can see, known and within its radius, is the retreat's to judge on a
+	* rung that retreats: units leaving on one hit where the fight as a whole holds were the passivity 4264d652
+	* cost matches to take out. */
+Bool aiFireMayLeave( Bool unitAtHome, Bool gunAtHome, Bool rungRetreats, Bool gunKnown, Real gunDistance, Real retreatRadius );
+
+/** ours would lose to cover: there is something there, and ours are worth less than odds times it. */
+Bool aiOutgunned( Real ours, Real cover, Real odds );
+
+/** A body's last hit stamp is within window frames of now.  The stamp starts out as 0xffffffff. */
+Bool aiRecentlyHit( UnsignedInt hitFrame, UnsignedInt now, UnsignedInt window );
 
 /** A unit at (x, y) walking along (dirX, dirY), a unit vector, is about to walk into a gun at (gunX, gunY):
 	* it is outside the gun's reach, heading towards it, and the next lookahead of its walk comes within edge
