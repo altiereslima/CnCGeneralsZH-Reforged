@@ -2183,7 +2183,6 @@ Libraries/Source/WWVegas/Miles6/.gitignore
 Libraries/Source/WWVegas/Miles6/include/MSS/MSS.h
 Libraries/Source/WWVegas/Miles6/include/MSS/mss_backend_names.h
 Libraries/Source/WWVegas/Miles6/include/MSS/mss_ex_pcm.h
-Libraries/Source/WWVegas/Miles6/include/MSS/mss_ex_room.h
 Libraries/Source/WWVegas/Miles6/include/Mss.h
 Libraries/Source/WWVegas/Miles6/miles_dispatch.cpp
 Libraries/Source/WWVegas/Miles6/miniaudio/miles_miniaudio.cpp

@@ -690,7 +690,7 @@ GUI:LegacySound
 END
 
 TOOLTIP:LegacySound
-"The original game's sound: no echo off the map, no muffling by distance, hills or buildings, no delay or pitch bend on distant and passing sounds, no dip after big blasts, no cap on battle sounds or unit replies, no limiter, no map ambience and no music following the fight. Master volume, the device and the speakers still apply. Takes effect at once."
+"The original game's sound: no pitch bend on passing sounds, no Aurora sonic boom, no cap on battle sounds or unit replies, no limiter, no map ambience and no music following the fight. Master volume, the device and the speakers still apply. Takes effect at once."
 END
 
 GUI:IsometricCamera

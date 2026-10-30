@@ -2219,7 +2219,7 @@ endfunction()
 add_lib_test(test_msvc_float_casts)
 target_include_directories(test_msvc_float_casts PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Include)
 
-# MilesAudioDevice/AudioMixPolicy.h: the battle mix's budget, folding and occlusion arithmetic.
+# MilesAudioDevice/AudioMixPolicy.h: the battle mix's budget and folding arithmetic.
 add_lib_test(test_audio_mix_policy)
 target_include_directories(test_audio_mix_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/GameEngineDevice/Include)
 

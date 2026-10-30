@@ -15174,7 +15174,7 @@ GUI:LegacySound
 END
 
 TOOLTIP:LegacySound
-"Özgün oyunun sesi: haritada yankı yok, uzaklık, tepe ya da bina boğukluğu yok, uzak ve geçen seslerde gecikme ya da perde kayması yok, büyük patlamalardan sonra kısılma yok, savaş seslerine ve birlik cevaplarına sınır yok, sınırlayıcı yok, harita ambiyansı yok, müzik de çatışmayı izlemez. Ana ses, cihaz ve hoparlörler yine geçerlidir. Hemen etkili olur."
+"Özgün oyunun sesi: geçen seslerde perde kayması yok, Aurora'nın ses patlaması yok, savaş seslerine ve birlik cevaplarına sınır yok, sınırlayıcı yok, harita ambiyansı yok, müzik de çatışmayı izlemez. Ana ses, cihaz ve hoparlörler yine geçerlidir. Hemen etkili olur."
 END
 
 GUI:IsometricCamera
