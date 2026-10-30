@@ -377,6 +377,13 @@ Bool FlightDeckBehavior::hasReservedSpace(ObjectID id) const
 }
 
 //-------------------------------------------------------------------------------------------------
+// what reserveSpace would answer, without taking the space (see ParkingPlaceBehavior::canReserveSpace)
+Bool FlightDeckBehavior::canReserveSpace(ObjectID id) const
+{
+	return hasReservedSpace(id) || hasAvailableSpaceFor(NULL);
+}
+
+//-------------------------------------------------------------------------------------------------
 Int FlightDeckBehavior::getSpaceIndex( ObjectID id ) const
 {
 	if( id == INVALID_ID )

@@ -98,10 +98,11 @@ void ArmorUpgrade::upgradeImplementation( )
 		body->setArmorSetFlag( ARMORSET_PLAYER_UPGRADE );
 
 	// Unique case for AMERICA to test for upgrade to set flag
-	if(isTriggeredBy("Upgrade_AmericaChemicalSuits"))
-	{
-		obj->getDrawable()->setTerrainDecal(TERRAIN_DECAL_CHEMSUIT);
-	}
+	// The Object constructor sets a unit's production veterancy, which runs the upgrades, before
+	// initObject has made its drawable; that unit goes without the decal rather than crashing.
+	Drawable *draw = obj->getDrawable();
+	if( draw && isTriggeredBy("Upgrade_AmericaChemicalSuits") )
+		draw->setTerrainDecal(TERRAIN_DECAL_CHEMSUIT);
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -301,14 +301,16 @@ public:
 	// the ladder's perks and the auras leaders give (RankPerk, RankAura in GlobalData.h)
 	Real getRankPerk( RankPerk perk ) const;								///< what my grade carries, 0 without a ladder
 	Real getRankAura( RankAura aura ) const;								///< the strongest leader's on me now
-	void clearRankAuras();																	///< the once-a-second pass starts over; RALLY runs on
-	void raiseRankAura( RankAura aura, Real strength );		///< a leader has me in range; the stronger stays
+	void takeGatheredRankAuras();														///< my turn this second: what leaders gave me since my last turn is what I hold; RALLY runs on
+	void raiseRankAura( RankAura aura, Real strength );		///< a leader had me in range on its turn; the stronger stays until my next turn
 	void raiseRankRally( Real strength, UnsignedInt until );	///< a fallen leader's rally; the stronger stays, the later end
 	Real getRankSightScalar() const;												///< my own sight perk times the sight aura on me
 	Real getRankDamageTakenScalar() const;									///< guard, rally and the still guard perk, multiplied
 	Bool isSpotter() const;																	///< SpotterSight on the template, or the SPOTTER perk
+	Bool leadsRankAuras() const;														///< FALSE for a hacker: its grade's AURA_ lines give nothing
 	void onRankSightChanged( Real oldScalar );							///< look again if the rank sight moved
 	void giveRankRally();																		///< I fell: my death rally reaches the allies around me
+	void dropRankSalvage();																	///< I fell: my SALVAGE_CRATE perk leaves a crate where I lay
 	void forgoRankRally() { m_forgoRankRally = TRUE; }			///< about to be killed inside a container that let go of me first
 
 	inline const AsciiString& getName() const { return m_name; }
@@ -811,7 +813,8 @@ private:
 	Real					m_shroudClearingRange;						///< looking range for shroud ONLY
 	Real					m_shroudRange;										///< like looking range, this is how far I shroud others' looks
 	Int						m_sightJammerCount;								///< enemy jammers in whose field this stands; above zero its sight shrinks to a few feet
-	Real					m_rankAura[ RANK_AURA_COUNT ];		///< the strongest leader's of each kind, refilled once a second
+	Real					m_rankAura[ RANK_AURA_COUNT ];		///< the strongest leader's of each kind, refilled on my turn once a second
+	Real					m_rankAuraGathered[ RANK_AURA_PASSED ];	///< what the leaders' turns have given me since my last turn
 	UnsignedInt		m_rankRallyUntil;									///< the frame the death rally on me ends
 	Bool					m_forgoRankRally;									///< set and read within one kill, so not saved
 
@@ -832,6 +835,7 @@ private:
 
 	// modules
 	BehaviorModule**							m_behaviors;	// BehaviorModule, not BehaviorModuleInterface
+	CollideModuleInterface**			m_collides;		///< the m_behaviors that are collide modules, in their order, null-terminated
 
 	// cache these, for convenience
 	ContainModuleInterface*				m_contain;

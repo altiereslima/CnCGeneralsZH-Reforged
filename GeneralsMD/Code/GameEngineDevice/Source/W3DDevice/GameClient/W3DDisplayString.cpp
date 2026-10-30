@@ -73,23 +73,40 @@
 
 // Every sentence build by the text it was built for, for the report at shutdown.  A build makes a
 // new texture, and on the Direct3D 11 frame a new copy of that texture too, so a string rebuilt
-// every frame is a texture made and thrown away every frame.
+// every frame is a texture made and thrown away every frame.  A text that is new every time, the
+// corner readout's frame number or a clock, adds a string a build, so at the limit the strings
+// built least are dropped: the report wants the ones built over and over.
 static std::map<std::string, Int> theSentenceBuilds;
+static Int theSentenceBuildTotal = 0;
 static const size_t SENTENCE_BUILD_REPORT_LINES = 12;
+static const size_t SENTENCE_BUILD_STRING_LIMIT = 1024;
+
+static void countSentenceBuild( const AsciiString &text )
+{
+	++theSentenceBuildTotal;
+	++theSentenceBuilds[ text.str() ];
+	for( Int fewest = 1; theSentenceBuilds.size() >= SENTENCE_BUILD_STRING_LIMIT; ++fewest )
+	{
+		std::map<std::string, Int>::iterator entry = theSentenceBuilds.begin();
+		while( entry != theSentenceBuilds.end() )
+		{
+			if( entry->second <= fewest )
+				theSentenceBuilds.erase( entry++ );
+			else
+				++entry;
+		}
+	}
+}
 
 void W3DDisplayString_logSentenceBuilds( void )
 {
 	std::vector< std::pair<Int, std::string> > ranked;
-	Int total = 0;
 	for( std::map<std::string, Int>::const_iterator entry = theSentenceBuilds.begin();
 			 entry != theSentenceBuilds.end(); ++entry )
-	{
 		ranked.push_back( std::make_pair( entry->second, entry->first ) );
-		total += entry->second;
-	}
 	std::sort( ranked.rbegin(), ranked.rend() );
 
-	DEBUG_LOG(( "SENTENCE BUILDS: %d builds of %d distinct strings\n", total, (Int)ranked.size() ));
+	DEBUG_LOG(( "SENTENCE BUILDS: %d builds, %d strings kept\n", theSentenceBuildTotal, (Int)ranked.size() ));
 	for( size_t index = 0; index < ranked.size() && index < SENTENCE_BUILD_REPORT_LINES; ++index )
 		DEBUG_LOG(( "SENTENCE BUILDS: %d '%s'\n", ranked[ index ].first, ranked[ index ].second.c_str() ));
 }
@@ -159,8 +176,9 @@ void W3DDisplayString::notifyTextChanged( void )
 	//
 	m_textChanged = TRUE;
 
-	// reset data for our text renderer
-	m_textRenderer.Reset();
+	// reset data for our text renderer; its textures are filled again by the next build, which for a
+	// clock or the corner readout's frame number is every second or every logic frame
+	m_textRenderer.Reset_Keeping_Textures();
 
 }  // end notifyTextChanged
 
@@ -216,7 +234,7 @@ void W3DDisplayString::draw( Int x, Int y, Color color, Color dropColor, Int xDr
 
 		AsciiString builtText;
 		builtText.translate( getText() );
-		++theSentenceBuilds[ builtText.str() ];
+		countSentenceBuild( builtText );
 
 	}  // end if
 

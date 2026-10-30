@@ -225,6 +225,8 @@ bool makeHeatCopy(ID3D11Device *device, ID3D11RenderTargetView *scene, ID3D11Res
 	description.MiscFlags = 0;
 	description.Usage = D3D11_USAGE_DEFAULT;
 	description.CPUAccessFlags = 0;
+	description.SampleDesc.Count = 1;	// a multisampled scene is resolved into it
+	description.SampleDesc.Quality = 0;
 	D3D11_RENDER_TARGET_VIEW_DESC written;
 	scene->GetDesc(&written);
 	D3D11_SHADER_RESOURCE_VIEW_DESC view = {};
@@ -394,6 +396,8 @@ bool DX11Layer::render(const Camera &camera)
 	// carries the scene's depth, so the clouds go into it.
 	ID3D11RenderTargetView *scene = backend->Scene_Target();
 	if (!scene) return false;
+	ID3D11DepthStencilView *sceneDepth = backend->Scene_Depth_Target();
+	backend->Resolve_Scene_Depth();
 	ID3D11DeviceContext *context = device->Get_Context();
 	ID3D11ShaderResourceView *depth = device->Get_Depth_Texture();
 	if (!depth) return refuse("the scene has no readable depth");
@@ -532,7 +536,7 @@ bool DX11Layer::render(const Camera &camera)
 			context->RSSetScissorRects(1, &heatRect);
 			ID3D11Resource *source = nullptr;
 			scene->GetResource(&source);
-			context->CopyResource(shared.heat, source);
+			DX11Resource_Copy_Readable(context, shared.heat, source);
 			source->Release();
 			ID3D11ShaderResourceView *const heatViews[Slots] = {
 				depth, flowTexture.view, shared.low.view, caches[0].lighting.view, caches[1].lighting.view,
@@ -544,7 +548,6 @@ bool DX11Layer::render(const Camera &camera)
 	}
 
 	unbindViews(context);
-	ID3D11DepthStencilView *sceneDepth = device->Get_Depth_Stencil_View();
 	context->OMSetRenderTargets(1, &scene, sceneDepth);
 	context->RSSetViewports(viewportCount, &savedViewport);
 	backend->Forget_Bindings();

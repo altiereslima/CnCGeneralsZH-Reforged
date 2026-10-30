@@ -51,7 +51,9 @@
 #include "Common/DataChunk.h"
 #include "Common/FileSystem.h"
 #include "Common/GameState.h"
+#include "Common/GlobalData.h"
 #include "Common/PlayerTemplate.h"
+#include "Common/RandomMapGenerator.h"
 #include "Common/WellKnownKeys.h"
 #include "Common/Xfer.h"
 #include "GameLogic/AI.h"
@@ -207,7 +209,7 @@ Int SidesInfo::removeFromBuildList(BuildListInfo *pBuildList)
 /**
  SidesList - Constructor.
 */
-SidesList::SidesList(void) : m_numSides(0), m_numSkirmishSides(0)
+SidesList::SidesList(void) : m_numSides(0), m_numSkirmishSides(0), m_skirmishScriptsFromMap(false), m_forkAIMap(false)
 {
 }
 
@@ -233,6 +235,8 @@ void SidesList::clear(void)
 {
 	emptySides();
 	emptyTeams();
+	m_skirmishScriptsFromMap = false;
+	m_forkAIMap = false;
 }
 
 
@@ -691,8 +695,45 @@ SidesInfo *SidesList::findSkirmishSideNamed(const AsciiString& side, Int mod, Te
 	return best;
 }
 
+/*static*/ Bool SidesList::isForkAIMapPath(const AsciiString& mapPath)
+{
+	AsciiString path = mapPath;
+	// a loaded save plays its own copy of the map from the save folder; the map it was started on decides
+	if (TheGameState && TheGameState->isInSaveDirectory(path))
+		path = TheGameState->getPristineMapName();
+	if (path.isEmpty())
+		return false;
+
+	// The generator's maps sit in the player's own Maps folder, but the game made them.  Told by the
+	// leaf name alone ("rmg_v17_..."), the way the lobby and the replay carry it: isGeneratedMapPath
+	// also checks a template's CRC against this machine's copy of it, a local file.
+	const char *back = path.reverseFind('\\');
+	const char *forward = path.reverseFind('/');
+	const char *sep = (forward != NULL && (back == NULL || forward > back)) ? forward : back;
+	AsciiString leaf = sep ? sep + 1 : path.str();
+	leaf.toLower();
+	Int version = 0, seed = 0, players = 0, cells = 0;
+	if (sscanf(leaf.str(), "rmg_v%d_%d_%dp_%dc", &version, &seed, &players, &cells) == 4 &&
+			version == RANDOM_MAP_GENERATOR_VERSION)
+		return true;
+
+	// The player's own Maps folder first: with no user data folder it would be "Maps" itself, the
+	// game's, and nothing tells the two apart, so the game's wins as it does for the lobby.  Then the
+	// game's folder and its archives.  Anything else (a save's copy with no pristine name) is not ours.
+	const AsciiString userData = TheGlobalData->getPath_UserData();
+	if (!userData.isEmpty())
+	{
+		AsciiString userMaps = userData;
+		userMaps.concat("Maps\\");
+		if (path.startsWithNoCase(userMaps.str()))
+			return false;
+	}
+	return path.startsWithNoCase("maps\\") || path.startsWithNoCase("maps/");
+}
+
 void SidesList::prepareForMP_or_Skirmish(void)
 {
+	m_forkAIMap = isForkAIMapPath(TheGlobalData->m_mapName);
 	m_skirmishTeamrec.clear();
 	Int i;
 	for (i = 0; i < getNumTeams(); i++)
@@ -731,10 +772,24 @@ void SidesList::prepareForMP_or_Skirmish(void)
 			gotScripts = true;
 		}
 	}
+	m_skirmishScriptsFromMap = gotScripts;
+	if (gotScripts)
+		DEBUG_LOG(("Skirmish map brings its own scripts: fork AI off, map %s\n", TheGlobalData->m_mapName.str()));
 	loadModSkirmishScripts();
 	if (!gotScripts) {
 		AsciiString path = "data\\Scripts\\SkirmishScripts.scb";
-		DEBUG_LOG(("Skirmish map using standard scripts\n"));
+		// A player's own map gets EA's scripts as EA shipped them: the fork's file carries its own
+		// openings and its Hard without the free cash.  A -mod that ships its own SkirmishScripts.scb
+		// keeps it, since that is the file that resolves; a mod with none (art only) changes nothing.
+		// Either way the exe CRC hashes the resolved file and this one (GlobalData::computeExeCRC), so
+		// two machines that disagree here never share a match.
+		const char *retail = "data\\Scripts\\SkirmishScriptsRetail.scb";
+		Bool inModArchive = FALSE;
+		const Bool modScripts = TheFileSystem->modLooseFile(path, &inModArchive).isNotEmpty() || inModArchive;
+		if (!m_forkAIMap && !modScripts && TheFileSystem->doesFileExist(retail))
+			path = retail;
+		DEBUG_LOG(("Skirmish map using standard scripts %s: fork AI %s, map %s\n", path.str(),
+							 m_forkAIMap ? "on" : "off", TheGlobalData->m_mapName.str()));
 		m_skirmishTeamrec.clear();
 		CachedFileInputStream theInputStream;
 		if (theInputStream.open(path)) { 

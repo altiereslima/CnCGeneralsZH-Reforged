@@ -325,7 +325,7 @@ ThingTemplate *ThingFactory::findTemplateInternal( const AsciiString& name, Bool
 }  // end getTemplate
 
 //=============================================================================
-Object *ThingFactory::newObject( const ThingTemplate *tmplate, Team *team, ObjectStatusMaskType statusBits )
+Object *ThingFactory::newObject( const ThingTemplate *tmplate, Team *team, ObjectStatusMaskType statusBits, const Object *producer )
 {
 	if (tmplate == NULL)
 		throw ERROR_BAD_ARG;
@@ -339,11 +339,15 @@ Object *ThingFactory::newObject( const ThingTemplate *tmplate, Team *team, Objec
 			tmplate = tmp;
 	}
 
-	// a side's own reskin in place of another side's template: Turkiye is built on the American data
+	// a side's own reskin in place of another side's template: Turkiye is built on the American data.
+	// The side is the producer's when there is one.  Taken from the owner, a Turkiye player's captured
+	// China dozer put up the Kargu superweapon for an Airfield's 1000, because TurkiyeKarguBase is a
+	// reskin of ChinaAirfield, and a captured GLA Command Center trained Turkiye engineers for Workers.
 	const Player *owner = team ? team->getControllingPlayer() : NULL;
 	if (owner != NULL)
 	{
-		const ThingTemplate *own = findSideReskin( tmplate, owner->getSide() );
+		const AsciiString &side = producer ? producer->getTemplate()->getDefaultOwningSide() : owner->getSide();
+		const ThingTemplate *own = findSideReskin( tmplate, side );
 		if (own != NULL)
 			tmplate = own;
 	}
@@ -391,10 +395,14 @@ const ThingTemplate *ThingFactory::findSideReskin( const ThingTemplate *tmplate,
 	if (it != m_sideReskins.end())
 		return it->second;
 
+	// A template with build variations is only a build button: isEquivalentTo counts each variation
+	// as its equal, and EA's Toxin and Stealth Technicals roll the plain GLA chassis, so without the
+	// skip a Toxin player's chassis was swapped for Chem_GLAVehicleTechnical itself, a unit with no
+	// weapon or locomotor: the Arms Dealer charged for a Technical and nothing drove out.
 	const ThingTemplate *found = NULL;
 	for (const ThingTemplate *t = m_firstTemplate; t != NULL && found == NULL; t = t->friend_getNextTemplate())
 	{
-		if (t->getDefaultOwningSide() == side && t->isEquivalentTo( tmplate ))
+		if (t->getDefaultOwningSide() == side && t->getBuildVariations().empty() && t->isEquivalentTo( tmplate ))
 			found = (const ThingTemplate *)t->getFinalOverride();
 	}
 	m_sideReskins[ key ] = found;

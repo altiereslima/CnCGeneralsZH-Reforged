@@ -690,7 +690,7 @@ GUI:LegacySound
 END
 
 TOOLTIP:LegacySound
-"The original game's sound: no echo off the map, no muffling by distance, hills or buildings, no delay or pitch bend on distant and passing sounds, no dip after big blasts, no cap on battle sounds or unit replies, no limiter, no map ambience and no music following the fight. Master volume, the device and the speakers still apply. Takes effect at once."
+"The original game's sound: no pitch bend on passing sounds, no Aurora sonic boom, no cap on battle sounds or unit replies, no limiter, no map ambience and no music following the fight. Master volume, the device and the speakers still apply. Takes effect at once."
 END
 
 GUI:IsometricCamera
@@ -1473,7 +1473,7 @@ GUI:MapLight
 END
 
 TOOLTIP:MapLight
-"A low afternoon sun that lights the map warmer and casts longer shadows, and a light haze lying over low ground that aircraft part as they fly through it. Direct3D 11 only. Applies from the next map."
+"A low afternoon sun that lights the map warmer and casts longer shadows, and a light haze lying still over low ground. Direct3D 11 only. Applies from the next map."
 END
 
 GUI:TeamGlow
@@ -2470,7 +2470,7 @@ RANK:PerkSTILL_GUARD
 END
 
 RANK:PerkMEND
-"Out of combat: heals %d%% a second"
+"Out of combat: heals %d.%02d%% a second"
 END
 
 RANK:PerkSPOTTER
@@ -2507,6 +2507,66 @@ END
 
 RANK:PerkAURA_RANGE
 "Aura: artillery range +%d%%"
+END
+
+RANK:PerkRATE_OF_FIRE
+"Rate of fire +%d%%"
+END
+
+RANK:PerkRANGE
+"Range +%d%%"
+END
+
+RANK:PerkHEALTH
+"Health +%d%%"
+END
+
+RANK:PerkSPEED
+"Speed +%d%%"
+END
+
+RANK:PerkLAST_STAND
+"Below 35%% health: rate of fire +%d%%"
+END
+
+RANK:PerkSCAVENGE
+"Its kills pay %d%% of the victim's cost"
+END
+
+RANK:PerkDESIGNATE
+"Marks what it hits for %d seconds: everyone fires 50%% faster at it"
+END
+
+RANK:PerkDESIGNATE_REVEAL
+"Its mark reveals stealthed targets"
+END
+
+RANK:PerkSALVAGE_CRATE
+"Leaves a salvage crate when it falls"
+END
+
+RANK:PerkAURA_MEND
+"Aura: heals %d.%02d%% a second"
+END
+
+RANK:PerkAURA_PACE
+"Aura: speed +%d%%"
+END
+
+RANK:PerkAURA_DRILL
+"Aura: trains units up to grade %d"
+END
+
+RANK:PerkAURA_STEADY
+"Aura: paralysis, EMP and subdual %d%% shorter"
+END
+
+RANK:PerkAURA_CAPTURE
+"Aura: captures buildings %d%% faster"
+END
+
+RANK:PerkAURA_SPOILS
+"Aura: kills nearby pay %d%% of the victim's cost"
 END
 
 RANK:America0
@@ -3522,4 +3582,41 @@ END
 
 GUI:FactionPickSideNameHint
 "Click a side's name to play a random army of that side."
+END
+
+// The trainings and the generals' born veterans give grades on the rank ladder instead of a whole
+// level: three for EA's Veteran, six for its Elite.
+
+CONTROLBAR:ToolTipChinaScienceARtilleryTraining
+"Nuke Cannons and Inferno Cannons are built three ranks up"
+END
+
+CONTROLBAR:ToolTipGLAScienceTechnicalTraining
+"All Technicals will be created three ranks up"
+END
+
+CONTROLBAR:ToolTipChinaScienceBattlemasterTraining
+"All Battlemasters will be built six ranks up"
+END
+
+GUI:BioFeatures_Pos4
+"Emperor Tank \n Tank Drop \n All tanks start three ranks up \n Tanks cost less \n Aircraft cost more \n No Nuke or Inferno Cannons"
+END
+
+GUI:BioFeatures_Pos7
+"Assault Troop Transport \n Assault Helix \n Attack Outpost \n Fortified Bunkers \n Mini-Gunner \n Black Lotus hacks faster \n Hackers hack faster \n Mini-Gunner Paradrop \n All Infantry start three ranks up"
+END
+
+CONTROLBAR:ToolTipChinaScienceRedGuardTraining
+"All Red Guard will be built three ranks up, as Corporals"
+END
+
+CONTROLBAR:Infa_ToolTipChinaScienceRedGuardTraining
+"All Mini-Gunners will be built three ranks above Veteran"
+END
+
+// the LAN lobby's error box when the system bound the socket on another adapter; the first %ls is the
+// LAN IP chosen in Options, the second the address the system bound instead
+GUI:SocketRedirected
+"The LAN IP is %ls, but the system put the game's connection on %ls. A VPN split tunnel or a firewall redirected it, so nobody on your network can hear you. Turn split tunnelling off for the game and try again."
 END

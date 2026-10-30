@@ -94,6 +94,7 @@
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/GhostObject.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/PartitionManager.h"
 #include "GameLogic/ScriptEngine.h"		// For TheScriptEngine - jkmcd
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -872,10 +873,14 @@ void GameClient::update( void )
 				Object *object=draw->getObject();
 				if (object)
 				{
-					if (numNonLocalPlayers > 0)
+					// keep the other players' view of this object current too, so their fog memory is
+					// right the moment you become one of them.  Fog memory is the ghost's snapshot, and
+					// only an immobile object has a ghost (PartitionData::attachToObject); asking for a
+					// unit kept nothing and cost an observer a status call per player for every unit on
+					// the map every pass.  Whoever asks about a unit later works its answer out then.
+					const PartitionData *partition = object->friend_getPartitionData();
+					if (numNonLocalPlayers > 0 && partition != NULL && partition->getGhostObject() != NULL)
 					{
-						// keep the other players' view of this object current too, so their fog
-						// memory is right the moment you become one of them
 						Int *playerIndex=nonLocalPlayerIndices;
 						for (Int p=0; p<numNonLocalPlayers; p++, playerIndex++)
 							object->getShroudedStatus(*playerIndex);
@@ -1009,7 +1014,7 @@ void GameClient::update( void )
 				TheClientDrawMS = (Real)((double)(drawEnd - drawStart) * 1000.0 / (double)freq);
 #endif
 		}
-		else if( TheParticleSystemManager )
+		else
 		{
 			//
 			// The particle manager is updated from inside the draw, and its update is the only thing
@@ -1023,7 +1028,11 @@ void GameClient::update( void )
 			// the same bookkeeping a rendered run does, on a run that has no picture.  The same seed
 			// ends with 138 systems instead of 26,811, and the run takes 19.1s against 18.8 and 19.0.
 			//
-			TheParticleSystemManager->update();
+			if( TheParticleSystemManager )
+				TheParticleSystemManager->update();
+			// The light pulses are the same story: only the render faded and parked them, so a headless
+			// match kept every muzzle flash of the match switched on, and each new one walked them all.
+			TheDisplay->stepDynamicLights();
 		}
 	}
 

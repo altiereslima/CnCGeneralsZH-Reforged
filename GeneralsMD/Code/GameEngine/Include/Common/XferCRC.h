@@ -64,8 +64,6 @@ protected:
 
 	virtual void xferImplementation( void *data, Int dataSize );
 
-	void addCRC( UnsignedInt val );								///< CRC a 4-byte block
-
 	UnsignedInt m_crc;
 
 };

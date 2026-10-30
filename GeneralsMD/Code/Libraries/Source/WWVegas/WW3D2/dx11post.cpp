@@ -19,6 +19,7 @@
 #include "dx11post.h"
 
 #include "dx11device.h"
+#include "dx11resource.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -127,8 +128,10 @@ static float HazeStrength = 0.0f;
 static float HazeReach = 1.0f;
 static float HazeWater = -1.0e6f;
 
+static float HazeSun[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+
 void DX11Post_Set_Haze(const float colour[3], float top, float thickness, float strength, float reach,
-	float water)
+	float water, const float toward_sun[3], float warmth)
 {
 	HazeWater = water;
 	HazeColour[0] = colour[0];
@@ -138,53 +141,10 @@ void DX11Post_Set_Haze(const float colour[3], float top, float thickness, float 
 	HazeThickness = thickness;
 	HazeStrength = strength;
 	HazeReach = reach;
-}
-
-static float HazeFieldRect[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-static float HazeMotion[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-static float HazeSun[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
-static unsigned char HazeFieldTexels[DX11_POST_HAZE_FIELD_SIZE * DX11_POST_HAZE_FIELD_SIZE];
-static bool HazeFieldDirty = false;
-
-void DX11Post_Set_Haze_Motion(const float field_rect[4], float drift_x, float drift_y,
-	float noise_scale, float stir, const float toward_sun[3], float warmth)
-{
-	memcpy(HazeFieldRect, field_rect, sizeof(HazeFieldRect));
-	HazeMotion[0] = drift_x;
-	HazeMotion[1] = drift_y;
-	HazeMotion[2] = noise_scale;
-	HazeMotion[3] = stir;
 	HazeSun[0] = toward_sun[0];
 	HazeSun[1] = toward_sun[1];
 	HazeSun[2] = toward_sun[2];
 	HazeSun[3] = warmth;
-}
-
-void DX11Post_Set_Haze_Field(const unsigned char * texels)
-{
-	memcpy(HazeFieldTexels, texels, sizeof(HazeFieldTexels));
-	HazeFieldDirty = true;
-}
-
-static float HazeWakeInfo[4] = { 0.0f, 1.0f, 1.0f, 0.0f };
-static float HazeWakeEnds[DX11_POST_HAZE_WAKE_LIMIT][4];
-static float HazeWakeShape[DX11_POST_HAZE_WAKE_LIMIT][4];
-static float HazeClock[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-
-void DX11Post_Set_Haze_Wakes(const float (*segments)[8], unsigned count, float arm_width, float open_soft,
-	float seconds)
-{
-	HazeClock[0] = seconds;
-	if (count > DX11_POST_HAZE_WAKE_LIMIT) {
-		count = DX11_POST_HAZE_WAKE_LIMIT;
-	}
-	for (unsigned index = 0; index < count; ++index) {
-		memcpy(HazeWakeEnds[index], &segments[index][0], sizeof(HazeWakeEnds[0]));
-		memcpy(HazeWakeShape[index], &segments[index][4], sizeof(HazeWakeShape[0]));
-	}
-	HazeWakeInfo[0] = static_cast<float>(count);
-	HazeWakeInfo[1] = arm_width;
-	HazeWakeInfo[2] = open_soft;
 }
 
 static ID3D11ShaderResourceView * HazeShroudSource = NULL;
@@ -194,31 +154,6 @@ void DX11Post_Set_Haze_Shroud(ID3D11ShaderResourceView * view, const float rect[
 {
 	HazeShroudSource = view;
 	memcpy(HazeShroudRect, rect, sizeof(HazeShroudRect));
-}
-
-/** A single channel eight bit texture of size by size for the haze, made on first use; false
-	when the device refused it. */
-static bool make_haze_texture(ID3D11Device * device, unsigned size, ID3D11Texture2D ** texture,
-	ID3D11ShaderResourceView ** view)
-{
-	if (*texture != NULL) {
-		return true;
-	}
-	D3D11_TEXTURE2D_DESC description;
-	ZeroMemory(&description, sizeof(description));
-	description.Width = size;
-	description.Height = size;
-	description.MipLevels = 1;
-	description.ArraySize = 1;
-	description.Format = DXGI_FORMAT_R8_UNORM;
-	description.SampleDesc.Count = 1;
-	description.Usage = D3D11_USAGE_DEFAULT;
-	description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-	if (FAILED(device->CreateTexture2D(&description, NULL, texture))) {
-		return false;
-	}
-	device->CreateShaderResourceView(*texture, NULL, view);
-	return true;
 }
 
 static DX11PostWarp Warps[DX11_POST_WARP_LIMIT];
@@ -267,20 +202,10 @@ struct PostConstantBlock
 	float Haze[4];
 	float HazeColour[4];
 	float WorldFromClip[16];
-	// Then the disturbance field's world rectangle (origin, one over size), the wind's drift so far,
-	// the noise scale and the field's strength, and the way toward the sun with its warmth.
-	float HazeField[4];
-	float HazeMotion[4];
+	// Then the way toward the sun with its warmth.
 	float HazeSun[4];
 	// The shroud light's world rectangle (origin, one over size).
 	float HazeShroudRect[4];
-	// The aircraft wakes: their count, arm width and opening ease, then each segment's ends and
-	// its shape.
-	float HazeWakeInfo[4];
-	float HazeWakeEnds[DX11_POST_HAZE_WAKE_LIMIT][4];
-	float HazeWakeShape[DX11_POST_HAZE_WAKE_LIMIT][4];
-	// The picture's clock in seconds, in x.
-	float HazeClock[4];
 };
 
 // A triangle big enough to cover the screen, made out of nothing.  No vertex buffer and no input
@@ -443,25 +368,34 @@ static const char * const FXAA_SHADER_BODY =
 // Unsharp mask: the pixel plus what it has that a blur of its neighbours does not.  The amount is
 // low on purpose.  This runs over the world and the world alone, but the world holds thin wires and
 // aerials as well as ground, and anything stronger rings around them.
-static const char * const SHARPEN_SHADER_BODY =
-	"static const float SHARPEN_AMOUNT = 0.35;\n"
-	"\n"
-	"float4 main(VertexOutput input) : SV_TARGET\n"
-	"{\n"
-	"    float2 texel = TexelSize.xy;\n"
-	"    float4 centre = Source.Sample(Sampler, input.Texture);\n"
-	"    float3 left = Source.Sample(Sampler, input.Texture + float2(-texel.x, 0.0)).rgb;\n"
-	"    float3 right = Source.Sample(Sampler, input.Texture + float2(texel.x, 0.0)).rgb;\n"
-	"    float3 up = Source.Sample(Sampler, input.Texture + float2(0.0, -texel.y)).rgb;\n"
-	"    float3 down = Source.Sample(Sampler, input.Texture + float2(0.0, texel.y)).rgb;\n"
-	"    float3 neighbours = left + right + up + down;\n"
-	"    float3 sharpened = centre.rgb + (centre.rgb - neighbours * 0.25) * SHARPEN_AMOUNT;\n"
-	"    // never past the brightest or the darkest of the five: overshooting them drew a white rim\n"
-	"    // around every dark wreck inside a nuke's white cloud\n"
-	"    float3 lowest = min(centre.rgb, min(min(left, right), min(up, down)));\n"
-	"    float3 highest = max(centre.rgb, max(max(left, right), max(up, down)));\n"
-	"    return float4(clamp(sharpened, lowest, highest), centre.a);\n"
-	"}\n";
+//
+// A multisampled scene has no FXAA before this, and FXAA was what softened the ground's texture
+// grain at one sample: sharpened at 0.35 the 4x ground measured half as grainy again as -msaa 0
+// (mean absolute Laplacian 36.3 against 24.1 on one crop, 58.5 against 39.9 on another).  There the
+// same pass runs at -0.25, a light pull toward the neighbours, which brought five ground crops to
+// within 10% of -msaa 0.
+#define SHARPEN_SHADER_TEXT(amount) \
+	"static const float SHARPEN_AMOUNT = " amount ";\n" \
+	"\n" \
+	"float4 main(VertexOutput input) : SV_TARGET\n" \
+	"{\n" \
+	"    float2 texel = TexelSize.xy;\n" \
+	"    float4 centre = Source.Sample(Sampler, input.Texture);\n" \
+	"    float3 left = Source.Sample(Sampler, input.Texture + float2(-texel.x, 0.0)).rgb;\n" \
+	"    float3 right = Source.Sample(Sampler, input.Texture + float2(texel.x, 0.0)).rgb;\n" \
+	"    float3 up = Source.Sample(Sampler, input.Texture + float2(0.0, -texel.y)).rgb;\n" \
+	"    float3 down = Source.Sample(Sampler, input.Texture + float2(0.0, texel.y)).rgb;\n" \
+	"    float3 neighbours = left + right + up + down;\n" \
+	"    float3 sharpened = centre.rgb + (centre.rgb - neighbours * 0.25) * SHARPEN_AMOUNT;\n" \
+	"    // never past the brightest or the darkest of the five: overshooting them drew a white rim\n" \
+	"    // around every dark wreck inside a nuke's white cloud\n" \
+	"    float3 lowest = min(centre.rgb, min(min(left, right), min(up, down)));\n" \
+	"    float3 highest = max(centre.rgb, max(max(left, right), max(up, down)));\n" \
+	"    return float4(clamp(sharpened, lowest, highest), centre.a);\n" \
+	"}\n"
+static const char * const SHARPEN_SHADER_BODY = SHARPEN_SHADER_TEXT("0.35");
+static const char * const SHARPEN_MULTISAMPLED_SHADER_BODY = SHARPEN_SHADER_TEXT("-0.25");
+#undef SHARPEN_SHADER_TEXT
 
 // Ambient occlusion out of the frame's own depth, and nothing else.  Every pixel asks a ring of
 // neighbours how much nearer to the eye they are: at the foot of a wall half of them are in front
@@ -553,42 +487,15 @@ static const char * const AO_SCENE_SHADER_BODY =
 // Oasis's low plateau takes: the bank under it went milky at the full amount, and still a little
 // at 0.62.
 //
-// The layer is not even.  Four points along the last stretch of the eye's ray inside the layer
-// read two octaves of value noise drifting with the wind, each at its own height so the patches
-// part with parallax as the camera moves.  Their mean, eased so the patches have soft edges and
-// clear gaps, scales the amount between 0.65 and 1.35 of the even layer (one on average, so a
-// map's average haze is what it was; 0.3 to 1.7 went to a flat milky plate on the low bank), and
-// the dense patches come out a touch paler, which keeps them apart from the map's darker cloud
-// shadows.  The disturbance field (t2, DX11Post_Set_Haze_Field) clears the haze where something
-// went through, read at the same four points along the ray: looking down that is the ground under
-// the pixel, and across a far bank the ray passes through the lane only partly, so a lane there
-// thins instead of standing up as a wall with a doorway in it.  The clearing eases in over a wide
-// band and takes less with distance; its slope pushes the noise outward by up to HAZE_SWIRL world
-// units and piles a faint extra on the rim (a bright rim read as a crater's edge).
+// The layer is not even, and it holds still: nothing moves it.  Four points along the last stretch
+// of the eye's ray inside the layer read two octaves of value noise fixed to the world, each at its
+// own height so the patches part with parallax as the camera moves.  Their mean, eased so the
+// patches have soft edges and clear gaps, scales the amount between 0.65 and 1.35 of the even layer
+// (one on average, so a map's average haze is what it was; 0.3 to 1.7 went to a flat milky plate on
+// the low bank), and the dense patches come out a touch paler, which keeps them apart from the
+// map's darker cloud shadows.
 //
-// Aircraft disturb the haze in a wedge, the Mach cone or a boat's wake seen from above: its point
-// at the aircraft, two arms spreading back along its recent path (DX11Post_Set_Haze_Wakes, a few
-// segments, so a turn bends the wedge).  Nothing is drawn on top: the wedge is a mask that moves
-// the haze already there.  A pixel's distance behind the aircraft along the path and its distance
-// off the path decide it.  Along each arm, where the second is the first times the half-angle's
-// tangent plus a drift outward with age (HAZE_WAKE_DRIFT), sits a wingtip vortex: it pushes the
-// haze outward (HAZE_WAKE_PUSH world units) and rolls it along the arm, the two sides turning
-// opposite ways on the picture's clock (HAZE_WAKE_ROLL, HAZE_WAKE_SPIN), smearing wider as it ages
-// (HAZE_WAKE_SMEAR).  Curl noise breaks the push up (HAZE_WAKE_TURB), and inside the wake a finer
-// grain of haze rides the same displacement (HAZE_WAKE_GRAIN), so what shows is haze texture
-// bending and parting.  Inside the arms the lane tears open (HAZE_WAKE_TATTER_SCALE noise, eased
-// so the torn holes clear right down to the ground and the rest keeps HAZE_WAKE_TATTER_KEEP of the
-// clearing) and fills back in from the sides after HAZE_WAKE_FILL_FROM of the wake's life.  The
-// haze the vortices push out piles on them (HAZE_WAKE_PILE, up to twice the haze there), and they
-// lift a little more out of the layer below (HAZE_WAKE_LIFT of the full layer, in clumps of the
-// fine grain), which is what still shows over a bank where the haze is too thin for a clearing in
-// it to read.  A pixel whose foot on a segment falls past either end belongs to the next segment
-// and is skipped.  A hovering helicopter's segments are rings instead: the same vortex pushed radially outward and
-// rolling round the ring, the disc inside cleared, travelling out as the ring ages.  A weaker
-// segment (an aircraft higher over the haze) spreads its vortices wider, up to HAZE_WAKE_HIGH_SOFT
-// more at nothing, so a high pass reads soft and a low one sharp.
-//
-// The shroud has already darkened the ground under the haze by its light (t3, the very texture the
+// The shroud has already darkened the ground under the haze by its light (t2, the very texture the
 // terrain multiplies by, through the terrain's own mapping, so the two cannot disagree; a copy read
 // through W3DShroud::getShroudLevel did, by cells and by a stair-step edge), so the haze takes
 // that light too, its colour once and its amount three times over: in the fog
@@ -603,41 +510,12 @@ static const char * const HAZE_SHADER_BODY =
 	"    float4 Haze : packoffset(c13);\n"
 	"    float4 HazeColour : packoffset(c14);\n"
 	"    row_major float4x4 WorldFromClip : packoffset(c15);\n"
-	"    float4 HazeField : packoffset(c19);\n"
-	"    float4 HazeMotion : packoffset(c20);\n"
-	"    float4 HazeSun : packoffset(c21);\n"
-	"    float4 HazeShroudRect : packoffset(c22);\n"
-	"    float4 HazeWakeInfo : packoffset(c23);\n"
-	"    float4 HazeWakeEnds[" DX11_POST_HAZE_WAKE_LIMIT_TEXT "] : packoffset(c24);\n"
-	"    float4 HazeWakeShape[" DX11_POST_HAZE_WAKE_LIMIT_TEXT "] : packoffset(" DX11_POST_HAZE_WAKE_SHAPE_REGISTER_TEXT ");\n"
-	"    float4 HazeClock : packoffset(" DX11_POST_HAZE_CLOCK_REGISTER_TEXT ");\n"
+	"    float4 HazeSun : packoffset(c19);\n"
+	"    float4 HazeShroudRect : packoffset(c20);\n"
 	"};\n"
-	"Texture2D HazeStir : register(t2);\n"
-	"Texture2D HazeShroud : register(t3);\n"
-	"static const float HAZE_FIELD_TEXEL = 1.0 / " DX11_POST_HAZE_FIELD_SIZE_TEXT ".0;\n"
-	"static const float HAZE_SWIRL = 140.0;\n"
-	"static const float HAZE_RIM_GAIN = 1.5;\n"
+	"Texture2D HazeShroud : register(t2);\n"
+	"static const float HAZE_PATCH = 1.0 / 320.0;\n"
 	"static const float HAZE_LOW_CAP = 0.5;\n"
-	"static const float HAZE_WAKE_PILE = 1.0;\n"
-	"static const float HAZE_WAKE_LIFT = 0.8;\n"
-	"static const float HAZE_WAKE_TATTER_KEEP = 0.45;\n"
-	"static const float HAZE_WAKE_HOLD = 0.55;\n"
-	"static const float HAZE_WAKE_GONE = 0.85;\n"
-	"static const float HAZE_WAKE_END_SCALE = 1.0 / 20.0;\n"
-	"static const float HAZE_WAKE_END_BREAK = 0.3;\n"
-	"static const float HAZE_WAKE_SIDE_SOFT = 0.6;\n"
-	"static const float HAZE_WAKE_HIGH_SOFT = 1.5;\n"
-	"static const float HAZE_WAKE_DRIFT = 16.0;\n"
-	"static const float HAZE_WAKE_SMEAR = 2.5;\n"
-	"static const float HAZE_WAKE_PUSH = 24.0;\n"
-	"static const float HAZE_WAKE_ROLL = 14.0;\n"
-	"static const float HAZE_WAKE_SPIN = 5.0;\n"
-	"static const float HAZE_WAKE_FILL_FROM = 0.25;\n"
-	"static const float HAZE_WAKE_TURB_SCALE = 1.0 / 18.0;\n"
-	"static const float HAZE_WAKE_TURB = 18.0;\n"
-	"static const float HAZE_WAKE_TATTER_SCALE = 1.0 / 14.0;\n"
-	"static const float HAZE_WAKE_GRAIN = 1.0 / 22.0;\n"
-	"static const float HAZE_WAKE_GRAIN_SHOW = 0.8;\n"
 	"\n"
 	"float haze_hash(float2 p)\n"
 	"{\n"
@@ -654,11 +532,6 @@ static const char * const HAZE_SHADER_BODY =
 	"    float c = haze_hash(cell + float2(0.0, 1.0));\n"
 	"    float d = haze_hash(cell + float2(1.0, 1.0));\n"
 	"    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);\n"
-	"}\n"
-	"\n"
-	"float haze_stir(float2 at)\n"
-	"{\n"
-	"    return HazeStir.SampleLevel(Sampler, at, 0.0).r;\n"
 	"}\n"
 	"\n"
 	"float4 main(VertexOutput input) : SV_TARGET\n"
@@ -680,101 +553,17 @@ static const char * const HAZE_SHADER_BODY =
 	"    bank = bank * bank * (3.0 - 2.0 * bank);\n"
 	"    amount *= bank;\n"
 	"\n"
-	"    float2 field = (world.xy - HazeField.xy) * HazeField.zw;\n"
-	"    float2 slope = float2(haze_stir(field + float2(HAZE_FIELD_TEXEL, 0.0)) - haze_stir(field - float2(HAZE_FIELD_TEXEL, 0.0)),\n"
-	"        haze_stir(field + float2(0.0, HAZE_FIELD_TEXEL)) - haze_stir(field - float2(0.0, HAZE_FIELD_TEXEL)));\n"
-	"\n"
-	"    float2 warp = float2(0.0, 0.0);\n"
-	"    float wakeClear = 0.0;\n"
-	"    float wakeStir = 0.0;\n"
-	"    float endBreak = (haze_noise(world.xy * HAZE_WAKE_END_SCALE + 11.0) - 0.5) * HAZE_WAKE_END_BREAK;\n"
-	"    for (int wake = 0; wake < " DX11_POST_HAZE_WAKE_LIMIT_TEXT "; ++wake)\n"
-	"    {\n"
-	"        if (wake >= (int)HazeWakeInfo.x) break;\n"
-	"        float4 ends = HazeWakeEnds[wake];\n"
-	"        float4 shape = HazeWakeShape[wake];\n"
-	"        float2 outward;\n"
-	"        float2 across;\n"
-	"        float off;\n"
-	"        float edge;\n"
-	"        float age;\n"
-	"        float hand;\n"
-	"        if (shape.y < 0.0)\n"
-	"        {\n"
-	"            float2 fromCentre = world.xy - ends.zw;\n"
-	"            off = length(fromCentre);\n"
-	"            outward = fromCentre / max(off, 0.001);\n"
-	"            across = float2(-outward.y, outward.x);\n"
-	"            edge = shape.x;\n"
-	"            age = shape.w;\n"
-	"            hand = 1.0;\n"
-	"        }\n"
-	"        else\n"
-	"        {\n"
-	"            float2 back = ends.xy - ends.zw;\n"
-	"            float2 fromNear = world.xy - ends.zw;\n"
-	"            float span2 = max(dot(back, back), 0.0001);\n"
-	"            float along = dot(fromNear, back) / span2;\n"
-	"            if (along < 0.0 || along > 1.0) continue;\n"
-	"            float behind = shape.x + along * sqrt(span2);\n"
-	"            float2 sideways = fromNear - back * along;\n"
-	"            off = length(sideways);\n"
-	"            outward = sideways / max(off, 0.001);\n"
-	"            across = back * rsqrt(span2);\n"
-	"            hand = (back.x * fromNear.y - back.y * fromNear.x) >= 0.0 ? 1.0 : -1.0;\n"
-	"            age = behind * shape.w;\n"
-	"            edge = behind * shape.y + age * HAZE_WAKE_DRIFT;\n"
-	"        }\n"
-	"        float fade = (1.0 - smoothstep(HAZE_WAKE_HOLD, HAZE_WAKE_GONE, age + endBreak)) * shape.z;\n"
-	"        if (fade <= 0.0) continue;\n"
-	"        float spread = HazeWakeInfo.y * (1.0 + age * HAZE_WAKE_SMEAR) * (1.0 + HAZE_WAKE_HIGH_SOFT * (1.0 - shape.z));\n"
-	"        float arm = (off - edge) / spread;\n"
-	"        float vortex = exp(-arm * arm) * fade;\n"
-	"        float roll = sin(arm * 2.2 - HazeClock.x * HAZE_WAKE_SPIN * hand);\n"
-	"        warp += outward * vortex * HAZE_WAKE_PUSH * (1.0 - 0.5 * age) + across * vortex * roll * HAZE_WAKE_ROLL * hand;\n"
-	"        float lane = saturate((edge * (1.0 - smoothstep(HAZE_WAKE_FILL_FROM, 1.0, age)) - off + endBreak * spread)\n"
-	"            / max(HazeWakeInfo.z, spread * HAZE_WAKE_SIDE_SOFT));\n"
-	"        wakeClear = max(wakeClear, lane * fade);\n"
-	"        wakeStir = max(wakeStir, vortex);\n"
-	"    }\n"
-	"    float wakeTouch = saturate(wakeStir + wakeClear);\n"
-	"    if (wakeTouch > 0.001)\n"
-	"    {\n"
-	"        float2 t = world.xy * HAZE_WAKE_TURB_SCALE + HazeClock.x * 0.7;\n"
-	"        float2 curl = float2(haze_noise(t + float2(0.0, 0.5)) - haze_noise(t - float2(0.0, 0.5)),\n"
-	"            haze_noise(t - float2(0.5, 0.0)) - haze_noise(t + float2(0.5, 0.0)));\n"
-	"        warp += curl * HAZE_WAKE_TURB * wakeTouch;\n"
-	"        float tatter = haze_noise((world.xy - warp) * HAZE_WAKE_TATTER_SCALE + HazeClock.x * 0.3);\n"
-	"        wakeClear *= lerp(HAZE_WAKE_TATTER_KEEP, 1.0, smoothstep(0.3, 0.7, tatter));\n"
-	"    }\n"
-	"\n"
 	"    float3 ray = world.xyz - eye.xyz;\n"
 	"    float entry = (eye.z > Haze.x && abs(ray.z) > 0.0001) ? saturate((Haze.x - eye.z) / ray.z) : 0.0;\n"
-	"    float2 shove = slope * HAZE_SWIRL * HazeMotion.z;\n"
 	"    float patches = 0.0;\n"
-	"    float stir = 0.0;\n"
 	"    for (int tap = 0; tap < 4; ++tap)\n"
 	"    {\n"
 	"        float3 at = eye.xyz + ray * lerp(entry, 1.0, ((float)tap + 0.5) * 0.25);\n"
-	"        float2 q = (at.xy - warp - HazeMotion.xy) * HazeMotion.z - shove + at.z * 0.011;\n"
+	"        float2 q = at.xy * HAZE_PATCH + at.z * 0.011;\n"
 	"        patches += haze_noise(q) * 0.7 + haze_noise(q * 2.7 + 17.0) * 0.3;\n"
-	"        stir += haze_stir((at.xy - HazeField.xy) * HazeField.zw);\n"
 	"    }\n"
 	"    float dense = smoothstep(0.28, 0.72, patches * 0.25);\n"
 	"    amount *= lerp(0.65, 1.35, dense);\n"
-	"    float fine = 0.0;\n"
-	"    if (wakeTouch > 0.001)\n"
-	"    {\n"
-	"        float2 grain = (world.xy - warp - HazeMotion.xy * 0.5) * HAZE_WAKE_GRAIN;\n"
-	"        fine = haze_noise(grain) * 0.6 + haze_noise(grain * 2.3 + 31.0) * 0.4;\n"
-	"        amount *= lerp(1.0, 0.4 + 1.2 * fine, wakeTouch * HAZE_WAKE_GRAIN_SHOW);\n"
-	"    }\n"
-	"\n"
-	"    float clear = max(HazeMotion.w * smoothstep(0.05, 0.6, stir * 0.25), wakeClear) * lerp(1.0, 0.6, reach);\n"
-	"    float rim = saturate(length(slope) * HAZE_RIM_GAIN) * (1.0 - clear);\n"
-	"    float pushed = wakeStir * (1.0 - clear);\n"
-	"    amount *= (1.0 - clear) * (1.0 + 0.12 * rim + HAZE_WAKE_PILE * pushed);\n"
-	"    amount += HAZE_WAKE_LIFT * Haze.z * HAZE_LOW_CAP * saturate(below * 4.0) * bank * pushed * smoothstep(0.3, 0.8, fine);\n"
 	"\n"
 	"    float2 look = ray.xy * rsqrt(max(dot(ray.xy, ray.xy), 0.0001));\n"
 	"    float2 sun = HazeSun.xy * rsqrt(max(dot(HazeSun.xy, HazeSun.xy), 0.0001));\n"
@@ -1002,6 +791,7 @@ DX11PostProcessClass::DX11PostProcessClass()
 	: Device(NULL)
 	, VertexShader(NULL)
 	, ToneMapShader(NULL)
+	, SharpenMultisampledShader(NULL)
 	, BloomExtractShader(NULL)
 	, NearPlane(1.0f)
 	, FarPlane(1200.0f)
@@ -1022,19 +812,19 @@ DX11PostProcessClass::DX11PostProcessClass()
 	, Height(0)
 	, BloomWidth(0)
 	, BloomHeight(0)
+	, TargetSamples(1)
 	, TargetsAreFloat(false)
 	, ShadersReady(false)
 	, Resolved(false)
 	, Occluded(false)
 	, Hazed(false)
 	, HazeRefused(false)
-	, HazeFieldTexture(NULL)
-	, HazeFieldView(NULL)
 	, HazeShroudView(NULL)
 {
 	memset(HazeWorldFromClip, 0, sizeof(HazeWorldFromClip));
 	memset(PixelShaders, 0, sizeof(PixelShaders));
 	memset(&SceneTarget, 0, sizeof(SceneTarget));
+	memset(&SceneResolve, 0, sizeof(SceneResolve));
 	memset(&SceneCopy, 0, sizeof(SceneCopy));
 	memset(ChainTargets, 0, sizeof(ChainTargets));
 	memset(BloomTargets, 0, sizeof(BloomTargets));
@@ -1070,12 +860,8 @@ bool DX11PostProcessClass::Initialise(DX11DeviceClass * device)
 void DX11PostProcessClass::Shutdown()
 {
 	Release_Targets();
-	release_interface(reinterpret_cast<IUnknown **>(&HazeFieldView));
-	release_interface(reinterpret_cast<IUnknown **>(&HazeFieldTexture));
 	HazeShroudView = NULL;
 	HazeShroudSource = NULL;
-	// A new device starts without it, so the next upload has to make it.
-	HazeFieldDirty = true;
 	release_interface(reinterpret_cast<IUnknown **>(&ConstantBuffer));
 	release_interface(reinterpret_cast<IUnknown **>(&RasterizerState));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthState));
@@ -1090,6 +876,7 @@ void DX11PostProcessClass::Shutdown()
 	release_interface(reinterpret_cast<IUnknown **>(&BloomBlurShader));
 	release_interface(reinterpret_cast<IUnknown **>(&BloomExtractShader));
 	release_interface(reinterpret_cast<IUnknown **>(&ToneMapShader));
+	release_interface(reinterpret_cast<IUnknown **>(&SharpenMultisampledShader));
 	for (unsigned index = 0; index < DX11_POST_SIMPLE_EFFECTS; ++index) {
 		release_interface(reinterpret_cast<IUnknown **>(&PixelShaders[index]));
 	}
@@ -1165,6 +952,8 @@ bool DX11PostProcessClass::Create_Shaders()
 	}
 
 	return compile_pixel_shader(compiler, device, TONE_MAP_SHADER_BODY, &ToneMapShader)
+		&& compile_pixel_shader(compiler, device, SHARPEN_MULTISAMPLED_SHADER_BODY,
+			&SharpenMultisampledShader)
 		&& compile_pixel_shader(compiler, device, BLOOM_EXTRACT_SHADER_BODY, &BloomExtractShader)
 		&& compile_pixel_shader(compiler, device, BLOOM_BLUR_SHADER_BODY, &BloomBlurShader)
 		&& compile_pixel_shader(compiler, device, BLOOM_COMPOSITE_SHADER_BODY,
@@ -1245,7 +1034,7 @@ bool DX11PostProcessClass::Create_States()
 }
 
 bool DX11PostProcessClass::Create_Target(Target & target, unsigned width, unsigned height,
-	DXGI_FORMAT format)
+	DXGI_FORMAT format, unsigned samples)
 {
 	ID3D11Device * device = Device->Get_Device();
 
@@ -1256,9 +1045,10 @@ bool DX11PostProcessClass::Create_Target(Target & target, unsigned width, unsign
 	description.MipLevels = 1;
 	description.ArraySize = 1;
 	description.Format = format;
-	description.SampleDesc.Count = 1;
+	description.SampleDesc.Count = samples;
 	description.Usage = D3D11_USAGE_DEFAULT;
-	description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+	description.BindFlags = D3D11_BIND_RENDER_TARGET
+		| (samples > 1 ? 0 : D3D11_BIND_SHADER_RESOURCE);
 
 	if (FAILED(device->CreateTexture2D(&description, NULL, &target.Texture))) {
 		return false;
@@ -1266,13 +1056,16 @@ bool DX11PostProcessClass::Create_Target(Target & target, unsigned width, unsign
 	if (FAILED(device->CreateRenderTargetView(target.Texture, NULL, &target.View))) {
 		return false;
 	}
-	return SUCCEEDED(device->CreateShaderResourceView(target.Texture, NULL, &target.Resource));
+	return samples > 1
+		|| SUCCEEDED(device->CreateShaderResourceView(target.Texture, NULL, &target.Resource));
 }
 
-bool DX11PostProcessClass::Create_Targets(unsigned width, unsigned height, bool floating)
+bool DX11PostProcessClass::Create_Targets(unsigned width, unsigned height, bool floating,
+	unsigned samples)
 {
 	const DXGI_FORMAT scene_format = floating ? FLOAT_FORMAT : EIGHT_BIT_FORMAT;
-	if (!Create_Target(SceneTarget, width, height, scene_format)) {
+	if (!Create_Target(SceneTarget, width, height, scene_format, samples)
+			|| (samples > 1 && !Create_Target(SceneResolve, width, height, scene_format))) {
 		Release_Targets();
 		return false;
 	}
@@ -1300,6 +1093,7 @@ bool DX11PostProcessClass::Create_Targets(unsigned width, unsigned height, bool 
 
 	Width = width;
 	Height = height;
+	TargetSamples = samples;
 	TargetsAreFloat = floating;
 	return true;
 }
@@ -1314,6 +1108,7 @@ void DX11PostProcessClass::Release_Target(Target & target)
 void DX11PostProcessClass::Release_Targets()
 {
 	Release_Target(SceneTarget);
+	Release_Target(SceneResolve);
 	Release_Target(SceneCopy);
 	const unsigned chain_target_count = sizeof(ChainTargets) / sizeof(ChainTargets[0]);
 	for (unsigned index = 0; index < chain_target_count; ++index) {
@@ -1327,12 +1122,19 @@ void DX11PostProcessClass::Release_Targets()
 	Height = 0;
 	BloomWidth = 0;
 	BloomHeight = 0;
+	TargetSamples = 1;
 	TargetsAreFloat = false;
+}
+
+unsigned DX11PostProcessClass::Scene_Samples() const
+{
+	return (Device != NULL) ? Device->Get_Sample_Count() : 1;
 }
 
 bool DX11PostProcessClass::Ensure_Buffers()
 {
-	if (!ShadersReady || ChainLength == 0 || Device == NULL) {
+	const unsigned samples = Scene_Samples();
+	if (!ShadersReady || Device == NULL || (ChainLength == 0 && samples == 1)) {
 		return false;
 	}
 
@@ -1344,14 +1146,14 @@ bool DX11PostProcessClass::Ensure_Buffers()
 
 	const bool floating = Scene_Is_Float();
 	if (SceneTarget.View != NULL && Width == width && Height == height
-			&& TargetsAreFloat == floating) {
+			&& TargetsAreFloat == floating && TargetSamples == samples) {
 		return true;
 	}
 
 	// A resolution change makes the old set the wrong size, and a chain that gained or lost bloom
 	// makes the scene target the wrong format.  Both are for the rest of the run, not for a frame.
 	Release_Targets();
-	if (!Create_Targets(width, height, floating)) {
+	if (!Create_Targets(width, height, floating, samples)) {
 		Release_Targets();
 		strcpy(Diagnostic, "post-process off: the device refused the offscreen targets");
 		return false;
@@ -1363,6 +1165,15 @@ bool DX11PostProcessClass::Ensure_Buffers()
 ID3D11RenderTargetView * DX11PostProcessClass::Scene_View()
 {
 	return Ensure_Buffers() ? SceneTarget.View : NULL;
+}
+
+ID3D11ShaderResourceView * DX11PostProcessClass::Scene_Source()
+{
+	if (SceneResolve.Texture == NULL) {
+		return SceneTarget.Resource;
+	}
+	DX11Resource_Copy_Readable(Device->Get_Context(), SceneResolve.Texture, SceneTarget.Texture);
+	return SceneResolve.Resource;
 }
 
 void DX11PostProcessClass::Begin_Frame()
@@ -1418,13 +1229,6 @@ bool DX11PostProcessClass::Haze_Scene(ID3D11ShaderResourceView * depth,
 	}
 	memcpy(HazeWorldFromClip, world_from_clip, sizeof(HazeWorldFromClip));
 
-	if (HazeFieldDirty) {
-		if (make_haze_texture(Device->Get_Device(), DX11_POST_HAZE_FIELD_SIZE, &HazeFieldTexture, &HazeFieldView)) {
-			Device->Get_Context()->UpdateSubresource(HazeFieldTexture, 0, NULL, HazeFieldTexels,
-				DX11_POST_HAZE_FIELD_SIZE, 0);
-		}
-		HazeFieldDirty = false;
-	}
 	// Borrowed for this frame only: the shroud's texture (and so its mirror) can be freed by the
 	// next map or a shroud reset, and a frame that set none draws with none.
 	HazeShroudView = HazeShroudSource;
@@ -1465,7 +1269,7 @@ bool DX11PostProcessClass::Occlude_Scene(ID3D11ShaderResourceView * depth)
 		Release_Target(SceneCopy);
 		return false;
 	}
-	Device->Get_Context()->CopyResource(SceneCopy.Texture, SceneTarget.Texture);
+	DX11Resource_Copy_Readable(Device->Get_Context(), SceneCopy.Texture, SceneTarget.Texture);
 
 	PassSetup pass;
 	memset(&pass, 0, sizeof(pass));
@@ -1539,16 +1343,10 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	block.HazeColour[2] = HazeColour[2];
 	block.HazeColour[3] = HazeWater;
 	memcpy(block.WorldFromClip, HazeWorldFromClip, sizeof(block.WorldFromClip));
-	memcpy(block.HazeField, HazeFieldRect, sizeof(block.HazeField));
-	memcpy(block.HazeMotion, HazeMotion, sizeof(block.HazeMotion));
 	memcpy(block.HazeSun, HazeSun, sizeof(block.HazeSun));
 	// the program reads only the sun's bearing, so its z says whether a shroud texture is bound
 	block.HazeSun[2] = (HazeShroudView != NULL) ? 1.0f : 0.0f;
 	memcpy(block.HazeShroudRect, HazeShroudRect, sizeof(block.HazeShroudRect));
-	memcpy(block.HazeWakeInfo, HazeWakeInfo, sizeof(block.HazeWakeInfo));
-	memcpy(block.HazeWakeEnds, HazeWakeEnds, sizeof(block.HazeWakeEnds));
-	memcpy(block.HazeWakeShape, HazeWakeShape, sizeof(block.HazeWakeShape));
-	memcpy(block.HazeClock, HazeClock, sizeof(block.HazeClock));
 	memcpy(mapped.pData, &block, sizeof(block));
 	context->Unmap(ConstantBuffer, 0);
 
@@ -1582,17 +1380,16 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	const bool haze = (pass.Shader == HazeShader);
 	if (haze) {
 		// The same buffer at b1 as well, where the haze program reads its own fields of it, and
-		// the disturbance field at t2 (none yet reads as an unstirred field).
+		// the shroud at t2.
 		context->PSSetConstantBuffers(1, 1, &ConstantBuffer);
-		ID3D11ShaderResourceView * haze_resources[2] = { HazeFieldView, HazeShroudView };
-		context->PSSetShaderResources(2, 2, haze_resources);
+		context->PSSetShaderResources(2, 1, &HazeShroudView);
 	}
 
 	context->Draw(FULL_SCREEN_VERTEX_COUNT, 0);
 
 	if (haze) {
-		ID3D11ShaderResourceView * no_haze_resources[2] = { NULL, NULL };
-		context->PSSetShaderResources(2, 2, no_haze_resources);
+		ID3D11ShaderResourceView * no_haze_resource = NULL;
+		context->PSSetShaderResources(2, 1, &no_haze_resource);
 	}
 
 	// The texture this pass read is the target the next one writes, and D3D11 unbinds a resource
@@ -1602,7 +1399,8 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	context->PSSetShaderResources(0, 2, no_resources);
 }
 
-ID3D11ShaderResourceView * DX11PostProcessClass::Run_Bloom(ID3D11RenderTargetView * destination)
+ID3D11ShaderResourceView * DX11PostProcessClass::Run_Bloom(ID3D11RenderTargetView * destination,
+	ID3D11ShaderResourceView * scene)
 {
 	const float bloom_texel_x = 1.0f / static_cast<float>(BloomWidth);
 	const float bloom_texel_y = 1.0f / static_cast<float>(BloomHeight);
@@ -1613,7 +1411,7 @@ ID3D11ShaderResourceView * DX11PostProcessClass::Run_Bloom(ID3D11RenderTargetVie
 	// The bright pass reads the full size scene and writes the quarter size target, so it is the
 	// one pass whose source and destination sizes differ.
 	pass.Shader = BloomExtractShader;
-	pass.Source = SceneTarget.Resource;
+	pass.Source = scene;
 	pass.Destination = BloomTargets[0].View;
 	pass.DestinationWidth = BloomWidth;
 	pass.DestinationHeight = BloomHeight;
@@ -1642,7 +1440,7 @@ ID3D11ShaderResourceView * DX11PostProcessClass::Run_Bloom(ID3D11RenderTargetVie
 	}
 
 	pass.Shader = BloomCompositeShader;
-	pass.Source = SceneTarget.Resource;
+	pass.Source = scene;
 	pass.Extra = BloomTargets[source].Resource;
 	pass.Destination = destination;
 	pass.DestinationWidth = Width;
@@ -1672,14 +1470,15 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 	const bool warp = (WarpCount > 0);
 
 	unsigned first = 0;
-	ID3D11ShaderResourceView * source = SceneTarget.Resource;
+	ID3D11ShaderResourceView * const scene = Scene_Source();
+	ID3D11ShaderResourceView * source = scene;
 	if (effects[0] == DX11_POST_BLOOM) {
 		// Bloom is the only effect that reads the half float scene, and the frame is eight bits by
 		// the time it hands over. If it is also the last thing in the chain it writes the screen.
 		const bool alone = (count == 1) && !warp;
 		ID3D11RenderTargetView * bloom_destination = alone ? back_buffer : ChainTargets[0].View;
 		if (BloomIntensity > 0.0f) {
-			source = Run_Bloom(bloom_destination);
+			source = Run_Bloom(bloom_destination, scene);
 		} else {
 			// Bloom switched off in the options: no glow, but the scene is still half floats and
 			// still has to come down to eight bits, the same way Copy_Through brings it down.  The
@@ -1687,7 +1486,7 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 			PassSetup tone;
 			memset(&tone, 0, sizeof(tone));
 			tone.Shader = ToneMapShader;
-			tone.Source = SceneTarget.Resource;
+			tone.Source = scene;
 			tone.Destination = bloom_destination;
 			tone.DestinationWidth = Width;
 			tone.DestinationHeight = Height;
@@ -1714,7 +1513,8 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 	pass.SourceHeight = Height;
 	for (unsigned index = first; index < count; ++index) {
 		const bool last = (index + 1 == count) && !warp;
-		pass.Shader = PixelShaders[effects[index]];
+		pass.Shader = (effects[index] == DX11_POST_SHARPEN && TargetSamples > 1)
+			? SharpenMultisampledShader : PixelShaders[effects[index]];
 		// The occlusion pass is the one effect that reads something other than the frame: the
 		// frame's own depth, which the device keeps as a texture as well as a depth buffer.
 		pass.Extra = (effects[index] == DX11_POST_AO) ? Device->Get_Depth_Texture() : NULL;
@@ -1741,17 +1541,18 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 
 bool DX11PostProcessClass::Run_Chain()
 {
-	if (!Occluded) {
-		return Finish(Chain, ChainLength);
-	}
-	// The scene took its occlusion before the particles; a chain of nothing else still has to
-	// bring the scene to the screen.
+	// The scene took its occlusion before the particles, and a multisampled one has no use for
+	// FXAA; a chain of nothing else, or none at all over a multisampled scene, still has to bring
+	// the scene to the screen.  Without either the chain runs as it was set, and an empty one with
+	// it, since an empty chain at one sample has no scene target to bring.
+	const bool multisampled = Scene_Samples() > 1;
 	DX11PostEffect effects[DX11_POST_CHAIN_LIMIT];
 	unsigned count = 0;
 	for (unsigned index = 0; index < ChainLength; ++index) {
-		if (Chain[index] != DX11_POST_AO) {
-			effects[count++] = Chain[index];
+		if ((Occluded && Chain[index] == DX11_POST_AO) || (multisampled && Chain[index] == DX11_POST_FXAA)) {
+			continue;
 		}
+		effects[count++] = Chain[index];
 	}
 	if (count == 0) {
 		effects[count++] = DX11_POST_COPY;
@@ -1761,7 +1562,7 @@ bool DX11PostProcessClass::Run_Chain()
 
 bool DX11PostProcessClass::Copy_Through()
 {
-	if (Resolved || ChainLength == 0 || !Ensure_Buffers()) {
+	if (Resolved || !Ensure_Buffers()) {
 		return false;
 	}
 
@@ -1777,7 +1578,7 @@ bool DX11PostProcessClass::Copy_Through()
 	memset(&pass, 0, sizeof(pass));
 	pass.Shader = TargetsAreFloat ? ToneMapShader : PixelShaders[DX11_POST_COPY];
 	pass.Ungraded = true;
-	pass.Source = SceneTarget.Resource;
+	pass.Source = Scene_Source();
 	pass.Destination = back_buffer;
 	pass.DestinationWidth = Width;
 	pass.DestinationHeight = Height;
@@ -1794,18 +1595,24 @@ void DX11PostProcessClass::Describe()
 	if (!ShadersReady) {
 		return;
 	}
-	if (ChainLength == 0) {
+	const unsigned samples = Scene_Samples();
+	if (ChainLength == 0 && samples == 1) {
 		strcpy(Diagnostic, "post-process off");
 		return;
 	}
 
-	std::string names;
+	std::string names = (ChainLength == 0) ? "copy" : "";
 	for (unsigned index = 0; index < ChainLength; ++index) {
 		if (index > 0) {
 			names += ",";
 		}
 		names += DX11Post_Effect_Name(Chain[index]);
 	}
-	snprintf(Diagnostic, sizeof(Diagnostic), "post-process %s over %ux%u, scene in %s", names.c_str(),
-		Width, Height, TargetsAreFloat ? "half floats" : "eight bits");
+	char multisampling[64] = "";
+	if (samples > 1) {
+		snprintf(multisampling, sizeof(multisampling), ", %ux multisampled without fxaa, sharpen softened",
+			samples);
+	}
+	snprintf(Diagnostic, sizeof(Diagnostic), "post-process %s over %ux%u, scene in %s%s", names.c_str(),
+		Width, Height, TargetsAreFloat ? "half floats" : "eight bits", multisampling);
 }

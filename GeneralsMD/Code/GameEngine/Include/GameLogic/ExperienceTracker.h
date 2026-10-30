@@ -99,6 +99,7 @@ public:
 		* on the pin of the summed level. */
 	Bool gainExpForLevel(Int levelsToGain, Bool canScaleForBonus = TRUE, Bool byLevel = FALSE );
 	Bool canGainExpForLevel(Int levelsToGain) const;															///< return same value as gainExpForLevel, but don't change anything
+	void gainGrades( Int grades );																							///< on a rank ladder, this many grades up, never past the Heroic pin; nothing without one
 	void setExperienceAndLevel(Int experienceIn, Bool provideFeedback = TRUE );
 	void setExperienceSink( ObjectID sink );											///< My experience actually goes to this person (loose couple)
 

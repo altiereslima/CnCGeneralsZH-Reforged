@@ -1,0 +1,41 @@
+# Scenarios/reachhills.txt: the terrain reach overlay on Twilight Flame's south-west plateau, a
+# played American seat (no -observer) and the defences selected by -control clicks at the screen
+# centre while the camera sits on each one at 1.8, pitch 0.  hud on keeps the selection and the
+# paint.  The driving script clicks at: 5 s the Patriot, 21 s the Fire Base, 31 s a dozer the
+# script spawns at 3750,3950, then the dozer's command grid at 34 s and 37 s for the placement
+# cursor.  -control keeps the run alive past -maxframes, so the list ends it.
+# Past about 2.0 relative zoom the far clip eats the terrain here: 2.4 at pitch -30 is half void,
+# 2.6 and up all void.
+
+0.0   hud     on
+0.3   cut     3400 3700 1.8 0 0
+
+# the Patriot, selected at 5 s
+7.0   cut     3400 3650 2.0 0 -34
+8.2   shot
+9.0   cut     3400 3650 2.0 45 -34
+10.2  shot
+11.0  cut     3400 3650 2.0 315 -34
+12.2  shot
+13.0  cut     3400 3650 2.0 90 -34
+14.2  shot
+15.0  cut     3400 3620 1.5 270 -15
+16.2  shot
+17.0  cut     3400 3600 1.5 0 -10
+18.2  shot
+
+# the Fire Base, selected at 21 s
+19.0  cut     3550 3950 1.8 0 0
+23.0  cut     3550 3950 1.5 135 -15
+24.2  shot
+25.0  cut     3550 3950 2.0 45 -34
+26.2  shot
+27.0  cut     3550 3950 1.6 0 -36
+28.2  shot
+
+# the dozer, selected at 31 s, then a building on the cursor at 34 s and 37 s
+29.0  cut     3750 3950 1.8 0 0
+33.0  cut     3480 3830 2.1 0 -36
+35.5  shot
+38.5  shot
+40.0  end

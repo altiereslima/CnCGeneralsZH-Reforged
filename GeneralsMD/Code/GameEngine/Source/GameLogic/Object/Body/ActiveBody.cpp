@@ -63,6 +63,7 @@
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/DamageModule.h"
 #include "GameLogic/Module/DieModule.h"
+#include "GameLogic/Module/StealthUpdate.h"
 
 
 #ifdef _INTERNAL
@@ -624,7 +625,20 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 		// remember which enemy took how much health off, for splitting the kill (Object::scoreTheKill)
 		if( !alreadyHandled && damageInfo->out.m_actualDamageClipped > 0.0f && damager && damager != obj
 				&& damager->getRelationship( obj ) == ENEMIES )
+		{
 			obj->getExperienceTracker()->recordDamage( damager->getID(), REAL_TO_INT_CEIL( damageInfo->out.m_actualDamageClipped ) );
+
+			// a designator's hit marks what it hurt: everyone shooting at it fires faster (GameData's
+			// TARGET_FAERIE_FIRE), and a mark that reveals shows a stealthed target for as long
+			const Real markSeconds = damager->getRankPerk( RANK_PERK_DESIGNATE );
+			if( markSeconds > 0.0f && m_currentHealth > 0.0f )
+			{
+				const UnsignedInt markFrames = REAL_TO_UNSIGNEDINT( markSeconds * LOGICFRAMES_PER_SECOND );
+				obj->doStatusDamage( OBJECT_STATUS_FAERIE_FIRE, markFrames );
+				if( obj->getStealth() && damager->getRankPerk( RANK_PERK_DESIGNATE_REVEAL ) > 0.0f )
+					obj->getStealth()->markAsDetected( markFrames );
+			}
+		}
 
 		// then copy the whole DamageInfo struct for easy lookup 
 		// (object pointer loses scope as soon as atteptdamage's caller ends)

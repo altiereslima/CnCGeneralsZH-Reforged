@@ -100,8 +100,13 @@ m_surrenderFrame(0)
 	// GameLogicRandomValue, so a replay rolls the same one.  Rolled here rather than in AIPlayer's
 	// constructor so a Challenge or mission opponent leaves the logic random stream as retail did;
 	// nothing between the two constructors draws, so a skirmish rolls on the same draw as before.
+	// A seat that plays EA's AI (a player's own map, or one that scripts its seats) does not roll at
+	// all: retail had no role and drew nothing here.  The sides list is read before the players are
+	// made, so runsOwnAI() already knows, and in this body isSkirmishAI() is this class's.
 	//
-	m_role = (GameLogicRandomValue( 0, AIROLE_COUNT - 1 ) == 0) ? AIROLE_AGGRESSIVE : AIROLE_DEFENSIVE;
+	if (runsOwnAI()) {
+		m_role = (GameLogicRandomValue( 0, AIROLE_COUNT - 1 ) == 0) ? AIROLE_AGGRESSIVE : AIROLE_DEFENSIVE;
+	}
 }
 
 AISkirmishPlayer::~AISkirmishPlayer()
@@ -122,7 +127,7 @@ void AISkirmishPlayer::processBaseBuilding( void )
 	// A Hard AI in the dark does not wait out the structure timer for its power plant: a USA whose plants a
 	// superweapon took sat dark for two minutes of logic frames with a plant asked for and money coming in.
 	// Once a second rather than every frame, because a pass walks the whole plan.
-	const Bool darkRush = getSkillProfile()->m_economyBuildings && !m_player->getEnergy()->hasSufficientPower() &&
+	const Bool darkRush = runsOwnAI() && getSkillProfile()->m_economyBuildings && !m_player->getEnergy()->hasSufficientPower() &&
 		TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 0;
 	if (m_readyToBuildStructure || darkRush)
 	{
@@ -131,8 +136,8 @@ void AISkirmishPlayer::processBaseBuilding( void )
 		Bool isPriority = false;
 		// and a Tech AI from Medium up, whose whole plan is the tree and the superweapon at its top, and a
 		// GLA Air one, whose SCUD Storm stands in for the air force it cannot build
-		const Bool rushBigGuns = getSkillProfile()->m_economyBuildings ||
-			(m_persona != AIPERSONA_NORMAL && m_skillLevel >= AISKILL_MEDIUM && superweaponIsPlan());
+		const Bool rushBigGuns = runsOwnAI() && (getSkillProfile()->m_economyBuildings ||
+			(m_persona != AIPERSONA_NORMAL && m_skillLevel >= AISKILL_MEDIUM && superweaponIsPlan()));
 		Bool rushTaken = false;
 		// With the purchase queue the priority entries are taken by its score, the first of the best in
 		// list order, so an early drop zone does not wait behind the scripts' bunkers.
@@ -192,8 +197,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 						// Check for built or dozer missing.
 						if( bldg->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 						{
-							// a site its dozers cannot reach, or die on the way to, is cancelled for the money
-							if (watchSite(info, bldg)) {
+							// a site its dozers cannot reach, or die on the way to, is cancelled for the money;
+							// EA's AI waits on it for ever, as retail did
+							if (runsOwnAI() && watchSite(info, bldg)) {
 								continue;
 							}
 							if (bldg->isKindOf(KINDOF_FS_POWER) && !bldg->isKindOf(KINDOF_CASH_GENERATOR))
@@ -244,8 +250,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				continue; // already built.
 			}
 			// A second war factory, barracks or airfield of the plan's waits until the ones standing
-			// fall behind their queues, as an extra one would.
-			if (holdsExtraFactory(curPlan)) {
+			// fall behind their queues, as an extra one would.  Only for the fork's AI: the queues are
+			// sampled by its doSpending, so EA's would wait on a sample that never comes.
+			if (runsOwnAI() && holdsExtraFactory(curPlan)) {
 				continue;
 			}
 			// The safety check below is a range query over everything near the spot, most of a
@@ -268,8 +275,13 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				(!isPriority || (rushThis && !rushTaken) || planScore > bldgScore) && m_player->canBuild(curPlan);
 			const Bool couldBePower = powerPlan==NULL && curPlan->isKindOf(KINDOF_FS_POWER) &&
 				!curPlan->isKindOf(KINDOF_CASH_GENERATOR) && (isUnderPowered || info->isAutomaticBuild());
-			const Bool couldBeBuilt = bldgPlan==NULL && info->isAutomaticBuild() && info->isBuildable();
-			if (!couldBePriority && !couldBePower && !couldBeBuilt) {
+			// The rest of the plan, unasked: a seat its map scripts builds what the scripts ask and the
+			// power, as retail's did, or an Art of Defense GLA puts up a base and leaves its waves.
+			const Bool couldBeBuilt = runsOwnAI() && bldgPlan==NULL && info->isAutomaticBuild() && info->isBuildable();
+			// EA's AI walked every entry on, and short of power an automatic one with no free dozer
+			// queues one below; that entry keeps going for it, so the dozer comes when retail's did.
+			const Bool retailDozerAsk = !runsOwnAI() && isUnderPowered && info->isAutomaticBuild();
+			if (!couldBePriority && !couldBePower && !couldBeBuilt && !retailDozerAsk) {
 				continue;
 			}
 			// Make sure it is safe to build here.
@@ -322,9 +334,10 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				}
 				continue;
 			}
-			// check if this building has any "rebuilds" left
-			if (info->isBuildable())
-			{	
+			// check if this building has any "rebuilds" left.  EA's test above read bldgPlan, so this
+			// never took anything for retail; EA's AI still builds only what is asked and the power.
+			if (info->isBuildable() && runsOwnAI())
+			{
 				if (bldgPlan == NULL) {
 					bldgPlan = curPlan;
 					bldgInfo = info;
@@ -443,7 +456,8 @@ Bool AISkirmishPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 		return false;
 	}
 
-	if (hasEnoughMoneyUnitsFor(proto)) {
+	// the hacker cap and the hoard are the fork's AI; EA's builds what its scripts ask, as many as the data says
+	if (runsOwnAI() && hasEnoughMoneyUnitsFor(proto)) {
 		return false;
 	}
 	// check build limit, which a hoard raises for attack teams; defence teams keep the data's, and so do
@@ -452,7 +466,7 @@ Bool AISkirmishPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 	Int allowedInstances = info->m_maxInstances;
 	if (!info->m_isBaseDefense && !info->m_isPerimeterDefense && aiTeamAttacks(info)) {
 		allowedInstances = aiHoardAllowedTeamInstances( allowedInstances, m_player->getMoney()->countMoney(),
-																										getSkillProfile()->m_cashHoardThreshold );
+																										hoardThreshold() );
 	}
 	if (proto->countTeamInstances() >= allowedInstances){
 		if (TheGlobalData->m_debugAI) {	
@@ -587,12 +601,15 @@ Int AISkirmishPlayer::getMyEnemyPlayerIndex(void) {
 	* are.  Fog-masked, so it is somewhere this AI has actually seen; FALSE means it has not looked
 	* yet and the caller keeps the old aim point.
 	*
-	* Off on every rung, deliberately - see the note on useInfluenceMapForAttackLane in AI.cpp.
+	* Hard's alone, and only where the map has no approach path to take: with one the attack goes down
+	* the road chooseApproachLabel picks instead, since aiming at the money walked past the army.  See the
+	* note on useInfluenceMapForAttackLane in AI.cpp.  This is the engine's cash layer, not AIInfluenceMap.
 	*/
 //----------------------------------------------------------------------------------------------------------
 Bool AISkirmishPlayer::influenceMapAttackGoal( Coord3D *goal )
 {
-	if( !getSkillProfile()->m_useInfluenceMapForAttackLane )
+	// EA's AI aims at the middle of the buildings, as retail did
+	if( !runsOwnAI() || !getSkillProfile()->m_useInfluenceMapForAttackLane )
 		return FALSE;
 	if( ThePartitionManager == NULL || goal == NULL )
 		return FALSE;
@@ -608,8 +625,82 @@ Bool AISkirmishPlayer::influenceMapAttackGoal( Coord3D *goal )
 	return TRUE;
 }
 
+//----------------------------------------------------------------------------------------------------------
+/** EA's acquireEnemy as it shipped, for a seat that plays EA's AI.  Its quirks are the point: the
+	* crippled enemy pushed to half the map, the gang-up penalty counting this AI's own pick, the
+	* "attacking me" nudge going to whoever else is targeted, and the bounds read through the fog. */
+//----------------------------------------------------------------------------------------------------------
+void AISkirmishPlayer::acquireEnemyRetail(void)
+{
+	Player *bestEnemy = NULL;
+	Real bestDistanceSqr = HUGE_DIST*HUGE_DIST;
+
+	if (m_currentEnemy) {
+		Bool inBadShape = !m_currentEnemy->hasAnyUnits() || !m_currentEnemy->hasAnyBuildFacility();
+		if (!inBadShape) return;
+	}
+
+	// look for the closest enemy.
+	Int i;
+	for (i=0; i<ThePlayerList->getPlayerCount(); i++) {
+		Player *curPlayer = ThePlayerList->getNthPlayer(i);
+		if (m_player->getRelationship(curPlayer->getDefaultTeam()) == ENEMIES) {
+			if (curPlayer->hasAnyObjects()==false) continue; // not much of an enemy.
+			// ok, we got an enemy;
+			// If a player is out of units, or out of build facilities, we can lower his priority.
+			Bool inBadShape = !curPlayer->hasAnyUnits() || !curPlayer->hasAnyBuildFacility();
+
+			Coord3D enemyPos = m_baseCenter;
+			Region2D bounds;
+			getPlayerStructureBounds(&bounds, i);
+			enemyPos.x = bounds.lo.x + bounds.width()/2;
+			enemyPos.y = bounds.lo.y + bounds.height()/2;
+			Real curDistSqr = sqr(enemyPos.x-m_baseCenter.x) + sqr(enemyPos.y-m_baseCenter.y);
+
+			//Fudge for in bad shape.	 If an enemy is crippled, concentrate on the other ones.
+			if (inBadShape) {
+				curDistSqr = HUGE_DIST*HUGE_DIST*0.5f;
+			}
+			// See if other ai's are attacking this target.
+			// We don't want the ai's to gang up on one enemy.
+			Int k;
+			for (k=0; k<ThePlayerList->getPlayerCount(); k++) {
+				if (k==i) continue;  // don't count self.
+				Player *somePlayer = ThePlayerList->getNthPlayer(k);
+				if (somePlayer->isSkirmishAIPlayer() && (somePlayer->getCurrentEnemy()==curPlayer)) {
+					// Some ai is already targeting this guy.  Add a distance penalty.
+					curDistSqr += (500*500);
+				}
+				if (somePlayer->isSkirmishAIPlayer() && (somePlayer->getCurrentEnemy()==m_player)) {
+					// he is attacking me.  So I will (gently) prefer to attack him.
+					curDistSqr -= (25*25);
+					if (curDistSqr<0) curDistSqr = 0;
+				}
+			}
+
+			// Ai enemy - will take if we don't get a better offer.
+			if (curDistSqr<bestDistanceSqr) {
+				bestEnemy = curPlayer;
+				bestDistanceSqr = curDistSqr;
+			}
+		}
+	}
+	if (bestEnemy!=NULL && (bestEnemy!=m_currentEnemy)) {
+		m_currentEnemy = bestEnemy;
+		AsciiString msg = TheNameKeyGenerator->keyToName(m_player->getPlayerNameKey());
+		msg.concat(" acquiring target enemy player: ");
+		msg.concat(TheNameKeyGenerator->keyToName(m_currentEnemy->getPlayerNameKey()));
+		TheScriptEngine->AppendDebugMessage( msg, false);
+	}
+}
+
 void AISkirmishPlayer::acquireEnemy(void)
 {
+	if (!runsOwnAI()) {
+		acquireEnemyRetail();
+		return;
+	}
+
 	Player *bestEnemy = NULL;
 	Real bestDistanceSqr = HUGE_DIST*HUGE_DIST;
 
@@ -752,8 +843,9 @@ void AISkirmishPlayer::buildAIBaseDefense(Bool flank)
 		defenseTemplateName = resInfo->m_baseDefenseStructure1;
 	}
 	// the data names one defence per side, so a script asking for ten got ten of it: the side's mix
-	// comes off a dozer's buttons instead, and the data's choice stands in when no dozer is left
-	Object *dozer = findNearestDozer(&m_baseCenter);
+	// comes off a dozer's buttons instead, and the data's choice stands in when no dozer is left.
+	// EA's AI builds the data's one, on the approach-path ring, as retail did.
+	Object *dozer = runsOwnAI() ? findNearestDozer(&m_baseCenter) : NULL;
 	const ThingTemplate *mix = dozer ? nextBaseDefense(dozer) : NULL;
 	if (mix) {
 		// the spot with the widest field of fire first; the approach-path ring when none scores
@@ -813,7 +905,8 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 			if (flank) return;
 			if (!influenceMapAttackGoal(&goalPos)) {
 				Region2D bounds;
-				getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
+				// what this AI has seen of him; EA's sees every building, as retail did
+				getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, runsOwnAI() ? m_player->getPlayerIndex() : -1);
 				goalPos.x = bounds.lo.x + bounds.width()/2;
 				goalPos.y = bounds.lo.y + bounds.height()/2;
 			}
@@ -888,8 +981,9 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 		/* See if we can build there. */
 		Bool canBuild;
 		Real placeAngle = tTemplate->getPlacementViewAngle();
-		// a spot the base cannot drive to guards nothing: a ledge, or across a valley the path runs beside
-		canBuild = reachableFromBase(&buildPos) && LBC_OK == TheBuildAssistant->isLocationLegalToBuild(&buildPos, tTemplate, placeAngle,
+		// a spot the base cannot drive to guards nothing: a ledge, or across a valley the path runs beside.
+		// EA's AI takes the first legal spot, as retail did.
+		canBuild = (!runsOwnAI() || reachableFromBase(&buildPos)) && LBC_OK == TheBuildAssistant->isLocationLegalToBuild(&buildPos, tTemplate, placeAngle,
 			BuildAssistant::TERRAIN_RESTRICTIONS|BuildAssistant::NO_OBJECT_OVERLAP, NULL, m_player);
 		TheTerrainVisual->removeAllBibs();	// isLocationLegalToBuild adds bib feedback, turn it off.  jba.
 		if (flank) {
@@ -1072,10 +1166,12 @@ void AISkirmishPlayer::processTeamBuilding( void )
  * instead, the shipped values land on the same 3 seconds they do today, and the modifiers
  * work again around it: a wealthy skirmish AI presses at 1.5 seconds, a poor one drops to 5.
  * See FINDINGS.md 4.
+ *
+ * A seat that plays EA's AI keeps the data's delays and EA's clamp (doBaseBuilding, doTeamBuilding).
  */
 Real AISkirmishPlayer::getBuildRateScale( void )
 {
-	return 10.0f/3.0f;
+	return runsOwnAI() ? 10.0f/3.0f : 1.0f;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -1091,6 +1187,10 @@ void AISkirmishPlayer::doBaseBuilding( void )
 			if (m_structureTimer<=0) {
 				m_readyToBuildStructure = true;
 				m_buildDelay = 0;
+			}
+			// EA's flat 3 seconds, for a seat that plays EA's AI; the fork's works off getBuildRateScale
+			if (!runsOwnAI() && m_structureTimer > 3*LOGICFRAMES_PER_SECOND) {
+				m_structureTimer = 3*LOGICFRAMES_PER_SECOND;
 			}
 		}
 		// This timer is to keep from banging on the logic each frame.  If something interesting
@@ -1140,6 +1240,10 @@ void AISkirmishPlayer::doTeamBuilding( void )
 			if (m_teamTimer<=0) {
 				m_readyToBuildTeam = true;
 				m_teamDelay = 0;
+			}
+			// EA's flat 3 seconds, as for the structure timer above
+			if (!runsOwnAI() && m_teamTimer > 3*LOGICFRAMES_PER_SECOND) {
+				m_teamTimer = 3*LOGICFRAMES_PER_SECOND;
 			}
 		}
 
@@ -1226,7 +1330,8 @@ void AISkirmishPlayer::doSurrender( void )
 	const UnsignedInt CHECK_FRAMES = 5 * LOGICFRAMES_PER_SECOND;
 	if( (now + 7 * (UnsignedInt)m_player->getPlayerIndex()) % CHECK_FRAMES != 0 )
 		return;
-	if( !TheRecorder->isMultiplayer() || !m_player->isPlayableSide() )
+	// a seat its map scripts may hold no base by design, an Art of Defense GLA's waves
+	if( !TheRecorder->isMultiplayer() || !m_player->isPlayableSide() || !runsOwnAI() )
 		return;
 
 	// Easy, Medium, Hard.
@@ -1479,8 +1584,10 @@ Object * AISkirmishPlayer::findDozer( const Coord3D *pos )
 Bool AISkirmishPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord3D *retPos, Int playerNdx, Real weaponRadius)
 {
 
+	// what this AI has seen of the target; EA's sees every building, as retail did
+	const Int observer = runsOwnAI() ? m_player->getPlayerIndex() : -1;
 	Region2D bounds;
-	getPlayerStructureBounds(&bounds, playerNdx, FALSE, m_player->getPlayerIndex());
+	getPlayerStructureBounds(&bounds, playerNdx, FALSE, observer);
 
 	if( power->getSpecialPowerType() == SPECIAL_CLUSTER_MINES || power->getSpecialPowerType() == NUKE_SPECIAL_CLUSTER_MINES )
 	{
@@ -1502,7 +1609,7 @@ Bool AISkirmishPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *powe
 		} else {
 			if (!influenceMapAttackGoal(&goalPos)) {
 				Region2D bounds;
-				getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
+				getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, observer);
 				goalPos.x = bounds.lo.x + bounds.width()/2;
 				goalPos.y = bounds.lo.y + bounds.height()/2;
 			}

@@ -308,6 +308,8 @@ public:
 	ModelConditionFlags								m_ignoreConditionStates;
 	Bool															m_okToChangeModelColor;
 	Bool															m_animationsRequirePower;///< Should UnderPowered disable type pause animations in this draw module?
+	Bool															m_stabilizedTurretPitch;	///< draw a pitch bone at the logic's pitch against level ground, whatever the drawn hull's tilt
+	Real															m_barrelArtPitch;					///< with that: how far the barrel's mesh is modelled above level at rest, taken off the drawn pitch
 #ifdef CACHE_ATTACH_BONE
 	mutable Bool											m_attachToDrawableBoneOffsetValid;
 #endif
@@ -409,6 +411,7 @@ public:
 	virtual Bool getCurrentWorldspaceClientBonePositions(const char* boneName, Matrix3D& transform) const;
 	virtual Bool getProjectileLaunchOffset(const ModelConditionFlags& condition, WeaponSlotType wslot, Int specificBarrelToUse, Matrix3D* launchPos, WhichTurretType tur, Coord3D* turretRotPos, Coord3D* turretPitchPos = NULL) const;
 	virtual void updateProjectileClipStatus( UnsignedInt shotsRemaining, UnsignedInt maxShots, WeaponSlotType slot ); ///< This will do the show/hide work if ProjectileBoneFeedbackEnabled is set.
+	virtual Int getProjectileClipFeedbackSlots() const;
 	virtual void updateDrawModuleSupplyStatus( Int maxSupply, Int currentSupply ); ///< This will do visual feedback on Supplies carried
 	virtual void notifyDrawModuleDependencyCleared( ){}///< if you were waiting for something before you drew, it's ready now
 
@@ -475,6 +478,8 @@ protected:
 	void stopClientParticleSystems();
 	void doHideShowSubObjs(const std::vector<ModelConditionInfo::HideShowSubObjInfo>* vec);
 	virtual void adjustTransformMtx(Matrix3D& mtx) const;
+	/// how far the hull this model is drawn on trails its logic heading, which a turret aims from
+	virtual Real getHullHeadingLag() const;
 
 	Real getCurAnimDistanceCovered() const;
 	Bool setCurAnimDurationInMsec(Real duration);
@@ -529,6 +534,7 @@ private:
 	Int														m_hexColor;
 	Int														m_whichAnimInCurState;						///< the index of the currently playing anim in cur state (if any)
 	WeaponRecoilInfoVec						m_weaponRecoilInfoVec[WEAPONSLOT_COUNT];
+	Real													m_drawnTurretPitch[MAX_TURRETS];		///< the pitch handleClientTurretPositioning gave each turret's pitch bone this frame
 	Bool													m_needRecalcBoneParticleSystems;
 	Coord3D												m_groundMotionPos;								///< where stepGroundMotion last saw the unit
 	Real													m_groundMotionAngle;

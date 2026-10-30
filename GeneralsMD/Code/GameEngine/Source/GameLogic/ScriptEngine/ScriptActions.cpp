@@ -5842,6 +5842,29 @@ void ScriptActions::doTeamUseCommandButtonOnNearestBuildingClass( const AsciiStr
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Whether anyone PartitionFilterPlayerAffiliation(me, ALLOW_ENEMIES | ALLOW_NEUTRAL, true) lets
+	through holds a member equivalent to type: an enemy, a neutral, or me, whose own objects pass that
+	filter as well. Every Object in the partition sits on some player's team, so with no such holder
+	a REALLY_FAR search for the type finds nothing, after walking the whole map to be sure. */
+//-------------------------------------------------------------------------------------------------
+static Bool enemyNeutralOrSelfHolds( const Player *me, const ThingTemplate *type )
+{
+	// with no team-keyed override a relationship to a team depends only on the team's player, and
+	// that player's default team answers for all of its teams (Team::getEnemyPlayerMask)
+	const Bool perTeam = me->hasTeamRelationships();
+	for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
+	{
+		const Player *holder = ThePlayerList->getNthPlayer(i);
+		if (!holder->hasTemplateMember(type))
+			continue;
+		if (perTeam || holder == me || holder->getDefaultTeam()->getControllingPlayer() != holder
+				|| me->getRelationship(holder->getDefaultTeam()) != ALLIES)
+			return true;
+	}
+	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** doTeamUseCommandButtonOnNearestObjectType */
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doTeamUseCommandButtonOnNearestObjectType( const AsciiString& teamName, const AsciiString& commandAbility, const AsciiString& objectType )
@@ -5874,8 +5897,13 @@ void ScriptActions::doTeamUseCommandButtonOnNearestObjectType( const AsciiString
 
 	//First look for a specific object type (object lists will fail)
 	const ThingTemplate *thingTemplate = TheThingFactory->findTemplate( objectType, FALSE );
-	if( thingTemplate ) 
+	if( thingTemplate )
 	{
+		// The Stealth General's GPS Scrambler script asks this for its own Quad Cannon every frame, and
+		// with none on the map the search walked every ring offset of it to come back empty
+		if (!enemyNeutralOrSelfHolds(team->getControllingPlayer(), thingTemplate))
+			return;
+
 		PartitionFilterPlayerAffiliation f1(team->getControllingPlayer(), ALLOW_ENEMIES | ALLOW_NEUTRAL, true);
 		PartitionFilterThing f2(thingTemplate, true);
 		PartitionFilterValidCommandButtonTarget f3(srcObj, commandButton, true, CMD_FROM_SCRIPT);
@@ -5913,6 +5941,10 @@ void ScriptActions::doTeamUseCommandButtonOnNearestObjectType( const AsciiString
 				{
 					PartitionFilterThing f2( thisType, true );
 					PartitionFilter *filters[] = { &f1, &f2, &f3, &f4, 0 };
+
+					// the search walks every ring offset of the map before it gives up on a type
+					if (!enemyNeutralOrSelfHolds(team->getControllingPlayer(), thisType))
+						continue;
 
 					Object *obj = ThePartitionManager->getClosestObject(&pos, REALLY_FAR, FROM_CENTER_2D, filters, &dist );
 					if( obj )

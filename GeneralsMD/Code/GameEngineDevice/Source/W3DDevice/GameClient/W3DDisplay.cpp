@@ -481,8 +481,12 @@ static double s_aircraftLeadSum = 0.0;
 static unsigned long long s_aircraftLeadCount = 0;
 static Real s_aircraftLeadMax = 0.0f;
 static Real s_aircraftRadiusMax = 0.0f;
-static Int64 s_smoothPassTicks = 0;			// R1's blend and restore, together, over the run
+static Int64 s_smoothPassTicks = 0;			// R1's captures, blend and restore, together, over the run
 static unsigned long long s_smoothPasses = 0;
+// R1's pacing (notePacing, below): the spread of the picture's game time about the wall clock, [0] a
+// tick's state held until the next, [1] blended
+static double s_pacingSpread[2] = { 0.0, 0.0 };
+static unsigned long long s_pacingPictures = 0;
 
 W3DDisplay::~W3DDisplay()
 {
@@ -502,8 +506,11 @@ W3DDisplay::~W3DDisplay()
 			fprintf(stderr, "\n");
 		}
 		if (s_smoothPasses > 0 && getenv("ZH_SMOOTH_MOTION_STATS") != NULL)
-			fprintf(stderr, "smooth motion: blend and restore cost %.1f us a render frame over %llu frames\n",
+			fprintf(stderr, "smooth motion: capture, blend and restore cost %.1f us a render frame over %llu frames\n",
 				(double)s_smoothPassTicks * 1.0e6 / (double)Clock_Ticks_Per_Second() / (double)s_smoothPasses, s_smoothPasses);
+		if (s_pacingPictures > 0 && getenv("ZH_SMOOTH_MOTION_STATS") != NULL)
+			fprintf(stderr, "smooth motion: pacing over %llu pictures, shown game time about the wall clock spreads %.2f ms stepped, %.2f ms blended\n",
+				s_pacingPictures, sqrt(s_pacingSpread[0] / (double)s_pacingPictures), sqrt(s_pacingSpread[1] / (double)s_pacingPictures));
 		if (s_aircraftLeadCount > 0 && getenv("ZH_SMOOTH_MOTION_STATS") != NULL)
 			fprintf(stderr, "smooth motion: aircraft lead (logic position ahead of the drawn one): %llu samples, mean %.2f, max %.2f world units; the largest aircraft's bounding radius %.2f\n",
 				s_aircraftLeadCount, s_aircraftLeadSum / (double)s_aircraftLeadCount, s_aircraftLeadMax, s_aircraftRadiusMax);
@@ -847,9 +854,7 @@ static void sizeWindowToClient( Int mode, Int width, Int height )
 
 //=============================================================================
 // GlobalData carries the whole chain by default and -dx11post replaces it, "off" included.  FXAA is
-// always in the default: the Direct3D 11 swap chain takes one sample, and a multisampled scene
-// target would break the screen filters, which redirect the scene into a texture of the same size
-// and share the back buffer's depth with it.
+// always in the default, and the chain leaves it out by itself while the scene is multisampled.
 static void pushDirect3D11PostChain( void )
 {
 	// Classic graphics is the game's own picture, which is what -d3d9 draws: hard edged sprites.
@@ -1143,10 +1148,11 @@ void W3DDisplay::init( void )
 	// Multisampling has to be known before the device exists, and WW3D2 cannot read GlobalData, so
 	// the sample count is handed to it here.  msaaSamplesForLevel turns the stored index into 0, 2,
 	// 4, 8 or 16; the device degrades an unsupported one on its own.  While Direct3D 11 presents,
-	// the Direct3D 9 frame is never shown, so its samples would be memory spent on nothing; the
-	// Direct3D 11 frame is smoothed by the FXAA in its default chain instead.
+	// the Direct3D 9 frame is never shown, so its samples would be memory spent on nothing: the
+	// count goes to the Direct3D 11 scene instead, which drops its FXAA while it has samples.
 	DX8Wrapper::Set_Requested_MultiSample_Level( TheGlobalData->m_direct3D11
 		? 0 : msaaSamplesForLevel( TheGlobalData->m_msaaLevel ) );
+	Direct3D11_Set_Sample_Count( msaaSamplesForLevel( TheGlobalData->m_msaaLevel ) );
 	DX8Wrapper::Set_Requested_VSync( TheGlobalData->m_vsync != FALSE );
 	Direct3D11_Set_VSync( TheGlobalData->m_vsync != FALSE );
 	DX8Wrapper::Set_Requested_Monitor( chosenMonitor().device );
@@ -1241,8 +1247,9 @@ void W3DDisplay::init( void )
 	}
 #endif
 	// multisampling is opt-in with "-msaa" / "-msaa N" and silently degrades to whatever the
-	// device supports, so log what was actually granted
-	DEBUG_LOG(("W3DDisplay::init - multisampling: %ux\n", DX8Wrapper::Get_MultiSample_Level()));
+	// device supports, so log what was actually granted, by whichever device presents
+	DEBUG_LOG(("W3DDisplay::init - multisampling: %ux\n", Direct3D11_Present_Is_Enabled()
+		? Direct3D11_Sample_Count() : DX8Wrapper::Get_MultiSample_Level()));
 #if defined(_WIN32)
 	DEBUG_LOG(("W3DDisplay::init - vsync: %s\n", DX8Wrapper::Get_Requested_VSync() ? "on" : "off"));
 #else
@@ -2199,35 +2206,133 @@ extern UnsignedInt TheSceneDrawCalls;
 // R1, smooth motion (W3DSmoothMotion.h).  Three steps around the scene's render, and only the picture:
 //   smoothMotionBegin    before updateViews: the blend's alpha, and on a new tick each drawable's position
 //                        (the camera's lock follows the blended one)
-//   smoothMotionApply    after the particles, before the render targets and the scene: on a new tick each
-//                        model's transform is captured, then every model is shown blended
+//   smoothMotionApply    after the particles and the sync point, before the overlap window opens: on a new
+//                        tick each model's transform is captured, then every model is shown blended
 //   smoothMotionRestore  after the render loop: the logic transforms go back before picking and the logic
+// A tick reads live bones (ParticleUplinkCannonUpdate), so it never runs beside a blend: a picture that holds
+// one keeps its tick serial.  A picture with a tick beside it shows the state before that tick, which was due
+// when it was handed over, so it is a whole tick behind and blends nothing anyway; the pictures drawn again
+// beside it (phase 4) show the logic transforms as they stand.
 //=============================================================================
 bool TheSmoothMotionActive = false;
 float TheSmoothMotionAlpha = 1.0f;
 static UnsignedInt s_smoothPositionFrame = 0xFFFFFFFFu;
 static UnsignedInt s_smoothModelFrame = 0xFFFFFFFFu;
 static Bool s_smoothApplied = FALSE;
+static Bool s_smoothBehind = FALSE;		// this picture is a whole tick or more behind: nothing captured or blended
+static Bool s_pacingNoted = FALSE;			// ZH_SMOOTH_MOTION_STATS samples this pass's pictures, of s_pacingFrame
+static UnsignedInt s_pacingFrame = 0;
+
+/* Smooth motion's default: a blend only on a display that refreshes faster than the logic ticks.  At 60 Hz
+	 every refresh shows a new tick already, and the blend would only draw each one a tick late.  The
+	 adapter's mode is asked once. */
+static Bool displayOutpacesLogic()
+{
+	static Int refresh = -1;
+	if (refresh < 0)
+	{
+		D3DDISPLAYMODE mode;
+		memset(&mode, 0, sizeof(mode));
+		DX8Wrapper::_Get_D3D()->GetAdapterDisplayMode(WW3D::Get_Render_Device(), &mode);
+		refresh = (Int)mode.RefreshRate;
+		DEBUG_LOG(("smooth motion: the display refreshes at %d Hz, the logic ticks at %d: %s\n", refresh,
+			LOGICFRAMES_PER_SECOND, refresh > LOGICFRAMES_PER_SECOND ? "models drawn between ticks" : "no blend"));
+	}
+	return refresh > LOGICFRAMES_PER_SECOND;
+}
+
+/* With ZH_SMOOTH_MOTION_STATS, how evenly the picture's game time follows the wall clock: per window of 120
+	 pictures, the spread of shown game time about the straight line through it against the wall clock, with
+	 each tick's state held until the next (frame ticks) and blended (frame - 1 + fraction ticks).  A 60 Hz
+	 state held on a faster screen spreads a tick over the square root of 12, 4.8 ms.  The line, and not
+	 the wall clock itself, so a game the catch-up cap holds below full speed still measures; a gap over
+	 100 ms (the load, a pause, a hitch) starts the window again. */
+static void notePacing(UnsignedInt frame)
+{
+	const Int WINDOW = 120;
+	const Int SHOWN = 2;
+	// sums over the window, game time and wall time each counted from the window's start to keep them small
+	static double wallStart, wallLast, x, xx, shownStart[SHOWN], y[SHOWN], yy[SHOWN], xy[SHOWN];
+	static Int pictures = 0;
+	const double tickMs = 1000.0 / (double)LOGICFRAMES_PER_SECOND;
+	const double wallMs = (double)Clock_Ticks() * 1000.0 / (double)Clock_Ticks_Per_Second();
+	const double shown[SHOWN] = { (double)frame * tickMs,
+		((double)frame - 1.0 + (double)GameEngine_logicTickFraction()) * tickMs };
+	if (pictures > 0 && wallMs - wallLast > 100.0)
+		pictures = 0;
+	wallLast = wallMs;
+	if (pictures == 0)
+	{
+		wallStart = wallMs;
+		x = xx = 0.0;
+		for (Int i = 0; i < SHOWN; ++i)
+			y[i] = yy[i] = xy[i] = 0.0;
+	}
+	const double w = wallMs - wallStart;
+	x += w;
+	xx += w * w;
+	for (Int i = 0; i < SHOWN; ++i)
+	{
+		if (pictures == 0)
+			shownStart[i] = shown[i];
+		const double s = shown[i] - shownStart[i];
+		y[i] += s;
+		yy[i] += s * s;
+		xy[i] += w * s;
+	}
+	if (++pictures < WINDOW)
+		return;
+	const double n = (double)WINDOW;
+	const double sxx = xx - x * x / n;
+	for (Int i = 0; i < SHOWN; ++i)
+	{
+		const double sxy = xy[i] - x * y[i] / n;
+		const double syy = yy[i] - y[i] * y[i] / n;
+		s_pacingSpread[i] += syy - sxy * sxy / sxx;
+	}
+	s_pacingPictures += WINDOW;
+	pictures = 0;
+}
 
 static void smoothMotionBegin()
 {
-	// only -recordfps's pictures between two logic frames blend, from the frame before the first so
-	// that one is captured
-	TheSmoothMotionActive = !TheGlobalData->m_headless && GameEngine_videoBlends();
+	// on a display faster than the logic, unless -nosmoothmotion says no, at every -logicthread setting;
+	// -recordfps's pictures between two logic frames always blend, from the frame before the first so that
+	// one is captured
+	const Bool video = GameEngine_videoBlends();
+	TheSmoothMotionActive = !TheGlobalData->m_headless
+		&& ((TheGlobalData->m_smoothMotion && (TheGlobalData->m_smoothMotionAnyDisplay || displayOutpacesLogic()))
+			|| video);
 	TheSmoothMotionAlpha = TheSmoothMotionActive ? GameEngine_logicTickFraction() : 1.0f;
-	if (!TheSmoothMotionActive)
+	// A picture a whole tick or more behind the battle shows every model at its logic transform, so it
+	// captures and blends nothing, and a game that has fallen behind pays nothing for the blend.  The next
+	// picture under a tick captures, late in its tick if need be (the transforms are still that tick's),
+	// and a capture after a tick it missed snaps.  -recordfps pictures never skip: a frame's last one has
+	// an alpha of 1, and the frame before the first blended one has to be captured.
+	s_smoothBehind = TheSmoothMotionAlpha >= 1.0f && !video;
+	static const Bool stats = getenv("ZH_SMOOTH_MOTION_STATS") != NULL;
+	s_pacingNoted = stats && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() && !TheGameLogic->isGamePaused();
+	s_pacingFrame = TheGameClient->getFrame();
+	if (s_pacingNoted)
+		notePacing(s_pacingFrame);
+	if (!TheSmoothMotionActive || s_smoothBehind)
 		return;
 	const UnsignedInt frame = TheGameClient->getFrame();
 	if (frame == s_smoothPositionFrame)
 		return;
+	const Int64 passStart = Clock_Ticks();
 	s_smoothPositionFrame = frame;
 	for (Drawable *draw = TheGameClient->firstDrawable(); draw != NULL; draw = draw->getNextDrawable())
 		draw->smoothMotionCapturePosition(frame);
+	s_smoothPassTicks += Clock_Ticks() - passStart;
 }
 
 static void smoothMotionApply()
 {
 	if (!TheSmoothMotionActive)
+		return;
+	++s_smoothPasses;
+	if (s_smoothBehind)
 		return;
 	const Int64 passStart = Clock_Ticks();
 	const UnsignedInt frame = TheGameClient->getFrame();
@@ -2275,7 +2380,18 @@ static void smoothMotionApply()
 	}
 	s_smoothApplied = TRUE;
 	s_smoothPassTicks += Clock_Ticks() - passStart;
-	++s_smoothPasses;
+}
+
+/* Phase 4's picture drawn again beside the tick.  Only a pass with no blend held hands its tick over, so
+	 this picture, like the pass's first, is a whole tick behind and shows the logic transforms; it touches
+	 no drawable and no logic, and is only counted, for the cost and pacing figures. */
+static void smoothMotionDrawAgain()
+{
+	DEBUG_ASSERTCRASH(!s_smoothApplied, ("smooth motion: a blend held beside a tick"));
+	if (s_pacingNoted)
+		notePacing(s_pacingFrame);
+	if (TheSmoothMotionActive)
+		++s_smoothPasses;
 }
 
 static void smoothMotionRestore()
@@ -2345,6 +2461,10 @@ static void takeReadsForRender( Bool renders )
 		static_cast<W3DView *>( view )->recordPostDraw();
 	TheInGameUI->recordDraw();
 	TheTerrainRenderObject->takeWaypointsForRender();
+	// never the load screen's: no tick runs beside it, and with the shroud off nothing wipes what it would
+	// read before the partition's first update
+	if( !TheGlobalData->m_loadScreenRender )
+		TheTerrainRenderObject->takePropShroudForRender();
 	TheTerrainRenderObject->stepTrees();	// before the particles: a falling tree's FX makes systems
 #if ZH_MODERN_WATER
 	if (TheWaterRenderObj) TheWaterRenderObj->takeReadsForRender();
@@ -2364,8 +2484,9 @@ void W3DDisplay::draw( void )
 		// the particle update below is the only thing that retires a particle system, so skipping
 		// it with the draw stacked up every system the match made in the meantime, all of them to
 		// start emitting at once on return (TheSuperHackers #2709 reproduce it with Propaganda
-		// Towers).  Same bookkeeping as the lost-device branch below.
+		// Towers).  Same bookkeeping as the lost-device branch below, and the light pulses' with it.
 		TheParticleSystemManager->update();
+		stepDynamicLights();
 		return;
 	}
 #endif
@@ -2624,6 +2745,7 @@ AGAIN:
 				now = Clock_Milliseconds();		// the letterbox's fade runs on it
 				TheLookAtTranslator->scrollView();
 				primaryW3DView->updateCameraBesideTick();
+				smoothMotionDrawAgain();
 #ifdef DEBUG_LOGGING
 				tOverlapStart = Clock_Ticks();
 #endif
@@ -2651,6 +2773,9 @@ AGAIN:
 				TheParticleUpdateMS = w3dElapsedMS( tParticleStart, tParticleEnd );
 #endif
 				takeReadsForRender( rendersThisPass() );
+				// R1: after the particles read the logic bones (Lorenzen's note above) and the sync point
+				// flushed the models' conditions, before anything renders and before a tick may start
+				smoothMotionApply();
 				pictureStart = Clock_Ticks();
 #ifdef DEBUG_LOGGING
 				tOverlapStart = Clock_Ticks();
@@ -2658,11 +2783,13 @@ AGAIN:
 				// a draw from inside a tick (the load screen the map start paints) is the tick's own.  The
 				// tick runs beside a render that reads logic only through the sync point's copies, which
 				// rules out the scripted camera's loop of renders, the debug overlays and displays that walk
-				// the objects live, -cinema's own interface, smooth motion's restore and the load screen.
+				// the objects live, -cinema's own interface, a blend on the models (the tick reads live
+				// bones) and the load screen.
 				if( !TheGameLogic->isInGameLogicUpdate() )
 				{
-					Bool mayOverlap = !loopForCameraMovement && rendersThisPass() && !TheSmoothMotionActive
+					Bool mayOverlap = !loopForCameraMovement && rendersThisPass() && !s_smoothApplied
 						&& m_debugDisplayCallback == NULL && !TheGlobalData->m_loadScreenRender
+						&& !TheGlobalData->m_breakTheMovie && !TheGlobalData->m_disableRender	// takeReadsForRender took nothing
 						&& !TheGlobalData->m_showLanes && !CinemaDirector_hidesHud()
 						&& TheObserverCamera.getDrawnPaneCount() <= 1;
 #if defined(_DEBUG) || defined(_INTERNAL)
@@ -2675,15 +2802,12 @@ AGAIN:
 				}
 			}
 
-			// R1: after the particles read the logic bones (Lorenzen's note above), before anything renders.
-			smoothMotionApply();
-
 			// After the smooth motion, so a lamp's light sits where its model is drawn this frame.
 			if (primaryW3DView && primaryW3DView->get3DCamera())
 				W3DModelDraw::lightHeadlights(primaryW3DView->get3DCamera()->Get_Position());
 
 			// Once a frame and before any view draws, so a script's blur or black and white filter
-			// does not freeze the haze the way pushing it from the default filter did.
+			// does not cost the haze its levels and shroud the way pushing it from the default filter did.
 			W3DShaderManager::pushProtoHaze();
 
 			if (TheWaterRenderObj)
@@ -2709,9 +2833,11 @@ AGAIN:
 			// read the client transform while it is still valid.  There is no updateViews here and
 			// nothing to draw the result of, so a frame's worth of stale transforms costs nothing.
 			// Not beside a tick (phase 4's pictures drawn again), which may be making systems.
+			// The light pulses fade and park only in the render as well (RTS3DScene::stepDynamicLights).
 			//
 			if (!drawAgain)
 				TheParticleSystemManager->update();
+			stepDynamicLights();
 		}
 
 		Debug_Statistics::End_Statistics();	//record number of polygons rendered in RenderTargetTextures.
@@ -2937,6 +3063,12 @@ AGAIN:
 				}
 			}
 		}
+		else
+		{
+			// A replay's fast forward and a seek draw one frame a game second, and only the draw
+			// faded and parked the light pulses, so the frame after a seek was lit by its muzzle flashes.
+			stepDynamicLights();
+		}
 #ifdef DEBUG_LOGGING
 		if (tOverlapStart)
 			TheOverlapWindowMS += w3dElapsedMS( tOverlapStart, Clock_Ticks() );
@@ -3071,6 +3203,11 @@ void W3DDisplay::createLightPulse( const Coord3D *pos, const RGBColor *color,
 	//theDynamicLight->setDonut(donut);
 	// (gth) CNC3 enable far attenuation.  C&C3 defaults to disabled.  Must enable to match Generals. MW 8-06-03
 	theDynamicLight->Set_Flag(LightClass::FAR_ATTENUATION,true);
+}
+
+void W3DDisplay::stepDynamicLights( void )
+{
+	m_3DScene->stepDynamicLights();
 }
 
 void W3DDisplay::toggleLetterBox(void)

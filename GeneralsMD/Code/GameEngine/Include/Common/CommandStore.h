@@ -61,6 +61,7 @@ public:
 
 	const CommandButton *getCommandButtons( void ) { return m_commandButtons; }
 	CommandButton *friend_getCommandButtons( void ) { return m_commandButtons; }	///< for ControlBar::postProcessCommands' image cache
+	CommandSet *friend_getCommandSets( void ) { return m_commandSets; }				///< for ControlBar::initWindows' count of slots
 
 	static void parseCommandButtonDefinition( INI *ini );
 	static void parseCommandSetDefinition( INI *ini );

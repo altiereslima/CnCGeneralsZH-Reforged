@@ -200,6 +200,13 @@ static bool operation_expression(FixedFunctionValue operation, const std::string
 static const char * const ALPHA_LEVEL =
 	"    float alpha_level = floor(current.a * 255.0 + 0.5);\n";
 
+// The sharpened alpha in place of the clip, for the two tests that keep the high alphas.
+static bool alpha_to_coverage(const PixelPipelineDescription & pipeline)
+{
+	return pipeline.AlphaToCoverage && pipeline.AlphaTestEnabled
+		&& (pipeline.AlphaFunction == FF_CMP_GREATER || pipeline.AlphaFunction == FF_CMP_GREATEREQUAL);
+}
+
 static bool alpha_test_expression(FixedFunctionValue function, std::string & expression)
 {
 	switch (function) {
@@ -566,7 +573,16 @@ bool CombinerShader_Append_Pixel_Pipeline(const PixelPipelineDescription & pipel
 		if (!alpha_test_expression(pipeline.AlphaFunction, clip)) {
 			return false;
 		}
-		if (!clip.empty()) {
+		if (alpha_to_coverage(pipeline)) {
+			// The edge half a level past the reference on the side the test keeps, so a strict and
+			// an inclusive test part where their clips do.  Nothing is clipped: no coverage is no
+			// sample, depth included.
+			hlsl += (pipeline.AlphaFunction == FF_CMP_GREATER)
+				? "    float coverage_edge = (AlphaReference.x + 0.5) / 255.0;\n"
+				: "    float coverage_edge = (AlphaReference.x - 0.5) / 255.0;\n";
+			hlsl += "    current.a = saturate((current.a - coverage_edge) / max(fwidth(current.a), 0.0001) + 0.5);\n";
+		}
+		else if (!clip.empty()) {
 			hlsl += ALPHA_LEVEL;
 			hlsl += "    " + clip;
 		}
@@ -577,10 +593,11 @@ bool CombinerShader_Append_Pixel_Pipeline(const PixelPipelineDescription & pipel
 std::string CombinerShader_Pipeline_Key(const PixelPipelineDescription & pipeline)
 {
 	char field[32];
-	snprintf(field, sizeof(field), ":A%u,%lu,F%u",
+	snprintf(field, sizeof(field), ":A%u,%lu,F%u%s",
 		pipeline.AlphaTestEnabled ? 1u : 0u,
 		pipeline.AlphaTestEnabled ? pipeline.AlphaFunction : 0ul,
-		pipeline.FogEnabled ? 1u : 0u);
+		pipeline.FogEnabled ? 1u : 0u,
+		alpha_to_coverage(pipeline) ? ",C" : "");
 	return field;
 }
 

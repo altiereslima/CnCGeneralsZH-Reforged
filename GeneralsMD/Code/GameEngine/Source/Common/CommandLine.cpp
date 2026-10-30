@@ -768,6 +768,16 @@ Int parseBuildMapCache(char *args[], int)
 	return 1;
 }
 
+Int parseFile(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		TheWritableGlobalData->m_initialFile = args[1];
+		ConvertShortMapPathToLongMapPath(TheWritableGlobalData->m_initialFile);
+	}
+	return 2;
+}
+
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 Int parseDisplayDebug(char *args[], int)
@@ -777,16 +787,6 @@ Int parseDisplayDebug(char *args[], int)
 		TheWritableGlobalData->m_displayDebug = TRUE;
 	}
 	return 1;
-}
-
-Int parseFile(char *args[], int num)
-{
-	if (TheWritableGlobalData && num > 1)
-	{
-		TheWritableGlobalData->m_initialFile = args[1];
-		ConvertShortMapPathToLongMapPath(TheWritableGlobalData->m_initialFile);
-	}
-	return 2;
 }
 
 
@@ -1074,6 +1074,29 @@ Int parseNoVolumetricSmoke(char *args[], int)
 	if (TheWritableGlobalData)
 	{
 		TheWritableGlobalData->m_volumetricSmokeShadows = FALSE;
+	}
+	return 1;
+}
+
+/* -nosmoothmotion: every model drawn where the last logic tick left it, a tick's state held until the
+	 next, as on a 60 Hz screen.  -recordfps still blends its in-between pictures. */
+Int parseNoSmoothMotion(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_smoothMotion = FALSE;
+	}
+	return 1;
+}
+
+/* -smoothmotion: models drawn between their last two logic states whatever the display's refresh rate,
+	 for a 60 Hz screen rendering uncapped or a picture of the blend on any machine. */
+Int parseSmoothMotion(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_smoothMotion = TRUE;
+		TheWritableGlobalData->m_smoothMotionAnyDisplay = TRUE;
 	}
 	return 1;
 }
@@ -2874,6 +2897,8 @@ static CommandLineParam params[] =
 	{ "-shadowmapboth", parseShadowMapBoth },
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-novolumetricsmoke", parseNoVolumetricSmoke },
+	{ "-nosmoothmotion", parseNoSmoothMotion },
+	{ "-smoothmotion", parseSmoothMotion },
 	{ "-nosmokefirelight", parseNoSmokeFireLight },
 	{ "-lighting", parseLightingStyle },
 	{ "-quickstart", parseQuickStart },
@@ -2928,7 +2953,6 @@ static CommandLineParam params[] =
 	{ "-jabber", parseJabber },
 	{ "-munkee", parseMunkee },
 	{ "-displayDebug", parseDisplayDebug },
-	{ "-file", parseFile },
   
   { "-preloadEverything", parsePreloadEverything },
 	{ "-logAssets", parseLogAssets },
@@ -3026,6 +3050,9 @@ static CommandLineParam params[] =
 	{ "-takeover", parseTakeover },
 	{ "-replay", parseReplay },
 	{ "-loadsave", parseLoadSave },
+	// EA kept -file to Debug and Internal, so a Release run had no way into a campaign mission
+	// without clicking through the shell
+	{ "-file", parseFile },
 	{ "-netgame", parseNetGame },
 	{ "-netslot", parseNetSlot },
 	{ "-netai", parseNetAI },

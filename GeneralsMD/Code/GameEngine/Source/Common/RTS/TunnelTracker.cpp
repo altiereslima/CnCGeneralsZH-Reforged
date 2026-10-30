@@ -247,7 +247,7 @@ void TunnelTracker::onTunnelDestroyed( const Object *deadTunnel )
 	}
 	else
 	{
-		// The mouth named here is the one a trip with nowhere quiet to surface comes out of, so a
+		// The mouth named here is the one a trip with nowhere else to surface comes out of, so a
 		// finished one wins over a foundation or a rebuild out of a hole; with nothing but building
 		// sites left, the first of them.  The loop below copes with a null tunnel.
 		Object *validTunnel = NULL;
@@ -277,19 +277,18 @@ void TunnelTracker::onTunnelDestroyed( const Object *deadTunnel )
 }
 
 // ------------------------------------------------------------------------
-// A mouth that took a hit this recently is not one to send anybody through: they would come out
-// into whatever is shooting at it.
-static const UnsignedInt TUNNEL_UNDER_FIRE_FRAMES = 2 * LOGICFRAMES_PER_SECOND;
-
 // With a walker, a mouth that is on the other side of a cliff or a river from reachPos (pos when
 // none is given) is no mouth at all.  The question is asked in terrain zones, which read a structure
 // as the ground under it: the mouth is one, and a base wall is not what keeps a walk from getting
 // somewhere.
-Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos, const Object *walker, const Coord3D *reachPos ) const
+// A mouth under fire counts like any other.  Skipping one hit in the last two seconds was meant to
+// keep anybody from surfacing into the fire, and a Sneak Attack is a mouth that is under fire for as
+// long as it stands: the army came up at a quiet one across the map, or at home, and walked the
+// rest in a line in front of the enemy (tunnelunderfire.txt).
+Object *TunnelTracker::findTunnelNear( const Coord3D *pos, const Object *walker, const Coord3D *reachPos ) const
 {
 	if( reachPos == NULL )
 		reachPos = pos;
-	const UnsignedInt now = TheGameLogic->getFrame();
 	Object *nearest = NULL;
 	Real nearestSqr = 0.0f;
 	for( std::list<ObjectID>::const_iterator it = m_tunnelIDs.begin(); it != m_tunnelIDs.end(); ++it )
@@ -299,10 +298,6 @@ Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos, const Object *wa
 			continue;
 
 		if( !isFinishedTunnel( tunnel ) )
-			continue;
-
-		// the stamp starts at 0xffffffff, which the sum wraps to just under the window
-		if( tunnel->getBodyModule()->getLastDamageTimestamp() + TUNNEL_UNDER_FIRE_FRAMES > now )
 			continue;
 
 		const Real distSqr = ThePartitionManager->getDistanceSquared( tunnel, pos, FROM_CENTER_2D );
@@ -361,7 +356,7 @@ Int TunnelTracker::getResidentCount() const
 		tunnels it was meant to use stood on both sides of it.  Otherwise the legs to and from the tunnels
 		are straight lines, and `walk` is the caller's to measure: the straight line for a move order, the
 		length of the path for a wave that follows one.  The trip leaves by the same far mouth
-		(AIUpdateInterface::update asks findQuietTunnelNear the same question).
+		(AIUpdateInterface::update asks findTunnelNear the same question).
 		ponytail: straight lines, not path lengths; a tunnel across a river the walk has to go round
 		looks no better than one across open ground.  A path search when that matters.  The walker is
 		one member of a group, so a mixed group is judged by that member's feet.
@@ -375,8 +370,8 @@ Object *TunnelTracker::findTunnelShortcut( const Object *walker, const Coord3D *
 	if( tunnels == NULL || (Int)tunnels->getContainCount() >= tunnels->getContainMax() )
 		return NULL;
 
-	Object *entrance = tunnels->findQuietTunnelNear( from, walker, walker->getPosition() );
-	Object *exit = tunnels->findQuietTunnelNear( to, walker );
+	Object *entrance = tunnels->findTunnelNear( from, walker, walker->getPosition() );
+	Object *exit = tunnels->findTunnelNear( to, walker );
 	if( entrance == NULL || exit == NULL || exit == entrance )
 		return NULL;
 

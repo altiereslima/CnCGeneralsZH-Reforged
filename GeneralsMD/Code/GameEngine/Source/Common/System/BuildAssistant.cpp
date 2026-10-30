@@ -420,7 +420,7 @@ Object *BuildAssistant::buildObjectNow( Object *constructorObject, const ThingTe
 		if( what->isKindOf( KINDOF_STRUCTURE ) )
 			startingStatus.set( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_UNDER_CONSTRUCTION ) );
 
-		Object *obj = TheThingFactory->newObject( what, owningPlayer->getDefaultTeam(), startingStatus );
+		Object *obj = TheThingFactory->newObject( what, owningPlayer->getDefaultTeam(), startingStatus, constructorObject );
 		obj->setProducer(constructorObject);
 
 		// place on terrain surface

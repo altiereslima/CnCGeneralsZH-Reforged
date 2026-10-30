@@ -58,8 +58,11 @@ TEST(map_ini_refuses_a_block_its_store_cannot_put_back)
 	remove( TEST_INI );
 }
 
-/* A weapon the first map edits goes back to the game's values, and one it made from nothing is gone,
-	 so the second map that defines the same name builds it from a new weapon's defaults. */
+/* A map's edit of an existing weapon is dropped, as retail dropped it: EA parsed the block into a
+	 copy nothing pointed at (WeaponStore::newOverride in the original source), and the campaigns were
+	 tuned that way.  Generals USA04's map.ini asks for a 1000 radius CarpetBombWeapon and its cutscene
+	 wiped the whole map while the edit applied.  A weapon the map made from nothing is gone after the
+	 match, so the second map that defines the same name builds it from a new weapon's defaults. */
 TEST(map_ini_weapons_go_back_after_the_match)
 {
 	CHECK( bootOnce() );
@@ -89,7 +92,7 @@ TEST(map_ini_weapons_go_back_after_the_match)
 	CHECK( gun != NULL );
 	if( gun == NULL )
 		return;
-	CHECK_NEAR( gun->getPrimaryDamage( noBonus ), 999.0f, 0.01f );
+	CHECK_NEAR( gun->getPrimaryDamage( noBonus ), 60.0f, 0.01f );
 	CHECK( TheWeaponStore->findWeaponTemplate( "MapOnlyProbeGun" ) != NULL );
 
 	TheWeaponStore->reset();

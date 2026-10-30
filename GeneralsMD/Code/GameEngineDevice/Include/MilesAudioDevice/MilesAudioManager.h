@@ -93,16 +93,13 @@ struct PlayingAudio
 	Bool m_tracked;
 	Coord3D m_lastPosition;
 	Coord3D m_velocity;
-	/// A sound that started late by its distance stops late by it too: the stop is held here, in
-	/// logic milliseconds still to wait, and m_stopHeld stays set once it has gone through.
-	Bool m_stopHeld;
-	Real m_stopInMs;
-	/// A world sound behind a hill or a building (MilesAudioManager::updateOcclusion): how muffled it
-	/// is now, 0 to 1, what the last look along the line said it should be, and EA's off-screen low pass
-	/// it was started with, which the muffle never goes under.
-	Real m_occlusion;
-	Real m_occlusionTarget;
+	/// EA's off-screen low pass (LowPassCutoff), which the sound was started with.
 	Real m_offscreenOcclusion;
+	/// The Aurora's pass (MilesAudioManager::updateSonicPass): the microphone's distance last pass,
+	/// whether that was closing, and the logic frame the jet last flew at its attack speed.
+	Real m_passDistance;
+	Bool m_passClosing;
+	UnsignedInt m_supersonicAt;
 
 	PlayingAudio() :
 		m_type(PAT_INVALID),
@@ -116,11 +113,10 @@ struct PlayingAudio
 		m_stream(0),
 		m_framesFaded(0.0f),
 		m_tracked(false),
-		m_stopHeld(false),
-		m_stopInMs(0.0f),
-		m_occlusion(0.0f),
-		m_occlusionTarget(0.0f),
-		m_offscreenOcclusion(0.0f)
+		m_offscreenOcclusion(0.0f),
+		m_passDistance(0.0f),
+		m_passClosing(false),
+		m_supersonicAt(0)
 	{
 		m_lastPosition.zero();
 		m_velocity.zero();
@@ -271,13 +267,7 @@ class MilesAudioManager : public AudioManager
 		void logMix( void );
 		void noteReach( const PlayingAudio *playing, const Coord3D *pos ) const;
 		void setSampleDistances( H3DSAMPLE sample3D, const AudioEventRTS *event ) const;
-
-		// Occlusion: the line from the microphone to a world sound, through the ground and the buildings.
-		Real lookForOcclusion( const Coord3D *pos ) const;
-		void updateOcclusion( PlayingAudio *playing, const Coord3D *pos, Bool look );
 		void applyOcclusion( PlayingAudio *playing );
-		void buildBlockers( void );
-		Real getBlockerHeight( Real x, Real y ) const;
 
 		virtual void adjustVolumeOfPlayingAudio(AsciiString eventName, Real newVolume);
 
@@ -292,10 +282,10 @@ class MilesAudioManager : public AudioManager
 		void adjustRequest( AudioRequest *req );
 		void advanceAudioClock( void );
 		void trackVelocity( PlayingAudio *playing, const Coord3D *pos );
-		void setRoomFromMap( void );
+		void updateSonicPass( PlayingAudio *playing, const Coord3D *pos );
+		void chooseAmbienceBed( void );
 		void applyLegacySound( void );
 		void updateAmbienceBed( void );
-		void duckForBlast( AudioEventRTS *event, H3DSAMPLE sample3D );
 		Bool checkForSample( AudioRequest *req );
 
 		virtual void setHardwareAccelerated(Bool accel);
@@ -384,14 +374,13 @@ class MilesAudioManager : public AudioManager
 		UnsignedInt m_clockFrame;
 		Real m_clockElapsedMs;
 		UnsignedInt m_clockMovedAt;	///< Clock_Milliseconds when the logic clock last moved on
-		AsciiString m_roomMap;	///< the map setRoomFromMap last set the room for
+		AsciiString m_bedMap;	///< the map chooseAmbienceBed last chose a bed for
 		Bool m_legacySound;	///< what applyLegacySound last put into m_audioSettings
-		Real m_roomAbsorption;	///< the air's absorption distance the room asks for, before the range scale
-		Real m_airScale;	///< the range scale the backend's air was last given with, 0 to give it again
+		UnsignedInt m_boomedAt;	///< the logic frame of the last sonic boom (updateSonicPass)
 		AudioSettings m_engineSettings;	///< AudioSettings.ini as init read it, for Legacy sound turned off again
-		Bool m_askingOnArrival;	///< checkForSample is asking canPlayNow about a sound that waited out its distance
+		Bool m_askingOnArrival;	///< checkForSample is asking canPlayNow about a sound that waited out its Delay
 
-		/// The map's ambience bed (AmbienceBed* in AudioSettings.h): the event setRoomFromMap chose, the
+		/// The map's ambience bed (AmbienceBed* in AudioSettings.h): the event chooseAmbienceBed chose, the
 		/// handle of the one playing, and the logic frame it was last started at.
 		AsciiString m_bedEvent;
 		AudioHandle m_bedHandle;
@@ -470,9 +459,8 @@ class MilesAudioManager : public AudioManager
 		/// What the mix did since the last AUDIO MIX line, and the most 3D voices heard at once.
 		struct MixCounts
 		{
-			Int started3D, merged, stolen, overBudget, repliesLet, repliesHeld, looks;
+			Int started3D, merged, stolen, overBudget, repliesLet, repliesHeld;
 			UnsignedInt peak3D, peakBattle;
-			Real occludedPeak;
 			// the AUDIO REACH line (noteReach): battle sounds started in the middle of the screen, on the
 			// rest of it and off it, their summed distance, gain in dB and cutoff in Hz
 			Int reachCount[3];
@@ -480,12 +468,6 @@ class MilesAudioManager : public AudioManager
 		};
 		mutable MixCounts m_mixCounts;
 		UnsignedInt m_mixLoggedAt;
-		UnsignedInt m_occlusionCursor;
-		/// The tallest roof over each cell, for occlusion, rebuilt now and then from the drawables.
-		std::vector<Real> m_blockers;
-		Int m_blockerColumns;
-		Int m_blockerRows;
-		UnsignedInt m_blockersBuiltAt;
 
 		AudioFileCache *m_audioCache;
 		PlayingAudio *m_binkHandle;

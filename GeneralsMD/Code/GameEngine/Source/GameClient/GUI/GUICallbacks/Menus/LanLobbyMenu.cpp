@@ -619,7 +619,19 @@ void LanLobbyMenuUpdate( WindowLayout * layout, void *userData)
 	if (LANSocketErrorDetected == TRUE) {
 		LANSocketErrorDetected = FALSE;
 		DEBUG_LOG(("SOCKET ERROR!  BAILING!\n"));
-		MessageBoxOk(TheGameText->fetch("GUI:NetworkError"), TheGameText->fetch("GUI:SocketError"), NULL);
+		// The socket opened, but the system put it on another adapter than the LAN IP chosen (issue 146).
+		const UnsignedInt redirectedIP = TheLAN->GetRedirectedIP();
+		if (redirectedIP)
+		{
+			const UnsignedInt askedIP = TheLAN->GetLocalIP();
+			UnicodeString asked, bound, text;
+			asked.format(u"%d.%d.%d.%d", askedIP >> 24, (askedIP >> 16) & 0xff, (askedIP >> 8) & 0xff, askedIP & 0xff);
+			bound.format(u"%d.%d.%d.%d", redirectedIP >> 24, (redirectedIP >> 16) & 0xff, (redirectedIP >> 8) & 0xff, redirectedIP & 0xff);
+			text.format(TheGameText->fetch("GUI:SocketRedirected").str(), asked.str(), bound.str());
+			MessageBoxOk(TheGameText->fetch("GUI:NetworkError"), text, NULL);
+		}
+		else
+			MessageBoxOk(TheGameText->fetch("GUI:NetworkError"), TheGameText->fetch("GUI:SocketError"), NULL);
 
 		// we have a socket problem, back out to the main menu.
 		TheWindowManager->winSendSystemMsg(buttonBack->winGetParent(), GBM_SELECTED,

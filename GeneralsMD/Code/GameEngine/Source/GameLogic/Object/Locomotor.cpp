@@ -57,7 +57,7 @@
 static const Real DONUT_TIME_DELAY_SECONDS=2.5f;
 static const Real DONUT_DISTANCE=4.0*PATHFIND_CELL_SIZE_F;
 
-// Ground vehicles (Locomotor::isGroundVehicle). Speeds are per frame, as everywhere in this file;
+// The vehicle drive, which only a taxiing jet uses now (Locomotor::isGroundVehicle). Speeds are per frame, as everywhere in this file;
 // the frame counts were tuned at the retail rate.
 static const Real VEHICLE_ACCEL_EASE_FRAMES = ConvertRetailFrames(6.0f);		// frames for the pull along the nose to build up to full Acceleration
 static const Real VEHICLE_BRAKE_EASE_FRAMES = ConvertRetailFrames(3.0f);		// and to full braking, which a driver stamps on harder
@@ -1207,13 +1207,19 @@ Bool Locomotor::isJet(const Object* obj) const
 //-------------------------------------------------------------------------------------------------
 Bool Locomotor::isGroundVehicle(const Object* obj) const
 {
+	/* Only a jet taxiing on its nose wheel (BasicJetTaxiLocomotor in BalanceReforged.ini), with the
+		 precision its taxi asks for; a landed helicopter keeps EA's drive. Tanks, cars and bikes drive
+		 EA's treads and wheels again, so they start, stop, turn and cross the map in the time they took
+		 in Zero Hour: players found the eased drive slow. What made it look driven is now drawn only
+		 (Drawable::calcPhysicsXformGround). */
+	return obj->isKindOf(KINDOF_AIRCRAFT) && m_template->m_appearance == LOCO_WHEELS_FOUR;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool Locomotor::isGroundDrive() const
+{
 	LocomotorAppearance appearance = m_template->m_appearance;
-	// a jet taxis on its nose wheel (BasicJetTaxiLocomotor in BalanceReforged.ini), with the precision
-	// its taxi asks for; a landed helicopter keeps EA's drive
-	if (obj->isKindOf(KINDOF_AIRCRAFT))
-		return appearance == LOCO_WHEELS_FOUR;
-	return (appearance == LOCO_TREADS || appearance == LOCO_WHEELS_FOUR || appearance == LOCO_MOTORCYCLE)
-		&& !getFlag(ULTRA_ACCURATE);	// a dozer or a POW truck lining up on its spot keeps EA's drive
+	return appearance == LOCO_TREADS || appearance == LOCO_WHEELS_FOUR || appearance == LOCO_MOTORCYCLE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1403,7 +1409,9 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& chase
 	/* A vehicle slides onto its goal on the frames physics leaves its position alone, which is this
 		 frame's flag. Last frame's put the slide one frame late: the frame braking began moved nothing,
 		 and the first frame of the next order both slid and drove, up to twice top speed. */
-	if (groundVehicle)
+	// a helicopter landed on treads is left as it was
+	Bool groundDrive = isGroundDrive() && (groundVehicle || !obj->isKindOf(KINDOF_AIRCRAFT));
+	if (groundDrive)
 		wasBraking = getFlag(IS_BRAKING);
 
 	if (wasBraking)
@@ -1448,6 +1456,9 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& chase
 				// a helicopter's speed need not lie along its nose
 				const Coord3D *v = physics->getVelocity();
 				Real vel = isHelicopter(obj) ? sqrt(sqr(v->x) + sqr(v->y)) : fabs(physics->getForwardSpeed2D());
+				// EA's treads and wheels slide at the speed they drive on, EA's own
+				if (groundDrive && !groundVehicle)
+					vel = fabs(physics->getRetailForwardSpeed2D());
 				// a vehicle's planned stop has already slowed it; a third of a cell a frame would put the speed back
 				Real minVel = groundVehicle ? VEHICLE_MIN_SLIDE : MIN_VEL;
 				if (vel < minVel)
@@ -1509,7 +1520,9 @@ void Locomotor::moveTowardsPositionTreads(Object* obj, PhysicsBehavior *physics,
 //	if (speed < m_minTurnSpeed)
 //		speed = m_minTurnSpeed;
 
-	Real actualSpeed = physics->getForwardSpeed2D();
+	// EA's measure, so a tank keeps the diagonal pace it had in Zero Hour (calcRetailForwardSpeed); a
+	// helicopter landed on treads is left as it was
+	Real actualSpeed = obj->isKindOf(KINDOF_AIRCRAFT) ? physics->getForwardSpeed2D() : physics->getRetailForwardSpeed2D();
 	Real slowDownTime = actualSpeed / getBraking();
 	Real slowDownDist = (actualSpeed/1.50f) * slowDownTime;	
 
@@ -1620,7 +1633,8 @@ void Locomotor::moveTowardsPositionWheels(Object* obj, PhysicsBehavior *physics,
 	}
 
 
-	Real actualSpeed = physics->getForwardSpeed2D();
+	// EA's measure, so a car keeps the diagonal pace it had in Zero Hour (calcRetailForwardSpeed)
+	Real actualSpeed = obj->isKindOf(KINDOF_AIRCRAFT) ? physics->getForwardSpeed2D() : physics->getRetailForwardSpeed2D();
 	Bool do3pointTurn = false;
 #if 1
 	if (actualSpeed==0.0f) {
@@ -1924,7 +1938,9 @@ void Locomotor::turnVehicle(Object* obj, PhysicsBehavior *physics, Real yaw)
 
 //-------------------------------------------------------------------------------------------------
 /*
-	A tank, car or bike under its own power. EA's treads and wheels set the speed they wanted on the
+	A jet taxiing on its nose wheel (isGroundVehicle). It drove every tank, car and bike from 2026-10-03
+	until players found them slow against Zero Hour's; they are back on EA's drives, written up here
+	for what they do differently. EA's treads and wheels set the speed they wanted on the
 	next frame (Acceleration and Braking were 1000, a thirtieth of a second from rest to top speed),
 	cut it to 60% on every frame near a waypoint that was not dead ahead, pivoted a tank on the spot
 	at full TurnRate for anything past 45 degrees, and turned a car round in less than its own length.

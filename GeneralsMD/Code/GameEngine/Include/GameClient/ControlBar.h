@@ -513,6 +513,18 @@ Bool ControlBar_commandPlaces( const Int *types, const Int *groups, const Int *p
 	* when free, anything else to the first empty one. */
 void ControlBar_fitCommandSlots( const Int *types, const Bool *windowed, Int count, Int *shown );
 
+enum
+{
+	COMMAND_GRID_NARROW_SLOTS = 14,		///< ButtonCommand01 to 14, the bar every set of Zero Hour's fits
+	COMMAND_GRID_WIDE_STEP = 92,			///< one column of two cells, at the 1920x1080 the bar was drawn at
+};
+
+/** TRUE when one command set, `types` as ControlBar_fitCommandSlots takes them, shows more buttons
+	* than the fourteen-slot grid has windows for, so ControlBar_fitCommandSlots would have to drop
+	* some: a mod drawn for ControlBar Pro's eighteen (Contra's edit).  A promotion screen's set, the
+	* only one of Zero Hour's with a slot past 14, is laid out on its own screen and never counts. */
+Bool ControlBar_needsWideCommandGrid( const Int *types, Int count );
+
 /** Slot 12 (0-based 11) when the set already has Attack Move and that hole is empty: left of Stop,
 	* under Attack Move. An object ControlBar_forceFires names takes 12 too, or 11 above it when 12 is
 	* taken (Gattling Cannon's mines, Stinger Site's camo net, Fire Base's Sell). -1 when neither
@@ -1056,6 +1068,11 @@ public:
 		* set - because it remembers both the authored rectangle and the one it last handed out. */
 	void layoutPanels( void );
 
+	/** TRUE when the loaded command sets need all eighteen command windows and our ControlBar.wnd
+		* is the layout: the grid is then nine columns, one more at each end of the plate, and the
+		* scheme draws its painting's <name>Wide copy.  Fixed when the windows are looked up. */
+	Bool isCommandGridWide( void ) const { return m_commandGridWide; }
+
 	/// top edge of the highest visible window the bar owns, and where MoneyDisplay is; see -uidrill
 	void forEachPlacedWindow( Int *topOut, Int *moneyOut );
 	ControlBarContext getCurrentContext( void ) const { return m_currContext; }	///< for -uidrill's log
@@ -1222,6 +1239,7 @@ protected:
 
 	IRegion2D m_panelRect[ CB_PANEL_COUNT ];				///< screen rect of each panel, filled by layoutPanels()
 	ICoord2D m_panelOrigin;													///< where the frame was put, so the plates can follow it
+	Bool m_commandGridWide;												///< see isCommandGridWide
 	Bool m_UIDirty;																///< the context UI must be re-evaluated
 
 	ControlBarSchemeManager *m_controlBarSchemeManager;		///< The Scheme singleton

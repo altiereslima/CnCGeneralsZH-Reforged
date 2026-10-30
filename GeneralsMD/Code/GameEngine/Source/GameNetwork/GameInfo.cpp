@@ -533,7 +533,7 @@ void GameInfo::init( void )
 
 void GameInfo::reset( void )
 {
-	m_crcInterval = NET_CRC_INTERVAL;
+	setCRCInterval(NET_CRC_INTERVAL);
 	m_inGame = false;
 	m_inProgress = false;
 	m_gameID = 0;

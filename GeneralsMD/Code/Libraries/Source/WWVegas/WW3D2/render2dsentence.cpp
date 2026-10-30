@@ -142,6 +142,20 @@ Render2DSentenceClass::Reset_Polys (void)
 void
 Render2DSentenceClass::Reset (void)
 {
+	Reset_Keeping_Textures ();
+	Release_Spare_Textures ();
+	return ;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////
+//
+//	Reset_Keeping_Textures
+//
+////////////////////////////////////////////////////////////////////////////////////
+void
+Render2DSentenceClass::Reset_Keeping_Textures (void)
+{
 	//
 	//	Make sure we unlock the current surface (if necessary)
 	//
@@ -156,9 +170,18 @@ Render2DSentenceClass::Reset (void)
 	REF_PTR_RELEASE (CurSurface);
 
 	//
-	//	Free each renderer
+	//	Free each renderer, keeping its texture.  Text set again (a clock, a counter, the corner
+	//	readout's frame number every logic frame) mostly wants textures of the same size, and
+	//	Build_Textures fills one of these rather than making a new one: a made one was a Direct3D 9
+	//	texture and, on the Direct3D 11 frame, a new copy of it, most of what drawing a string cost.
+	//	Each surface has its own renderer and texture, so none is kept twice.
 	//
 	while (Renderers.Count () > 0) {
+		TextureClass *texture = Renderers[0].Renderer->Peek_Texture ();
+		if (texture != NULL) {
+			texture->Add_Ref ();
+			SpareTextures.Add (texture);
+		}
 		delete Renderers[0].Renderer;
 		Renderers.Delete(0);
 	}
@@ -384,16 +407,25 @@ Render2DSentenceClass::Build_Textures (void)
 		curr_surface->Get_Description (desc);
 		
 		//
-		//	Create the new texture
+		//	A texture the sentence's last text left (Reset) when one is this size, or a new one.  The
+		//	copy below writes the whole of it, so nothing of the old text survives.
 		//
-		TextureClass *new_texture = W3DNEW TextureClass (desc.Width, desc.Width, WW3D_FORMAT_A4R4G4B4, MIP_LEVELS_1);
+		TextureClass *new_texture = NULL;
+		for (int spare = 0; spare < SpareTextures.Count () && new_texture == NULL; spare ++) {
+			if (SpareTextures[spare]->Get_Width () == (int)desc.Width) {
+				new_texture = SpareTextures[spare];
+				SpareTextures.Delete (spare);
+			}
+		}
+		if (new_texture == NULL) {
+			new_texture = W3DNEW TextureClass (desc.Width, desc.Width, WW3D_FORMAT_A4R4G4B4, MIP_LEVELS_1);
+			new_texture->Get_Filter().Set_U_Addr_Mode(TextureFilterClass::TEXTURE_ADDRESS_CLAMP);
+			new_texture->Get_Filter().Set_V_Addr_Mode(TextureFilterClass::TEXTURE_ADDRESS_CLAMP);
+			new_texture->Get_Filter().Set_Min_Filter(TextureFilterClass::FILTER_TYPE_NONE);
+			new_texture->Get_Filter().Set_Mag_Filter(TextureFilterClass::FILTER_TYPE_NONE);
+			new_texture->Get_Filter().Set_Mip_Mapping(TextureFilterClass::FILTER_TYPE_NONE);
+		}
 		SurfaceClass *texture_surface = new_texture->Get_Surface_Level ();
-
-		new_texture->Get_Filter().Set_U_Addr_Mode(TextureFilterClass::TEXTURE_ADDRESS_CLAMP);
-		new_texture->Get_Filter().Set_V_Addr_Mode(TextureFilterClass::TEXTURE_ADDRESS_CLAMP);
-		new_texture->Get_Filter().Set_Min_Filter(TextureFilterClass::FILTER_TYPE_NONE);
-		new_texture->Get_Filter().Set_Mag_Filter(TextureFilterClass::FILTER_TYPE_NONE);
-		new_texture->Get_Filter().Set_Mip_Mapping(TextureFilterClass::FILTER_TYPE_NONE);
 
 		//
 		//	Copy the contents of the texture from the surface
@@ -422,6 +454,26 @@ Render2DSentenceClass::Build_Textures (void)
 	if (PendingSurfaces.Count()>0) {
 		PendingSurfaces.Delete_All ();
 	}
+
+	//	what the new text had no use for
+	Release_Spare_Textures ();
+	return ;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////
+//
+//	Release_Spare_Textures
+//
+////////////////////////////////////////////////////////////////////////////////////
+void
+Render2DSentenceClass::Release_Spare_Textures (void)
+{
+	for (int index = 0; index < SpareTextures.Count (); index ++) {
+		REF_PTR_RELEASE (SpareTextures[index]);
+	}
+
+	if (SpareTextures.Count()>0) SpareTextures.Delete_All ();
 	return ;
 }
 

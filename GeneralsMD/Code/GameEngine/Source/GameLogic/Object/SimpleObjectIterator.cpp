@@ -46,7 +46,7 @@ SimpleObjectIterator::ClumpCompareProc SimpleObjectIterator::theClumpCompareProc
 };
 
 //=============================================================================
-SimpleObjectIterator::PooledClump::~PooledClump()
+SimpleObjectIterator::PooledClumps::~PooledClumps()
 {
 }
 
@@ -57,6 +57,8 @@ SimpleObjectIterator::SimpleObjectIterator()
 	m_curClump = NULL;
 	m_clumpCount = 0;
 	m_inlineClumpsUsed = 0;
+	m_pooledBlocks = NULL;
+	m_pooledClumpsUsed = 0;
 }
 
 //=============================================================================
@@ -66,15 +68,15 @@ SimpleObjectIterator::~SimpleObjectIterator()
 }
 
 //=============================================================================
-/* The first INLINE_CLUMPS objects a query finds go into the iterator's own array, and only the
-	 rest take a pool block each. A gathering range query used to allocate one per object found.
-	 On an eight-player match (111 such queries a logic frame) recycling them through a free list
-	 measured at nothing, 1.24ms to 1.26, since the pool is a free list already and its lock is
-	 uncontended. A dense fight of several hundred units makes far more of these queries, each one
-	 finding dozens of neighbours, and that is the case this array is for; its gain there has not
-	 been measured yet. Which slot a clump lives
-	 in never reaches the order: insert still pushes at the head and sort compares only m_numeric
-	 or the build cost, so the output is the same object sequence as before. */
+/* The first INLINE_CLUMPS objects a query finds go into the iterator's own array, and the rest
+	 into pool blocks of POOLED_CLUMPS each. A gathering range query used to allocate one per object
+	 found. On an eight-player match (111 such queries a logic frame) recycling them through a free
+	 list measured at nothing, 1.24ms to 1.26, since the pool is a free list already and its lock is
+	 uncontended. A dense fight is another matter: fifty Avengers' point defence lasers each sweeping
+	 six hundred aircraft took a block per aircraft, and those allocations and their frees were a
+	 quarter of the pool lock's work in that fight (issue 144), hence the blocks. Which slot a clump
+	 lives in never reaches the order: insert still pushes at the head and sort compares only
+	 m_numeric or the build cost, so the output is the same object sequence as before. */
 void SimpleObjectIterator::insert(Object *obj, Real numeric)
 {
 	DEBUG_ASSERTCRASH(obj, ("sorry, no nulls allowed here"));
@@ -83,13 +85,17 @@ void SimpleObjectIterator::insert(Object *obj, Real numeric)
 	if (m_inlineClumpsUsed < INLINE_CLUMPS)
 	{
 		clump = &m_inlineClumps[m_inlineClumpsUsed++];
-		clump->m_pooled = NULL;
 	}
 	else
 	{
-		PooledClump *pooled = newInstance(PooledClump);
-		clump = &pooled->m_clump;
-		clump->m_pooled = pooled;
+		if (m_pooledBlocks == NULL || m_pooledClumpsUsed == POOLED_CLUMPS)
+		{
+			PooledClumps *block = newInstance(PooledClumps);
+			block->m_nextBlock = m_pooledBlocks;
+			m_pooledBlocks = block;
+			m_pooledClumpsUsed = 0;
+		}
+		clump = &m_pooledBlocks->m_clumps[m_pooledClumpsUsed++];
 	}
 
 	clump->m_nextClump = m_firstClump;
@@ -128,20 +134,18 @@ void SimpleObjectIterator::reset()
 //=============================================================================
 void SimpleObjectIterator::makeEmpty()
 {
-	while (m_firstClump)
+	while (m_pooledBlocks)
 	{
-		Clump *next = m_firstClump->m_nextClump;
-		if (m_firstClump->m_pooled)
-			m_firstClump->m_pooled->deleteInstance();
-		m_firstClump = next;
-		--m_clumpCount;
+		PooledClumps *next = m_pooledBlocks->m_nextBlock;
+		m_pooledBlocks->deleteInstance();
+		m_pooledBlocks = next;
 	}
-	DEBUG_ASSERTCRASH(m_clumpCount == 0, ("hmm"));
 
 	m_firstClump = NULL;
 	m_curClump = NULL;
 	m_clumpCount = 0;
 	m_inlineClumpsUsed = 0;
+	m_pooledClumpsUsed = 0;
 }
 
 //=============================================================================

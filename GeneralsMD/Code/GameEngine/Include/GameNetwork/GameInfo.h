@@ -273,7 +273,8 @@ public:
 	virtual void closeOpenSlots(void);						///< close all slots that are currently unoccupied.
 
 	// CRC checking hack
-	void setCRCInterval( Int val ) { m_crcInterval = (val<100)?val:100; }
+	// [1,100]: a lobby or replay string saying C=0 (or less) made GameLogic take m_frame % 0
+	void setCRCInterval( Int val ) { m_crcInterval = (val<1)?1:((val<100)?val:100); }
 	inline Int getCRCInterval( void ) const { return m_crcInterval; }
 	
 	Bool haveWeSurrendered(void) { return m_surrendered; }

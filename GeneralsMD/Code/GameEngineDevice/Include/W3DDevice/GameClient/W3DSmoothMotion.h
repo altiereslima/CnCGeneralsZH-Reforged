@@ -19,14 +19,15 @@
 // W3DSmoothMotion.h //////////////////////////////////////////////////////////////////////////////
 // R1, smooth motion: a render object shown between its last two logic states.
 //
-// The logic ticks at 30 Hz, and the client moves a model's render object only on the render frame
+// The logic ticks at 60 Hz, and the client moves a model's render object only on the render frame
 // that follows a tick (W3DView::update draws drawables only when W3D's clock moved, W3DDisplay.cpp).
-// On a 144 Hz panel four frames in five showed the same transforms under a camera that moves every
-// frame.  With SmoothMotion on, W3DDisplay::draw keeps each model's last two transforms and, just
-// before the scene renders, sets the render object to a blend of them by the fraction of a tick
-// that has passed; right after the render it puts the logic transform back, so picking and the
-// logic (ParticleUplinkCannonUpdate reads live bones) see exactly what they saw before.  The picture
-// is one logic tick behind (33 ms at 30 Hz) and the game never changes.
+// On a 164 Hz panel each state stays up for two or three refreshes, unevenly, under a camera that
+// moves every refresh.  On a display faster than the logic (and without -nosmoothmotion),
+// W3DDisplay::draw keeps each model's last two transforms and, just before the scene renders, sets
+// the render object to a blend of them by the fraction of a tick that has passed since the last one
+// was due (GameEngine_logicTickFraction); right after the render it puts the logic transform back, so
+// picking and the logic (ParticleUplinkCannonUpdate reads live bones) see exactly what they saw
+// before.  The picture is one logic tick behind (16.7 ms at 60 Hz) and the game never changes.
 //
 // Header-only on purpose: W3DModelDraw includes it on every platform, and nothing new has to be
 // listed in a build.
@@ -42,8 +43,10 @@
 #include "vector3.h"
 
 #include <math.h>
+#include <string.h>
 
-/// This render pass's blend (W3DDisplay.cpp): whether it is on (SmoothMotion, and not headless), and how
+/// This render pass's blend (W3DDisplay.cpp): whether it is on (a display faster than the logic, or a
+/// -recordfps picture, and not headless), and how
 /// far between the last two logic ticks the picture is.  W3DView's camera lock reads them too.
 extern bool TheSmoothMotionActive;
 extern float TheSmoothMotionAlpha;
@@ -65,7 +68,7 @@ enum SmoothMotionSnap
 
 enum
 {
-	SMOOTH_SNAP_DISTANCE_UNITS = 60,		///< world units per tick; a fast jet moves about 7
+	SMOOTH_SNAP_DISTANCE_UNITS = 60,		///< world units per tick; a fast jet moves about 7 a 30 Hz tick, half that at 60
 	SMOOTH_SNAP_ROTATION_DEGREES = 120		///< degrees per tick
 };
 
@@ -107,41 +110,98 @@ inline bool SmoothMotion_Split(const Matrix3D &m, Matrix3D &rotation, float scal
 	return true;
 }
 
-/// The blend of two logic transforms at `alpha` (0 = prev, 1 = cur) into `out`, or the reason not to
-/// (then `out` is `cur`).  Translation is lerped, the rotation slerped, each column's scale lerped.
-inline SmoothMotionSnap SmoothMotion_Blend(const Matrix3D &prev, const Matrix3D &cur, float alpha, Matrix3D &out)
+/// What a blend between two logic transforms needs, worked out once a tick, so a picture only mixes:
+/// the split, the quaternions and the angle between them cost about as much as the mix itself.
+struct SmoothMotionParts
 {
-	out = cur;
-	const Vector3 from = prev.Get_Translation(), to = cur.Get_Translation();
-	if ((to - from).Length() > (float)SMOOTH_SNAP_DISTANCE_UNITS) {
+	Vector3 From;
+	Vector3 To;
+	Quaternion RotationFrom;
+	Quaternion RotationTo;		///< on RotationFrom's side of the sphere, so the mix turns the short way
+	float Theta;				///< the angle between the two rotations; 0 when they are close enough to mix linearly
+	float OneOverSinTheta;
+	float ScaleFrom[3];
+	float ScaleTo[3];
+};
+
+/// Whether two logic transforms may be blended, and if so their parts.  The rotation mix is WWMath's
+/// Slerp taken apart (its hemisphere flip, its linear threshold, its trig), so a picture comes out
+/// as it did when every picture called Slerp.
+inline SmoothMotionSnap SmoothMotion_Prepare(const Matrix3D &prev, const Matrix3D &cur, SmoothMotionParts &parts)
+{
+	parts.From = prev.Get_Translation();
+	parts.To = cur.Get_Translation();
+	if ((parts.To - parts.From).Length() > (float)SMOOTH_SNAP_DISTANCE_UNITS) {
 		return SMOOTH_SNAP_DISTANCE;
 	}
 	Matrix3D prev_rotation, cur_rotation;
-	float prev_scale[3], cur_scale[3];
-	if (!SmoothMotion_Split(prev, prev_rotation, prev_scale) || !SmoothMotion_Split(cur, cur_rotation, cur_scale)) {
+	if (!SmoothMotion_Split(prev, prev_rotation, parts.ScaleFrom) || !SmoothMotion_Split(cur, cur_rotation, parts.ScaleTo)) {
 		return SMOOTH_SNAP_NOT_RIGID;
 	}
-	Quaternion qa = Build_Quaternion(prev_rotation), qb = Build_Quaternion(cur_rotation);
-	float dot = qa.X * qb.X + qa.Y * qb.Y + qa.Z * qb.Z + qa.W * qb.W;
-	if (dot < 0.0f) dot = -dot;
-	if (dot > 1.0f) dot = 1.0f;
-	const float turned_degrees = 2.0f * acosf(dot) * (180.0f / 3.14159265358979f);
+	parts.RotationFrom = Build_Quaternion(prev_rotation);
+	parts.RotationTo = Build_Quaternion(cur_rotation);
+	const Quaternion &from = parts.RotationFrom;
+	Quaternion &to = parts.RotationTo;
+	float cos_theta = from.X * to.X + from.Y * to.Y + from.Z * to.Z + from.W * to.W;
+	if (cos_theta < 0.0f) {
+		cos_theta = -cos_theta;
+		to.X = -to.X;
+		to.Y = -to.Y;
+		to.Z = -to.Z;
+		to.W = -to.W;
+	}
+	const float turned_degrees = 2.0f * acosf(cos_theta > 1.0f ? 1.0f : cos_theta) * (180.0f / 3.14159265358979f);
 	if (turned_degrees > (float)SMOOTH_SNAP_ROTATION_DEGREES) {
 		return SMOOTH_SNAP_ROTATION;
 	}
-	if (alpha <= 0.0f) { out = prev; return SMOOTH_BLENDED; }
-	if (alpha >= 1.0f) { out = cur; return SMOOTH_BLENDED; }
+	parts.Theta = 0.0f;
+	parts.OneOverSinTheta = 0.0f;
+	if (1.0f - cos_theta >= WWMATH_EPSILON * WWMATH_EPSILON) {
+		parts.Theta = WWMath::Acos(cos_theta);
+		parts.OneOverSinTheta = 1.0f / WWMath::Sin(parts.Theta);
+	}
+	return SMOOTH_BLENDED;
+}
+
+/// The transform `alpha` of the way from `prev` to `cur` (0 = prev, 1 = cur), from their parts.
+/// Translation is lerped, the rotation slerped, each column's scale lerped.
+inline void SmoothMotion_Pose(const Matrix3D &prev, const Matrix3D &cur, const SmoothMotionParts &parts, float alpha,
+	Matrix3D &out)
+{
+	if (alpha <= 0.0f) { out = prev; return; }
+	if (alpha >= 1.0f) { out = cur; return; }
+	float from_weight = 1.0f - alpha;
+	float to_weight = alpha;
+	if (parts.Theta > 0.0f) {
+		from_weight = WWMath::Sin(parts.Theta - alpha * parts.Theta) * parts.OneOverSinTheta;
+		to_weight = WWMath::Sin(alpha * parts.Theta) * parts.OneOverSinTheta;
+	}
 	Quaternion q;
-	Slerp(q, qa, qb, alpha);
+	q.X = from_weight * parts.RotationFrom.X + to_weight * parts.RotationTo.X;
+	q.Y = from_weight * parts.RotationFrom.Y + to_weight * parts.RotationTo.Y;
+	q.Z = from_weight * parts.RotationFrom.Z + to_weight * parts.RotationTo.Z;
+	q.W = from_weight * parts.RotationFrom.W + to_weight * parts.RotationTo.W;
 	Matrix3D rotation;
 	Build_Matrix3D(q, rotation);
 	out.Make_Identity();
 	for (int c = 0; c < 3; ++c) {
-		const float s = prev_scale[c] + (cur_scale[c] - prev_scale[c]) * alpha;
+		const float s = parts.ScaleFrom[c] + (parts.ScaleTo[c] - parts.ScaleFrom[c]) * alpha;
 		for (int r = 0; r < 3; ++r) out[r][c] = rotation[r][c] * s;
 	}
-	out.Set_Translation(from + (to - from) * alpha);
-	return SMOOTH_BLENDED;
+	out.Set_Translation(parts.From + (parts.To - parts.From) * alpha);
+}
+
+/// The blend of two logic transforms at `alpha` (0 = prev, 1 = cur) into `out`, or the reason not to
+/// (then `out` is `cur`).
+inline SmoothMotionSnap SmoothMotion_Blend(const Matrix3D &prev, const Matrix3D &cur, float alpha, Matrix3D &out)
+{
+	out = cur;
+	SmoothMotionParts parts;
+	const SmoothMotionSnap snap = SmoothMotion_Prepare(prev, cur, parts);
+	if (snap == SMOOTH_BLENDED) {
+		SmoothMotion_Pose(prev, cur, parts, alpha, out);
+	}
+	return snap;
 }
 
 /// One render object's last two logic transforms, and whether a blend is on it now.
@@ -155,10 +215,12 @@ struct SmoothMotionTrack
 	bool CurHidden;
 	bool PrevHidden;
 	bool Applied;				///< the render object holds a blend, to be put back
+	bool Still;					///< blended, but Prev and Cur are the same matrix: nothing to blend or put back
 	SmoothMotionSnap Snap;		///< this tick's verdict
+	SmoothMotionParts Parts;	///< Prev to Cur taken apart, when the verdict is a blend
 
 	SmoothMotionTrack() : Model(0), Frame(0), HavePrev(false), CurHidden(false), PrevHidden(false), Applied(false),
-		Snap(SMOOTH_SNAP_FIRST) { Prev.Make_Identity(); Cur.Make_Identity(); }
+		Still(false), Snap(SMOOTH_SNAP_FIRST) { Prev.Make_Identity(); Cur.Make_Identity(); }
 
 	/// On the first render frame after a tick: the transform the model holds now becomes Cur.  The
 	/// verdict for the whole tick is decided here and counted once.
@@ -171,15 +233,19 @@ struct SmoothMotionTrack
 		Cur = now;
 		CurHidden = hidden;
 		HavePrev = same_model;
+		Still = false;
 		if (Model == 0) Snap = SMOOTH_SNAP_FIRST;
 		else if (!same_model) Snap = SMOOTH_SNAP_NEW_MODEL;
 		else if (marked) Snap = SMOOTH_SNAP_MARKED;
 		else if (hidden || PrevHidden) Snap = SMOOTH_SNAP_HIDDEN;
 		else if (!next_frame) Snap = SMOOTH_SNAP_FRAME_GAP;
-		else {
-			Matrix3D ignored;
-			Snap = SmoothMotion_Blend(Prev, Cur, 0.5f, ignored);
+		else if (memcmp(&Prev, &Cur, sizeof(Matrix3D)) == 0) {
+			// most of a base stands still, and setting a model's transform every picture makes W3D work its
+			// sub-objects out again, so an unmoved model is left alone, and needs no parts
+			Snap = SMOOTH_BLENDED;
+			Still = true;
 		}
+		else Snap = SmoothMotion_Prepare(Prev, Cur, Parts);
 		Model = model;
 		Frame = frame;
 		++SmoothMotion_Counts()[Snap];

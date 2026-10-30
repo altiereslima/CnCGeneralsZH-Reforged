@@ -129,6 +129,7 @@ protected:
 	W3DShroudLevel *m_currentFogData;		///<copy of intermediate logical shroud while it's interpolated.
 	void interpolateFogLevels(RenderRect *rect);		///<fade current fog levels to actual logic side levels.
 	void fillBorderShroudData(W3DShroudLevel level, SurfaceClass* pDestSurface);	///<fill the destination texture with a known value
+	Bool m_cellsWritten = TRUE;					///<a cell was written since render last copied them up
 };
 
 #endif	//__W3DSHROUD_H_

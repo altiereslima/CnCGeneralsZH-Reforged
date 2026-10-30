@@ -74,6 +74,12 @@ struct PixelPipelineDescription
 	FixedFunctionValue AlphaFunction;
 
 	bool FogEnabled;
+
+	// D3D11 only: the draw goes into a multisampled scene with alpha to coverage on (a GREATER or
+	// GREATEREQUAL test, DX11BackendClass::Alpha_To_Coverage).  In place of the clip the alpha is
+	// sharpened about the reference to about a pixel's width, so a cut edge covers its samples
+	// across one pixel and a mipmap's faded alpha above the reference still covers them all.
+	bool AlphaToCoverage = false;
 };
 
 struct CombinerDescription

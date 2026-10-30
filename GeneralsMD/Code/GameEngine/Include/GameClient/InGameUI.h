@@ -1003,6 +1003,7 @@ public:  // ********************************************************************
 	virtual Bool getInputEnabled( void ) { LOGIC_CENSUS( CENSUS_CLIENT_READ ); return m_inputEnabled; }	///< Get the current input status
 
 	virtual void disregardDrawable( Drawable *draw );				///< Drawable is being destroyed, clean up any UI elements associated with it
+	void noteRankChanged( ObjectID id );										///< after the tick that moved its grade: it may lead now (updateAuraRings)
 
 	virtual void preDraw( void );														///< Logic which needs to occur before the UI renders
 	virtual void draw( void ) = 0;													///< Render the in-game user interface
@@ -1136,6 +1137,12 @@ public:  // ********************************************************************
 	Bool isGuardArmed( void ) const						{ return m_guardArmed; }
 	GuardMode getGuardArmedMode( void ) const	{ return m_guardArmedMode; }	///< what the armed guard's click gives: the key's, or the EA button's own
 
+	// While a guard is armed the wheel grows and shrinks the circle it will hold instead of zooming,
+	// the guard marker's ring follows it and the order carries it.  0 until the wheel has touched
+	// it: the click is then the retail guard, each unit on its own range
+	void adjustArmedGuardRadius( Real notches );
+	Real getArmedGuardRadius( void );
+
 	/** One of the page's keys past attack, hold position and move, an OrderKeyExtra (ControlBar.h),
 		* pressed with the mouse or its grid key: the stance key puts the selection on the other
 		* stance from the first unit's */
@@ -1265,7 +1272,9 @@ protected:
 	void destroyPlacementIcons( void );													///< Destroy placement icons
 	void handleBuildPlacements( void );													///< handle updating of placement icons based on mouse pos
 	void handleRadiusCursor();																	///< handle updating of "radius cursors" that follow the mouse pos
-	void updateAuraRings();																			///< the ground ring of each aura a selected or hovered leader gives
+	void updateAuraRings();																			///< the ground ring of each aura every visible leader gives
+	/// frozen time runs the scripts with no new logic frame, so an overlay laid once a frame is laid every pass
+	Bool isTimeFrozenWithoutTick( void ) const;
 
 	void incrementSelectCount( void ) { ++m_selectCount; }			///< Increase by one the running total of "selected" drawables
 	void decrementSelectCount( void ) { --m_selectCount; }			///< Decrease by one the running total of "selected" drawables
@@ -1552,9 +1561,10 @@ protected:
 
 	RadiusDecalTemplate					m_radiusCursors[RADIUSCURSOR_COUNT];
 	RadiusDecal									m_curRadiusCursor;
+	RadiusDecal									m_curRadiusCursorCentre;	///< the guard marker's shield, apart from its ring so it never stretches
 	RadiusCursorType						m_curRcType;
 
-	enum { AURA_RING_MAX = 32 };
+	enum { AURA_RING_MAX = 256 };	// ponytail: past this many rings on the map the rest go undrawn; the slot match is n squared
 	struct AuraRing
 	{
 		ObjectID		id;					///< INVALID_ID: a free slot
@@ -1563,6 +1573,11 @@ protected:
 		RadiusDecal	decal;
 	};
 	AuraRing										m_auraRings[AURA_RING_MAX];
+	UnsignedInt									m_auraRingsFrame = ~0u;		///< the logic frame the rings were last laid for
+	const Player							 *m_auraRingsPlayer = NULL;	///< and the local player they were laid for
+	Int													m_auraRingsShroudIndex = -1;	///< and the player whose fog the screen showed
+	std::vector<ObjectID>				m_auraLeaders;						///< everything that gave an aura at its grade when last looked at
+	Bool												m_auraLeadersFound = FALSE;	///< m_auraLeaders came from a walk over every drawable
 
 	//Floating Text Data
 	FloatingTextList						m_floatingTextList;				///< Our list of floating text
@@ -1580,6 +1595,7 @@ protected:
 	Bool												m_forceAttackArmed;	///< is the attack key holding force fire for the next click?
 	Bool												m_guardArmed;				///< is the guard key holding a guard order for the next click?
 	GuardMode										m_guardArmedMode;		///< the mode that guard order carries
+	Real												m_guardRadiusScale;	///< what the wheel has made of the armed guard's range, 1 untouched
 	Bool												m_moveArmed;				///< is the move key holding a move for the next click?
 	Bool												m_orderKeyKeptByShift;	///< an armed key was clicked with under shift, and drops when shift comes up
 	Bool												m_preferSelection;		///< the shift key has been depressed.

@@ -287,7 +287,16 @@ void AsciiString::format(AsciiString format, ...)
 {
 	validate();
 	va_list args;
+	// C4840 here is va_start naming a class-typed last parameter, which both compilers handle;
+	// it is kept on everywhere else to catch a string object passed through the "...".
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4840)
+#endif
   va_start(args, format);
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 	format_va(format, args);
   va_end(args);
 	validate();

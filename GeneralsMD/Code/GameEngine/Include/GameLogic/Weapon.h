@@ -883,7 +883,6 @@ protected:
 	WeaponTemplate *findWeaponTemplatePrivate( NameKeyType key ) const;	
 
 	WeaponTemplate *newWeaponTemplate( AsciiString name );
-	WeaponTemplate *newOverride( WeaponTemplate *weaponTemplate );
 
 	void deleteAllDelayedDamage();
 	void deleteWeaponsNow();

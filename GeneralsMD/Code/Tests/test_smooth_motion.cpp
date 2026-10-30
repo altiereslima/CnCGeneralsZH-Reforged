@@ -134,6 +134,63 @@ TEST(smooth_motion_track_verdicts_per_tick)
 	CHECK_EQ((int)(counts[SMOOTH_SNAP_HIDDEN] - before[SMOOTH_SNAP_HIDDEN]), 2);
 }
 
+// A model that did not move between two ticks is blended in name only: W3DModelDraw leaves its
+// transform alone rather than setting the same matrix every picture.
+TEST(smooth_motion_track_marks_an_unmoved_model_still)
+{
+	const int model = 0;
+	SmoothMotionTrack t;
+	t.capture(at(5, 5, 0), &model, false, 20, false);
+	CHECK(!t.Still);	// nothing before it
+	t.capture(at(5, 5, 0), &model, false, 21, false);
+	CHECK_EQ((int)t.Snap, (int)SMOOTH_BLENDED);
+	CHECK(t.Still);
+	t.capture(at(6, 5, 0), &model, false, 22, false);
+	CHECK_EQ((int)t.Snap, (int)SMOOTH_BLENDED);
+	CHECK(!t.Still);
+	t.capture(at(6, 5, 0), &model, false, 24, false);	// unmoved over a tick not seen: a snap, not still
+	CHECK(!t.Still);
+}
+
+// The parts are taken once a tick at capture, and a picture only mixes them: off the midpoint, so
+// swapped slerp weights show, and against WWMath's own Slerp, which every picture used to call.
+TEST(smooth_motion_track_poses_from_parts_taken_at_capture)
+{
+	const int model = 0;
+	SmoothMotionTrack t;
+	t.capture(at(0, 0, 0, 0.0f, 1.0f), &model, false, 30, false);
+	t.capture(at(8, 4, 0, 90.0f, 2.0f), &model, false, 31, false);
+	CHECK_EQ((int)t.Snap, (int)SMOOTH_BLENDED);
+	Matrix3D out;
+	SmoothMotion_Pose(t.Prev, t.Cur, t.Parts, 0.25f, out);
+	CHECK_NEAR(heading_degrees(out), 22.5f, 1.0e-3f);
+	CHECK_NEAR(out.Get_Translation().X, 2.0f, EPS);
+	CHECK_NEAR(out.Get_Translation().Y, 1.0f, EPS);
+	CHECK_NEAR(out.Get_X_Vector().Length(), 1.25f, EPS);
+
+	const float pairs[][2] = { { 0.0f, 90.0f }, { 170.0f, -170.0f }, { 10.0f, 10.001f } };
+	const float alphas[] = { 0.1f, 0.37f, 0.8f };
+	for (int p = 0; p < 3; ++p) {
+		const Matrix3D from = at(0, 0, 0, pairs[p][0]), to = at(0, 0, 0, pairs[p][1]);
+		SmoothMotionParts parts;
+		CHECK_EQ((int)SmoothMotion_Prepare(from, to, parts), (int)SMOOTH_BLENDED);
+		Matrix3D from_rotation, to_rotation;
+		float scale[3];
+		SmoothMotion_Split(from, from_rotation, scale);
+		SmoothMotion_Split(to, to_rotation, scale);
+		for (int a = 0; a < 3; ++a) {
+			Quaternion q;
+			Slerp(q, Build_Quaternion(from_rotation), Build_Quaternion(to_rotation), alphas[a]);
+			Matrix3D expected;
+			Build_Matrix3D(q, expected);
+			SmoothMotion_Pose(from, to, parts, alphas[a], out);
+			for (int r = 0; r < 3; ++r)
+				for (int c = 0; c < 3; ++c)
+					CHECK_NEAR(out[r][c], expected[r][c], 1.0e-6f);
+		}
+	}
+}
+
 TEST(drawable_update_composes_flushed_client_frame_when_pause_stops_animation)
 {
 	W3DDrawableUpdate update;

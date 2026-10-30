@@ -1,0 +1,39 @@
+# Direct3D 11 multisampling proofs on Winding River (Cinema/msaa_river.txt): the fenced rail yard
+# round 2460-2720, 650-900 (chain-link ring, Quonset hut, train cars, guard tower, palms inside and
+# round it), an American forward base between the two supply docks south of it, armour and Humvees
+# driving past it in three waves, Rangers walking into the yard and a Comanche going back and forth
+# over it. Nobody fights, so no smoke or fire differs between takes. Frames here count 30 a second.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -quickstart -noshellmap -multiInstance
+#     -fps 120 -noFPSLimit -nosmoothmotion -particlecap 2500
+#     -map "Maps\Winding River\Winding River.map" -autoskirmish 2 -takeover -observer
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario msaa_river -cinema msaa_river
+#     -video 1080 1740 msaa -maxframes 1800 -msaa 0|4|8
+
+# the forward base between the docks
+30    spawn      0  AmericaSupplyCenter           1  2700 540
+30    spawn      0  AmericaPowerPlant             1  2560 560
+30    spawn      0  AmericaBarracks               1  2820 520
+30    spawn      0  AmericaPatriotBattery         1  2960 760
+
+# three waves of armour past the yard, south-west to north-east
+30    spawn      0  AmericaTankCrusader           4  2250 520 40
+30    spawn      0  AmericaVehicleHumvee          2  2180 470 40
+60    move       0  AmericaTankCrusader              3000 900
+60    move       0  AmericaVehicleHumvee             3000 900
+210   spawn      0  AmericaTankPaladin            3  2250 520 40
+240   move       0  AmericaTankPaladin               3000 900
+390   spawn      0  AmericaTankCrusader           3  2250 520 40
+420   move       0  AmericaTankCrusader              3000 900
+
+# Rangers walking from the base into the yard
+30    spawn      0  AmericaInfantryRanger         6  2780 600 20
+60    move       0  AmericaInfantryRanger            2560 800
+
+# a Comanche going back and forth over the yard
+30    spawn      0  AmericaVehicleComanche        1  2420 880
+60    move       0  AmericaVehicleComanche           2900 620
+240   move       0  AmericaVehicleComanche           2420 880
+420   move       0  AmericaVehicleComanche           2900 620
+600   move       0  AmericaVehicleComanche           2420 880
+780   move       0  AmericaVehicleComanche           2900 620

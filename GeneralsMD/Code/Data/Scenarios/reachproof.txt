@@ -1,0 +1,40 @@
+# Does the reach overlay lie?  Each defence's field, and its template's on the placement cursor at
+# the same spot, against the logic itself: a GLA probe is stood on random points inside the lit
+# ground, outside it and within 6 of its edge, and asked the way an idle defence asks (the mood
+# target search, the fog, the chosen weapon's range and attack tests).  Every HEADLESS REACHPROOF
+# block ends PASS or FAIL with its count of lies: lit points the logic refused.
+#
+# Twilight Flame's south-west plateau: its rim drops to the south of y 3620, so the Patriot looks
+# down a cliff and the Fire Base and the Gattling Cannon across uneven ground; the ground sampled
+# spans 25 to 152 high.  Three probes: a low raider (Combat Cycle), a soldier, and a wide tank
+# (Overlord), parked by slot 1's start, the soldier away from the cycle so he does not climb on it,
+# and moved by the proof.  Nobody thinks (-takeover).
+#
+# 2026-10-28: every block PASS, 0 lies; with the line of sight test taken out of the overlay the
+# Patriot read 51, 338 and 332 lies and the Fire Base 84 each, so the check catches a missing test.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 900
+#     -scenario reachproof -logPrefix reachproof_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  AmericaPowerPlant              1  3600 4150
+30    spawn      0  AmericaPowerPlant              1  3700 4150
+
+30    spawn      0  AmericaPatriotBattery          1  3400 3700
+30    spawn      0  AmericaFireBase                1  3550 3950
+30    spawn      0  ChinaGattlingCannon            1  3300 3950
+
+30    spawn      1  GLAVehicleCombatBike           1  start1:200:0
+30    spawn      1  GLAInfantryRebel               1  start1:-250:-250
+30    spawn      1  ChinaTankOverlord              1  start1:200:120
+
+200   reachproof 0  AmericaPatriotBattery          1  GLAVehicleCombatBike   300
+200   reachproof 0  AmericaPatriotBattery          1  GLAInfantryRebel       300
+200   reachproof 0  AmericaPatriotBattery          1  ChinaTankOverlord      300
+200   reachproof 0  AmericaFireBase                1  GLAVehicleCombatBike   300
+200   reachproof 0  AmericaFireBase                1  ChinaTankOverlord      300
+200   reachproof 0  ChinaGattlingCannon            1  GLAVehicleCombatBike   300
+200   reachproof 0  ChinaGattlingCannon            1  ChinaTankOverlord      300

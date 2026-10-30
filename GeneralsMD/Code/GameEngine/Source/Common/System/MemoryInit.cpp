@@ -91,7 +91,6 @@ struct PoolSizeRec
 // not const -- we might override from INI
 static PoolSizeRec sizes[] = 
 {
-	{ "PartitionContactListNode", 2048, 512 },
 	{ "BattleshipUpdate", 32, 32 },
 	{ "FlyToDestAndDestroyUpdate", 32, 32 },
 	{ "MusicTrack", 32, 32 },
@@ -160,7 +159,7 @@ static PoolSizeRec sizes[] =
 	{ "LocomotorTemplate", 192, 32	},
 	{ "ObjectPool", 1500, 256 },
 	{ "SimpleObjectIteratorPool", 32, 32 },
-	{ "SimpleObjectIteratorClumpPool", 4096, 32 },
+	{ "SimpleObjectIteratorClumpPool", 64, 16 },
 	{ "PartitionDataPool", 2048, 512 },
 	{ "BuildEntry", 32, 32 },
 	{ "Weapon", 4096, 32 },

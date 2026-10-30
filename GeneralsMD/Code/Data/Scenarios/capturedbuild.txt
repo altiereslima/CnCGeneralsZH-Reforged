@@ -1,0 +1,34 @@
+# A Turkiye player building with another side's builders, as after capturing a China and a GLA base.
+#
+# Seat 0 plays Turkiye and owns a China dozer and supply center and a GLA Command Center, the way a
+# capture leaves them. The dozer is told to put up a China Airfield and the Command Center to train a
+# Worker; then Turkiye's own Command Center trains an Engineer and an Engineer puts up a Power Plant.
+# Read the tallies: before the fix the Airfield came out as the Kargu superweapon (TurkiyeKarguBase)
+# for an Airfield's $1000 and the Worker as a TurkiyeInfantryEngineer. After it the China dozer makes
+# a ChinaAirfield and the GLA Command Center a GLAInfantryWorker, each for its own price, and
+# Turkiye's own builds come out as before.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionTurkiye -side 1 FactionGLA -seed 7 -maxframes 5200
+#     -scenario capturedbuild -logPrefix capbuild_
+#
+# Seat 0 starts at 537,3188; every spot below was accepted by the spawn check on that map.
+
+60    spawn      0  ChinaVehicleDozer   1  800 3050
+60    spawn      0  ChinaSupplyCenter   1  697 2868
+60    spawn      0  GLACommandCenter    1  377 2868
+90    tally      0  *
+100   construct  0  ChinaAirfield       880 3220
+110   tally      0  *
+120   produce    0  GLACommandCenter    GLAInfantryWorker 1
+130   tally      0  *
+140   produce    0  TurkiyeCommandCenter TurkiyeInfantryEngineer 1
+150   tally      0  *
+600   construct  0  TurkiyePowerPlant   257 3188
+610   tally      0  *
+2500  tally      0  ChinaAirfield
+2500  tally      0  TurkiyeKarguBase
+2500  tally      0  GLAInfantryWorker
+2500  tally      0  TurkiyeInfantryEngineer
+2500  tally      0  TurkiyePowerPlant

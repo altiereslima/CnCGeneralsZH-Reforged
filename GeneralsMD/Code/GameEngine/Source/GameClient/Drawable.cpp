@@ -230,7 +230,6 @@ DrawableLocoInfo::DrawableLocoInfo()
 	m_airPitch = 0.0f;
 	m_airRoll = 0.0f;
 	m_airYaw = 0.0f;
-	m_jetHeading = 0.0f;
 	m_jetBank = 0.0f;
 	m_jetPitch = 0.0f;
 	for (Int i = 0; i < 3; ++i)
@@ -243,6 +242,11 @@ DrawableLocoInfo::DrawableLocoInfo()
 	m_groundPitch = 0.0f;
 	m_groundRoll = 0.0f;
 	m_groundZ = 0.0f;
+	m_headingLag = 0.0f;
+	m_headingLagRate = 0.0f;
+	m_headingLogic = 0.0f;
+	m_headingFrame = 0;
+	m_headingSeeded = FALSE;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -586,6 +590,7 @@ void Drawable::takeLookForDraw( void )
 	look.hasSelectionColor = selection != NULL;
 	if( selection )
 		look.selectionColor = *selection;
+	look.position = *getPosition();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -752,6 +757,14 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 		*m++ = TheModuleFactory->newModule(this, drawMI.getNthName(modIdx), newModData, MODULETYPE_DRAW);
 	}
 	*m = NULL;
+
+	m_clipFeedbackSlots = 0;
+	for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
+	{
+		ObjectDrawInterface* di = (*dm)->getObjectDrawInterface();
+		if (di)
+			m_clipFeedbackSlots |= di->getProjectileClipFeedbackSlots();
+	}
 
 	const ModuleInfo& cuMI = thingTemplate->getClientUpdateModuleInfo();
 	if (cuMI.getCount())
@@ -1746,19 +1759,20 @@ void Drawable::applyPhysicsXform(Matrix3D* mtx)
 {
 	const Object *obj = getObject();
 
-	if( !obj ||	obj->isDisabledByType( DISABLED_HELD ) || !TheGlobalData->m_showClientPhysics )
-	{
-		return;
-	}
-
  	Bool frozen = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
  	frozen = frozen || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
-	if (frozen)
+	if( !obj ||	obj->isDisabledByType( DISABLED_HELD ) || !TheGlobalData->m_showClientPhysics || frozen )
+	{
+		// drawn on its logic heading, which is what the turret is drawn against (getDrawnHeadingLag)
+		if (m_locoInfo)
+			m_locoInfo->m_headingLag = 0.0f;
 		return;
+	}
 	PhysicsXformInfo info;
 	if (calcPhysicsXform(info))
 	{
 		mtx->Translate(0.0f, 0.0f, info.m_totalZ);
+		mtx->Rotate_Z( info.m_headingYaw );
 		mtx->Rotate_Y( info.m_totalPitch );
 		mtx->Rotate_X( -info.m_totalRoll );
 		mtx->Rotate_Z( info.m_totalYaw );
@@ -1773,9 +1787,10 @@ Bool Drawable::calcPhysicsXform(PhysicsXformInfo& info)
 	const Object* obj = getObject();
 	const AIUpdateInterface *ai = obj ? obj->getAIUpdateInterface() : NULL;
 	Bool hasPhysicsXform = false;
-	if (ai) 
+	Bool ground = false;
+	if (ai)
 	{
-		const Locomotor *locomotor = ai->getCurLocomotor(); 
+		const Locomotor *locomotor = ai->getCurLocomotor();
 		if (locomotor) 
 		{
 			switch (locomotor->getAppearance())
@@ -1785,6 +1800,7 @@ Bool Drawable::calcPhysicsXform(PhysicsXformInfo& info)
 				case LOCO_TREADS:
 					calcPhysicsXformGround(locomotor, info);
 					hasPhysicsXform = true;
+					ground = true;
 					break;
 				case LOCO_HOVER:
 				case LOCO_WINGS:
@@ -1798,6 +1814,9 @@ Bool Drawable::calcPhysicsXform(PhysicsXformInfo& info)
 			}
 		}
 	}
+	// off its ground locomotor the hull is drawn on its logic heading, and so is its turret
+	if (!ground && m_locoInfo)
+		m_locoInfo->m_headingLag = 0.0f;
 
   if (hasPhysicsXform)
   {
@@ -1965,35 +1984,44 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 	/* A jet banks into its turn and pitches with its climb. The bank is the lateral acceleration of
 		 the turn, speed times turn rate, against the full pull of its wings (Locomotor::getJetPull):
 		 JET_MAX_BANK at the full pull and level flying straight. The logic eases the turn in and out,
-		 so the bank rolls with it, and through level when a turn reverses. The pitch is the climb
-		 angle, clamped, plus a few degrees of nose-up while it flies slow, the attitude it comes in to
-		 land with, fading out over the last few feet so the nose comes down after the wheels touch.
-		 Both are eased again here against single-frame jumps. The springs below are left holding
-		 the same attitude, so a jet that dies falls from where it was. */
+		 so the bank rolls with it, and through level when a turn reverses. The turn rate is the
+		 locomotor's own, not the heading's change since the last drawn frame: that one was unknown
+		 for a jet coming into view, which rolled it level and back into its turn as it appeared. The
+		 pitch is the climb angle, clamped, plus a few degrees of nose-up while it flies slow, the
+		 attitude it comes in to land with, fading out over the last few feet so the nose comes down
+		 after the wheels touch.
+
+		 Both are eased here over JET_EASE_FRAMES. The logic flies the quickest turn there is, so a
+		 2 degree correction on a chase or a path corner rolls the wings 15 degrees in and straight out
+		 again inside a third of a second, and a jet doing that every few seconds rocked its wings
+		 the whole time it flew. Over 6 retail frames nearly all of those flicks stay under 8 degrees
+		 while a real turn still reaches the full bank, a fifth of a second behind it (2026-10-26, a
+		 four-player Hard match: 1.8 flicks of 8 degrees or more that turned the nose less than 5, a
+		 flight-minute a jet, at 3 frames, 0.2 at 6). The pitch ease also
+		 takes out the lift's frame-to-frame ripple. After a gap in the drawing both start from where
+		 the jet is, not from where it was last seen. The springs below are left holding the same
+		 attitude, so a jet that dies falls from where it was. */
 	if (locomotor->isJet(obj))
 	{
 		const Real JET_MAX_BANK = 1.1f;				// radians, about 63 degrees, at the full pull of the wings
 		const Real JET_MAX_CLIMB = 0.35f;			// radians, about 20 degrees, nose up or down
 		const Real JET_SLOW_NOSE_UP = 0.12f;	// radians, about 7 degrees, at MinSpeed and below, none from twice that
 		const Real JET_NOSE_UP_HEIGHT = 5.0f;	// the nose-up fades out below this height
-		const Real JET_EASE_FRAMES = 3.0f;		// retail frames
-		const UnsignedInt MAX_GAP = 4;				// retail frames; after a longer gap (taxiing, hidden) the turn rate is not known
+		const Real JET_EASE_FRAMES = 6.0f;		// retail frames
+		const UnsignedInt MAX_GAP = 4;				// retail frames; after a longer gap (hidden, out of view) the eased attitude is stale
 
 		BodyDamageType bdt = obj->getBodyModule()->getDamageState();
 		Real speed = sqrt(sqr(vel->x) + sqr(vel->y));	// per logic frame
-		Real heading = obj->getOrientation();
 		Real bank = 0.0f;
 		Real pull = locomotor->getJetPull(bdt);
-		if (elapsed <= MAX_GAP && pull > 0.0f)
+		if (pull > 0.0f)
 		{
-			Real turnRate = stdAngleDiff(heading, m_locoInfo->m_jetHeading) / (Real)(elapsed * LOGICFRAMES_PER_RETAIL_FRAME);
-			bank = JET_MAX_BANK * speed * turnRate / pull;
+			bank = JET_MAX_BANK * speed * locomotor->getYawRate() / pull;
 			if (bank > JET_MAX_BANK)
 				bank = JET_MAX_BANK;
 			else if (bank < -JET_MAX_BANK)
 				bank = -JET_MAX_BANK;
 		}
-		m_locoInfo->m_jetHeading = heading;
 
 		Real pitch = 0.0f;	// nose up
 		if (speed > 0.01f || fabs(vel->z) > 0.01f)
@@ -2020,8 +2048,16 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 			}
 		}
 
-		m_locoInfo->m_jetBank += (bank - m_locoInfo->m_jetBank) / JET_EASE_FRAMES;
-		m_locoInfo->m_jetPitch += (pitch - m_locoInfo->m_jetPitch) / JET_EASE_FRAMES;
+		if (elapsed > MAX_GAP)
+		{
+			m_locoInfo->m_jetBank = bank;
+			m_locoInfo->m_jetPitch = pitch;
+		}
+		else
+		{
+			m_locoInfo->m_jetBank += (bank - m_locoInfo->m_jetBank) / JET_EASE_FRAMES;
+			m_locoInfo->m_jetPitch += (pitch - m_locoInfo->m_jetPitch) / JET_EASE_FRAMES;
+		}
 
 		info.m_totalRoll = m_locoInfo->m_jetBank;		// positive rolls the left wing down, into a turn to the left
 		info.m_totalPitch = -m_locoInfo->m_jetPitch;	// negative lifts the nose
@@ -2183,7 +2219,15 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 	* follows the change of forward speed over a logic frame as a share of top speed, and in a turn
 	* speed times turn rate as a share of the most the locomotor can do, eased through three stages:
 	* a standing start to top speed inside one frame peaks four frames later at most of the limit and
-	* has gone by about half a second, and a slower pull away leans less for longer. */
+	* has gone by about half a second, and a slower pull away leans less for longer. That one frame
+	* start is how a tank or car pulls away again (Locomotor::isGroundVehicle), so the share of top
+	* speed and of the turn is held to one: a diagonal start, at up to 1.41 times Speed, or a shove
+	* leans no further than a straight start.
+	*
+	* The drawn heading of a tank or car trails the logic one through a critically damped spring,
+	* HEADING_LAG_FRAMES behind on a steady turn, so EA's pivot, which starts and stops dead at full
+	* TurnRate, swings the hull up to speed and settles it. It is the picture only: the turret is drawn
+	* against the logic heading (W3DModelDraw::handleClientTurretPositioning). */
 //-------------------------------------------------------------------------------------------------
 void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformInfo& info )
 {
@@ -2194,12 +2238,49 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 	const Real LEAN_EASE_FRAMES = 3.0f;					// each of the three smoothing stages, in retail frames
 	const Real START_GAIN = 11.0f;							// a one frame start from rest to top speed peaks at tanh(1.2) of the limit
 	const Real DEFAULT_LEAN_LIMIT = 0.07f;			// 4 degrees, for a locomotor that reacts but names no limit, like the Humvee's
+	const Real HEADING_LAG_FRAMES = 5.0f;				// logic frames the drawn hull trails a steady turn by
+	const Real HEADING_MAX_LAG = PI / 4.0f;			// never further behind than this: a heading a script sets is drawn there soon
+	const UnsignedInt HEADING_CATCH_UP_FRAMES = 8;	// more logic frames than this unseen and the hull is drawn on its heading
+
+	/* The spring is stepped once a logic frame, the rate the heading itself changes at. The heading and
+		 the frame are read once: with -logicthread 1 the logic can move on between two reads. */
+	const Object *owner = getObject();
+	UnsignedInt logicFrame = TheGameLogic->getFrame();
+	Real logicAngle = getOrientation();
+	UnsignedInt gap = logicFrame - m_locoInfo->m_headingFrame;
+	if (!m_locoInfo->m_headingSeeded || gap > HEADING_CATCH_UP_FRAMES || owner->isKindOf(KINDOF_AIRCRAFT))
+	{
+		// first drawn, long unseen, or a taxiing jet or landed helicopter, which eases its own turn in the logic
+		m_locoInfo->m_headingLag = 0.0f;
+		m_locoInfo->m_headingLagRate = 0.0f;
+		m_locoInfo->m_headingSeeded = TRUE;
+	}
+	else if (gap != 0)
+	{
+		const Real omega = 2.0f / HEADING_LAG_FRAMES;	// a ramp's lag is 2 / omega
+		Real turned = stdAngleDiff(logicAngle, m_locoInfo->m_headingLogic) / gap;
+		for (UnsignedInt i = 0; i < gap; ++i)
+		{
+			m_locoInfo->m_headingLag -= turned;
+			m_locoInfo->m_headingLagRate += -omega * omega * m_locoInfo->m_headingLag - 2.0f * omega * m_locoInfo->m_headingLagRate;
+			m_locoInfo->m_headingLag += m_locoInfo->m_headingLagRate;
+		}
+		if (fabs(m_locoInfo->m_headingLag) > HEADING_MAX_LAG)
+		{
+			m_locoInfo->m_headingLag = (m_locoInfo->m_headingLag > 0.0f) ? HEADING_MAX_LAG : -HEADING_MAX_LAG;
+			m_locoInfo->m_headingLagRate = 0.0f;
+		}
+	}
+	m_locoInfo->m_headingLogic = logicAngle;
+	m_locoInfo->m_headingFrame = logicFrame;
+	// turned first, under the lean, so the lean tips along the hull as drawn (applyPhysicsXform)
+	info.m_headingYaw = m_locoInfo->m_headingLag;
 
 	/* Stepped on the retail clock, every second logic frame, so the springs, the locomotor's
 		 stiffness and damping and the ease frames below keep the timing they were tuned at.  Speeds are
 		 per logic frame and only ever divided by the locomotor's own top speed, which cancels; the turn
 		 rate does not, so it is taken per retail frame. */
-	UnsignedInt now = TheGameLogic->getFrame() / LOGICFRAMES_PER_RETAIL_FRAME;
+	UnsignedInt now = logicFrame / LOGICFRAMES_PER_RETAIL_FRAME;
 	UnsignedInt steps = now - m_locoInfo->m_groundFrame;
 	if (steps != 0)
 	{
@@ -2210,7 +2291,7 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 			return;
 		BodyDamageType bdt = obj->getBodyModule()->getDamageState();
 		Real speed = physics->getForwardSpeed2D();
-		Real angle = getOrientation();
+		Real angle = logicAngle + m_locoInfo->m_headingLag;	// the turn as drawn
 		if (steps > MAX_CATCH_UP_FRAMES)
 		{
 			// long unseen, or just loaded: let the springs settle without a lurch from the gap
@@ -2234,8 +2315,8 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 		{
 			Real maxSpeed = locomotor->getMaxSpeedForCondition(bdt);
 			Real maxLateral = maxSpeed * locomotor->getMaxTurnRate(bdt) * LOGICFRAMES_PER_RETAIL_FRAME;
-			pitchIn = maxSpeed > 0.0f ? -START_GAIN * forwardAccel / maxSpeed : 0.0f;
-			rollIn = maxLateral > 0.0f ? -lateralAccel / maxLateral : 0.0f;
+			pitchIn = maxSpeed > 0.0f ? -START_GAIN * clamp(-1.0f, forwardAccel / maxSpeed, 1.0f) : 0.0f;
+			rollIn = maxLateral > 0.0f ? -clamp(-1.0f, lateralAccel / maxLateral, 1.0f) : 0.0f;
 		}
 		Real accelLimit = locomotor->getAccelPitchLimit();
 		Real decelLimit = locomotor->getDecelPitchLimit();
@@ -3441,6 +3522,39 @@ static Bool showsOwnerDetail( const Object *obj )
 
 }  // end showsOwnerDetail
 
+//-------------------------------------------------------------------------------------------------
+static NameKeyType stickyBombUpdateKey( void )
+{
+	static const NameKeyType key = NAMEKEY( "StickyBombUpdate" );
+	return key;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Whether the object carries a module the icon pass asks for.  Each ask walked every module of
+	* every drawable in view on every pass, and the supply cash, the sticky bomb, the production bar
+	* and the charge bar asked for one each: most of what the post draw cost late in a match.  The
+	* object's modules are made with it, so one walk answers for its whole life. */
+//-------------------------------------------------------------------------------------------------
+Bool Drawable::hasIconModule( IconModule module )
+{
+	if( m_iconModules == 0 )
+	{
+		m_iconModules = ICON_MODULES_KNOWN;
+		for( BehaviorModule **m = getObject()->getBehaviorModules(); *m; ++m )
+		{
+			if( (*m)->getDockUpdateInterface() )
+				m_iconModules |= ICON_MODULE_DOCK;
+			if( (*m)->getModuleNameKey() == stickyBombUpdateKey() )
+				m_iconModules |= ICON_MODULE_STICKY_BOMB;
+			if( (*m)->getProductionUpdateInterface() )
+				m_iconModules |= ICON_MODULE_PRODUCTION;
+			if( (*m)->getSpecialPower() )
+				m_iconModules |= ICON_MODULE_SPECIAL_POWER;
+		}
+	}
+	return ( m_iconModules & module ) != 0;
+}
+
 
 // ------------------------------------------------------------------------------------------------
 
@@ -4287,8 +4401,8 @@ void Drawable::drawBombed(const IRegion2D* healthBarRegion)
 	//
 	// Bombed?
 	//
-	static NameKeyType key_StickyBombUpdate = NAMEKEY( "StickyBombUpdate" );
-	StickyBombUpdate *update = (StickyBombUpdate*)obj->findUpdateModule( key_StickyBombUpdate );
+	StickyBombUpdate *update = hasIconModule( ICON_MODULE_STICKY_BOMB )
+		? (StickyBombUpdate*)obj->findUpdateModule( stickyBombUpdateKey() ) : NULL;
 	if( update )
 	{
 		//This case is tricky. The object that is bombed doesn't know it... but the bomb itself does.
@@ -4546,7 +4660,7 @@ void Drawable::drawConstructPercent( const IRegion2D *healthBarRegion )
 void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 {
 	Object *obj = getObject();
-	DockUpdateInterface *dock = obj ? obj->getDockUpdateInterface() : NULL;
+	DockUpdateInterface *dock = obj && hasIconModule( ICON_MODULE_DOCK ) ? obj->getDockUpdateInterface() : NULL;
 	Int cash = dock ? dock->getSupplyCashValue() : -1;
 
 	if( cash <= 0 )
@@ -4670,7 +4784,6 @@ void Drawable::drawVeterancy( const IRegion2D *healthBarRegion )
 	// a unit on a rank ladder wears its grade's insignia, a grade with no insignia nothing; anyone else
 	// EA's chevron for the level
 	const RankLadder *ladder = TheGlobalData->getRankLadder( obj->getTemplate() );
-	const Int insignia = ladder ? ladder->insigniaIndex( obj->getRankGrade(), obj->isKindOf( KINDOF_HERO ) ) : 0;
 	VeterancyLevel level = obj->getVeterancyLevel();
 	const Image* image = ladder ? getRankInsignia( obj ) : s_veterancyImage[level];
 	if (!image)
@@ -4715,9 +4828,11 @@ void Drawable::drawVeterancy( const IRegion2D *healthBarRegion )
 			left = healthBarRegion->hi.x + 2;
 			middle = ( healthBarRegion->lo.y + healthBarRegion->hi.y ) / 2;
 		}
+		// image is the grade's insignia already (getRankInsignia), so it is drawn as drawRankInsignia would
 		Int width, height;
 		rankInsigniaSize( image, 1.0f, &width, &height );
-		drawRankInsignia( obj->getTemplate(), insignia, left, middle - height / 2, FALSE, 1.0f, GameMakeColor( 255, 255, 255, 255 ) );
+		const Int top = middle - height / 2;
+		TheDisplay->drawImage( image, left, top, left + width, top + height, GameMakeColor( 255, 255, 255, 255 ) );
 		return;
 	}
 
@@ -5151,7 +5266,8 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		Int stackY = healthBarRegion->lo.y - 3;
 
 		// own producers show a white production-progress bar above the health bar, with seconds left at its top-left
-		ProductionUpdateInterface *pu = showsOwnerDetail( obj ) ? obj->getProductionUpdateInterface() : NULL;
+		ProductionUpdateInterface *pu = hasIconModule( ICON_MODULE_PRODUCTION ) && showsOwnerDetail( obj )
+			? obj->getProductionUpdateInterface() : NULL;
 		const ProductionEntry *pe = pu ? pu->firstProduction() : NULL;
 		if( pe )
 		{
@@ -5219,7 +5335,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		// not own is skipped, and so is one that has finished charging: a full bar that never
 		// empties is the same clutter in a different colour.
 		//
-		if( showsOwnerDetail( obj ) &&
+		if( hasIconModule( ICON_MODULE_SPECIAL_POWER ) && showsOwnerDetail( obj ) &&
 				!obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) &&
 				!obj->getStatusBits().test( OBJECT_STATUS_SOLD ) )
 		{
@@ -5745,8 +5861,8 @@ DrawableID Drawable::getID( void ) const
 
 //-------------------------------------------------------------------------------------------------
 void Drawable::friend_bindToObject( Object *obj ) ///< bind this drawable to an object ID
-{ 
-	m_object = obj; 
+{
+	m_object = obj;
 	if (getObject())
 	{
 		if (TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT)
@@ -6336,6 +6452,11 @@ void Drawable::setDrawableHidden( Bool hidden )
 //-------------------------------------------------------------------------------------------------
 void Drawable::updateDrawableClipStatus( UnsignedInt shotsRemaining, UnsignedInt maxShots, WeaponSlotType slot )
 {
+	// every armed object asks every frame; only a model with projectile bones on this slot answers,
+	// so the rest queue nothing. Those that do still ask every frame, which is what shows the bones
+	// again after a model state change rebuilt the render object
+	if ((m_clipFeedbackSlots & (1 << slot)) == 0)
+		return;
 	doClientWork( [this, shotsRemaining, maxShots, slot]() {
 		for (DrawModule** dm = getDrawModulesNonDirty(); *dm; ++dm)
 		{

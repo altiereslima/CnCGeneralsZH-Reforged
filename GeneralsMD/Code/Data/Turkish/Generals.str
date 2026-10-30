@@ -7346,7 +7346,7 @@ CONTROLBAR:ToolTipChinaScienceNukeCannon
 END
 
 CONTROLBAR:ToolTipChinaScienceRedGuardTraining
-"Tüm Kızıl Muhafızlar kıdemli olarak üretilir"
+"Tüm Kızıl Muhafızlar üç rütbe yukarıda, Onbaşı olarak üretilir"
 END
 
 CONTROLBAR:ToolTipChinaScienceClusterMines
@@ -7354,7 +7354,7 @@ CONTROLBAR:ToolTipChinaScienceClusterMines
 END
 
 CONTROLBAR:ToolTipChinaScienceARtilleryTraining
-"Nükleer Toplar ve Cehennem Topları kıdemli olarak üretilir"
+"Nükleer Toplar ve Cehennem Topları üç rütbe yukarıda üretilir"
 END
 
 CONTROLBAR:ToolTipChinaScienceArtilleryBarrage
@@ -7378,7 +7378,7 @@ CONTROLBAR:ToolTipGLaScienceMarauderTank
 END
 
 CONTROLBAR:ToolTipGLAScienceTechnicalTraining
-"Tüm Silahlı Pikaplar kıdemli olarak üretilir"
+"Tüm Silahlı Pikaplar üç rütbe yukarıda üretilir"
 END
 
 CONTROLBAR:ToolTipGLAScienceRebelAmbush
@@ -13198,7 +13198,7 @@ CONTROLBAR:ToolTipChinaScienceTankHunterTraining
 END
 
 CONTROLBAR:ToolTipChinaScienceBattlemasterTraining
-"Tüm Battlemaster'lar seçkin olarak üretilir"
+"Tüm Battlemaster'lar altı rütbe yukarıda üretilir"
 END
 
 CONTROLBAR:ToolTipChinaScienceOverlordTraining
@@ -13882,7 +13882,7 @@ SCIENCE:Infa_ChinaRedGuardTraining
 END
 
 CONTROLBAR:Infa_ToolTipChinaScienceRedGuardTraining
-"Tüm Minigun Erleri Seçkin olarak üretilir"
+"Tüm Minigun Erleri kıdemliden üç rütbe yukarıda üretilir"
 END
 
 CONTROLBAR:ToolTipChinaBuildNuclearMissileLauncherBoss
@@ -14342,7 +14342,7 @@ GUI:BioFeatures_Pos3
 END
 
 GUI:BioFeatures_Pos4
-"Emperor Tankı \n Tank İndirme \n Tüm tanklar kıdemli başlar \n Tanklar daha ucuz \n Hava araçları daha pahalı \n Nükleer Top ve Cehennem Topu yok"
+"Emperor Tankı \n Tank İndirme \n Tüm tanklar üç rütbe yukarıda başlar \n Tanklar daha ucuz \n Hava araçları daha pahalı \n Nükleer Top ve Cehennem Topu yok"
 END
 
 GUI:BioFeatures_Pos5
@@ -14354,7 +14354,7 @@ GUI:BioFeatures_Pos6
 END
 
 GUI:BioFeatures_Pos7
-"Taarruz Birlik Taşıyıcısı \n Taarruz Helix'i \n Saldırı Karakolu \n Tahkimli Sığınaklar \n Minigun Eri \n Black Lotus daha hızlı hackler \n Hacker'lar daha hızlı hackler \n Minigun Eri İndirme \n Tüm piyadeler kıdemli başlar"
+"Taarruz Birlik Taşıyıcısı \n Taarruz Helix'i \n Saldırı Karakolu \n Tahkimli Sığınaklar \n Minigun Eri \n Black Lotus daha hızlı hackler \n Hacker'lar daha hızlı hackler \n Minigun Eri İndirme \n Tüm piyadeler üç rütbe yukarıda başlar"
 END
 
 GUI:BioFeatures_Pos8
@@ -15174,7 +15174,7 @@ GUI:LegacySound
 END
 
 TOOLTIP:LegacySound
-"Özgün oyunun sesi: haritada yankı yok, uzaklık, tepe ya da bina boğukluğu yok, uzak ve geçen seslerde gecikme ya da perde kayması yok, büyük patlamalardan sonra kısılma yok, savaş seslerine ve birlik cevaplarına sınır yok, sınırlayıcı yok, harita ambiyansı yok, müzik de çatışmayı izlemez. Ana ses, cihaz ve hoparlörler yine geçerlidir. Hemen etkili olur."
+"Özgün oyunun sesi: geçen seslerde perde kayması yok, Aurora'nın ses patlaması yok, savaş seslerine ve birlik cevaplarına sınır yok, sınırlayıcı yok, harita ambiyansı yok, müzik de çatışmayı izlemez. Ana ses, cihaz ve hoparlörler yine geçerlidir. Hemen etkili olur."
 END
 
 GUI:IsometricCamera
@@ -15866,7 +15866,7 @@ GUI:MapLight
 END
 
 TOOLTIP:MapLight
-"Haritayı daha sıcak aydınlatıp daha uzun gölgeler düşüren alçak bir ikindi güneşi ve alçak zeminin üstünde duran, içinden geçen uçakların araladığı hafif bir pus. Yalnızca Direct3D 11. Bir sonraki haritada uygulanır."
+"Haritayı daha sıcak aydınlatıp daha uzun gölgeler düşüren alçak bir ikindi güneşi ve alçak zeminin üstünde kımıldamadan duran hafif bir pus. Yalnızca Direct3D 11. Bir sonraki haritada uygulanır."
 END
 
 GUI:TeamGlow
@@ -16832,7 +16832,7 @@ RANK:PerkSTILL_GUARD
 END
 
 RANK:PerkMEND
-"Çatışma dışında saniyede %d%% iyileşir"
+"Çatışma dışında saniyede %d.%02d%% iyileşir"
 END
 
 RANK:PerkSPOTTER
@@ -16869,6 +16869,66 @@ END
 
 RANK:PerkAURA_RANGE
 "Aura: topçu menzili +%d%%"
+END
+
+RANK:PerkRATE_OF_FIRE
+"Atış hızı +%d%%"
+END
+
+RANK:PerkRANGE
+"Menzil +%d%%"
+END
+
+RANK:PerkHEALTH
+"Can +%d%%"
+END
+
+RANK:PerkSPEED
+"Hız +%d%%"
+END
+
+RANK:PerkLAST_STAND
+"Canı 35%%'in altındayken atış hızı +%d%%"
+END
+
+RANK:PerkSCAVENGE
+"Öldürdükleri, kurbanın bedelinin %d%%'ini öder"
+END
+
+RANK:PerkDESIGNATE
+"Vurduğunu %d saniye işaretler: herkes ona 50%% daha hızlı ateş eder"
+END
+
+RANK:PerkDESIGNATE_REVEAL
+"İşareti gizli hedefleri açığa çıkarır"
+END
+
+RANK:PerkSALVAGE_CRATE
+"Düştüğünde hurda sandığı bırakır"
+END
+
+RANK:PerkAURA_MEND
+"Aura: saniyede %d.%02d%% iyileştirir"
+END
+
+RANK:PerkAURA_PACE
+"Aura: hız +%d%%"
+END
+
+RANK:PerkAURA_DRILL
+"Aura: birimleri %d. rütbeye kadar eğitir"
+END
+
+RANK:PerkAURA_STEADY
+"Aura: felç, EMP ve bastırma %d%% daha kısa"
+END
+
+RANK:PerkAURA_CAPTURE
+"Aura: binaları %d%% daha hızlı ele geçirir"
+END
+
+RANK:PerkAURA_SPOILS
+"Aura: yakındaki öldürmeler kurbanın bedelinin %d%%'ini öder"
 END
 
 RANK:America0
@@ -17793,4 +17853,8 @@ END
 
 GUI:FactionPickSideNameHint
 "Bir tarafın rastgele bir ordusuyla oynamak için o tarafın adına tıklayın."
+END
+
+GUI:SocketRedirected
+"LAN IP adresi %ls, ama sistem oyunun bağlantısını %ls üzerine koydu. Bir VPN'in bölünmüş tüneli (split tunnel) ya da bir güvenlik duvarı bağlantıyı yönlendirdi, bu yüzden ağınızdaki kimse sizi duyamıyor. Oyun için bölünmüş tüneli kapatıp yeniden deneyin."
 END

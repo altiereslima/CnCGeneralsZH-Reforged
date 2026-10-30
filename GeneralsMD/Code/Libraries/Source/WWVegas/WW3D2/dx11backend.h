@@ -112,6 +112,13 @@ public:
 	// frame.  While they are, the engine leaves the dynamic lights out of its own vertex lighting.
 	bool Lights_Per_Pixel() const { return ShadowReceiving && ShadowMapTexture != NULL; }
 
+	// How many blast lights the pixel block the last draw went up with carries.  A pass multiplying
+	// what is under it carries none (Upload_Pixel_Constants).
+	unsigned Pixel_Block_Blast_Lights() const
+	{
+		return static_cast<unsigned>(HeldPixelConstants.BlastLightParameters[0]);
+	}
+
 	// The draws that follow are sorted particle billboards, which fade where they meet the scene's
 	// depth (SOFT_PARTICLE_SAMPLING).  Only the sorting pool sets it, around the billboards' runs.
 	void Set_Soft_Particles(bool soft);
@@ -345,6 +352,19 @@ public:
 	// Where the scene is going now: its own target, or a screen filter's texture drawn over the
 	// scene's depth; NULL for a mirror or the sun's map.
 	ID3D11RenderTargetView * Scene_Target() const;
+	// The depth that goes with Scene_Target: the scene's own, multisampled with the scene, or the
+	// single-sample one a screen filter's texture is drawn over.
+	ID3D11DepthStencilView * Scene_Depth_Target() const;
+
+	// With a multisampled scene, its depth resolved into the device's single-sample depth buffer,
+	// which is what Get_Depth_Texture reads and what every pass reading the scene's depth samples:
+	// a full screen pass taking sample 0 of each pixel, since a depth buffer cannot be resolved the
+	// way a colour target is.  Only while the draws go into the scene, and only when a clear or a
+	// draw wrote its depth since the last one; anything that reads the depth calls it first.
+	void Resolve_Scene_Depth();
+	// Makes that pass now; false when the device refuses it, and a multisampled scene without it
+	// would leave every reader of the depth an unwritten buffer (Direct3D11_Create drops to one sample).
+	bool Make_Depth_Resolve();
 
 	// The scene's target, its depth and the draws' viewport bound again after a pass that bound
 	// its own on the context mid-scene (the post chain's occlusion).
@@ -573,6 +593,7 @@ private:
 	bool Build_Combiner_Description(CombinerDescription & description) const;
 	void Upload_Constants();
 	void Upload_Vertex_Constants();
+	void Upload_World_Constants();
 	void Upload_Pixel_Constants();
 
 	// Both indexed draws land here; only the topology differs.
@@ -593,6 +614,7 @@ private:
 		unsigned Bytes;			///< the whole buffer, a whole number of entries
 		unsigned Next;			///< where the next write goes; Bytes makes it discard
 		unsigned Current;		///< where the last write went, which is what the draws read
+		unsigned Discards;		///< every discard and every new buffer: an entry written since is still there
 	};
 	bool Create_Constant_Ring(ConstantRing & ring, unsigned block_bytes);
 	bool Write_Constants(ConstantRing & ring, const void * block, unsigned bytes);
@@ -604,7 +626,7 @@ private:
 	void Bind_State_Objects();
 	void Release_Cached();
 
-	ID3D11BlendState * Blend_State(bool glow);
+	ID3D11BlendState * Blend_State(bool glow, bool coverage);
 	ID3D11DepthStencilState * Depth_Stencil_State();
 	ID3D11RasterizerState * Rasterizer_State();
 	ID3D11SamplerState * Sampler_State(unsigned sampler);
@@ -721,6 +743,11 @@ private:
 	float AdditiveGain;
 	bool GlowDraw;
 	bool Additive_Glow() const;
+	// An alpha tested draw without blending into the multisampled scene covers the samples its
+	// alpha says, which smooths a leaf's or a fence's cut edge the way the samples smooth a
+	// triangle's.  Never into a single-sample target, where it would only dither, never for a test
+	// that keeps the low alphas, and never under Classic, whose fences are -d3d9's hard ones.
+	bool Alpha_To_Coverage() const;
 	ID3D11ShaderResourceView * SceneStandIn;
 	// A stage samples the target the draw is going into: the heat haze, which bends a picture that
 	// already took its shadows, and would take them a second time.
@@ -780,6 +807,15 @@ private:
 	bool SceneDepthRefused;		///< the device would not make the copy; no draw fades again
 	unsigned FrameDepthCopies;
 	void Release_Scene_Depth();
+	// Resolve_Scene_Depth's pass (Make_Depth_Resolve); refused for good if the device cannot.
+	// Stale while a clear or a draw into the scene wrote the multisampled depth since the last one.
+	ID3D11VertexShader * DepthResolveVertexShader;
+	ID3D11PixelShader * DepthResolvePixelShader;
+	ID3D11DepthStencilState * DepthResolveState;
+	ID3D11RasterizerState * DepthResolveRasterizer;
+	bool DepthResolveStale;
+	bool DepthResolveRefused;
+	void Release_Depth_Resolve();
 	bool Make_Smoke_Map();
 	void Release_Smoke_Map();
 
@@ -838,6 +874,17 @@ private:
 	PixelConstantBlock HeldPixelConstants;
 	float HeldEngineConstants[ENGINE_SHADER_CONSTANTS][4];
 
+	// The last few pixel blocks written, with the entry each went to and the ring's discard count
+	// then.  The sorted flush goes back and forth between a few of them, a billboard run's soft
+	// particle depth and a streak's none, and one still in the buffer is bound where it lies instead
+	// of written again (Rebind_Recent_Pixel_Constants).
+	enum { RECENT_PIXEL_BLOCKS = 4 };
+	PixelConstantBlock RecentPixelConstants[RECENT_PIXEL_BLOCKS];
+	unsigned RecentPixelOffset[RECENT_PIXEL_BLOCKS];
+	unsigned RecentPixelDiscards[RECENT_PIXEL_BLOCKS];
+	unsigned NextRecentPixel;
+	bool Rebind_Recent_Pixel_Constants(const PixelConstantBlock & block);
+
 	// A freshly created dynamic buffer holds nothing in particular, and a Map can fail, so a copy
 	// above only stands for what is in its buffer once a write has actually gone through.  One flag
 	// each rather than one between them: the engine bank is skipped on every draw that takes no
@@ -861,6 +908,19 @@ private:
 	// whose bytes always matched.  ConstantsChanged stands for both.
 	bool VertexConstantsChanged;
 	bool PixelConstantsChanged;
+	// The blend switch or either factor, which the pixel block reads only through Pixel_Blend_Key:
+	// the block is built again only when the key moved from the one it was last built with.  The
+	// sorted flush flips the blend at nearly every run, and each flip rebuilt and compared the
+	// whole block to find the same bytes.
+	bool PixelBlendChanged;
+	unsigned HeldPixelBlendKey;
+	unsigned Pixel_Blend_Key() const;
+	// A blend that multiplies what is under it: it takes no blast light.
+	bool Multiplies_Below() const;
+	// The world transform alone, which is every mesh draw: with nothing else flagged the held block
+	// is the rest of the next one, and only its three world products are made again
+	// (Upload_World_Constants).
+	bool WorldChanged;
 	bool PipelineChanged;
 	bool SamplerChanged[DX11_BACKEND_TEXTURE_STAGES];
 	// A stage's texture changed, or the last draw sampled the current target and so needs a fresh
@@ -1036,6 +1096,7 @@ private:
 	D3D11_BLEND_DESC LastBlendDescription;
 	ID3D11BlendState * LastBlendState;
 	bool LastBlendGlow;
+	bool LastBlendCoverage;
 	D3D11_DEPTH_STENCIL_DESC LastDepthStencilDescription;
 	ID3D11DepthStencilState * LastDepthStencilState;
 	D3D11_RASTERIZER_DESC LastRasterizerDescription;

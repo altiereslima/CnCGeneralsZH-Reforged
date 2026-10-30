@@ -43,6 +43,7 @@ VeterancyGainCreateModuleData::VeterancyGainCreateModuleData()
 {
 	m_startingLevel = LEVEL_REGULAR;
 	m_scienceRequired = SCIENCE_INVALID;
+	m_startingGrades = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -55,6 +56,7 @@ void VeterancyGainCreateModuleData::buildFieldParse(MultiIniFieldParse& p)
 	{
 		{ "StartingLevel",		INI::parseIndexList,	TheVeterancyNames,	offsetof( VeterancyGainCreateModuleData, m_startingLevel ) },
 		{ "ScienceRequired",	INI::parseScience,		NULL,								offsetof( VeterancyGainCreateModuleData, m_scienceRequired ) },
+		{ "StartingGrades",		INI::parseInt,				NULL,								offsetof( VeterancyGainCreateModuleData, m_startingGrades ) },
 		{ 0, 0, 0, 0 }
 	};
 
@@ -92,7 +94,10 @@ void VeterancyGainCreate::onCreate( void )
 		if( myExp  &&  myExp->isTrainable() )
 		{
 			// srj sez: use "setMin" here so that we never lose levels
-			myExp->setMinVeterancyLevel( md->m_startingLevel );// sVL can override isTrainable, but this module should not.
+			if( md->m_startingGrades > 0 )
+				myExp->gainGrades( md->m_startingGrades );
+			else
+				myExp->setMinVeterancyLevel( md->m_startingLevel );// sVL can override isTrainable, but this module should not.
 		}
 	}
 

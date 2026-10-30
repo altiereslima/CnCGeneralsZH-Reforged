@@ -575,6 +575,10 @@ static AsciiString thePendingReplayFile;
 	 that before init()'s resetAll() would have resetAll tear it straight back down again. */
 static AsciiString thePendingSaveFile;
 
+/* -file <map>: a single player game on that map, queued after init()'s resetAll() as the replay
+	 and the save are, so nothing the reset tears down is set up for it beforehand. */
+static AsciiString thePendingMapFile;
+
 /** Open the save game -loadsave named, once every subsystem has been reset.
 	*
 	* This is doLoadGame() in PopupSaveLoad.cpp without the menu: prepare a single player game, load,
@@ -1430,17 +1434,7 @@ void GameEngine::init( int argc, char *argv[] )
 			{
 				TheWritableGlobalData->m_shellMapOn = FALSE;
 				TheWritableGlobalData->m_playIntro = FALSE;
-				TheWritableGlobalData->m_pendingFile = TheGlobalData->m_initialFile;
-
-				// shutdown the top, but do not pop it off the stack
-	//			TheShell->hideShell();
-
-				// send a message to the logic for a new game
-				GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
-				msg->appendIntegerArgument(GAME_SINGLE_PLAYER);
-				msg->appendIntegerArgument(DIFFICULTY_NORMAL);
-				msg->appendIntegerArgument(0);
-				InitRandom(0);
+				thePendingMapFile = TheGlobalData->m_initialFile;
 			}
 			else if (fname.endsWithNoCase(".rep"))
 			{
@@ -1568,6 +1562,17 @@ void GameEngine::init( int argc, char *argv[] )
 		thePendingSaveFile.clear();
 	}
 
+	if (thePendingMapFile.isNotEmpty())
+	{
+		TheWritableGlobalData->m_pendingFile = thePendingMapFile;
+		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
+		msg->appendIntegerArgument( GAME_SINGLE_PLAYER );
+		msg->appendIntegerArgument( DIFFICULTY_NORMAL );
+		msg->appendIntegerArgument( 0 );
+		InitRandom( 0 );
+		thePendingMapFile.clear();
+	}
+
 	if (TheGlobalData->m_netGameHosts.isNotEmpty() && TheGlobalData->m_initialFile.isEmpty())
 	{
 		startAutoNetGame();
@@ -1661,17 +1666,18 @@ Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real e
 	return elapsedMsInLoop < LOGIC_CATCHUP_BUDGET_MS;
 }
 
-/* R1, smooth motion: when the last logic tick finished and how long a tick lasts, so the renderer can
+/* R1, smooth motion: when the last logic tick was due and how long a tick lasts, so the renderer can
 	 show models between their last two logic states (W3DSmoothMotion.h).  Read, never written, by the
-	 client; nothing here reaches the logic. */
-static Int64 s_lastLogicTickTicks = 0;
+	 client; nothing here reaches the logic.  Set by noteLogicTickDue after each pass's ticks. */
+static Int64 s_lastTickDueTicks = 0;
 static Real s_msPerLogicTick = 0.0f;
 
-void GameEngine_noteLogicTickDone( Int logicFps, Bool fastMode )
+Real GameEngine_tickFraction( Int64 now, Int64 due, Real msPerTick, Int64 ticksPerSecond )
 {
-	s_lastLogicTickTicks = Clock_Ticks();
-	// Fast mode runs one tick per pass however long it takes: there is no tick length to blend over.
-	s_msPerLogicTick = (logicFps > 0 && !fastMode) ? 1000.0f / (Real)logicFps : 0.0f;
+	if (msPerTick <= 0.0f || ticksPerSecond <= 0)
+		return 1.0f;
+	const Real fraction = (Real)((double)(now - due) * 1000.0 / (double)ticksPerSecond) / msPerTick;
+	return fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
 }
 
 /* -recordfps: which of the logic frame's pictures the coming draw is.  The logic loop moves it on once a
@@ -1750,11 +1756,7 @@ Real GameEngine_logicTickFraction( void )
 	const Int pictures = GameEngine_videoPictures();
 	if (pictures > 1)
 		return (Real)(GameEngine_videoPicture() + 1) / (Real)pictures;
-	if (s_msPerLogicTick <= 0.0f)
-		return 1.0f;
-	const Real ms = (Real)(Clock_Ticks() - s_lastLogicTickTicks) * 1000.0f / (Real)Clock_Ticks_Per_Second();
-	const Real fraction = ms / s_msPerLogicTick;
-	return fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
+	return GameEngine_tickFraction( Clock_Ticks(), s_lastTickDueTicks, s_msPerLogicTick, Clock_Ticks_Per_Second() );
 }
 
 Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
@@ -2101,16 +2103,16 @@ static void reportFrameTimeStats( void )
 						 theFrameTimes.countOver( 16.7f ), over16,
 						 theFrameTimes.countOver( 33.3f ), over33,
 						 theFrameTimes.countOver( 25.0f )));
-	// the same passes split for the logic thread plan: mean/p50/p99 of each part
-	#define PASS_SPLIT(h) (h).meanMS(), (h).percentileMS( 0.50f ), (h).percentileMS( 0.99f )
-	DEBUG_LOG(("HEADLESS PASSES TICK: %d | pass %.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f | render %.2f/%.2f/%.2f | logic %.2f/%.2f/%.2f ms mean/p50/p99\n",
+	// the same passes split for the logic thread plan: mean/p50/p99/p99.9 of each part
+	#define PASS_SPLIT(h) (h).meanMS(), (h).percentileMS( 0.50f ), (h).percentileMS( 0.99f ), (h).percentileMS( 0.999f )
+	DEBUG_LOG(("HEADLESS PASSES TICK: %d | pass %.2f/%.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f/%.2f | render %.2f/%.2f/%.2f/%.2f | logic %.2f/%.2f/%.2f/%.2f ms mean/p50/p99/p99.9\n",
 						 theTickPass.count(), PASS_SPLIT( theTickPass ), PASS_SPLIT( theTickSync ),
 						 PASS_SPLIT( theTickRender ), PASS_SPLIT( theTickLogic )));
-	DEBUG_LOG(("HEADLESS PASSES NOTICK: %d | pass %.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f | render %.2f/%.2f/%.2f ms mean/p50/p99\n",
+	DEBUG_LOG(("HEADLESS PASSES NOTICK: %d | pass %.2f/%.2f/%.2f/%.2f | sync %.2f/%.2f/%.2f/%.2f | render %.2f/%.2f/%.2f/%.2f ms mean/p50/p99/p99.9\n",
 						 theRenderPass.count(), PASS_SPLIT( theRenderPass ), PASS_SPLIT( theRenderSync ),
 						 PASS_SPLIT( theRenderRender )));
-	DEBUG_LOG(("HEADLESS PASSES OVERLAPPED: %d | %.2f/%.2f/%.2f p99.9 %.2f ms mean/p50/p99, every pass with the tick beside the render\n",
-						 theOverlapped.count(), PASS_SPLIT( theOverlapped ), theOverlapped.percentileMS( 0.999f )));
+	DEBUG_LOG(("HEADLESS PASSES OVERLAPPED: %d | %.2f/%.2f/%.2f/%.2f ms mean/p50/p99/p99.9, every pass with the tick beside the render\n",
+						 theOverlapped.count(), PASS_SPLIT( theOverlapped )));
 	#undef PASS_SPLIT
 	if (TheGlobalData)
 	{
@@ -2925,6 +2927,27 @@ static Bool s_passPlanned = FALSE;
 static GameEngine::LogicPassPlan s_passPlan;
 static UnsignedInt s_frameBeforeOverlap = 0;
 static UnsignedInt s_planTimeMs = 0;		///< when the pacer last spent the time since the one before
+static Int64 s_planTimeTicks = 0;				///< the same moment on the fine clock, for smooth motion
+
+/* R1, smooth motion: the blend runs from the moment the pass's last tick was due, the pacer's plan time
+	 less the debt it still holds.  Stamped when the ticks finished, as it was, a late-game tick of 2 to
+	 12 ms moved the stamp by its own length and the picture jumped back and forth by up to 0.6 of a
+	 tick.  A network game holds no debt, so its stamp is the plan time, and its ticks come at the
+	 network's rate.  Fast mode runs one tick a pass however long it takes: no tick length to blend over. */
+static void noteLogicTickDue( Int logicFps, Bool fastMode, Bool networkPaced )
+{
+	Real msPerTick = 0.0f;
+	if (networkPaced)
+	{
+		// the frame that just ran may have ended the match and taken the network with it
+		const UnsignedInt rate = TheNetwork != NULL ? TheNetwork->getFrameRate() : 0;
+		msPerTick = rate > 0 ? 1000.0f / (Real)rate : 0.0f;
+	}
+	else if (logicFps > 0 && !fastMode)
+		msPerTick = 1000.0f / (Real)logicFps;
+	s_msPerLogicTick = msPerTick;
+	s_lastTickDueTicks = s_planTimeTicks - (Int64)( (double)s_logicAccumMs * (double)Clock_Ticks_Per_Second() / 1000.0 );
+}
 
 void GameEngine::planLogicPass( LogicPassPlan &plan )
 {
@@ -2968,6 +2991,7 @@ void GameEngine::planLogicPass( LogicPassPlan &plan )
 	Real elapsedMs = (Real)(now - prevLogicTime);
 	prevLogicTime = now;
 	s_planTimeMs = now;
+	s_planTimeTicks = Clock_Ticks();
 
 	const Bool logicMayRun =
 			((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady()));
@@ -3228,11 +3252,15 @@ void GameEngine::update( void )
 				else if (!GameEngine_isLogicFrameDue(s_logicAccumMs, 0.0f, m_maxFPS))
 					break;
 			}
-			GameEngine_noteLogicTickDone( m_maxFPS, fastMode );
+			noteLogicTickDue( m_maxFPS, fastMode, networkPaced );
 			// a frame held by a scripted freeze keeps showing its last picture, rather than going back
-			// half a frame every other pass
+			// half a frame every other pass; smooth motion shows it whole too, since the update may have
+			// moved a model (a script's teleport) that the blend and its restore would put back
 			if (TheGameLogic->getFrame() == frameBeforeTicks)
+			{
 				s_videoPicture = GameEngine_videoPictures() - 1;
+				s_msPerLogicTick = 0.0f;
+			}
 #ifdef DEBUG_LOGGING
 			tLogicEnd = Clock_Ticks();
 			logicMS = engineElapsedMS( tLogicStart, tLogicEnd );

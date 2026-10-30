@@ -79,6 +79,21 @@
 
 #include <algorithm>
 #include <vector>
+
+/* A hint that a cache line is about to be read, as in PartitionManager.cpp: it reads nothing the
+	 program sees, so no result depends on it. */
+#if defined(__GNUC__) || defined(__clang__)
+	#define SCENE_PREFETCH(addr) __builtin_prefetch(addr)
+#elif defined(_M_X64) || defined(_M_IX86)
+	#include <xmmintrin.h>
+	#define SCENE_PREFETCH(addr) _mm_prefetch((const char *)(addr), _MM_HINT_T0)
+#elif defined(_M_ARM64)
+	#include <intrin.h>
+	#define SCENE_PREFETCH(addr) __prefetch(addr)
+#else
+	#define SCENE_PREFETCH(addr) ((void)0)
+#endif
+
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -370,6 +385,27 @@ void RTS3DScene::flagOccludedObjects(CameraClass * camera)
 }
 
 //=============================================================================
+/** One object of castRay's walk: a quick ray-sphere test (Graphics Gems I, p388), then the geometry.
+	* A hit shortens the ray to end on it, so a later object has to be nearer to count. */
+static Bool castRayAgainst(RenderObjClass *robj, RayCollisionTestClass &tempRayTest, RayCollisionTestClass &raytest)
+{
+	const SphereClass *sphere = &robj->Get_Bounding_Sphere();
+	Vector3 sphere_vector(sphere->Center - tempRayTest.Ray.Get_P0());
+	Real Alpha = Vector3::Dot_Product(sphere_vector, tempRayTest.Ray.Get_Dir());
+	Real Beta = sphere->Radius * sphere->Radius - (Vector3::Dot_Product(sphere_vector, sphere_vector) - Alpha * Alpha);
+	if (Beta < 0.0f || !robj->Cast_Ray(tempRayTest))
+		return FALSE;
+
+	raytest.CollidedRenderObj = robj;
+	Vector3 newEndPoint;
+	tempRayTest.Ray.Compute_Point(tempRayTest.Result->Fraction,&newEndPoint);
+	tempRayTest.Ray.Set(raytest.Ray.Get_P0(),newEndPoint);
+	//intersection point is at the end of shortened ray, so adjust fraction to 1.0
+	tempRayTest.Result->Fraction=1.0f;
+	return TRUE;
+}
+
+//=============================================================================
 // RTS3DScene::castRay
 //=============================================================================
 /** Does a ray intersection test against objects in our scene.
@@ -389,60 +425,69 @@ Bool RTS3DScene::castRay(RayCollisionTestClass & raytest, Bool testAll, Int coll
 	//temporary results for each object tested
 	CastResultStruct result;
 	RayCollisionTestClass tempRayTest(raytest.Ray,&result);
-	Vector3 newEndPoint;
 	Bool hit=FALSE;
 
 	tempRayTest.CollisionType = COLL_TYPE_ALL;
 	//check if a mesh is translucent before colliding with it. Skips headlights, etc.
 	tempRayTest.CheckTranslucent = true;
 
-	RefRenderObjListIterator it(&RenderList);
-
-	// select the first object
-	it.First();
-
-	while (!it.Is_Done())
+	if (testAll)
 	{
-		// get the render object
-		RenderObjClass * robj = it.Peek_Obj();
-		it.Next();
-
-		// only intersect if it was visible or if we must test all
-		if(robj->Get_Collision_Type() & collisionType && (testAll || robj->Is_Really_Visible()))
+		RefRenderObjListIterator it(&RenderList);
+		for (it.First(); !it.Is_Done(); it.Next())
 		{
-			// Do a quick ray-sphere test (Graphics Gems I,  p388)
-			const SphereClass *sphere = &robj->Get_Bounding_Sphere();
-
-			// make a vector from the ray origin to the sphere center
-			Vector3 sphere_vector(sphere->Center - tempRayTest.Ray.Get_P0());
-		
-			// get the dot product between the sphere_vector and the ray vector
-			Real Alpha = Vector3::Dot_Product(sphere_vector, tempRayTest.Ray.Get_Dir());
-
-			Real Beta = sphere->Radius * sphere->Radius - (Vector3::Dot_Product(sphere_vector, sphere_vector) - Alpha * Alpha);
-
-			if(Beta < 0.0f)
-				continue;	//no intersection
-			
-			//Do a more accurate test against object geometry
-			if (robj->Cast_Ray(tempRayTest))
-			{
-				//Found an object closer than last closest object
-				//Adjust our results and refine search
-				raytest.CollidedRenderObj = robj;
-				hit=TRUE;
-				//Refine search by making ray shorter
-				tempRayTest.Ray.Compute_Point(tempRayTest.Result->Fraction,&newEndPoint);
-				tempRayTest.Ray.Set(raytest.Ray.Get_P0(),newEndPoint);
-				//intersection point is at the end of shortened ray, so adjust fraction to 1.0
-				tempRayTest.Result->Fraction=1.0f;
-			}
+			RenderObjClass *robj = it.Peek_Obj();
+			if ((robj->Get_Collision_Type() & collisionType) && castRayAgainst(robj, tempRayTest, raytest))
+				hit = TRUE;
+		}
+	}
+	else
+	{
+		// The visible ones only (m_visibleObjects, see Add_Render_Object): about 145 of 900 render
+		// objects late in a 4-player match.  The mouse-over pick runs once a client frame, undrawn
+		// frames included, and the walk past the other 750 was two thirds of its time.
+		for (size_t i = 0; i < m_visibleObjects.size(); ++i)
+		{
+			RenderObjClass *robj = m_visibleObjects[i];
+			if (robj && (robj->Get_Collision_Type() & collisionType) && robj->Is_Really_Visible() && castRayAgainst(robj, tempRayTest, raytest))
+				hit = TRUE;
 		}
 	}
 
 	//Store results of ray intersection test including a clipped ray that ends on object.
 	raytest.Ray=tempRayTest.Ray;
 	return hit;
+}
+
+//=============================================================================
+// RTS3DScene::Add_Render_Object / Remove_Render_Object / Remove_All_Render_Objects
+//=============================================================================
+/** m_visibleObjects holds every object in the scene whose visible bit is set, in RenderList order,
+	* so a walk over it that asks Is_Really_Visible meets what a walk over RenderList would.  An
+	* object joins the scene without the bit (DEFAULT_BITS) and only Visibility_Check sets it, so the
+	* list is what that check left, plus an object that comes back still carrying the bit from an
+	* earlier stay.  A removed object is nulled rather than erased, keeping the order, which is the
+	* tie-break of castRay and the order the render loop queues in; the scene's reference is what
+	* kept it alive. */
+//=============================================================================
+void RTS3DScene::Add_Render_Object(RenderObjClass * obj)
+{
+	const bool listed = RenderList.Contains(obj);
+	SimpleSceneClass::Add_Render_Object(obj);
+	if (!listed && obj->Is_Visible())
+		m_visibleObjects.push_back(obj);
+}
+
+void RTS3DScene::Remove_Render_Object(RenderObjClass * obj)
+{
+	std::replace(m_visibleObjects.begin(), m_visibleObjects.end(), obj, (RenderObjClass *)NULL);
+	SimpleSceneClass::Remove_Render_Object(obj);
+}
+
+void RTS3DScene::Remove_All_Render_Objects(void)
+{
+	m_visibleObjects.clear();
+	SimpleSceneClass::Remove_All_Render_Objects();
 }
 
 //=============================================================================
@@ -455,6 +500,23 @@ static Bool posedPartsInView(RenderObjClass *robj, CameraClass *camera)
 {
 	SphereClass posed;
 	return W3DModelDraw::getPosedBoundingSphere(robj, posed) && !camera->Cull_Sphere(posed);
+}
+
+/** Visibility_Check's walk is a linked list of objects scattered over the heap, most of them off the
+	* screen and done with in a few tests, so the walk is mostly waiting for each one to arrive.  This
+	* asks for the one two ahead: its vtable pointer and bits at the start, its cached bounding sphere
+	* about 100 bytes in.  A layout change only makes the second hint miss. */
+static inline void prefetchAhead(RefRenderObjListIterator it)
+{
+	it.Next();
+	if (it.Is_Done())
+		return;
+	it.Next();
+	if (it.Is_Done())
+		return;
+	const char *obj = (const char *)it.Peek_Obj();
+	SCENE_PREFETCH(obj);
+	SCENE_PREFETCH(obj + 100);
 }
 
 //=============================================================================
@@ -478,6 +540,7 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 	m_numPotentialOccludees=0;
 	m_translucentObjectsCount=0;
 	m_numNonOccluderOrOccludee=0;
+	m_visibleObjects.clear();
 
 	Int currentFrame=0;
 	if (TheGameLogic) currentFrame = TheGameLogic->getFrame();
@@ -494,6 +557,7 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 		for (it.First(); !it.Is_Done(); it.Next()) {
 
 			robj = it.Peek_Obj();
+			prefetchAhead(it);
 
 			draw=NULL;
 			drawInfo = (DrawableInfo *)robj->Get_User_Data();
@@ -523,6 +587,8 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 					robj->Set_Visible(!camera->Cull_Sphere(robj->Get_Bounding_Sphere()));
 				}
 			}
+			if (robj->Is_Visible())
+				m_visibleObjects.push_back(robj);
 		}
 	}
 	else
@@ -533,6 +599,7 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 		for (it.First(); !it.Is_Done(); it.Next()) {
 
 			robj = it.Peek_Obj();
+			prefetchAhead(it);
 
 			if (robj->Is_Force_Visible()) {
 				robj->Set_Visible(true);
@@ -605,6 +672,8 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 
 				robj->Set_Visible(isVisible);
 			}
+			if (robj->Is_Visible())
+				m_visibleObjects.push_back(robj);
 
 			///@todo: We're not using LOD yet so I disabled this code. MW
 			// Also, should check how multiple passes (reflections) get along
@@ -1441,15 +1510,13 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 	}
 #endif
 
-	// loop through all render objects in the list:
-	for (it.First(&RenderList); !it.Is_Done();) 
+	// loop through the visible render objects: m_visibleObjects is RenderList's visible ones in its
+	// order (Add_Render_Object), and the ~85% of the list off the screen cost this walk most of its
+	// time.  By index, so an object removed during renderOneObject() only leaves a null behind.
+	for (size_t v = 0; v < m_visibleObjects.size(); ++v)
 	{
-
-		// get the render object
-		robj = it.Peek_Obj();
- 		it.Next();	//advance to next object in case this one gets deleted during renderOneObject().
-
-		if (robj->Class_ID() == RenderObjClass::CLASSID_TILEMAP)
+		robj = m_visibleObjects[v];
+		if (robj == NULL || robj->Class_ID() == RenderObjClass::CLASSID_TILEMAP)
 			continue;	//we already rendered terrain
 
 		if (robj->Is_Really_Visible()) {
@@ -1711,7 +1778,7 @@ void RTS3DScene::flushOccludedObjectsIntoStencil(RenderInfoClass & rinfo)
 				{
 					DrawableInfo *drawInfo=((DrawableInfo *)(*renderList)->Get_User_Data());
 					if (drawInfo->m_flags & DrawableInfo::ERF_IS_TRANSLUCENT)
-					{	
+					{
 						TheDX8MeshRenderer.Flush();	//render all the submitted meshes using current stencil function
 						SHD_FLUSH;
 						//Disable writing to color buffer since translucent objects are rendered at end of frame.
@@ -2019,6 +2086,26 @@ void RTS3DScene::parkSpentDynamicLights(void)
 		UpdateList.Remove(pLight);
 		m_dynamicLightList.Remove(pLight);
 	}
+}
+
+//=============================================================================
+// RTS3DScene::stepDynamicLights
+//=============================================================================
+/** The lights' half of Customized_Render, in its order, for a pass whose draw is skipped: -headless,
+	* the undrawn stretch of -jumpToFrame, a minimised window, a lost device, a replay's fast forward and
+	* seek (29 passes in 30 skip the draw).  Only the render stepped a light's fade and parked it, so
+	* those runs kept every light pulse of the match switched on and getADynamicLight walked all of
+	* them for each new one: 28 to 37% of the main thread late in a
+	* headless match, and a -jumpToFrame's first drawn frame lit by every muzzle flash of the jump.  The
+	* fade counts logic frames and is gated on the client frame, so a later render steps nothing twice,
+	* and a light the terrain still holds is not spent and waits for it. */
+//=============================================================================
+void RTS3DScene::stepDynamicLights(void)
+{
+	parkSpentDynamicLights();
+	RefRenderObjListIterator dynaLightIt(&m_dynamicLightList);
+	for (dynaLightIt.First(); !dynaLightIt.Is_Done(); dynaLightIt.Next())
+		dynaLightIt.Peek_Obj()->On_Frame_Update();
 }
 
 //=============================================================================

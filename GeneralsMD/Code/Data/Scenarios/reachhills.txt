@@ -1,0 +1,16 @@
+# The reach overlay on hilly ground, for a picture: reachproof's defences on Twilight Flame's
+# south-west plateau, with an American seat that plays (no -observer), so a click on a defence
+# selects it and its ground is painted.  Nobody thinks (-takeover); the enemy stays at home.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -scenario reachhills -control <port>
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  AmericaPowerPlant              1  3600 4150
+30    spawn      0  AmericaPowerPlant              1  3700 4150
+
+30    spawn      0  AmericaPatriotBattery          1  3400 3700
+30    spawn      0  AmericaFireBase                1  3550 3950
+30    spawn      0  ChinaGattlingCannon            1  3300 3950

@@ -1,0 +1,48 @@
+# Tunnel under fire: a GLA attack move across the map while enemy Rangers shoot at the tunnel nearest
+# the goal, a Sneak Attack tunnel in an enemy base the way a player uses one.
+#
+# Three mouths: one beside the army at home (880,910), one 300 short of the goal (700,1270) and one
+# 150 from it (550,1570) that the Rangers start shooting just after the order.  The army goes down at
+# home and should come up beside the goal, into the Rangers, and fight there.  Before the fix a mouth
+# hit in the last two seconds counted as no mouth at all, so everybody came up at the one 300 short
+# and walked the rest.
+#
+# Measured 2026-10-27, seed 3, with a temporary log of the mouth each unit left by: before, all 35
+# came up at the one 300 short (700,1270) and the Rebels reached the goal after 710 frames on average,
+# the last after 887 (14.8 s); after, all 35 came up beside the goal and the Rebels took 280, the last
+# 381 (6.3 s), Scorpions 519 to 209.  HEADLESS STALL: no stop of a second or more either way, and
+# every unit left the tunnel the frame after it was told to, so nothing waited at the mouth.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 3 2 small -autoskirmish 2 -takeover -side 0 FactionGLA -side 1 FactionAmerica
+#     -seed 3 -maxframes 4800 -scenario tunnelunderfire -logPrefix tunnelunderfire_
+
+30    spawn             0  GLATunnelNetwork       1  start0:0:300
+30    spawn             0  GLATunnelNetwork       1  start1:450:-300
+30    spawn             0  GLAInfantryRebel      30  start0:0:180    15
+30    spawn             0  GLATankScorpion        6  start0:-150:300 40
+60    spawn             0  GLATunnelNetwork       1  start1:300:0
+# the shortcut waits for the pathfinder's zones to take the new tunnels in (tunnelgap.txt)
+400   playerattackmove  0  GLAInfantryRebel          start1:450:0
+400   playerattackmove  0  GLATankScorpion           start1:450:0
+400   arrive            0  GLAInfantryRebel          start1:450:0  200
+400   arrive            0  GLATankScorpion           start1:450:0  200
+# the Rangers open fire once the order has picked its tunnels, the way a Sneak Attack draws fire
+430   spawn             1  AmericaInfantryRanger  8  start1:300:-130    20
+440   attack            1  AmericaInfantryRanger     0  GLATunnelNetwork
+# and keep firing through the whole time the army comes up, about 525 to 1040
+700   spawn             1  AmericaInfantryRanger  8  start1:300:-130    20
+710   attack            1  AmericaInfantryRanger     0  GLATunnelNetwork
+500   tally             1  AmericaInfantryRanger
+500   tally             0  GLATunnelNetwork
+600   tally             1  AmericaInfantryRanger
+600   tally             0  GLATunnelNetwork
+700   tally             1  AmericaInfantryRanger
+700   tally             0  GLATunnelNetwork
+800   tally             1  AmericaInfantryRanger
+800   tally             0  GLATunnelNetwork
+1000  tally             1  AmericaInfantryRanger
+1000  tally             0  GLATunnelNetwork
+2300  tally             1  AmericaInfantryRanger
+2300  tally             0  GLAInfantryRebel
+2300  tally             0  GLATunnelNetwork

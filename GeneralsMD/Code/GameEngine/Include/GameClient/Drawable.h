@@ -197,7 +197,6 @@ public:
 	Real m_airPitch;						///< hover or wings pitch, roll and yaw from that frame, drawn until the next one
 	Real m_airRoll;
 	Real m_airYaw;
-	Real m_jetHeading;					///< a jet's heading on the retail frame wings last stepped on, for its turn rate
 	Real m_jetBank;							///< a jet's bank into its turn and its nose-up pitch, eased
 	Real m_jetPitch;
 	Real m_groundLeanStages[2][3];	///< a ground vehicle's pitch and roll lean, smoothed through three stages once a retail frame
@@ -209,6 +208,11 @@ public:
 	Real m_groundPitch;					///< a ground vehicle's chassis pitch, roll and lift from that frame, drawn until the next one
 	Real m_groundRoll;
 	Real m_groundZ;
+	Real m_headingLag;					///< a ground vehicle's drawn heading minus its logic heading, sprung back towards 0
+	Real m_headingLagRate;			///< and how fast that changes, a logic frame
+	Real m_headingLogic;				///< the logic heading on m_headingFrame
+	UnsignedInt m_headingFrame;	///< the logic frame the heading spring last stepped on
+	Bool m_headingSeeded;				///< m_headingLogic and m_headingFrame hold a real heading and frame
 	TWheelInfo m_wheelInfo;			///< Wheel offset & angle info for a wheeled type locomotor.
 
 	DrawableLocoInfo();
@@ -541,8 +545,11 @@ public:
 		UnsignedInt			tintStatus;
 		Vector3					tintColor;
 		Vector3					selectionColor;
+		Coord3D					position;
 	};
 	void takeLookForDraw( void );
+	/** Where it stood at the sync point, for the draw's own walks of the drawables: the Thing's cache moves with the tick. */
+	const Coord3D *getPositionForDraw( void ) const { return &m_lookForDraw.position; }
 
 	void colorFlash( const RGBColor *color, UnsignedInt decayFrames = DEF_DECAY_FRAMES, UnsignedInt attackFrames = 0, UnsignedInt sustainAtPeak = FALSE );  ///< flash a drawable in the color specified for a short time
 	void colorTint( const RGBColor *color );	 ///< tint this drawable the color specified
@@ -623,6 +630,8 @@ public:
 	const TWheelInfo *getWheelInfo(void) const { return m_locoInfo ? &m_locoInfo->m_wheelInfo : NULL; }
 	
 	const DrawableLocoInfo *getLocoInfo() const { return m_locoInfo; }
+	/// how far the drawn hull of a tank or car trails its logic heading (calcPhysicsXformGround), 0 for anything else
+	Real getDrawnHeadingLag() const { return m_locoInfo ? m_locoInfo->m_headingLag : 0.0f; }
 
 	// this method must ONLY be called from the client, NEVER From the logic, not even indirectly.
 	Bool clientOnly_getFirstRenderObjInfo(Coord3D* pos, Real* boundingSphereRadius, Matrix3D* transform);
@@ -780,8 +789,9 @@ protected:
 		Real m_totalRoll;						///< Current total roll for this frame.
 		Real m_totalYaw;						///< Current total yaw for this frame
 		Real m_totalZ;
+		Real m_headingYaw;					///< a ground vehicle's heading lag, turned before the pitch and roll
 
-		PhysicsXformInfo() : m_totalPitch(0), m_totalRoll(0), m_totalYaw(0), m_totalZ(0) { }
+		PhysicsXformInfo() : m_totalPitch(0), m_totalRoll(0), m_totalYaw(0), m_totalZ(0), m_headingYaw(0) { }
 	};
 
 	Bool calcPhysicsXform(PhysicsXformInfo& info);
@@ -912,6 +922,7 @@ private:
 	mutable Bool m_clientWorkQueued;		///< this drawable's ID is in the list flushPendingClientWork walks
 	Bool m_transformPending;						///< the tick moved it; the draw modules have not been told
 	Bool m_renderPending;								///< made in a tick: the draw modules have not built their render objects
+	Int m_clipFeedbackSlots;						///< the draw modules' getProjectileClipFeedbackSlots, or'd at creation
 	struct PendingStep
 	{
 		ModelConditionFlags condition;		///< a state an in-tick flush would have applied, when work is empty
@@ -971,7 +982,22 @@ private:
 	void drawBattlePlans( const IRegion2D* healthBarRegion );				///< Icons rendering for active battle plan statii
 
 	Bool drawsAnyUIText( void );
-	
+
+	/// the modules the icon pass looks for on the object; its modules are made with it and never change
+	enum IconModule
+	{
+		ICON_MODULE_DOCK					= 1 << 0,
+		ICON_MODULE_STICKY_BOMB		= 1 << 1,
+		ICON_MODULE_PRODUCTION		= 1 << 2,
+		ICON_MODULE_SPECIAL_POWER	= 1 << 3,
+		ICON_MODULES_KNOWN				= 1 << 7
+	};
+	UnsignedByte m_iconModules = 0;		///< IconModule bits, found the first time the icon pass asks
+	Bool hasIconModule( IconModule module );
+public:
+	Bool hasProductionModule( void ) { return hasIconModule( ICON_MODULE_PRODUCTION ); }	///< the object's; it has one
+private:
+
 	static Bool							s_staticImagesInited;
 	static const Image*			s_veterancyImage[LEVEL_COUNT];
 	static const Image*			s_fullAmmo;

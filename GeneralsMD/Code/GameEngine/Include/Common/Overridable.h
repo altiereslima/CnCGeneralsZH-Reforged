@@ -57,12 +57,13 @@ class Overridable : public MemoryPoolObject
 			return m_nextOverride;
 		}
 
-		// recursively ask if there is a next override, and if not, return this.
+		// follow the chain to its last override, or return this if there is none.
 		const Overridable *getFinalOverride( void ) const
 		{
-			if (m_nextOverride)
-				return m_nextOverride->getFinalOverride();
-			return this;
+			const Overridable *last = this;
+			while (last->m_nextOverride)
+				last = last->m_nextOverride;
+			return last;
 		}
 
 		// set the next override on this object. This currently makes no attempt to prevent leaks.

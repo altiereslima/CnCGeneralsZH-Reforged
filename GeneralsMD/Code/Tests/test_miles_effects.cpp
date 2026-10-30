@@ -1,6 +1,8 @@
 /*
- * The air, room, duck and limiter of the Miles surface on miniaudio (MSS.h's AIL_ex_set_3D_air,
- * AIL_ex_set_reverb, AIL_ex_duck and AIL_ex_limit), measured in the mix a -wav run records.
+ * Doppler and the limiter of the Miles surface on miniaudio (MSS.h's AIL_ex_set_3D_air and
+ * AIL_ex_limit), measured in the mix a -wav run records, and what the mix does not do: no echo after
+ * a sound has stopped, and no filter that grows with distance, the two that made every map sound
+ * like the inside of a tunnel.
  *
  * miles_miniaudio.cpp is compiled into this test on its own, without the XAudio2 half, and run on its
  * offline mix: AIL_ex_offline_mix, then AIL_ex_mix_to_frame moves the mix by logic frames, so every
@@ -8,10 +10,7 @@
  * back through AIL_ex_start_capture, the tap -wav writes its file from.  The expected numbers are the
  * physics the helpers in MSS.h claim, worked out here, not read back from them.
  *
- * The room is MSS/mss_ex_room.h, which miles_xaudio2 runs too, so the room tests hold for what a
- * player on Windows hears.  Not covered: XAudio2's own filter and its wall-clock duck, which need an
- * audio device, and the delay a world sound starts with, which is the game's request list and not
- * this library.
+ * Not covered: XAudio2's own filter, which needs an audio device.
  */
 #include "test_harness.h"
 
@@ -189,25 +188,14 @@ static double brightnessAt(float x)
 	return rms(capture, 0.1, 0.4) / (10.0 / fabs(x));
 }
 
-TEST(air_takes_the_top_off_a_far_sound)
+TEST(distance_changes_the_level_and_leaves_the_top_end)
 {
 	startAudio();
-	// No air: distance changes the level and nothing else.
-	AIL_ex_set_3D_air(0.0f, 0.0f);
-	const double nearOpen = brightnessAt(-20.0f);
-	const double farOpen = brightnessAt(-1600.0f);
+	const double nearLevel = brightnessAt(-20.0f);
+	const double farLevel = brightnessAt(-1600.0f);
 	// all of it on the right, half of the mono average: 0.17263 / 2 at full volume
-	CHECK(nearOpen > 0.05);
-	CHECK(fabs(farOpen / nearOpen - 1.0) < 0.05);
-
-	// Air at 400: 1600 out is a cutoff of 20 kHz / 17, 1.2 kHz, where a one-pole leaves an 8 kHz
-	// tone under a fifth of itself; 20 out the cutoff is still near 20 kHz and the tone passes.
-	AIL_ex_set_3D_air(0.0f, 400.0f);
-	const double nearAir = brightnessAt(-20.0f);
-	const double farAir = brightnessAt(-1600.0f);
-	AIL_ex_set_3D_air(0.0f, 0.0f);
-	CHECK(nearAir / nearOpen > 0.9);
-	CHECK(farAir / nearAir < 0.2);
+	CHECK(nearLevel > 0.05);
+	CHECK(fabs(farLevel / nearLevel - 1.0) < 0.05);
 }
 
 TEST(doppler_raises_what_comes_and_lowers_what_goes)
@@ -215,7 +203,7 @@ TEST(doppler_raises_what_comes_and_lowers_what_goes)
 	startAudio();
 	// A quarter of the speed of sound towards the listener is 1700 / 1275, a third up; the same away
 	// is 1700 / 2125, a fifth down.
-	AIL_ex_set_3D_air(1700.0f, 0.0f);
+	AIL_ex_set_3D_air(1700.0f);
 	std::vector<unsigned char> tone = makeTone(440.0, 500);
 	std::vector<H3DSAMPLE> coming(1, place(tone, -500.0f, 425.0f, 1.0f));
 	const Capture up = listen(coming, 0.6);
@@ -223,114 +211,42 @@ TEST(doppler_raises_what_comes_and_lowers_what_goes)
 	const Capture down = listen(going, 0.6);
 	std::vector<H3DSAMPLE> standing(1, place(tone, -500.0f, 0.0f, 1.0f));
 	const Capture still = listen(standing, 0.6);
-	AIL_ex_set_3D_air(0.0f, 0.0f);
+	AIL_ex_set_3D_air(0.0f);
 
 	CHECK_NEAR(frequency(still, 0.05, 0.25), 440.0, 440.0 * 0.02);
 	CHECK_NEAR(frequency(up, 0.05, 0.25), 440.0 * 4.0 / 3.0, 440.0 * 0.02);
 	CHECK_NEAR(frequency(down, 0.05, 0.25), 440.0 * 0.8, 440.0 * 0.02);
 }
 
-TEST(the_room_rings_on_after_the_sound_has_stopped)
+TEST(a_sound_that_has_stopped_leaves_no_echo)
 {
 	startAudio();
-	// A tenth of a second of tone, then listen past it: dry is silence, a room is a tail.
+	// A tenth of a second of tone, then listen past it, near and far: silence, where the room this
+	// mix used to have rang on for two seconds.
 	std::vector<unsigned char> tone = makeTone(440.0, 100);
-	AIL_ex_set_reverb(0.0f, 1.5f, 0.3f, 0.0f, 0.0f);
-	std::vector<H3DSAMPLE> dry(1, place(tone, -20.0f, 0.0f, 1.0f));
-	const Capture dryCapture = listen(dry, 1.0);
+	std::vector<H3DSAMPLE> nearSound(1, place(tone, -20.0f, 0.0f, 1.0f));
+	const Capture nearCapture = listen(nearSound, 1.0);
+	std::vector<H3DSAMPLE> farSound(1, place(tone, -200.0f, 0.0f, 1.0f));
+	const Capture farCapture = listen(farSound, 1.0);
 
-	AIL_ex_set_reverb(0.5f, 1.5f, 0.3f, 0.0f, 0.0f);
-	std::vector<H3DSAMPLE> wet(1, place(tone, -20.0f, 0.0f, 1.0f));
-	const Capture wetCapture = listen(wet, 1.0);
-
-	// An echo holds the room back: after a 30 ms blip the room answers within a comb's length, 25 ms,
-	// and with a 90 ms echo nothing comes back before the echo does.
-	// Each waits out the last one's tail first, four seconds being 160 dB at this decay.
-	std::vector<unsigned char> blip = makeTone(440.0, 30);
-	runSeconds(4.0);
-	std::vector<H3DSAMPLE> prompt(1, place(blip, -20.0f, 0.0f, 1.0f));
-	const Capture promptCapture = listen(prompt, 0.3);
-	runSeconds(4.0);
-	AIL_ex_set_reverb(0.5f, 1.5f, 0.3f, 0.09f, 0.35f);
-	std::vector<H3DSAMPLE> echoed(1, place(blip, -20.0f, 0.0f, 1.0f));
-	const Capture echoCapture = listen(echoed, 0.3);
-	AIL_ex_set_reverb(0.0f, 1.0f, 0.0f, 0.0f, 0.0f);
-	runSeconds(3.0);	// let the tail die before the next test listens
-
-	CHECK(rms(dryCapture, 0.0, 0.1) > 0.02);
-	CHECK(rms(dryCapture, 0.3, 0.6) < 0.0002);
-	CHECK(rms(wetCapture, 0.3, 0.6) > 0.001);
-	CHECK(rms(wetCapture, 0.3, 0.6) < rms(wetCapture, 0.0, 0.1));
-	CHECK(rms(promptCapture, 0.035, 0.085) > 0.001);
-	CHECK(rms(echoCapture, 0.035, 0.085) < 0.0002);
-	CHECK(rms(echoCapture, 0.095, 0.12) > 0.002);
+	CHECK(rms(nearCapture, 0.0, 0.1) > 0.02);
+	CHECK(rms(nearCapture, 0.15, 0.9) < 0.0002);
+	CHECK(rms(farCapture, 0.0, 0.1) > 0.002);
+	CHECK(rms(farCapture, 0.15, 0.9) < 0.0002);
 }
 
-TEST(a_dry_sample_takes_no_air_and_no_room)
+TEST(a_dry_sample_takes_no_doppler)
 {
 	startAudio();
-	// A unit's reply: 1600 out with air at 400 keeps its 8 kHz, and a room at half send adds no tail.
-	AIL_ex_set_3D_air(0.0f, 400.0f);
-	AIL_ex_set_reverb(0.5f, 1.5f, 0.3f, 0.0f, 0.0f);
-	std::vector<unsigned char> bright = makeTone(8000.0, 500);
-	std::vector<H3DSAMPLE> farReply(1, place(bright, -1600.0f, 0.0f, 1.0f));
-	AIL_ex_set_3D_sample_dry(farReply[0], 1);
-	const double farLevel = rms(listen(farReply, 0.6), 0.1, 0.4) / (10.0 / 1600.0);
-	std::vector<H3DSAMPLE> nearReply(1, place(bright, -20.0f, 0.0f, 1.0f));
-	AIL_ex_set_3D_sample_dry(nearReply[0], 1);
-	const double nearLevel = rms(listen(nearReply, 0.6), 0.1, 0.4) / (10.0 / 20.0);
-	runSeconds(4.0);
-	std::vector<unsigned char> blip = makeTone(440.0, 100);
-	std::vector<H3DSAMPLE> reply(1, place(blip, -20.0f, 0.0f, 1.0f));
+	// A unit's reply, coming at a quarter of the speed of sound, keeps its pitch.
+	AIL_ex_set_3D_air(1700.0f);
+	std::vector<unsigned char> tone = makeTone(440.0, 500);
+	std::vector<H3DSAMPLE> reply(1, place(tone, -500.0f, 425.0f, 1.0f));
 	AIL_ex_set_3D_sample_dry(reply[0], 1);
-	const Capture replyCapture = listen(reply, 1.0);
-	AIL_ex_set_3D_air(0.0f, 0.0f);
-	AIL_ex_set_reverb(0.0f, 1.0f, 0.0f, 0.0f, 0.0f);
-	runSeconds(3.0);
+	const Capture capture = listen(reply, 0.6);
+	AIL_ex_set_3D_air(0.0f);
 
-	CHECK(nearLevel > 0.05);
-	CHECK(fabs(farLevel / nearLevel - 1.0) < 0.05);
-	CHECK(rms(replyCapture, 0.0, 0.1) > 0.02);
-	CHECK(rms(replyCapture, 0.3, 0.6) < 0.0002);
-}
-
-TEST(a_duck_dips_the_rest_and_spares_the_blast)
-{
-	startAudio();
-	// The rest is a steady tone, low enough that the duck's muffle leaves it be; the blast is a silent
-	// sample, since only its exemption matters.
-	std::vector<unsigned char> steady = makeTone(110.0, 4000);
-	std::vector<unsigned char> blastTone = makeTone(880.0, 4000);
-	std::vector<H3DSAMPLE> samples;
-	samples.push_back(place(steady, -20.0f, 0.0f, 1.0f));
-	samples.push_back(place(blastTone, -20.0f, 0.0f, 0.0f));
-	AIL_ex_duck(samples[1], 0.25f, 2.0f);
-	const Capture capture = listen(samples, 3.0);
-
-	// Held at a quarter for the first half second (the hold is a quarter of the two), back by two.
-	const double full = rms(capture, 2.2, 2.9);
-	CHECK(full > 0.02);
-	CHECK_NEAR(rms(capture, 0.1, 0.45) / full, 0.25, 0.03);
-	CHECK(rms(capture, 1.2, 1.3) / full > 0.4);
-	CHECK(rms(capture, 1.2, 1.3) / full < 0.9);
-}
-
-TEST(a_duck_muffles_what_it_dips)
-{
-	startAudio();
-	// A duck to a quarter is a 1250 Hz ceiling, AIL_ex_duck_cutoff: an 8 kHz tone under it loses far
-	// more than the quarter the gain takes.
-	std::vector<unsigned char> bright = makeTone(8000.0, 3000);
-	std::vector<unsigned char> blastTone = makeTone(880.0, 3000);
-	std::vector<H3DSAMPLE> samples;
-	samples.push_back(place(bright, -20.0f, 0.0f, 1.0f));
-	samples.push_back(place(blastTone, -20.0f, 0.0f, 0.0f));
-	AIL_ex_duck(samples[1], 0.25f, 2.0f);
-	const Capture capture = listen(samples, 2.5);
-
-	const double full = rms(capture, 2.1, 2.4);
-	CHECK(full > 0.02);
-	CHECK(rms(capture, 0.1, 0.45) / full < 0.1);
+	CHECK_NEAR(frequency(capture, 0.05, 0.25), 440.0, 440.0 * 0.02);
 }
 
 TEST(a_loud_mix_never_reaches_full_scale)

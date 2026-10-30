@@ -80,6 +80,7 @@ Transport::Transport(void)
 {
 	m_winsockInit = false;
 	m_udpsock = NULL;
+	m_redirectedIP = 0;
 	// EA never initialized these two.  It did not bite because everything that read them was
 	// compiled out of the shipping build; now that the simulator is built in every configuration,
 	// a Transport that is used before init() would have run on whatever was on the heap.
@@ -125,6 +126,7 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 #endif
 
 	// ------- Bind our port --------
+	m_redirectedIP = 0;
 	if (m_udpsock)
 		delete m_udpsock;
 	m_udpsock = NEW UDP();
@@ -148,6 +150,24 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 	if (retval != 0) {
 		DEBUG_CRASH(("Could not bind to 0x%8.8X:%d\n", ip, port));
 		DEBUG_LOG(("Transport::init - Failure to bind socket with error code %x\n", retval));
+		delete m_udpsock;
+		m_udpsock = NULL;
+		return false;
+	}
+
+	/* A VPN's split tunnel (a WFP bind redirect) or a firewall can move the socket to another adapter
+		 after bind() succeeds.  Everything then leaves from an address the lobby does not know as its own:
+		 the player hears his own announcements as a stranger's and nobody on the chosen network hears him.
+		 Refuse the socket and say which address the system bound.  A wildcard bind has nothing to compare. */
+	UnsignedInt boundIP;
+	UnsignedShort boundPort;
+	m_udpsock->getLocalAddr(boundIP, boundPort);
+	if (ip != INADDR_ANY && boundIP != ip)
+	{
+		DEBUG_LOG(("Transport::init - asked for %d.%d.%d.%d:%d, the system bound %d.%d.%d.%d:%d (a VPN split tunnel or a firewall redirected the socket)\n",
+			ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff, port,
+			boundIP >> 24, (boundIP >> 16) & 0xff, (boundIP >> 8) & 0xff, boundIP & 0xff, boundPort));
+		m_redirectedIP = boundIP;
 		delete m_udpsock;
 		m_udpsock = NULL;
 		return false;

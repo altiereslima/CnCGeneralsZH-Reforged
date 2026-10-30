@@ -59,10 +59,11 @@ Int GameEngine_logicCatchupMaxFrames( Int logicFps );
 Int GameEngine_matchFramesPerSecond( Bool turbo );
 
 /** R1, smooth motion: the renderer's blend reads how far into the next logic tick the wall clock is
-	(0 just after a tick, 1 a whole tick later or more; always 1 in fast mode or before the first tick).
-	The logic loop notes each pass's last tick with GameEngine_noteLogicTickDone. */
-void GameEngine_noteLogicTickDone( Int logicFps, Bool fastMode );
+	(0 when the last tick was due, 1 a whole tick later or more; always 1 in fast mode or before the first
+	tick).  GameEngine_tickFraction is the arithmetic, on the fine clock's ticks: 1 for a tick length of
+	0, clamped to 0..1 otherwise. */
 Real GameEngine_logicTickFraction( void );
+Real GameEngine_tickFraction( Int64 now, Int64 due, Real msPerTick, Int64 ticksPerSecond );
 
 /** LOGIC-THREAD.md phase 4: a picture presented while the pass's tick still runs beside the render,
 	with another to follow in the same pass.  The frame-time histograms count each picture as a pass of

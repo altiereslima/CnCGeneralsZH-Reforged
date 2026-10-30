@@ -63,6 +63,10 @@ public:
 
 	inline Bool allowBroadcasts(Bool val) { if (!m_udpsock) return false; return (m_udpsock->AllowBroadcasts(val))?true:false; }
 
+	/// The address the system bound when the last init() was refused because it was not the one asked
+	/// for (a VPN split tunnel or a firewall redirecting the socket), 0 otherwise
+	UnsignedInt getRedirectedIP( void ) const { return m_redirectedIP; }
+
 #if !defined(_WIN32)
 	/* Port defect 29 (udp.h): shareAddress(TRUE) before init lets this socket share its port with another
 		 copy's broadcast listener; initBroadcastListener binds the wildcard address to take only the
@@ -96,6 +100,7 @@ public:
 private:
 	Bool m_winsockInit;
 	UDP *m_udpsock;
+	UnsignedInt m_redirectedIP;
 #if !defined(_WIN32)
 	Bool m_shareAddress;
 	Bool m_broadcastsOnly;

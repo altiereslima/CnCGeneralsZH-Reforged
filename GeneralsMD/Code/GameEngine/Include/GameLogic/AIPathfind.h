@@ -1046,6 +1046,7 @@ public:
 	Bool isViewBlockedByObstacle(const Object* obj, const Object* objOther);	///< Return true if the straight line between the given points contains any obstacle, and thus blocks vision
 
 	Bool isAttackViewBlockedByObstacle(const Object* obj, const Coord3D& attackerPos,  const Object* victim, const Coord3D& victimPos);	///< Return true if the straight line between the given points contains any obstacle, and thus blocks vision
+	Bool isGroundViewBlockedByObstacle(const Coord3D& attackerPos, const Coord3D& victimPos, ObjectID standingIn = INVALID_ID);	///< the same walk for a ground shooter and target that are no Objects (the placement cursor's reach overlay)
 
 	Bool isLinePassable( const Object *obj, LocomotorSurfaceTypeMask acceptableSurfaces, 
 		PathfindLayerEnum layer, const Coord3D& startWorld, const Coord3D& endWorld, 

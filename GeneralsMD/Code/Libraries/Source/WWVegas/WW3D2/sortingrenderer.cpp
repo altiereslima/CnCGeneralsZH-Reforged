@@ -572,6 +572,85 @@ static bool Same_Draw_State(const RenderStateStruct& a, const RenderStateStruct&
 	return true;
 }
 
+// Whether two nodes draw in one run: the device state above and every look the flush sets per run.
+// A billboard run fades into the depth behind it and a mesh run does not, so the two never share one.
+static bool Same_Run_State(const SortingNodeStruct* a,const SortingNodeStruct* b)
+{
+	return a->glow==b->glow && a->fire==b->fire && a->emissive==b->emissive && a->quads==b->quads
+		&& Same_Draw_Effect(a,b) && a->excludeSunReceivers==b->excludeSunReceivers
+		&& a->casterEffect==b->casterEffect && Same_Draw_State(a->sorting_state,b->sorting_state);
+}
+
+// ----------------------------------------------------------------------------
+// Each pooled node's run state, named by the first node in pool order that has it, so a run break
+// is one compare and not Same_Run_State's matrices and lights.  The hash covers only fields that
+// Same_Run_State compares byte for byte, so equal states always hash alike.
+
+static unsigned short overlapping_node_class[MAX_OVERLAPPING_NODES];
+static const unsigned CLASS_TABLE_SIZE=2*MAX_OVERLAPPING_NODES;
+static unsigned short class_table[CLASS_TABLE_SIZE];	// a class's node plus one; nought is empty
+static unsigned class_table_hash[CLASS_TABLE_SIZE];
+
+static unsigned Hash_Words(unsigned hash,const void* bytes,unsigned byte_count)
+{
+	const unsigned char* at=(const unsigned char*)bytes;
+	for (unsigned offset=0;offset+sizeof(unsigned)<=byte_count;offset+=sizeof(unsigned)) {
+		unsigned word;
+		memcpy(&word,at+offset,sizeof(word));
+		hash=(hash^word)*16777619u;
+	}
+	return hash;
+}
+
+static unsigned Run_State_Hash(const SortingNodeStruct* node,int textures)
+{
+	const RenderStateStruct& state=node->sorting_state;
+	const unsigned fields[3]={
+		state.shader.Get_Bits(),
+		node->draw_effect,
+		(node->glow?1u:0u)|(node->fire?2u:0u)|(node->emissive?4u:0u)|(node->quads?8u:0u)|(node->excludeSunReceivers?16u:0u) };
+	unsigned hash=Hash_Words(2166136261u,fields,sizeof(fields));
+	hash=Hash_Words(hash,&state.material,sizeof(state.material));
+	hash=Hash_Words(hash,state.Textures,sizeof(state.Textures[0])*textures);
+	hash=Hash_Words(hash,&state.world,sizeof(state.world));
+	return Hash_Words(hash,&state.view,sizeof(state.view));
+}
+
+// A node nothing may pass, nor it anything: a look that reads the scene's copy, a sun caster
+// effect, or a texture in the default pool, which is where every render target lives and so where a
+// draw sampling the picture under it would find it.
+static bool Run_Stays_In_Order(const SortingNodeStruct* node,int textures)
+{
+	if (node->draw_effect!=0 || node->casterEffect.Effect!=0) return true;
+	for (int i=0;i<textures;++i) {
+		const TextureBaseClass* texture=node->sorting_state.Textures[i];
+		if (texture && texture->Get_Pool()==TextureBaseClass::POOL_DEFAULT) return true;
+	}
+	return false;
+}
+
+static void Classify_Nodes(unsigned node_count,unsigned short* states)
+{
+	const int textures=DX8Wrapper::Get_Current_Caps()->Get_Max_Textures_Per_Pass();
+	memset(class_table,0,sizeof(class_table));
+	for (unsigned node=0;node<node_count;++node) {
+		const SortingNodeStruct* state=overlapping_nodes[node];
+		const unsigned hash=Run_State_Hash(state,textures);
+		unsigned slot=hash&(CLASS_TABLE_SIZE-1);
+		while (class_table[slot]!=0
+			&& (class_table_hash[slot]!=hash || !Same_Run_State(overlapping_nodes[class_table[slot]-1],state))) {
+			slot=(slot+1)&(CLASS_TABLE_SIZE-1);
+		}
+		if (class_table[slot]==0) {
+			class_table[slot]=(unsigned short)(node+1);
+			class_table_hash[slot]=hash;
+		}
+		overlapping_node_class[node]=(unsigned short)(class_table[slot]-1);
+		states[node]=overlapping_node_class[node]
+			| (Run_Stays_In_Order(state,textures) ? (unsigned short)SortingRendererClass::SORT_STATE_FIXED : 0);
+	}
+}
+
 // ----------------------------------------------------------------------------
 
 static inline bool Entry_Is_Quad(const TempIndexStruct& entry)
@@ -682,17 +761,241 @@ static void Write_Batch_Indices(int chunk,void* context)
 	}
 }
 
-// Draw one batch of the sorted entries, in that order.
+// ----------------------------------------------------------------------------
+// Runs.  Nearly every sorted entry was a draw of its own in a big battle: two fires a screen apart
+// burn at the same depths, the sort interleaves their quads, and the state flipped at every one.
+// Blending orders only the draws that land on one pixel, so an entry may move back past entries
+// that share no pixel with it and join the last run of its own state; every pixel still blends the
+// same draws in the same order, so the picture is the same to the bit.  Where an entry can reach is
+// worked out on SORT_TILE_GRID by SORT_TILE_GRID tiles of the viewport: an entry's tiles hold every
+// pixel it can touch, found from its corners through the projection with a margin, and anything
+// whose corners cannot be put on the screen that way covers all of it.
+
+static const unsigned TILE_GRID=SortingRendererClass::SORT_TILE_GRID;
+// How many runs back an entry looks for its own state.
+static const unsigned RUN_LOOK_BACK=64;
+// Past the rasterizer's snapping (a 256th of a pixel) and the CPU's rounding of the corners against
+// the GPU's (a millionth of the width), in the viewport's own units, two across: 1.3 pixels at 1280.
+static const float TILE_MARGIN=0.002f;
+// A corner this close to the eye, or behind it, puts the entry on the whole screen.
+static const float TILE_NEAREST_W=1.0e-3f;
+
+// Each pooled node's world, view and projection in one, for its entries' tiles.
+static D3DXMATRIX overlapping_node_clip[MAX_OVERLAPPING_NODES];
+static D3DXMATRIX sort_projection;
+static unsigned short overlapping_node_state[MAX_OVERLAPPING_NODES];
+
+// The arrays only grow, and only on the render thread.
+static unsigned short* entry_states;
+static SortingRendererClass::SortTiles* entry_tiles;
+static unsigned* entry_order;
+static unsigned entry_arrays_count;
+static unsigned* group_entry_run;
+static unsigned* group_run_start;
+static unsigned group_arrays_count;
+
+static void Reserve_Entry_Arrays(unsigned count)
+{
+	if (count<=entry_arrays_count) return;
+	delete[] entry_states;
+	delete[] entry_tiles;
+	delete[] entry_order;
+	entry_states=W3DNEWARRAY unsigned short[count];
+	entry_tiles=W3DNEWARRAY SortingRendererClass::SortTiles[count];
+	entry_order=W3DNEWARRAY unsigned[count];
+	entry_arrays_count=count;
+}
+
+static void Release_Entry_Arrays()
+{
+	delete[] entry_states;
+	delete[] entry_tiles;
+	delete[] entry_order;
+	delete[] group_entry_run;
+	delete[] group_run_start;
+	entry_states=NULL;
+	entry_tiles=NULL;
+	entry_order=NULL;
+	group_entry_run=NULL;
+	group_run_start=NULL;
+	entry_arrays_count=0;
+	group_arrays_count=0;
+}
+
+// NaN goes to the screen's edge on either side, so a broken corner widens the range.
+static inline unsigned char Low_Tile(float ndc)
+{
+	const float tile=(ndc-TILE_MARGIN+1.0f)*(0.5f*TILE_GRID);
+	if (!(tile>0.0f)) return 0;
+	return (tile<(float)(TILE_GRID-1)) ? (unsigned char)tile : (unsigned char)(TILE_GRID-1);
+}
+
+static inline unsigned char High_Tile(float ndc)
+{
+	const float tile=(ndc+TILE_MARGIN+1.0f)*(0.5f*TILE_GRID);
+	if (!(tile<(float)(TILE_GRID-1))) return (unsigned char)(TILE_GRID-1);
+	return (tile>0.0f) ? (unsigned char)tile : 0;
+}
+
+static SortingRendererClass::SortTiles Whole_Grid()
+{
+	SortingRendererClass::SortTiles tiles;
+	tiles.x0=0;
+	tiles.x1=(unsigned char)(TILE_GRID-1);
+	tiles.y0=0;
+	tiles.y1=(unsigned char)(TILE_GRID-1);
+	return tiles;
+}
+
+// The corners go through the same three matrices the draw's vertex program multiplies them by.  With
+// every corner in front of the eye a triangle's picture is the triangle of its corners' pictures, and
+// clipping only takes from it.
+SortingRendererClass::SortTiles SortingRendererClass::_Entry_Tiles(const float* const* corners,
+	unsigned corner_count,const float* clip)
+{
+	float min_x=1.0e30f,max_x=-1.0e30f,min_y=1.0e30f,max_y=-1.0e30f;
+	for (unsigned c=0;c<corner_count;++c) {
+		const float x=corners[c][0],y=corners[c][1],z=corners[c][2];
+		const float w=x*clip[3]+y*clip[7]+z*clip[11]+clip[15];
+		if (!(w>TILE_NEAREST_W)) return Whole_Grid();
+		const float screen_x=(x*clip[0]+y*clip[4]+z*clip[8]+clip[12])/w;
+		const float screen_y=(x*clip[1]+y*clip[5]+z*clip[9]+clip[13])/w;
+		if (!(screen_x==screen_x) || !(screen_y==screen_y)) return Whole_Grid();
+		min_x=MIN(min_x,screen_x);
+		max_x=MAX(max_x,screen_x);
+		min_y=MIN(min_y,screen_y);
+		max_y=MAX(max_y,screen_y);
+	}
+	SortTiles tiles;
+	tiles.x0=Low_Tile(min_x);
+	tiles.x1=High_Tile(max_x);
+	tiles.y0=Low_Tile(min_y);
+	tiles.y1=High_Tile(max_y);
+	return tiles;
+}
+
+struct EntryTileJob
+{
+	const TempIndexStruct* entries;
+	unsigned entry_count;
+};
+
+static void Find_Entry_Tiles(int chunk,void* context)
+{
+	const EntryTileJob* job=(const EntryTileJob*)context;
+	const unsigned first=(unsigned)chunk*ENTRIES_PER_COPY_CHUNK;
+	const unsigned last=MIN(first+ENTRIES_PER_COPY_CHUNK,job->entry_count);
+	for (unsigned e=first;e<last;++e) {
+		const TempIndexStruct& entry=job->entries[e];
+		const VertexFormatXYZNDUV2* src_verts=overlapping_node_vertices[entry.idx];
+		const float* corners[4];
+		unsigned corner_count=3;
+		if (Entry_Is_Quad(entry)) {
+			for (unsigned c=0;c<4;++c) {
+				corners[c]=&src_verts[entry.tri.i+c].x;
+			}
+			corner_count=4;
+		}
+		else {
+			corners[0]=&src_verts[entry.tri.i].x;
+			corners[1]=&src_verts[entry.tri.j].x;
+			corners[2]=&src_verts[entry.tri.k].x;
+		}
+		entry_tiles[e]=SortingRendererClass::_Entry_Tiles(corners,corner_count,&overlapping_node_clip[entry.idx]._11);
+		entry_states[e]=overlapping_node_state[entry.idx];
+	}
+}
+
+struct OpenRun
+{
+	unsigned short state;
+	unsigned long long rows[TILE_GRID];	// the tiles its entries cover, a bit a column
+};
+
+unsigned SortingRendererClass::_Group_Runs(const unsigned short* states,const SortTiles* tiles,
+	unsigned count,unsigned* order)
+{
+	if (count>group_arrays_count) {
+		delete[] group_entry_run;
+		delete[] group_run_start;
+		group_entry_run=W3DNEWARRAY unsigned[count];
+		group_run_start=W3DNEWARRAY unsigned[count];
+		group_arrays_count=count;
+	}
+	static OpenRun open_runs[RUN_LOOK_BACK];
+	unsigned runs=0;
+	for (unsigned e=0;e<count;++e) {
+		const unsigned short state=states[e];
+		const SortTiles& at=tiles[e];
+		const unsigned long long columns=(2ull<<at.x1)-(1ull<<at.x0);
+		unsigned run=runs;
+		const unsigned oldest=(runs>RUN_LOOK_BACK) ? runs-RUN_LOOK_BACK : 0;
+		for (unsigned r=runs;r-->oldest;) {
+			const OpenRun& open=open_runs[r%RUN_LOOK_BACK];
+			if (open.state==state) {
+				run=r;
+				break;
+			}
+			if ((state|open.state)&SORT_STATE_FIXED) break;
+			bool shared=false;
+			for (unsigned y=at.y0;y<=at.y1 && !shared;++y) {
+				shared=(open.rows[y]&columns)!=0;
+			}
+			if (shared) break;
+		}
+		OpenRun& target=open_runs[run%RUN_LOOK_BACK];
+		if (run==runs) {
+			target.state=state;
+			memset(target.rows,0,sizeof(target.rows));
+			group_run_start[run]=0;
+			++runs;
+		}
+		for (unsigned y=at.y0;y<=at.y1;++y) {
+			target.rows[y]|=columns;
+		}
+		group_entry_run[e]=run;
+		++group_run_start[run];
+	}
+
+	// Each run's entries in the order the sort gave them, the runs in the order they opened.
+	unsigned start=0;
+	for (unsigned r=0;r<runs;++r) {
+		const unsigned entries_in_run=group_run_start[r];
+		group_run_start[r]=start;
+		start+=entries_in_run;
+	}
+	for (unsigned e=0;e<count;++e) {
+		order[group_run_start[group_entry_run[e]]++]=e;
+	}
+	return runs;
+}
+
+// The run's state is any of its nodes': they are all one class.
+static void Draw_Run(SortingNodeStruct* state,unsigned first_index,unsigned triangles,
+	unsigned first_vertex,unsigned vertex_count)
+{
+	Apply_Render_State(state->sorting_state);
+	SunShadow::SetSmokeGlow(DX8Wrapper::_Get_D3D_Device(),state->glow);
+	Direct3D11_Set_Fire_Look(state->fire);
+	Direct3D11_Set_Emissive(state->emissive);
+	Direct3D11_Set_Soft_Particles(state->quads);
+	Direct3D11_Set_Draw_Effect(state->draw_effect,state->draw_effect_parameters);
+	SunShadow::ReceiverExclusion sunReceivers(DX8Wrapper::_Get_D3D_Device(), state->excludeSunReceivers);
+	SunShadow::CasterEffectScope casterEffect(DX8Wrapper::_Get_D3D_Device(), state->casterEffect);
+	DX8Wrapper::Draw_Triangles(first_index,triangles,first_vertex,vertex_count);
+}
+
+// Draw one batch of the entries, in the order _Group_Runs gave them.
 //
 // Each entry's vertices are copied out of its node on their own - three for a triangle, four for a
 // quad - so a run of entries covers one contiguous stretch of the batch's vertices and indices.  A
 // quad's indices are the pattern PointGroupClass's own quad index buffers use.
 //
-// A run ends where the sorted entries move to another node, and it used to be drawn there even
-// when the next node draws with exactly the same state - thirty inferno cannons each with its own
-// fire system on the same texture, interleaved in depth, were a draw every few triangles.  A run
-// carries on across nodes whose state matches.  The order of the entries does not change, so
-// neither does the picture.
+// A run carries on across nodes of one class and ends where the class changes.  Thirty inferno
+// cannons each with its own fire system on the same texture, interleaved in depth, used to be a
+// draw every few triangles; _Group_Runs has already moved each entry back past the entries in
+// other tiles to the last run of its class, so every pixel blends the same draws in the depth
+// sort's order and the picture does not change.
 static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_count,unsigned vertex_count,unsigned index_count)
 {
 	BatchCopyJob job;
@@ -743,50 +1046,21 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 	unsigned run_triangles=0;
 	unsigned index_cursor=0;
 	unsigned vertex_cursor=0;
-	unsigned node_id=entries[0].idx;
+	unsigned run_class=overlapping_node_class[entries[0].idx];
 	for (unsigned e=0;e<entry_count;++e) {
-		const unsigned entry_node=entries[e].idx;
-		if (entry_node!=node_id) {
-			SortingNodeStruct* state=overlapping_nodes[node_id];
-			SortingNodeStruct* next=overlapping_nodes[entry_node];
-			// A run of billboards fades into the depth behind it and a run of meshes does not, so the
-			// two never share a draw even in one state.
-			if (state->glow!=next->glow || state->fire!=next->fire || state->emissive!=next->emissive ||
-				state->quads!=next->quads || !Same_Draw_Effect(state,next) ||
-				state->excludeSunReceivers!=next->excludeSunReceivers ||
-				!(state->casterEffect==next->casterEffect) ||
-				!Same_Draw_State(state->sorting_state,next->sorting_state)) {
-				Apply_Render_State(state->sorting_state);
-				SunShadow::SetSmokeGlow(DX8Wrapper::_Get_D3D_Device(),state->glow);
-				Direct3D11_Set_Fire_Look(state->fire);
-				Direct3D11_Set_Emissive(state->emissive);
-				Direct3D11_Set_Soft_Particles(state->quads);
-				Direct3D11_Set_Draw_Effect(state->draw_effect,state->draw_effect_parameters);
-				SunShadow::ReceiverExclusion sunReceivers(DX8Wrapper::_Get_D3D_Device(), state->excludeSunReceivers);
-				SunShadow::CasterEffectScope casterEffect(DX8Wrapper::_Get_D3D_Device(), state->casterEffect);
-				DX8Wrapper::Draw_Triangles(run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
-				run_first_index=index_cursor;
-				run_first_vertex=vertex_cursor;
-				run_triangles=0;
-			}
-			node_id=entry_node;
+		const unsigned entry_class=overlapping_node_class[entries[e].idx];
+		if (entry_class!=run_class) {
+			Draw_Run(overlapping_nodes[run_class],run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
+			run_first_index=index_cursor;
+			run_first_vertex=vertex_cursor;
+			run_triangles=0;
+			run_class=entry_class;
 		}
 		run_triangles+=Entry_Is_Quad(entries[e]) ? 2 : 1;
 		index_cursor+=Entry_Index_Count(entries[e]);
 		vertex_cursor+=Entry_Vertex_Count(entries[e]);
 	}
-
-	Apply_Render_State(overlapping_nodes[node_id]->sorting_state);
-	SunShadow::SetSmokeGlow(DX8Wrapper::_Get_D3D_Device(),overlapping_nodes[node_id]->glow);
-	Direct3D11_Set_Fire_Look(overlapping_nodes[node_id]->fire);
-	Direct3D11_Set_Emissive(overlapping_nodes[node_id]->emissive);
-	Direct3D11_Set_Soft_Particles(overlapping_nodes[node_id]->quads);
-	Direct3D11_Set_Draw_Effect(overlapping_nodes[node_id]->draw_effect,overlapping_nodes[node_id]->draw_effect_parameters);
-	{
-		SunShadow::ReceiverExclusion sunReceivers(DX8Wrapper::_Get_D3D_Device(), overlapping_nodes[node_id]->excludeSunReceivers);
-		SunShadow::CasterEffectScope casterEffect(DX8Wrapper::_Get_D3D_Device(), overlapping_nodes[node_id]->casterEffect);
-		DX8Wrapper::Draw_Triangles(run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
-	}
+	Draw_Run(overlapping_nodes[run_class],run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
 	SunShadow::SetSmokeGlow(DX8Wrapper::_Get_D3D_Device(),false);
 	Direct3D11_Set_Fire_Look(false);
 	Direct3D11_Set_Emissive(false);
@@ -813,6 +1087,11 @@ void SortingRendererClass::Flush_Sorting_Pool()
 	if (!overlapping_node_count) return;
 
 	SNAPSHOT_SAY(("SortingSystem - Flush \n"));
+
+	// The draws' projection, which no run sets, for the entries' tiles.
+	Matrix4x4 projection;
+	DX8Wrapper::_Get_DX8_Transform(D3DTS_PROJECTION,projection);
+	sort_projection=(D3DXMATRIX&)projection;
 
 	// Before any run resolves its program: the soft particles fade into this copy of the depth, and
 	// a sorted mesh writing depth between two of their runs costs no second one.  A pool with no
@@ -842,6 +1121,7 @@ void SortingRendererClass::Flush_Sorting_Pool()
 		D3DXMATRIX d3d_mtx=(D3DXMATRIX&)state->sorting_state.world*(D3DXMATRIX&)state->sorting_state.view;
 		const Matrix4x4& mtx=(const Matrix4x4&)d3d_mtx;
 		const bool camera_space=(mtx[0][2] == 0.0f && mtx[1][2] == 0.0f && mtx[3][2] == 0.0f && mtx[2][2] == 1.0f);
+		overlapping_node_clip[node_id]=d3d_mtx*sort_projection;
 
 		if (state->quads) {
 			const int quad_count=state->polygon_count/2;
@@ -939,6 +1219,19 @@ void SortingRendererClass::Flush_Sorting_Pool()
 
 	const TempIndexStruct* sorted=Sort_By_Depth(tis,temp_sort_scratch_array,overlapping_entry_count);
 
+	// The runs, drawn from the radix sort's other buffer.
+	Classify_Nodes(overlapping_node_count,overlapping_node_state);
+	Reserve_Entry_Arrays(overlapping_entry_count);
+	EntryTileJob tile_job;
+	tile_job.entries=sorted;
+	tile_job.entry_count=overlapping_entry_count;
+	Run_Parallel((int)((overlapping_entry_count+ENTRIES_PER_COPY_CHUNK-1)/ENTRIES_PER_COPY_CHUNK),1,Find_Entry_Tiles,&tile_job);
+	_Group_Runs(entry_states,entry_tiles,overlapping_entry_count,entry_order);
+	TempIndexStruct* grouped=(sorted==temp_index_array) ? temp_sort_scratch_array : temp_index_array;
+	for (unsigned e=0;e<overlapping_entry_count;++e) {
+		grouped[e]=sorted[entry_order[e]];
+	}
+
 	tSortEnd = Clock_Ticks();
 	flush_profile_sort_ms += flushProfileElapsedMS(tSortStart, tSortEnd);
 
@@ -948,8 +1241,8 @@ void SortingRendererClass::Flush_Sorting_Pool()
 		unsigned batch_vertices=0;
 		unsigned batch_indices=0;
 		while (batch_end<overlapping_entry_count) {
-			const unsigned vertices=Entry_Vertex_Count(sorted[batch_end]);
-			const unsigned indices=Entry_Index_Count(sorted[batch_end]);
+			const unsigned vertices=Entry_Vertex_Count(grouped[batch_end]);
+			const unsigned indices=Entry_Index_Count(grouped[batch_end]);
 			if (batch_vertices+vertices>MAX_BATCH_VERTICES || batch_indices+indices>MAX_BATCH_INDICES) {
 				break;
 			}
@@ -957,7 +1250,7 @@ void SortingRendererClass::Flush_Sorting_Pool()
 			batch_indices+=indices;
 			++batch_end;
 		}
-		Flush_Sorting_Batch(sorted+batch_start,batch_end-batch_start,batch_vertices,batch_indices);
+		Flush_Sorting_Batch(grouped+batch_start,batch_end-batch_start,batch_vertices,batch_indices);
 		batch_start=batch_end;
 	}
 
@@ -1074,6 +1367,7 @@ void SortingRendererClass::Deinit()
 	delete[] batch_offsets;
 	batch_offsets=NULL;
 	batch_offsets_count=0;
+	Release_Entry_Arrays();
 }
 
 

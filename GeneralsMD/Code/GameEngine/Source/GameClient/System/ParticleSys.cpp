@@ -2399,6 +2399,9 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
 	Bool transformSet = false;
 	const Matrix3D *parentXfrm = NULL;
 	Bool isShrouded = false;
+	// the hull of a tank or car is drawn trailing its logic heading, and exhaust and damage smoke
+	// hang off the hull as drawn (Drawable::getDrawnHeadingLag)
+	Matrix3D drawnXfrm;
 
 	if (m_attachedToDrawableID)
 	{
@@ -2409,7 +2412,9 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
 			if (attachedTo->getFullyObscuredByShroud())
 				isShrouded = true;
 
-			parentXfrm = attachedTo->getTransformMatrix();
+			drawnXfrm = *attachedTo->getTransformMatrix();
+			drawnXfrm.Rotate_Z( attachedTo->getDrawnHeadingLag() );
+			parentXfrm = &drawnXfrm;
 
 			m_lastPos = m_pos;
 			m_pos = *attachedTo->getPosition();
@@ -2435,7 +2440,11 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
       const Drawable * draw = objectAttachedTo->getDrawable();
 			m_attachedObjectDrawableForDraw = draw ? draw->getID() : INVALID_DRAWABLE_ID;
       if ( draw )
-  			parentXfrm = draw->getTransformMatrix();
+      {
+  			drawnXfrm = *draw->getTransformMatrix();
+  			drawnXfrm.Rotate_Z( draw->getDrawnHeadingLag() );
+  			parentXfrm = &drawnXfrm;
+      }
       else
   			parentXfrm = objectAttachedTo->getTransformMatrix();
       

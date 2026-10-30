@@ -100,13 +100,42 @@ enum RankPerk
 	RANK_PERK_SCATTER,						///< share of its own weapons' scatter taken away
 	RANK_PERK_DEATH_RALLY,				///< on death, allies within its aura radius take this share less damage for RallyTime
 	RANK_PERK_DETECT,							///< stealthed enemies within this radius are detected
-	RANK_PERK_AURA_RADIUS,				///< its aura radius, a multiplier
+	RANK_PERK_AURA_RADIUS,				///< every aura radius it gives, a multiplier (DETECT's excepted)
+	RANK_PERK_RATE_OF_FIRE,				///< added to its own weapons' rate of fire, on top of the grade's stat
+	RANK_PERK_RANGE,							///< added to its own weapons' range, on top of the grade's stat
+	RANK_PERK_HEALTH,							///< its max health times 1 + this, on top of the grade's stat
+	RANK_PERK_SPEED,							///< its speed times 1 + this, on top of the grade's stat
+	RANK_PERK_LAST_STAND,					///< added to its rate of fire while it is below RANK_LAST_STAND_HEALTH
+	RANK_PERK_SCAVENGE,						///< each kill it scores pays its player this share of the victim's cost
+	RANK_PERK_DESIGNATE,					///< seconds whatever it hurts wears FAERIE_FIRE, which everyone shooting at it fires faster on
+	RANK_PERK_DESIGNATE_REVEAL,		///< its mark also detects a stealthed target for as long
+	RANK_PERK_SALVAGE_CRATE,			///< on death it leaves the Veterancy block's SalvageCrate
 	RANK_PERK_AURA_RATE_OF_FIRE,	///< the first of the aura perks, in RankAura order
 	RANK_PERK_AURA_SIGHT,
 	RANK_PERK_AURA_GUARD,
 	RANK_PERK_AURA_RANGE,
+	RANK_PERK_AURA_MEND,
+	RANK_PERK_AURA_PACE,
+	RANK_PERK_AURA_DRILL,
+	RANK_PERK_AURA_STEADY,
+	RANK_PERK_AURA_CAPTURE,
+	RANK_PERK_AURA_SPOILS,
 
 	RANK_PERK_COUNT
+};
+
+/// the share of max health under which the LAST_STAND perk fires faster
+#define RANK_LAST_STAND_HEALTH 0.35f
+
+/** Who an aura line reaches besides its leader's allies' units: Perk_<side> = grade AURA_<kind> value
+	* radius INFANTRY, or STRUCTURES for units and buildings both. */
+enum RankReach
+{
+	RANK_REACH_UNITS,							///< every allied unit, buildings left out
+	RANK_REACH_INFANTRY,					///< allied infantry only
+	RANK_REACH_STRUCTURES,				///< allied units and buildings
+
+	RANK_REACH_COUNT
 };
 
 /** A leader's bonus to friendly units within its aura radius, refilled once a second.  Of one kind a
@@ -117,6 +146,12 @@ enum RankAura
 	RANK_AURA_SIGHT,							///< shroud clearing, 1 + this
 	RANK_AURA_GUARD,							///< damage taken, 1 - this
 	RANK_AURA_RANGE,							///< an artillery weapon's range, added
+	RANK_AURA_MEND,								///< share of max health healed a second, hurt or not
+	RANK_AURA_PACE,								///< speed, 1 + this
+	RANK_AURA_DRILL,							///< experience a second (DrillRate) up to this grade of the unit's own ladder
+	RANK_AURA_STEADY,							///< a timed paralysis or EMP runs 1 - this as long, subdual wears off 1 / (1 - this) as fast
+	RANK_AURA_CAPTURE,						///< taking a building takes 1 - this as long
+	RANK_AURA_SPOILS,							///< each kill it scores pays its player this share of the victim's cost
 	RANK_AURA_RALLY,							///< damage taken, 1 - this, until the rally runs out
 
 	RANK_AURA_COUNT,
@@ -125,6 +160,7 @@ enum RankAura
 
 extern const char *const TheRankPerkNames[RANK_PERK_COUNT + 1];
 extern const char *const TheRankAuraNames[RANK_AURA_COUNT];
+extern const char *const TheRankReachNames[RANK_REACH_COUNT + 1];
 
 /** One side's rank ladder, the Veterancy block in BalanceReforged.ini (docs/plans/RANK-LADDER.md).
 	* A unit's grade is a pure function of its experience and its template's E, its regular
@@ -140,12 +176,16 @@ struct RankLadder
 	Real	m_statTop[RANK_STAT_COUNT];				///< each stat at the top of the ladder
 	Real	m_auraRadius;											///< a leader's aura radius before RANK_PERK_AURA_RADIUS
 	Real	m_perkAt[RANK_GRADES_MAX + 1][RANK_PERK_COUNT];	///< the perks a grade's own lines name, 0 for none
+	Real	m_radiusAt[RANK_GRADES_MAX + 1][RANK_PERK_COUNT];	///< an aura line's own radius, 0 for the one before it, or m_auraRadius
+	RankReach m_reachAt[RANK_GRADES_MAX + 1][RANK_PERK_COUNT];	///< an aura line's receivers
 
 	// filled by finish()
 	Real	m_ratio;
 	Real	m_total[RANK_GRADES_MAX + 1];			///< experience to hold grade g, in E
 	Real	m_stat[RANK_GRADES_MAX + 1][RANK_STAT_COUNT];	///< each stat at grade g
 	Real	m_perk[RANK_GRADES_MAX + 1][RANK_PERK_COUNT];	///< each perk grade g holds, the strongest of its grade and those below
+	Real	m_radius[RANK_GRADES_MAX + 1][RANK_PERK_COUNT];	///< the radius that came with it, carried up the same way
+	RankReach m_reach[RANK_GRADES_MAX + 1][RANK_PERK_COUNT];	///< the receivers that came with it
 
 	void clear();
 	/** The ratio from m_grades and m_top, the totals, and the stats: worth (rate of fire times damage
@@ -160,8 +200,16 @@ struct RankLadder
 	Int clipGain( Int unitValue, Int experience, Int gain ) const;
 	Int insigniaIndex( Int grade, Bool hero ) const;						///< a hero's insignia runs from m_heroStart to the top over its grades
 	Real perk( Int grade, RankPerk perk ) const;								///< what the grade holds of the kind, 0 for nothing
-	Real auraRadius( Int grade ) const;													///< m_auraRadius times the AURA_RADIUS perk
+	/// a Perk_<side> line's tokens after the =: grade kind [value [radius [reach]]]
+	void addPerkLine( const char *const *tokens, Int count );
+	/** The aura's own radius at the grade (RALLY's is m_auraRadius, and so is a line that gave none on
+		* a side with no radius before it), times the AURA_RADIUS perk. */
+	Real auraRadius( Int grade, RankAura aura ) const;
+	RankReach auraReach( Int grade, RankAura aura ) const;			///< who the aura reaches; RALLY reaches units
 	Real aura( Int grade, RankAura aura ) const;								///< what a leader of this grade gives; RALLY is its death rally
+	/** What a DRILL aura capped at capGrade adds to a unit with the experience this second: rate times
+		* its E, at least 1, never past the cap's threshold, 0 once there. */
+	Int drillGain( Int unitValue, Int experience, Int capGrade, Real rate ) const;
 
 	static Int unitValue( const ThingTemplate *thing );				///< E: the regular ExperienceValue, else half the Veteran threshold, at least 1
 };
@@ -325,6 +373,8 @@ public:
 	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
 	Bool m_volumetricSmokeShadows;	// "VolumetricSmokeShadows": smoke and dust shade the world and themselves through the sun's map (Direct3D 11)
 	Bool m_smokeFireLighting;		// "SmokeFireLighting": smoke takes light from the fire beside it
+	Bool m_smoothMotion;				// R1: on a display faster than the logic, models drawn between their last two logic states (W3DSmoothMotion.h); -nosmoothmotion turns it off
+	Bool m_smoothMotionAnyDisplay;	// -smoothmotion: the same whatever the display's refresh rate
 	Int m_waterStyle;					// "WaterStyle": 0 = Classic, 1 = Modern (SDL); applied between render frames
 	Int m_cloudStyle;					// "CloudStyle": 0 = Classic (default), 1 = Volumetric (when supported)
 	Bool m_explosionDebrisTrails;	// "DebrisTrails": blasts throw smoke-trailing fragments and burning shrapnel
@@ -652,7 +702,7 @@ public:
 	Bool m_lanLobbyOnStart;						///< -lanlobby: open the LAN lobby instead of stopping at the main menu
 	Bool m_skirmishLobbyOnStart;			///< -skirmishlobby: open the skirmish staging room instead of stopping at the main menu
 	Bool m_optionsMenuOnStart;				///< -optionsmenu: open the options screen over the main menu at startup
-	Bool m_mapLight;								///< "MapLight": warm low sun, ground haze and aircraft wakes (Direct3D 11, client only)
+	Bool m_mapLight;								///< "MapLight": warm low sun and a still ground haze (Direct3D 11, client only)
 	Bool m_teamGlow;								///< "TeamGlow": bright house colour glows (Direct3D 11, client only)
 	Bool m_waterFoam;								///< "WaterFoam": foam, shore band and the sun's shadow on water (Direct3D 11, client only)
 
@@ -672,8 +722,10 @@ public:
 	WeaponBonusSet* m_veterancyWeaponBonus[VETERANCY_SIDE_COUNT];	///< NULL: nothing beyond the grade
 	UnsignedInt m_veterancySelfRepairDelay;												///< frames unhurt before self-repair starts
 	Real m_rankAuraRateOfFireCap;																	///< the most a rate-of-fire aura adds
+	Real m_rankDrillRate;																					///< what a drill aura adds a second, a share of the unit's E
+	AsciiString m_rankSalvageCrate;																///< the crate a SALVAGE_CRATE perk leaves
 	UnsignedInt m_rankRallyTime;																	///< frames a death rally lasts
-	RadiusDecalTemplate m_rankAuraRing[RANK_AURA_COUNT];					///< the ground ring under a selected leader, one per aura kind (client)
+	RadiusDecalTemplate m_rankAuraRing[RANK_AURA_COUNT];					///< the ground ring under every visible leader, one per aura kind (client)
 
 	static VeterancySide veterancySideOf( const ThingTemplate *thing );
 	const RankLadder *getRankLadder( const ThingTemplate *thing ) const;	///< NULL: the thing's side keeps EA's levels

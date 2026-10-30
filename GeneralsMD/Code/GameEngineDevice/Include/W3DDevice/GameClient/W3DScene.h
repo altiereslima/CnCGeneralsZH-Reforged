@@ -77,6 +77,10 @@ public:
 	virtual void	Visibility_Check(CameraClass * camera);
 	virtual void  Render(RenderInfoClass & rinfo);
 
+	virtual void Add_Render_Object(RenderObjClass * obj);
+	virtual void Remove_Render_Object(RenderObjClass * obj);
+	virtual void Remove_All_Render_Objects(void);
+
 	void setCustomPassMode (CustomScenePassModes mode) {m_customPassMode = mode;}
 	CustomScenePassModes getCustomPassMode (void)	{return m_customPassMode;}
 
@@ -95,6 +99,7 @@ public:
 	RefRenderObjListClass				*getLightList(void) {return &LightList;};	///< for a stack iterator where a heap one per call costs
 	RefRenderObjListClass				*getDynamicLights(void) {return &m_dynamicLightList;};
 	W3DDynamicLight *getADynamicLight(void);
+	void				stepDynamicLights(void);	///< what Customized_Render does to the lights, for a pass that does not render
 	void				setGlobalLight(LightClass *pLight,Int lightIndex=0);
 	LightEnvironmentClass &getDefaultLightEnv(void) {return m_defaultLightEnv;}
 
@@ -143,7 +148,8 @@ protected:
 	RenderObjClass **m_nonOccludersOrOccludees;	///<objects which are neither bockers or blockees (small rocks, shrubs, etc.).
 	Int m_numPotentialOccluders;
 	Int m_numPotentialOccludees;
-	Int m_numNonOccluderOrOccludee;	
+	Int m_numNonOccluderOrOccludee;
+	std::vector<RenderObjClass *> m_visibleObjects;	///< what the last Visibility_Check set visible, in RenderList order; a removed object is nulled
 
 	CameraClass *m_camera;
 };  // end class RTS3DScene

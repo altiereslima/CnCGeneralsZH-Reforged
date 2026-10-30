@@ -1008,6 +1008,12 @@ Real PhysicsBehavior::getForwardSpeed2D() const
 }
 
 //-------------------------------------------------------------------------------------------------
+Real PhysicsBehavior::getRetailForwardSpeed2D() const
+{
+	return calcRetailForwardSpeed( m_vel, *getObject()->getUnitDirectionVector2D() );
+}
+
+//-------------------------------------------------------------------------------------------------
 /**
  * Return the current velocity magnitude in the forward direction.  
  * If velocity is opposite facing vector, the returned value will be negative.

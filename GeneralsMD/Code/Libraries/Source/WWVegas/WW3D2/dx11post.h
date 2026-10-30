@@ -65,9 +65,9 @@ enum DX11PostEffect
 	// screen pass and has to come out unchanged.
 	DX11_POST_COPY,
 
-	// Edge antialiasing in one pass over the finished world.  The Direct3D 9 device offers
-	// multisampling and the swap chain here asks for one sample, so this is what the D3D11 frame
-	// has against a jagged edge.
+	// Edge antialiasing in one pass over the finished world, what the D3D11 frame has against a
+	// jagged edge without multisampling.  A multisampled scene leaves it out of the chain: the
+	// edges are already resolved, and FXAA over them only blurs the textures.
 	DX11_POST_FXAA,
 
 	// Unsharp mask.  The game's textures are 2003 vintage and a 1080p window magnifies them; this
@@ -127,23 +127,10 @@ void DX11Post_Set_Grade(float amount);
 // height.  Top is the world height the haze thins out to nothing at, thickness how far below that
 // it reaches full strength, strength the most of the haze colour a pixel takes (zero, the default,
 // is no pass at all) and reach the eye distance at which it stops thickening.  Nothing below water,
-// the world height of the water surface the haze lies over, takes any.  Set every frame.
+// the world height of the water surface the haze lies over, takes any.  Toward_sun points at the
+// sun and warmth is how much warmer the haze looks toward it.  Set every frame.
 void DX11Post_Set_Haze(const float colour[3], float top, float thickness, float strength, float reach,
-	float water);
-
-// The haze's movement.  Field_rect is the world rectangle the disturbance field covers, as its
-// origin and one over its size on each axis; drift is how far the wind has carried the haze's
-// patches so far, in world units; noise_scale is one over a patch's size; stir is how much of the
-// haze a full field takes away; toward_sun points at the sun and warmth is how much warmer the
-// haze looks toward it.  Set every frame with the haze.
-void DX11Post_Set_Haze_Motion(const float field_rect[4], float drift_x, float drift_y,
-	float noise_scale, float stir, const float toward_sun[3], float warmth);
-
-// The disturbance field: what passed through the haze lately, size by size bytes, row by row from
-// the field's origin, 255 where it is most stirred.  Uploaded at the next haze pass.
-const unsigned DX11_POST_HAZE_FIELD_SIZE = 256;
-#define DX11_POST_HAZE_FIELD_SIZE_TEXT "256"
-void DX11Post_Set_Haze_Field(const unsigned char * texels);
+	float water, const float toward_sun[3], float warmth);
 
 // The view of the shroud texture the terrain draws its fog with (Direct3D11_Set_Haze_Shroud finds
 // it), and the terrain's own world to texture mapping (rect: world origin x, y, then one over the
@@ -151,25 +138,6 @@ void DX11Post_Set_Haze_Field(const unsigned char * texels);
 // 0 under the shroud, and fades with it, so it lies over exactly the fog the ground shows.  Set
 // every frame; null reads everything as in sight.  The view is borrowed, not held.
 void DX11Post_Set_Haze_Shroud(ID3D11ShaderResourceView * view, const float rect[4]);
-
-// The wakes aircraft leave in the haze, as segments of their recent paths.  A segment is eight
-// numbers: its far end x, y and its near end x, y (the end toward the aircraft), then how far
-// behind the aircraft along the path its near end lies, the tangent of the wake's half-angle, the
-// wake's strength (0 to 1) and one over the path length the wake lasts.  Behind the aircraft the
-// haze is pushed apart in a wedge whose edges stand off the path by distance behind times that
-// tangent: along each edge a vortex arm_width world units across stirs and rolls the haze, and
-// the inside clears, easing open over open_soft.  A segment with a negative tangent is a ring
-// instead: both ends the centre, its first number the radius and its last how far through its
-// life it is (0 to 1).  seconds is the picture's clock, which turns the vortices.  Set every
-// frame; a count past the limit keeps the first ones.
-const unsigned DX11_POST_HAZE_WAKE_LIMIT = 64;
-#define DX11_POST_HAZE_WAKE_LIMIT_TEXT "64"
-// Where the segments' second halves start in the haze program's constants: c24 plus the limit,
-// and the clock after them.
-#define DX11_POST_HAZE_WAKE_SHAPE_REGISTER_TEXT "c88"
-#define DX11_POST_HAZE_CLOCK_REGISTER_TEXT "c152"
-void DX11Post_Set_Haze_Wakes(const float (*segments)[8], unsigned count, float arm_width, float open_soft,
-	float seconds);
 
 // A blast warping the picture around it: the frame drawn toward a point and then pushed out by a
 // ring that travels away from it.  Not an effect in the chain and not a switch: whatever chain is
@@ -214,7 +182,9 @@ public:
 	void Shutdown();
 
 	// An empty chain is the whole feature turned off: Scene_View gives back nothing and the device
-	// keeps drawing into the swap chain the way it always has.
+	// keeps drawing into the swap chain the way it always has.  A multisampled device is the
+	// exception, since the swap chain cannot hold samples: its scene still goes into the target and
+	// reaches the screen through a copy.
 	void Set_Chain(const DX11PostEffect effects[DX11_POST_CHAIN_LIMIT], unsigned count);
 	unsigned Chain_Length() const { return ChainLength; }
 
@@ -308,13 +278,20 @@ private:
 
 	bool Create_Shaders();
 	bool Create_States();
-	bool Create_Target(Target & target, unsigned width, unsigned height, DXGI_FORMAT format);
-	bool Create_Targets(unsigned width, unsigned height, bool floating);
+	// A multisampled target is drawn into and resolved, never read, so it has no shader view.
+	bool Create_Target(Target & target, unsigned width, unsigned height, DXGI_FORMAT format,
+		unsigned samples = 1);
+	bool Create_Targets(unsigned width, unsigned height, bool floating, unsigned samples);
 	void Release_Target(Target & target);
 	void Release_Targets();
+	unsigned Scene_Samples() const;
 	bool Ensure_Buffers();
+	// The scene as a texture the passes read: the scene target itself, or with multisampling its
+	// samples resolved into SceneResolve, which is done again on every call.
+	ID3D11ShaderResourceView * Scene_Source();
 	bool Finish(const DX11PostEffect * effects, unsigned count);
-	ID3D11ShaderResourceView * Run_Bloom(ID3D11RenderTargetView * destination);
+	ID3D11ShaderResourceView * Run_Bloom(ID3D11RenderTargetView * destination,
+		ID3D11ShaderResourceView * scene);
 	void Draw_Pass(const PassSetup & pass);
 	void Describe();
 
@@ -322,6 +299,7 @@ private:
 	ID3D11VertexShader * VertexShader;
 	ID3D11PixelShader * PixelShaders[DX11_POST_SIMPLE_EFFECTS];
 	ID3D11PixelShader * ToneMapShader;
+	ID3D11PixelShader * SharpenMultisampledShader;	// the sharpen pass over a multisampled scene
 	ID3D11PixelShader * BloomExtractShader;
 	ID3D11PixelShader * BloomBlurShader;
 	ID3D11PixelShader * BloomCompositeShader;
@@ -340,6 +318,8 @@ private:
 	// turn, and they are always eight bit: the frame is back from half float by the time any of the
 	// one pass effects sees it.
 	Target SceneTarget;
+	// With multisampling, the scene target's samples resolved for the passes to read; empty without.
+	Target SceneResolve;
 	// The scene as Occlude_Scene found it, in its format, made at that pass's first use.
 	Target SceneCopy;
 	Target ChainTargets[2];
@@ -355,6 +335,7 @@ private:
 	unsigned Height;
 	unsigned BloomWidth;
 	unsigned BloomHeight;
+	unsigned TargetSamples;
 	bool TargetsAreFloat;
 	bool ShadersReady;
 	bool Resolved;
@@ -365,9 +346,6 @@ private:
 	float HazeWorldFromClip[16];
 	// The haze program, compiled on first use, failed to compile; not tried again.
 	bool HazeRefused;
-	// The haze's disturbance field on the device, made at its first upload.
-	ID3D11Texture2D * HazeFieldTexture;
-	ID3D11ShaderResourceView * HazeFieldView;
 	// The terrain's shroud texture under the haze, borrowed from its D3D9 texture each pass.
 	ID3D11ShaderResourceView * HazeShroudView;
 	char Diagnostic[192];

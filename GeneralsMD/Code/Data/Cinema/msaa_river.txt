@@ -1,0 +1,16 @@
+# Direct3D 11 multisampling proofs on Winding River over Scenarios/msaa_river.txt. Run with
+# -video 1080 1740 so this clock is the logic frame over 60 from 18 s on, and every take of
+# -msaa 0, 4 and 8 frames the same pictures. Heading 30 looks north-north-west into the map, so
+# no map edge; positive pitch is the low camera. View A holds from 3 s to 18 s, paced, for the
+# DX11 GPU frame lines.
+
+0     hud     off
+3     cut     2650 700 0.5 30 10
+18    cut     2650 700 0.5 30 10
+20    shot    # A: base in front, the yard's fence ring, train cars and palms beyond
+20.3  cut     2560 820 0.25 30 16
+22.5  shot    # B: close on the yard's north fence with palms and train cars behind it
+22.8  cut     2700 560 0.3 30 14
+25    shot    # C: the supply center, Patriot and the armour driving past
+25.3  cut     2600 760 0.8 30 0
+27.5  shot    # D: the same ground at about play distance and the game's own tilt

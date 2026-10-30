@@ -1,5 +1,6 @@
 """The ground rings under a Turkiye leader, one texture per aura kind (BalanceReforged.ini,
-AuraRing_<kind> in the Veterancy block).
+AuraRing_<kind> in the Veterancy block). The other sides' six kinds borrow these five in their own
+tints; the INI says which borrows which.
 
 Every ring is drawn at the full aura radius, and each kind owns a fixed band of that one disc, so
 any set of them lies as one dial: never on top of each other, the same line weight and spacing

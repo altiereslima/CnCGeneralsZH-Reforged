@@ -251,6 +251,19 @@ Bool ExperienceTracker::gainExpForLevel(Int levelsToGain, Bool canScaleForBonus,
 }
 
 //-------------------------------------------------------------------------------------------------
+void ExperienceTracker::gainGrades( Int grades )
+{
+	// a unit of no side in the ladder (a mod faction, a civilian) has no grades to gain
+	const RankLadder *ladder = TheGlobalData->getRankLadder( m_parent->getTemplate() );
+	if (ladder == NULL)
+		return;
+	const Int grade = MIN( m_currentGrade + grades, ladder->m_pin[LEVEL_LAST] );
+	const Int experience = ladder->threshold( RankLadder::unitValue( m_parent->getTemplate() ), grade );
+	if (experience > m_currentExperience)
+		setExperienceAndLevel( experience );
+}
+
+//-------------------------------------------------------------------------------------------------
 Bool ExperienceTracker::canGainExpForLevel(Int levelsToGain) const
 {
 	Int newLevel = (Int)m_currentLevel + levelsToGain;

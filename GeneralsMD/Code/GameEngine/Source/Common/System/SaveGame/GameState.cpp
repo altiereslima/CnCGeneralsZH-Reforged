@@ -1485,9 +1485,13 @@ void GameState::friend_xferSaveDataForCRC( Xfer *xfer, SnapshotType which )
 	gameInfo->description.clear();
 	gameInfo->saveFileType = SAVE_FILE_TYPE_NORMAL;
 	gameInfo->missionMapName.clear();
+	// cleared for the CRC's sake and put back after: a loaded save still needs to know the map it
+	// was started on (SidesList::isForkAIMapPath), and the next save writes it out again
+	const AsciiString pristine = gameInfo->pristineMapName;
 	gameInfo->pristineMapName.clear();
 
 	xferSaveData(xfer, which);
+	gameInfo->pristineMapName = pristine;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1551,9 +1555,9 @@ void GameState::xferSaveData( Xfer *xfer, SnapshotType which )
 
 					// the DEBUG_CRASH is compiled out of a release build; the module that threw logged itself
 					DEBUG_LOG(( "GameState::xferSaveData - error saving block '%s' in file '%s'\n",
-											blockName.str(), xfer->getIdentifier() ));
+											blockName.str(), xfer->getIdentifier().str() ));
 					DEBUG_CRASH(( "Error saving block '%s' in file '%s'\n",
-												blockName.str(), xfer->getIdentifier() ));
+												blockName.str(), xfer->getIdentifier().str() ));
 					throw;
 
 				}  // end catch
@@ -1634,9 +1638,9 @@ void GameState::xferSaveData( Xfer *xfer, SnapshotType which )
 
 					// the DEBUG_CRASH is compiled out of a release build; the module that threw logged itself
 					DEBUG_LOG(( "GameState::xferSaveData - error loading block '%s' in file '%s'\n",
-											blockInfo->blockName.str(), xfer->getIdentifier() ));
+											blockInfo->blockName.str(), xfer->getIdentifier().str() ));
 					DEBUG_CRASH(( "Error loading block '%s' in file '%s'\n",
-												blockInfo->blockName.str(), xfer->getIdentifier() ));
+												blockInfo->blockName.str(), xfer->getIdentifier().str() ));
 					throw;
 
 				}  // end catch

@@ -88,7 +88,12 @@ DX11DeviceClass::DX11DeviceClass()
 	, DepthStencilView(NULL)
 	, DepthStencilTexture(NULL)
 	, DepthTexture(NULL)
+	, SceneDepthSurface(NULL)
+	, SceneDepthView(NULL)
+	, SceneDepthTexture(NULL)
 	, FeatureLevel(D3D_FEATURE_LEVEL_11_0)
+	, RequestedSamples(1)
+	, SampleCount(1)
 	, Width(0)
 	, Height(0)
 	, Software(false)
@@ -326,6 +331,24 @@ bool DX11DeviceClass::Create_Views()
 		return false;
 	}
 
+	// The scene's own depth at the scene's sample count, beside the single-sample one above, which
+	// with multisampling holds the scene's depth resolved for every pass that reads it.  A device
+	// that refuses it draws the scene at one sample.
+	SampleCount = Granted_Sample_Count();
+	if (SampleCount > 1) {
+		depth.SampleDesc.Count = SampleCount;
+		depth_view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
+		depth_read.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
+		if (FAILED(Device->CreateTexture2D(&depth, NULL, &SceneDepthSurface))
+			|| FAILED(Device->CreateDepthStencilView(SceneDepthSurface, &depth_view, &SceneDepthView))
+			|| FAILED(Device->CreateShaderResourceView(SceneDepthSurface, &depth_read, &SceneDepthTexture))) {
+			release_interface(reinterpret_cast<IUnknown **>(&SceneDepthTexture));
+			release_interface(reinterpret_cast<IUnknown **>(&SceneDepthView));
+			release_interface(reinterpret_cast<IUnknown **>(&SceneDepthSurface));
+			SampleCount = 1;
+		}
+	}
+
 	Context->OMSetRenderTargets(1, &BackBufferView, DepthStencilView);
 
 	D3D11_VIEWPORT viewport;
@@ -350,6 +373,9 @@ void DX11DeviceClass::Release_Views()
 	// Whoever lent it a scene view sized the texture behind it to the buffers that are about to go,
 	// so the loan ends here and the next frame asks for a new one.
 	SceneView = NULL;
+	release_interface(reinterpret_cast<IUnknown **>(&SceneDepthTexture));
+	release_interface(reinterpret_cast<IUnknown **>(&SceneDepthView));
+	release_interface(reinterpret_cast<IUnknown **>(&SceneDepthSurface));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthTexture));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthStencilView));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthStencilTexture));
@@ -371,6 +397,36 @@ void DX11DeviceClass::Release()
 	Software = false;
 	Tearing = false;
 	ChainFlags = 0;
+	SampleCount = 1;
+}
+
+void DX11DeviceClass::Drop_Multisampling()
+{
+	RequestedSamples = 1;
+	SampleCount = 1;
+	release_interface(reinterpret_cast<IUnknown **>(&SceneDepthTexture));
+	release_interface(reinterpret_cast<IUnknown **>(&SceneDepthView));
+	release_interface(reinterpret_cast<IUnknown **>(&SceneDepthSurface));
+}
+
+// The most samples at or under the request that the scene's two colour formats (the post chain's
+// eight bit and half float targets) and its depth all take.  Every feature level 11 device takes 4
+// and 8 for those, so 16 is the one that degrades in practice.
+unsigned DX11DeviceClass::Granted_Sample_Count() const
+{
+	const DXGI_FORMAT formats[] = { BACK_BUFFER_FORMAT, DXGI_FORMAT_R16G16B16A16_FLOAT, DEPTH_WRITE_FORMAT };
+	for (unsigned samples = 16; samples > 1; samples /= 2) {
+		bool taken = samples <= RequestedSamples;
+		for (unsigned index = 0; taken && index < sizeof(formats) / sizeof(formats[0]); ++index) {
+			UINT levels = 0;
+			taken = SUCCEEDED(Device->CheckMultisampleQualityLevels(formats[index], samples, &levels))
+				&& levels > 0;
+		}
+		if (taken) {
+			return samples;
+		}
+	}
+	return 1;
 }
 
 bool DX11DeviceClass::Resize(unsigned width, unsigned height)

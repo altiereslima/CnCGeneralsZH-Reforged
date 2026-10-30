@@ -237,7 +237,7 @@ UpdateSleepTime RebuildHoleBehavior::update( void )
 				m_workerTemplate = TheThingFactory->findTemplate( modData->m_workerTemplateName );
 
 			// create a worker
-			worker = TheThingFactory->newObject( m_workerTemplate, hole->getTeam() );
+			worker = TheThingFactory->newObject( m_workerTemplate, hole->getTeam(), OBJECT_STATUS_MASK_NONE, hole );
 			if( worker )
 			{
 

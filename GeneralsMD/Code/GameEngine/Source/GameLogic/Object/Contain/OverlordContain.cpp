@@ -312,6 +312,17 @@ void OverlordContain::addToContain( Object *obj )
 //-------------------------------------------------------------------------------------------------
 void OverlordContain::removeFromContain( Object *obj, Bool exposeStealthUnits )
 {
+	// My own rider leaves my list, never the list it carries.  A bunker destroyed on its own (a
+	// team or player killed, a script) says goodbye through here from Object::onDestroy; redirected,
+	// the bunker was asked to let go of itself, refused, and stayed on my list after it was freed.
+	// The next redeployOccupants or the teardown at reset then touched the freed bunker.
+	if( m_containListSize > 0 && obj == m_containList.front() )
+	{
+		deactivateRedirectedContain();
+		TransportContain::removeFromContain( obj, exposeStealthUnits );
+		return;
+	}
+
 	// Do you mean me the Overlord, or my behavior of passing stuff on to my passengers?
 	if( getRedirectedContain() == NULL )
 	{

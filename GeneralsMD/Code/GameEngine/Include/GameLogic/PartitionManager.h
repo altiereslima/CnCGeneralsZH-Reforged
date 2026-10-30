@@ -338,6 +338,7 @@ private:
 	PlayerMaskType								m_playerCoiMask;		///< players whose m_playerCoiCount is nonzero
 	Short													m_cellX;						///< x-coord of this cell within the Partition Mgr coords (NOT in world coords)
 	Short													m_cellY;						///< y-coord of this cell within the Partition Mgr coords (NOT in world coords)
+	UnsignedShort									m_sightBlockerCoiCount;	///< COIs here of structures and shrubbery, the things that can hide what is behind them
 #ifdef PM_CACHE_TERRAIN_HEIGHT
 	Real													m_loTerrainZ;			///< lowest terrain-pt in this cell
 	Real													m_hiTerrainZ;			///< highest terrain-pt in this cell
@@ -368,6 +369,9 @@ public:
 	Bool hasCoiOfPlayers( PlayerMaskType players ) const { return (m_playerCoiMask & players) != 0; }	///< does any Object of these players touch this cell?
 	void addPlayerCoi( Int playerIndex );
 	void removePlayerCoi( Int playerIndex );
+	Bool hasSightBlockerCoi() const { return m_sightBlockerCoiCount != 0; }	///< false: no structure or shrub touches this cell
+	void addSightBlockerCoi() { ++m_sightBlockerCoiCount; }
+	void removeSightBlockerCoi() { DEBUG_ASSERTCRASH(m_sightBlockerCoiCount > 0, ("sight blocker coi count underflow")); --m_sightBlockerCoiCount; }
 	Int getCellX() const { return m_cellX; }
 	Int getCellY() const { return m_cellY; }
 
@@ -444,6 +448,8 @@ private:
 	Int													m_coiArrayCount;					///< number of COIs allocated (may be more than are in use)
 	CellAndObjectIntersection		*m_coiArray;							///< The array of COIs
 	Int													m_countedPlayer;					///< player index this module's COIs are counted under in their cells, -1 for none
+	Bool												m_sightBlocker;						///< its COIs count in their cells' m_sightBlockerCoiCount; fixed from attachToObject on
+	Bool												m_noCollide;							///< its Object is KINDOF_NO_COLLIDE, for collidesWith
 	DirtyStatus									m_dirtyStatus;
 	ObjectShroudStatus					m_shroudedness[MAX_PLAYER_COUNT];						
 	ObjectShroudStatus					m_shroudednessPrevious[MAX_PLAYER_COUNT];	///<previous frames value of m_shroudedness						
@@ -609,6 +615,7 @@ public:
 	void friend_updateCellsTouched()	{ updateCellsTouched(); } ///< this is only for use by PartitionManager
 	Int friend_getCoiInUseCount() { return m_coiInUseCount; } ///< this is only for use by PartitionManager
 	Int friend_getCountedPlayer() const { return m_countedPlayer; } ///< only for CellAndObjectIntersection
+	Bool friend_isSightBlocker() const { return m_sightBlocker; } ///< only for CellAndObjectIntersection
 	void refreshCountedPlayer();	///< move this module's per-player cell counts to its Object's current controlling player
 	Bool friend_collidesWith(const PartitionData *that, CollideLocAndNormal *cinfo) const { return collidesWith(that, cinfo); }	///< this is only for use by PartitionContactList
 

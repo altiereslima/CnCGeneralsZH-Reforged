@@ -86,8 +86,11 @@ public:
 
 	/** request a new object using the given template. 
 		this will throw an exception on failure; it will never return null.
+		producer is the factory, builder or hole making it, when there is one: the object comes out as the
+		producer's side builds it, not as the owner's side would, so a captured China Airfield's MiG or a
+		captured GLA Command Center's Worker stays China's or GLA's for a Turkiye player.
 	*/
-	Object *newObject( const ThingTemplate *tmplate, Team *team, ObjectStatusMaskType statusMask = OBJECT_STATUS_MASK_NONE );
+	Object *newObject( const ThingTemplate *tmplate, Team *team, ObjectStatusMaskType statusMask = OBJECT_STATUS_MASK_NONE, const Object *producer = NULL );
 
 	/** The reskin of tmplate that belongs to side, when tmplate belongs to another: TurkiyeInfantryPilot
 		for an AmericaInfantryPilot made for a Turkiye player.  NULL when there is none.  newObject makes

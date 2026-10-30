@@ -85,6 +85,9 @@ protected:
 	virtual void drawFormationLine( void );				///< the line an armed left drag is spreading the selection along
 	virtual void drawAttackCircle( void );				///< the circle a left drag is sweeping targets out of
 	void drawGuardMarkers( void );								///< the shield over each of the local player's guarding units
+	std::vector< Coord3D > m_guardMarkerTops;			///< the guarding units' tops, taken once a logic frame
+	UnsignedInt m_guardMarkersFrame = ~0u;				///< the logic frame they were taken on
+	const Player *m_guardMarkersPlayer = NULL;		///< and the local player they were taken for
 
 	RenderObjClass *m_buildingPlacementAnchor;
 	RenderObjClass *m_buildingPlacementArrow;

@@ -17,6 +17,7 @@
 */
 
 #include "dx11backend.h"
+#include "dx11resource.h"
 #include "dx11water.h"
 #include "Platform/WaterConstants.h"
 #include "Platform/WaterFftSampling.h"
@@ -453,7 +454,7 @@ void DX11BackendClass::WaterResources::Take_Scene(DX11DeviceClass & device, ID3D
 			drop(Colour);
 		}
 	}
-	if (Colour == NULL && description.SampleDesc.Count == 1) {
+	if (Colour == NULL) {
 		D3D11_RENDER_TARGET_VIEW_DESC written;
 		view->GetDesc(&written);
 		D3D11_TEXTURE2D_DESC copy = description;
@@ -462,6 +463,9 @@ void DX11BackendClass::WaterResources::Take_Scene(DX11DeviceClass & device, ID3D
 		copy.MiscFlags = 0;
 		copy.Usage = D3D11_USAGE_DEFAULT;
 		copy.CPUAccessFlags = 0;
+		// a multisampled scene is resolved into it
+		copy.SampleDesc.Count = 1;
+		copy.SampleDesc.Quality = 0;
 		D3D11_SHADER_RESOURCE_VIEW_DESC read;
 		memset(&read, 0, sizeof(read));
 		read.Format = written.Format;
@@ -474,7 +478,7 @@ void DX11BackendClass::WaterResources::Take_Scene(DX11DeviceClass & device, ID3D
 		}
 	}
 	if (Colour != NULL && description.MipLevels == 1) {
-		context->CopyResource(Colour, source);
+		DX11Resource_Copy_Readable(context, Colour, source);
 	}
 	else if (Colour != NULL) {
 		context->CopySubresourceRegion(Colour, 0, 0, 0, 0, source, 0, NULL);
@@ -660,6 +664,7 @@ bool DX11BackendClass::Prepare_Water()
 		water.Fft = water.DrawVertex != NULL;
 	}
 
+	Resolve_Scene_Depth();
 	ID3D11RenderTargetView * const view = (CurrentTarget != NULL) ? CurrentTarget : Device->Get_Scene_View();
 	ID3D11Resource * source = CurrentTargetResource;
 	if (CurrentTarget == NULL) {

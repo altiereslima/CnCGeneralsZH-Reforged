@@ -875,7 +875,7 @@ void Draw(unsigned shaderType, const Camera &camera)
 	// A mirror draws into a target and depth of its own: the particles go there as they are, with no
 	// fade, since the depth copy is the scene's and not the mirror's.
 	ID3D11RenderTargetView *target = backend->Scene_Target();
-	ID3D11DepthStencilView *targetDepth = device->Get_Depth_Stencil_View();
+	ID3D11DepthStencilView *targetDepth = backend->Scene_Depth_Target();
 	ID3D11RenderTargetView *heldTarget = nullptr;
 	ID3D11DepthStencilView *heldDepth = nullptr;
 	ID3D11ShaderResourceView *depth = nullptr;

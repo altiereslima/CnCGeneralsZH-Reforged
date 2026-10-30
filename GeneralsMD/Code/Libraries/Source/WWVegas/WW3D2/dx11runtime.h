@@ -72,6 +72,11 @@ bool Direct3D11_Is_Enabled();
 bool Direct3D11_Create(RenderWindow window, unsigned width, unsigned height);
 void Direct3D11_Release();
 
+// The scene's multisampling, asked for before Create (DX11DeviceClass::Request_Sample_Count): 0 or 1
+// is none, otherwise 2 to 16.  Sample_Count is what the device granted, 0 for none or no device.
+void Direct3D11_Set_Sample_Count(unsigned samples);
+unsigned Direct3D11_Sample_Count();
+
 // The swap chain's buffers at a new resolution.  Nothing if they already are that size.
 bool Direct3D11_Resize(unsigned width, unsigned height);
 

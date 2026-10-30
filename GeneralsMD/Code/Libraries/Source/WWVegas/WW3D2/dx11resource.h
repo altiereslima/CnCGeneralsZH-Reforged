@@ -49,6 +49,21 @@ inline double DX11Resource_Milliseconds_Now()
 	return 1000.0 * static_cast<double>(counter) / static_cast<double>(frequency);
 }
 
+// A render target copied into a single-sample texture of its size and format, for a pass that reads
+// it.  CopyResource refuses a multisampled source, so the MSAA scene is resolved instead: its
+// samples averaged, which is what the screen shows of it anyway.
+inline void DX11Resource_Copy_Readable(ID3D11DeviceContext * context, ID3D11Resource * destination,
+	ID3D11Resource * source)
+{
+	D3D11_TEXTURE2D_DESC description;
+	static_cast<ID3D11Texture2D *>(source)->GetDesc(&description);
+	if (description.SampleDesc.Count > 1) {
+		context->ResolveSubresource(destination, 0, source, 0, description.Format);
+	} else {
+		context->CopyResource(destination, source);
+	}
+}
+
 // DXGI_FORMAT_UNKNOWN comes back for a format with no D3D11 counterpart, which the caller has to
 // treat as a refusal: a texture created as UNKNOWN is not a texture.  Two of the engine's formats
 // are in that class - the palettised ones, which D3D11 dropped outright.

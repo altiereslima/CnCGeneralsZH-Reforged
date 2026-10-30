@@ -1,0 +1,148 @@
+# Retail pace: does a tank or car take the time it took in Zero Hour?
+#
+# Twelve vehicles, one at a time down the same lane on the open grass of the small generated map,
+# each spawned facing east: leg A 300 east from a standstill, leg B 300 at 45 degrees (a 45 degree
+# turn first, then the diagonal, where EA's forward speed let a vehicle run 1.41 times its Speed),
+# leg C a 40 hop east. Each finished vehicle parks on the bottom edge before the next one spawns.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -maxframes 48400
+#     -scenario retailpace -logPrefix retailpace_
+#
+# then read the HEADLESS ARRIVE lines, logic frames from each order. Measured 2026-10-26: the
+# fork's eased drive / retail (EA's drives, EA's forward speed, EA's Locomotor.ini numbers, the
+# same tree otherwise) / the change that restored them, legs A, B and C:
+#   Crusader, Paladin, Dragon, Tomahawk  616 614 108 / 582 418 75 / 582 418 75
+#   Battlemaster                         732 727 119 / 698 499 88 / 698 499 88
+#   Overlord                             909 901 138 / 911 671 142 / 911 671 142
+#   Scorpion                             471 471 93  / 438 316 58 / 438 316 58
+#   Marauder                             482 473 124 / 440 317 66 / 440 317 66
+#   Humvee                               328 333 80  / 293 217 44 / 293 217 43
+#   Technical                            239 245 73  / 250 233 71 / 250 230 70
+#   Quad Cannon                          476 469 124 / 441 316 65 / 440 316 64
+#   Avenger                              683 618 101 / 603 416 70 / 603 416 69
+# The frame or three the cars gain on retail is the slide onto the goal starting on the frame the
+# braking does, kept from the eased drive.
+#
+# See mobstress.txt for the line grammar.
+
+# AmericaTankCrusader
+70    spawn   0  AmericaTankCrusader      1  350 1325
+100    move    0  AmericaTankCrusader         650 1325
+100    arrive  0  AmericaTankCrusader         650 1325  10
+850    move    0  AmericaTankCrusader         862 1537
+850    arrive  0  AmericaTankCrusader         862 1537  10
+1750   move    0  AmericaTankCrusader         902 1537
+1750   arrive  0  AmericaTankCrusader         902 1537  5
+2000   move    0  AmericaTankCrusader         120 1775
+
+# AmericaTankPaladin
+2070   spawn   0  AmericaTankPaladin       1  350 1325
+2100   move    0  AmericaTankPaladin          650 1325
+2100   arrive  0  AmericaTankPaladin          650 1325  10
+2850   move    0  AmericaTankPaladin          862 1537
+2850   arrive  0  AmericaTankPaladin          862 1537  10
+3750   move    0  AmericaTankPaladin          902 1537
+3750   arrive  0  AmericaTankPaladin          902 1537  5
+4000   move    0  AmericaTankPaladin          250 1775
+
+# ChinaTankDragon
+4070   spawn   0  ChinaTankDragon          1  350 1325
+4100   move    0  ChinaTankDragon             650 1325
+4100   arrive  0  ChinaTankDragon             650 1325  10
+4850   move    0  ChinaTankDragon             862 1537
+4850   arrive  0  ChinaTankDragon             862 1537  10
+5750   move    0  ChinaTankDragon             902 1537
+5750   arrive  0  ChinaTankDragon             902 1537  5
+6000   move    0  ChinaTankDragon             380 1775
+
+# ChinaTankBattleMaster
+6070   spawn   0  ChinaTankBattleMaster    1  350 1325
+6100   move    0  ChinaTankBattleMaster       650 1325
+6100   arrive  0  ChinaTankBattleMaster       650 1325  10
+6850   move    0  ChinaTankBattleMaster       862 1537
+6850   arrive  0  ChinaTankBattleMaster       862 1537  10
+7750   move    0  ChinaTankBattleMaster       902 1537
+7750   arrive  0  ChinaTankBattleMaster       902 1537  5
+8000   move    0  ChinaTankBattleMaster       510 1775
+
+# ChinaTankOverlord
+8070   spawn   0  ChinaTankOverlord        1  350 1325
+8100   move    0  ChinaTankOverlord           650 1325
+8100   arrive  0  ChinaTankOverlord           650 1325  10
+8850   move    0  ChinaTankOverlord           862 1537
+8850   arrive  0  ChinaTankOverlord           862 1537  10
+9750   move    0  ChinaTankOverlord           902 1537
+9750   arrive  0  ChinaTankOverlord           902 1537  5
+10000  move    0  ChinaTankOverlord           640 1775
+
+# GLATankScorpion
+10070  spawn   0  GLATankScorpion          1  350 1325
+10100  move    0  GLATankScorpion             650 1325
+10100  arrive  0  GLATankScorpion             650 1325  10
+10850  move    0  GLATankScorpion             862 1537
+10850  arrive  0  GLATankScorpion             862 1537  10
+11750  move    0  GLATankScorpion             902 1537
+11750  arrive  0  GLATankScorpion             902 1537  5
+12000  move    0  GLATankScorpion             770 1775
+
+# GLATankMarauder
+12070  spawn   0  GLATankMarauder          1  350 1325
+12100  move    0  GLATankMarauder             650 1325
+12100  arrive  0  GLATankMarauder             650 1325  10
+12850  move    0  GLATankMarauder             862 1537
+12850  arrive  0  GLATankMarauder             862 1537  10
+13750  move    0  GLATankMarauder             902 1537
+13750  arrive  0  GLATankMarauder             902 1537  5
+14000  move    0  GLATankMarauder             900 1775
+
+# AmericaVehicleTomahawk
+14070  spawn   0  AmericaVehicleTomahawk   1  350 1325
+14100  move    0  AmericaVehicleTomahawk      650 1325
+14100  arrive  0  AmericaVehicleTomahawk      650 1325  10
+14850  move    0  AmericaVehicleTomahawk      862 1537
+14850  arrive  0  AmericaVehicleTomahawk      862 1537  10
+15750  move    0  AmericaVehicleTomahawk      902 1537
+15750  arrive  0  AmericaVehicleTomahawk      902 1537  5
+16000  move    0  AmericaVehicleTomahawk      1030 1775
+
+# AmericaVehicleHumvee
+16070  spawn   0  AmericaVehicleHumvee     1  350 1325
+16100  move    0  AmericaVehicleHumvee        650 1325
+16100  arrive  0  AmericaVehicleHumvee        650 1325  10
+16850  move    0  AmericaVehicleHumvee        862 1537
+16850  arrive  0  AmericaVehicleHumvee        862 1537  10
+17750  move    0  AmericaVehicleHumvee        902 1537
+17750  arrive  0  AmericaVehicleHumvee        902 1537  5
+18000  move    0  AmericaVehicleHumvee        1160 1775
+
+# GLAVehicleTechnical
+18070  spawn   0  GLAVehicleTechnical      1  350 1325
+18100  move    0  GLAVehicleTechnical*        650 1325
+18100  arrive  0  GLAVehicleTechnical*        650 1325  10
+18850  move    0  GLAVehicleTechnical*        862 1537
+18850  arrive  0  GLAVehicleTechnical*        862 1537  10
+19750  move    0  GLAVehicleTechnical*        902 1537
+19750  arrive  0  GLAVehicleTechnical*        902 1537  5
+20000  move    0  GLAVehicleTechnical*        1290 1775
+
+# GLAVehicleQuadCannon
+20070  spawn   0  GLAVehicleQuadCannon     1  350 1325
+20100  move    0  GLAVehicleQuadCannon        650 1325
+20100  arrive  0  GLAVehicleQuadCannon        650 1325  10
+20850  move    0  GLAVehicleQuadCannon        862 1537
+20850  arrive  0  GLAVehicleQuadCannon        862 1537  10
+21750  move    0  GLAVehicleQuadCannon        902 1537
+21750  arrive  0  GLAVehicleQuadCannon        902 1537  5
+22000  move    0  GLAVehicleQuadCannon        1420 1775
+
+# AmericaTankAvenger
+22070  spawn   0  AmericaTankAvenger       1  350 1325
+22100  move    0  AmericaTankAvenger          650 1325
+22100  arrive  0  AmericaTankAvenger          650 1325  10
+22850  move    0  AmericaTankAvenger          862 1537
+22850  arrive  0  AmericaTankAvenger          862 1537  10
+23750  move    0  AmericaTankAvenger          902 1537
+23750  arrive  0  AmericaTankAvenger          902 1537  5
+24000  move    0  AmericaTankAvenger          1550 1775

@@ -1259,12 +1259,17 @@ void InitSkirmishGameGadgets( void )
 	buttonRecordCloseID = NAMEKEY( "SkirmishGameOptionsMenu.wnd:ButtonRecordClose" );
 	recordPopover = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, NAMEKEY( "SkirmishGameOptionsMenu.wnd:RecordPopover" ) );
 	recordVeil = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, NAMEKEY( "SkirmishGameOptionsMenu.wnd:RecordVeil" ) );
-	recordPopover->winSetInputFunc( recordPopoverInput );
-	// Close's press goes to its parent, the record, which hands it up to the room; the layout gives
-	// the record no system callback, and the press died there
-	recordPopover->winSetSystemFunc( PassMessagesToParentSystem );
-	recordVeil->winSetInputFunc( recordVeilInput );
-	showRecord( FALSE );
+	// a layout from before the record (retail's, or a mod's in the install folder) has neither, and
+	// no Record button to open them
+	if ( recordPopover )
+	{
+		recordPopover->winSetInputFunc( recordPopoverInput );
+		// Close's press goes to its parent, the record, which hands it up to the room; the layout gives
+		// the record no system callback, and the press died there
+		recordPopover->winSetSystemFunc( PassMessagesToParentSystem );
+		recordVeil->winSetInputFunc( recordVeilInput );
+		showRecord( FALSE );
+	}
 	textEntryMapDisplay =TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, textEntryMapDisplayID );
 	DEBUG_ASSERTCRASH(textEntryMapDisplay, ("Could not find the textEntryMapDisplay"));
 	buttonReset = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, buttonResetID );
@@ -1761,7 +1766,7 @@ WindowMsgHandledType SkirmishGameOptionsMenuInput( GameWindow *window, UnsignedI
 					// back/exit button
 					//
 					// an open record closes first
-					if( BitTest( state, KEY_STATE_UP ) && !recordPopover->winIsHidden() )
+					if( BitTest( state, KEY_STATE_UP ) && recordPopover && !recordPopover->winIsHidden() )
 						showRecord( FALSE );
 					else if( BitTest( state, KEY_STATE_UP ) )
 					{

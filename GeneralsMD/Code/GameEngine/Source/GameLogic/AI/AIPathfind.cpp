@@ -4921,34 +4921,51 @@ void Pathfinder::resetClaims( void )
 	}
 }
 
-/* Two passes over the probe window on purpose.  Reusing the first dead slot as soon as one turns
-	 up would let the same (cell, bucket) exist twice - the live copy further along the window would
-	 never be found again - and the weight the search reads would then depend on which of the two
-	 the probe happened to reach first. */
-void Pathfinder::addClaim( Int cell, UnsignedInt bucket, Int weight )
+/* A hint that a cache line is about to be read, as PM_PREFETCH in PartitionManager.cpp.  It decides
+	 nothing, so no claim can depend on it. */
+#if defined(__GNUC__) || defined(__clang__)
+	#define PF_PREFETCH(addr) __builtin_prefetch(addr)
+#elif defined(_M_X64) || defined(_M_IX86)
+	#include <xmmintrin.h>
+	#define PF_PREFETCH(addr) _mm_prefetch((const char *)(addr), _MM_HINT_T0)
+#elif defined(_M_ARM64)
+	#include <intrin.h>
+	#define PF_PREFETCH(addr) __prefetch(addr)
+#else
+	#define PF_PREFETCH(addr) ((void)0)
+#endif
+
+/* The dead slot is only remembered during the walk and written after it.  Reusing the first dead
+	 slot as soon as one turns up would let the same (cell, bucket) exist twice - the live copy further
+	 along the window would never be found again - and the weight the search reads would then depend
+	 on which of the two the probe happened to reach first.  Walking once and writing at the end gives
+	 exactly what the old two passes gave: a live match anywhere wins, else the first dead slot. */
+static inline void claimInto( PathClaim *claims, Int cell, UnsignedInt bucket, Int weight, UnsignedInt nowBucket )
 {
-	if (m_claims == NULL || weight <= 0) return;
 	const Int base = claimSlotOf(cell, bucket);
-	const UnsignedInt nowBucket = TheGameLogic->getFrame() / PF_CLAIM_BUCKET_FRAMES;
-	Int p;
-	for (p = 0; p < PF_CLAIM_PROBES; p++) {
-		PathClaim& e = m_claims[(base + p) & (PF_CLAIM_TABLE_SIZE - 1)];
+	PathClaim *dead = NULL;
+	for (Int p = 0; p < PF_CLAIM_PROBES; p++) {
+		PathClaim& e = claims[(base + p) & (PF_CLAIM_TABLE_SIZE - 1)];
 		if (e.m_cell == cell && e.m_bucket == bucket && e.m_weight > 0) {
 			Int w = (Int)e.m_weight + weight;
 			e.m_weight = (UnsignedShort)(w > 0xFFFF ? 0xFFFF : w);
 			return;
 		}
-	}
-	for (p = 0; p < PF_CLAIM_PROBES; p++) {
-		PathClaim& e = m_claims[(base + p) & (PF_CLAIM_TABLE_SIZE - 1)];
-		if (e.m_cell >= 0 && e.m_weight > 0 && e.m_bucket >= nowBucket) continue;		// still live
-		e.m_cell = cell;
-		e.m_bucket = bucket;
-		e.m_weight = (UnsignedShort)weight;
-		return;
+		if (dead == NULL && !(e.m_cell >= 0 && e.m_weight > 0 && e.m_bucket >= nowBucket))		// not still live
+			dead = &e;
 	}
 	// the window is full of live claims: this one is simply not recorded.  Dropping it costs the
 	// search a penalty it will not see, which is the harmless direction to fail in.
+	if (dead == NULL) return;
+	dead->m_cell = cell;
+	dead->m_bucket = bucket;
+	dead->m_weight = (UnsignedShort)weight;
+}
+
+void Pathfinder::addClaim( Int cell, UnsignedInt bucket, Int weight )
+{
+	if (m_claims == NULL || weight <= 0) return;
+	claimInto(m_claims, cell, bucket, weight, TheGameLogic->getFrame() / PF_CLAIM_BUCKET_FRAMES);
 }
 
 Int Pathfinder::getClaims( Int x, Int y, UnsignedInt frame ) const
@@ -4977,7 +4994,9 @@ void Pathfinder::stampClaimAt( const Coord3D *pos, UnsignedInt frame, Int dilati
 	ICoord2D c;
 	worldToCell(pos, &c);
 	const UnsignedInt bucket = frame / PF_CLAIM_BUCKET_FRAMES;
+	const UnsignedInt nowBucket = TheGameLogic->getFrame() / PF_CLAIM_BUCKET_FRAMES;
 	const Int h = m_extent.hi.y + 1;
+	// the probe windows sit all over a 384 KB table: ask for every one first, so the misses overlap
 	for (Int dx = -dilation; dx <= dilation; dx++) {
 		Int x = c.x + dx;
 		if (x < m_extent.lo.x || x > m_extent.hi.x) continue;
@@ -4985,9 +5004,21 @@ void Pathfinder::stampClaimAt( const Coord3D *pos, UnsignedInt frame, Int dilati
 			Int y = c.y + dy;
 			if (y < m_extent.lo.y || y > m_extent.hi.y) continue;
 			Int cell = x*h + y;
-			addClaim(cell, bucket, 2);
-			if (bucket > 0) addClaim(cell, bucket-1, 1);
-			addClaim(cell, bucket+1, 1);
+			PF_PREFETCH(&m_claims[claimSlotOf(cell, bucket)]);
+			if (bucket > 0) PF_PREFETCH(&m_claims[claimSlotOf(cell, bucket-1)]);
+			PF_PREFETCH(&m_claims[claimSlotOf(cell, bucket+1)]);
+		}
+	}
+	for (Int dx = -dilation; dx <= dilation; dx++) {
+		Int x = c.x + dx;
+		if (x < m_extent.lo.x || x > m_extent.hi.x) continue;
+		for (Int dy = -dilation; dy <= dilation; dy++) {
+			Int y = c.y + dy;
+			if (y < m_extent.lo.y || y > m_extent.hi.y) continue;
+			Int cell = x*h + y;
+			claimInto(m_claims, cell, bucket, 2, nowBucket);
+			if (bucket > 0) claimInto(m_claims, cell, bucket-1, 1, nowBucket);
+			claimInto(m_claims, cell, bucket+1, 1, nowBucket);
 			UnsignedShort touch = (UnsignedShort)(bucket + 1);
 			if (m_claimTouch[cell] < touch) m_claimTouch[cell] = touch;
 		}
@@ -6584,6 +6615,11 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 		 Optimising the empty case optimised the half that was already free. */
 	Int numCellsAbove = info.radius;
 	if (info.centerInCell) numCellsAbove++;
+	const ObjectID myId = obj->getID();
+	/* A four-entry memo of the units already met in this window (object, relationship, crush answer)
+		 was tried here on 2026-10-27 and taken out: on the 530-unit crowd it halved the time spent in
+		 those three calls and added the same back in its own lookups, so the function cost what it did
+		 before.  Each cell asks once instead, and a moving unit's relationship is not asked twice. */
 	Int i, j;
 //	Bool isInfantry = obj->isKindOf(KINDOF_INFANTRY);
 	for (i=info.cell.x-info.radius; i<info.cell.x+numCellsAbove; i++) {
@@ -6591,24 +6627,33 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 			PathfindCell	*cell = getCell(info.layer,i, j);
 			if (cell) {
 				enum PathfindCell::CellFlags flags = cell->getFlags();
-				ObjectID posUnit = cell->getPosUnit();
 				if ((flags == PathfindCell::UNIT_GOAL) || (flags == PathfindCell::UNIT_GOAL_OTHER_MOVING)) {
 					info.allyGoal = true;
 				}
 				if (flags == PathfindCell::NO_UNITS) {
 					continue;  // Nobody is here, so it's ok.
-				} else if (posUnit==obj->getID()) {
+				}
+				// read only past the empty test: it goes through the cell's info, which every cell the running
+				// search has visited carries, and an empty cell never needed it
+				ObjectID posUnit = cell->getPosUnit();
+				if (posUnit==myId) {
 					continue; // we got it.
 				} else if (posUnit==ignoreId) {
-					continue; // we are ignoring this one.
+					// we are ignoring this one.  EA asked again further down whether the unit's own id was
+					// the ignored obstacle; that id is posUnit, so the second ask never fired and is gone.
+					continue;
 				}	else {
 					Bool check = false;
 					Object *unit = NULL;
+					Int rel = -1;		// asked at most once a cell
 					if (flags==PathfindCell::UNIT_PRESENT_MOVING || flags==PathfindCell::UNIT_GOAL_OTHER_MOVING) {
 						unit = TheGameLogic->findObjectByID(posUnit);
 						// order matters: we want to know if I consider it to be an ally, not vice versa
-						if (unit && obj->getRelationship(unit) == ALLIES) {
-							info.allyMoving = true;
+						if (unit) {
+							rel = obj->getRelationship(unit);
+							if (rel == ALLIES) {
+								info.allyMoving = true;
+							}
 						}
 						if (info.considerTransient) {
 							check = true;
@@ -6618,22 +6663,17 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 						check = true;
 						unit = TheGameLogic->findObjectByID(posUnit);
 					}
-					if (check && unit!=NULL) {
-						if (obj->getAIUpdateInterface() && obj->getAIUpdateInterface()->getIgnoredObstacleID()==unit->getID()) {
-							// Don't check if it's the ignored obstacle.
-							check = false;
-						}
-					}
 					if (check && unit) {
 #ifdef INFANTRY_MOVES_THROUGH_INFANTRY
 						if (obj->isKindOf(KINDOF_INFANTRY) && unit->isKindOf(KINDOF_INFANTRY)) {
 							// Infantry can run through infantry.
-							continue; // 
+							continue; //
 						}
 #endif
 						// See if it is an ally.
 						// order matters: we want to know if I consider it to be an ally, not vice versa
-						if (obj->getRelationship(unit) == ALLIES) {
+						if (rel < 0) rel = obj->getRelationship(unit);
+						if (rel == ALLIES) {
 							if (!unit->getAIUpdateInterface()) {
 								return false; // can't path through not-idle units.
 							}
@@ -11390,6 +11430,7 @@ struct ViewAttackBlockedStruct
 	const Object *victim;
 	const PathfindCell *victimCell;
 	Int		skipCount;
+	ObjectID standingIn;	///< with no obj: a building whose cells the shooter would stand in, not in its way
 };
 
 /*static*/ Int Pathfinder::attackBlockedByObstacleCallback(Pathfinder* pathfinder, PathfindCell* from, PathfindCell* to, Int to_x, Int to_y, void* userData)
@@ -11402,8 +11443,11 @@ struct ViewAttackBlockedStruct
 	}
 	if (to != NULL && (to->getType() == PathfindCell::CELL_OBSTACLE))
 	{
-		// we never block our own view!
-		if (to->isObstaclePresent(d->obj->getID()))
+		// we never block our own view!  No obj is a shooter not standing yet (isGroundViewBlockedByObstacle),
+		// which has no cells, container or slaver of its own.
+		if (d->obj && to->isObstaclePresent(d->obj->getID()))
+			return 0;
+		if (!d->obj && d->standingIn != INVALID_ID && to->isObstaclePresent(d->standingIn))
 			return 0;
 
 		if (d->victim) {
@@ -11422,7 +11466,7 @@ struct ViewAttackBlockedStruct
 		// @todo: if the obstacle is objOther's container, AND it's a "visible" container, ignore it.
 
 		// if the obstacle is the item to which we are slaved, ignore it as an obstacle.
-		if (to->isObstaclePresent(getSlaverID(d->obj)))
+		if (d->obj && to->isObstaclePresent(getSlaverID(d->obj)))
 			return 0;
 
 		if (to->isObstacleTransparent())
@@ -11541,9 +11585,10 @@ Bool Pathfinder::isAttackViewBlockedByObstacle(const Object* attacker, const Coo
 		layer = victim->getLayer();
 	}
 	info.victimCell = getCell(layer, &victimPos);
-	
+	info.standingIn = INVALID_ID;
+
 	info.skipCount = 0;
-	if (attacker->getLayer() != LAYER_GROUND) 
+	if (attacker->getLayer() != LAYER_GROUND)
 	{
 		info.skipCount = 3;	/// srj -- someone wanna tell me what this magic number means?
 												/// jba - Yes, it means that if someone is on a bridge, or rooftop, they can see 
@@ -11557,6 +11602,23 @@ Bool Pathfinder::isAttackViewBlockedByObstacle(const Object* attacker, const Coo
 	Int ret = iterateCellsAlongLine(attackerPos, victimPos, layer, attackBlockedByObstacleCallback, &info);
 	//CRCDEBUG_LOG(("Pathfinder::isAttackViewBlockedByObstacle() 4\n"));
 	return ret != 0;
+}
+
+//-----------------------------------------------------------------------------
+/** The structure walk of isAttackViewBlockedByObstacle for a ground shooter that does not stand yet
+	* (a defence on the placement cursor) and a ground target with no Object: the same cells, the same
+	* callback.  standingIn is a building the shooter would stand in, whose cells are no more in its way
+	* than a standing defence's own are (the reach proof puts the cursor's twin on a built defence).
+	* Only the client's reach overlay asks; nothing in the simulation does. */
+Bool Pathfinder::isGroundViewBlockedByObstacle(const Coord3D& attackerPos, const Coord3D& victimPos, ObjectID standingIn)
+{
+	ViewAttackBlockedStruct info;
+	info.obj = NULL;
+	info.victim = NULL;
+	info.victimCell = getCell(LAYER_GROUND, &victimPos);
+	info.skipCount = 0;
+	info.standingIn = standingIn;
+	return iterateCellsAlongLine(attackerPos, victimPos, LAYER_GROUND, attackBlockedByObstacleCallback, &info) != 0;
 }
 
 static void computeNormalRadialOffset(const Coord3D& from,	Coord3D& insert, const Coord3D& to, 

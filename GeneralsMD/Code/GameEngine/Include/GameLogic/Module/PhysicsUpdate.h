@@ -156,6 +156,22 @@ public:
 		return vel.x * dir.x + vel.y * dir.y + vel.z * dir.z;
 	}
 
+	/**
+		EA's forward speed, kept for EA's own tread and wheel drives (Locomotor::moveTowardsPositionTreads
+		and moveTowardsPositionWheels): sqrt((vx*dx)^2 + (vy*dy)^2), signed by the dot product. It reads
+		0.707 of the true speed at 45 degrees, so a drive closing its speed on it settles at up to 1.41
+		times its Speed off the axes. That is how fast a tank or a car crossed the map diagonally in Zero
+		Hour, and players time their moves on it. Only x and y are read.
+	*/
+	static Real calcRetailForwardSpeed( const Coord3D& vel, const Coord3D& dir )
+	{
+		Real vx = vel.x * dir.x;
+		Real vy = vel.y * dir.y;
+		Real speed = (Real)sqrtf( vx*vx + vy*vy );
+		return (vx + vy >= 0.0f) ? speed : -speed;
+	}
+	Real getRetailForwardSpeed2D() const;											///< calcRetailForwardSpeed along the object's 2d direction vector
+
 	ObjectID getCurrentOverlap() const;					///< return object(s) being overlapped
 	ObjectID getPreviousOverlap() const;					///< return object(s) that were overlapped last frame
 	ObjectID getLastCollidee() const;					///< return object that was last collided with... can be quite old

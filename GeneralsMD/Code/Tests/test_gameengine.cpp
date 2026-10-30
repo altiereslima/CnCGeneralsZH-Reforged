@@ -1694,6 +1694,59 @@ TEST(catchup_stops_paying_debt_when_the_logic_tick_is_what_is_slow)
 	CHECK_NEAR( 6.0f, elapsed, 0.01f );
 }
 
+/* R1, smooth motion: how far the picture is between the last two logic states, counted from when the
+	 last tick was due.  Pure arithmetic on the fine clock; a million ticks a second here. */
+extern Real GameEngine_tickFraction( Int64 now, Int64 due, Real msPerTick, Int64 ticksPerSecond );
+
+TEST(smooth_motion_tick_fraction_runs_from_the_due_time)
+{
+	const Real tick = 1000.0f / 60.0f;
+	const Int64 freq = 1000000;
+	const Int64 due = 5000000;
+
+	CHECK_NEAR( 0.0f, GameEngine_tickFraction( due, due, tick, freq ), 0.0001f );
+	CHECK_NEAR( 0.5f, GameEngine_tickFraction( due + 8333, due, tick, freq ), 0.001f );		// mid-tick
+	CHECK_NEAR( 0.9f, GameEngine_tickFraction( due + 15000, due, tick, freq ), 0.001f );
+
+	// clamped both ways: a draw a hair before the stamp shows the state before, and a paused game,
+	// which stamps no tick, is a whole tick on within one and holds the last state from then on
+	CHECK_NEAR( 0.0f, GameEngine_tickFraction( due - 100, due, tick, freq ), 0.0001f );
+	CHECK_NEAR( 1.0f, GameEngine_tickFraction( due + 16667, due, tick, freq ), 0.0001f );
+	CHECK_NEAR( 1.0f, GameEngine_tickFraction( due + 30 * freq, due, tick, freq ), 0.0001f );
+
+	// no tick length (fast mode, -turbo, TiVO, -headless) or no clock: no blend, the state as it is
+	CHECK_NEAR( 1.0f, GameEngine_tickFraction( due + 8333, due, 0.0f, freq ), 0.0001f );
+	CHECK_NEAR( 1.0f, GameEngine_tickFraction( due + 8333, due, tick, 0 ), 0.0001f );
+
+	/* The stamp GameEngine::update hands it is the pacer's plan time less the debt left once the pass's
+		 ticks are paid: that tick's due time.  Passes 6 and 7 ms apart (a 164 Hz screen) plan at uneven
+		 moments against the 16.7 ms tick, and the stamps still land exactly a tick apart, where the moment
+		 a tick finished moved with its own cost. */
+	Real accum = 0.0f;
+	Real planTime = 0.0f;
+	Real lastDue = -1.0f;
+	Int stamps = 0;
+	for( Int pass = 0; pass < 500; ++pass )
+	{
+		Real elapsed = ( pass % 3 == 0 ) ? 7.0f : 6.0f;
+		planTime += elapsed;
+		Bool ticked = FALSE;
+		while( GameEngine_isLogicFrameDue( accum, elapsed, 60 ) )
+		{
+			ticked = TRUE;
+			elapsed = 0.0f;
+		}
+		if( !ticked )
+			continue;
+		const Real stamp = planTime - accum;
+		if( lastDue >= 0.0f )
+			CHECK_NEAR( tick, stamp - lastDue, 0.01f );
+		lastDue = stamp;
+		++stamps;
+	}
+	CHECK( stamps >= 190 && stamps <= 192 );		// 3167 ms of passes, a tick every 16.7
+}
+
 /* AnimateWindowManager.cpp: the same argument one layer up. The menu animations
    count fixed steps and were authored against a capped frame rate, so with the
    renderer uncapped they have to be paced off the wall clock too or a whole
@@ -1796,6 +1849,24 @@ TEST(physics_forward_speed_is_the_projection_not_a_per_axis_norm)
 	Coord3D up; up.x = 0.0f; up.y = 0.0f; up.z = 1.0f;
 	Coord3D climb; climb.x = 0.0f; climb.y = 0.0f; climb.z = 12.0f;
 	CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( climb, up ), 12.0f, 0.01f );
+}
+
+/* EA's treads and wheels drive on EA's own measure again, which is what let a tank or car cross the
+   map diagonally 1.41 times as fast as along an axis in Zero Hour: exact on the axes, 0.707 of the
+   speed at 45 degrees, and signed by the dot product. */
+TEST(physics_retail_forward_speed_keeps_eas_per_axis_norm)
+{
+	const Real speed = 40.0f;
+	const Real d = 0.70710678f;
+	Coord3D east; east.x = 1.0f; east.y = 0.0f; east.z = 0.0f;
+	Coord3D diag; diag.x = d; diag.y = d; diag.z = 0.0f;
+	Coord3D velEast; velEast.x = speed; velEast.y = 0.0f; velEast.z = 0.0f;
+	Coord3D velDiag; velDiag.x = speed * d; velDiag.y = speed * d; velDiag.z = 0.0f;
+	Coord3D velBack; velBack.x = -speed * d; velBack.y = -speed * d; velBack.z = 0.0f;
+
+	CHECK_NEAR( PhysicsBehavior::calcRetailForwardSpeed( velEast, east ), speed, 0.01f );
+	CHECK_NEAR( PhysicsBehavior::calcRetailForwardSpeed( velDiag, diag ), speed * d, 0.01f );
+	CHECK_NEAR( PhysicsBehavior::calcRetailForwardSpeed( velBack, diag ), -speed * d, 0.01f );
 }
 
 /* CommandXlat.cpp: only the attack key arms force fire. Holding ctrl used to do it too, so a
@@ -3132,6 +3203,74 @@ TEST(attack_move_shoots_the_biggest_threat_first)
 	   from a bounding sphere: neither may divide by zero or invert the ranking. */
 	CHECK_EQ( AI_threatScore( 0, 1000, false, 500.0f, 0.0f ), 1000 );
 	CHECK_EQ( AI_threatScore( 0, 1000, false, -5.0f, MOD ), 1000 );
+}
+
+/* AI.cpp: the scripted-priority search a hunter runs over the whole map picks in one pass over
+   the unsorted list what the near-to-far sort and the lead loop over it picked, ties included,
+   or every replay moves. */
+extern Bool AI_attackPriorityTakesLead( Int modPriority, Int curPriority, Real distSqr,
+																				Int bestModPriority, Int bestCurPriority, Real bestDistSqr );
+
+TEST(attack_priority_pick_needs_no_sort)
+{
+	enum { N = 24 };
+	/* few distances, so equal distances and equal priorities after distance come up often */
+	const Real DIST[] = { 0.0f, 50.0f, 100.0f, 110.0f, 200.0f, 500.0f };
+	UnsignedInt seed = 12345;
+	for (Int round = 0; round < 2000; ++round)
+	{
+		Int modP[N], curP[N];
+		Real distSqr[N];
+		Bool allowed[N];
+		for (Int i = 0; i < N; ++i)
+		{
+			seed = seed * 1664525u + 1013904223u;
+			const Real dist = DIST[(seed >> 16) % 6];
+			curP[i] = (Int)((seed >> 8) % 5) + 1;
+			distSqr[i] = dist * dist;
+			allowed[i] = ((seed >> 24) & 3) != 0;
+			modP[i] = curP[i] - (Int)(dist / 100.0f);
+			if (modP[i] < 1)
+				modP[i] = 1;
+		}
+
+		/* the old way: a stable sort near to far, then the lead on a higher (modP, curP) */
+		Int order[N];
+		for (Int i = 0; i < N; ++i)
+		{
+			Int j = i;
+			for ( ; j > 0 && distSqr[order[j - 1]] > distSqr[i]; --j)
+				order[j] = order[j - 1];
+			order[j] = i;
+		}
+		Int sortedPick = -1, e = 0, a = 0;
+		for (Int k = 0; k < N; ++k)
+		{
+			const Int i = order[k];
+			if ((modP[i] > e || (modP[i] == e && curP[i] > a)) && allowed[i])
+			{
+				e = modP[i];
+				a = curP[i];
+				sortedPick = i;
+			}
+		}
+
+		Int onePassPick = -1, bestMod = 0, bestCur = 0;
+		Real bestDistSqr = 0.0f;
+		for (Int i = 0; i < N; ++i)
+		{
+			if (AI_attackPriorityTakesLead(modP[i], curP[i], distSqr[i], bestMod, bestCur, bestDistSqr) && allowed[i])
+			{
+				bestMod = modP[i];
+				bestCur = curP[i];
+				bestDistSqr = distSqr[i];
+				onePassPick = i;
+			}
+		}
+		CHECK_EQ( onePassPick, sortedPick );
+		if (onePassPick != sortedPick)
+			break;
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -5217,6 +5356,30 @@ TEST(controlbar_mod_slots_past_the_bar_fit_its_windows)
 	ControlBar_fitCommandSlots( humvee, windowed, SLOTS, shown );
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( shown[ slot ], humvee[ slot ] != N && slot < WINDOWS ? slot : -1 );
+}
+
+TEST(controlbar_wide_grid_only_for_a_set_past_fourteen)
+{
+	enum { SLOTS = MAX_COMMANDS_PER_SET };
+	const Int N = GUI_COMMAND_NONE, B = GUI_COMMAND_DOZER_CONSTRUCT, P = GUI_COMMAND_PURCHASE_SCIENCE;
+
+	/* Stealth's Arms Dealer: twelve buttons, one of them in 15, which the fourteen windows still hold */
+	const Int armsDealer[ SLOTS ] = { N, B, B, B, B, B, N, B, N, B, B, B, B, B, B, N, N, N };
+	CHECK( !ControlBar_needsWideCommandGrid( armsDealer, SLOTS ) );
+
+	/* a promotion screen's set has its own screen, however many slots it fills */
+	Int science[ SLOTS ];
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		science[ slot ] = P;
+	CHECK( !ControlBar_needsWideCommandGrid( science, SLOTS ) );
+
+	/* fourteen fit, fifteen do not */
+	Int full[ SLOTS ];
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		full[ slot ] = slot < 14 ? B : N;
+	CHECK( !ControlBar_needsWideCommandGrid( full, SLOTS ) );
+	full[ 16 ] = B;
+	CHECK( ControlBar_needsWideCommandGrid( full, SLOTS ) );
 }
 
 TEST(controlbar_force_attack_slot_is_under_attack_move)
@@ -7629,6 +7792,103 @@ TEST(bitflags_crc_covers_every_word_of_the_flag_set)
 			fullMinusOne.set( i );
 	}
 	CHECK_NE( crcOfStatusMask( full ), crcOfStatusMask( fullMinusOne ) );
+}
+
+/* The game's CRC as EA wrote it, byte by byte: each whole word read in network order (htonl of a
+	 little-endian load), the running value shifted left with its top bit added back, a 1-3 byte
+	 tail added as a little-endian number (htonl twice), and the result handed out through htonl.
+	 XferCRC folds with an inline byte swap now; every CRC a replay or a joiner checks has to stay
+	 exactly this. */
+static void eaCRCAdd( UnsignedInt &crc, UnsignedInt val )
+{
+	UnsignedInt hibit = (crc & 0x80000000) ? 1 : 0;
+	crc <<= 1;
+	crc += val;
+	crc += hibit;
+}
+
+static UnsignedInt eaCRCOfBuffers( const std::vector< std::vector<UnsignedByte> > &buffers )
+{
+	UnsignedInt crc = 0;
+	for( size_t b = 0; b < buffers.size(); ++b )
+	{
+		const std::vector<UnsignedByte> &p = buffers[b];
+		Int n = (Int)p.size();
+		Int i = 0;
+		for( ; i + 4 <= n; i += 4 )
+			eaCRCAdd( crc, ((UnsignedInt)p[i] << 24) | ((UnsignedInt)p[i+1] << 16) | ((UnsignedInt)p[i+2] << 8) | p[i+3] );
+		if( i < n )
+		{
+			UnsignedInt val = 0;
+			for( Int k = 0; i + k < n; ++k )
+				val += (UnsignedInt)p[i+k] << (k*8);
+			eaCRCAdd( crc, val );
+		}
+	}
+	return (crc >> 24) | ((crc >> 8) & 0xFF00) | ((crc << 8) & 0xFF0000) | (crc << 24);
+}
+
+TEST(xfer_crc_inline_byte_swap_gives_eas_htonl_numbers)
+{
+	// pinned by hand: word 01 02 03 04 gives 0x01020304, the tail 05 makes it 0x0204060D, swapped out
+	UnsignedByte five[5] = { 1, 2, 3, 4, 5 };
+	XferCRC pinned;
+	pinned.open( "test" );
+	pinned.xferUser( five, 5 );
+	pinned.close();
+	CHECK_EQ( pinned.getCRC(), 0x0D060402u );
+
+	// random buffers of every length from 1 to 66, several to a session so the running value carries
+	UnsignedInt seed = 0x2545F491u;
+	for( Int round = 0; round < 300; ++round )
+	{
+		std::vector< std::vector<UnsignedByte> > buffers;
+		XferCRC xfer;
+		xfer.open( "test" );
+		for( Int call = 0; call < 1 + round % 5; ++call )
+		{
+			std::vector<UnsignedByte> p( 1 + (round * 5 + call * 3) % 66 );
+			for( size_t k = 0; k < p.size(); ++k )
+			{
+				seed = seed * 1664525u + 1013904223u;
+				p[k] = (UnsignedByte)(seed >> 24);
+			}
+			xfer.xferUser( &p[0], (Int)p.size() );
+			buffers.push_back( p );
+		}
+		xfer.close();
+		CHECK_EQ( xfer.getCRC(), eaCRCOfBuffers( buffers ) );
+	}
+}
+
+// A lobby or replay string carrying C=0 used to reach GameLogic's m_frame % interval and crash.
+extern Int NET_CRC_INTERVAL;
+TEST(crc_interval_is_held_between_1_and_100)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;		// GameInfo::reset reads the default starting cash
+
+	SkirmishGameInfo game;
+	game.setCRCInterval( 0 );
+	CHECK_EQ( game.getCRCInterval(), 1 );
+	game.setCRCInterval( -7 );
+	CHECK_EQ( game.getCRCInterval(), 1 );
+	game.setCRCInterval( 1 );
+	CHECK_EQ( game.getCRCInterval(), 1 );
+	game.setCRCInterval( 37 );
+	CHECK_EQ( game.getCRCInterval(), 37 );
+	game.setCRCInterval( 5000 );
+	CHECK_EQ( game.getCRCInterval(), 100 );
+
+	// -NetCRCInterval writes NET_CRC_INTERVAL raw, and a host takes it through reset(), not the lobby string
+	Int savedInterval = NET_CRC_INTERVAL;
+	NET_CRC_INTERVAL = 0;
+	game.reset();
+	CHECK_EQ( game.getCRCInterval(), 1 );
+	NET_CRC_INTERVAL = savedInterval;
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -13134,6 +13394,14 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_counterCompositionWeight >= lower.m_counterCompositionWeight );
 		CHECK( upper.m_retreatTtkRatio >= lower.m_retreatTtkRatio );
 
+		// under fire: redraws the map and looks sooner, tells more of the group, wants better odds before
+		// going for a gun, and remembers a gun in the fog for longer
+		CHECK( upper.m_influenceSeconds < lower.m_influenceSeconds );
+		CHECK( upper.m_fireLookSeconds < lower.m_fireLookSeconds );
+		CHECK( upper.m_fireWordRadius > lower.m_fireWordRadius );
+		CHECK( upper.m_fireChargeOdds > lower.m_fireChargeOdds );
+		CHECK( upper.m_fireMemorySeconds > lower.m_fireMemorySeconds );
+
 		// capabilities only ever switch on as you climb, never off again
 		CHECK( upper.m_massBeforeAttacking >= lower.m_massBeforeAttacking );
 		CHECK( upper.m_retreatIndividualUnits >= lower.m_retreatIndividualUnits );
@@ -13601,38 +13869,234 @@ TEST(a_cleaner_counts_only_scans_that_find_it_stuck_short_of_its_hazard)
 }
 
 
-/** AI.cpp: a team that loses a fight stops at the first ground on its way home that none of the
-	 fight's guns reach, a step past it, rather than walking the whole map back to its base. */
+/** AI.cpp: a team that loses a fight stops at the first ground none of the fight's guns reach, a step
+	 past it, rather than walking the whole map back to its base; on the road home unless a way 45 or 90
+	 degrees off it gets out more than a step sooner. */
 TEST(a_losing_team_falls_back_out_of_reach_not_home)
 {
 	Real x = 0.0f, y = 0.0f;
+	const Real map[] = { -5000.0f, -5000.0f, 5000.0f, 5000.0f };
 
 	// home is 2000 east; one gun at the fight reaching 150: covered up to 150, first clear sample at
 	// 180, one 60 step past it
 	const Real oneGun[] = { 0.0f, 0.0f, 150.0f };
-	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, oneGun, 1, &x, &y ) );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, oneGun, 1, map, &x, &y ) );
 	CHECK_NEAR( 240.0f, x, 0.01f );
 	CHECK_NEAR( 0.0f, y, 0.01f );
 
-	// a second gun further down the road home (200..600 covered) pushes the stop past its reach too:
-	// the gap at 180 is clear, but the step past it is not, and a stop inside a reach is no stop
+	// a second gun further down the road home (200..600 covered): along the road the gap at 180 is clear
+	// but the step past it is not, and the first stop is 720, past the second gun.  45 degrees off the
+	// road it is out at 240 without passing it, which beats 720 by more than a step
 	const Real twoGuns[] = { 0.0f, 0.0f, 150.0f,  400.0f, 0.0f, 200.0f };
-	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, twoGuns, 2, &x, &y ) );
-	CHECK_NEAR( 720.0f, x, 0.01f );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, twoGuns, 2, map, &x, &y ) );
+	CHECK_NEAR( 169.706f, x, 0.01f );
+	CHECK_NEAR( 169.706f, y, 0.01f );
+
+	// ... unless the map ends 100 to the north: that way walks off it, and the way 45 degrees south is taken
+	const Real northEdge[] = { -5000.0f, -5000.0f, 5000.0f, 100.0f };
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, twoGuns, 2, northEdge, &x, &y ) );
+	CHECK_NEAR( 169.706f, x, 0.01f );
+	CHECK_NEAR( -169.706f, y, 0.01f );
+
+	// a gun beside the road leaves the road alone: out at 240 along it, no side gets out a step sooner
+	const Real sideGun[] = { 0.0f, 0.0f, 150.0f,  0.0f, 300.0f, 200.0f };
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, sideGun, 2, map, &x, &y ) );
+	CHECK_NEAR( 240.0f, x, 0.01f );
+	CHECK_NEAR( 0.0f, y, 0.01f );
 
 	// any direction: home to the south-west
-	CHECK( aiRetreatFallbackPoint( 1000.0f, 1000.0f, 0.0f, 1000.0f, 60.0f, NULL, 0, &x, &y ) );
+	CHECK( aiRetreatFallbackPoint( 1000.0f, 1000.0f, 0.0f, 1000.0f, 60.0f, NULL, 0, map, &x, &y ) );
 	CHECK_NEAR( 880.0f, x, 0.01f );
 	CHECK_NEAR( 1000.0f, y, 0.01f );
 
 	// guns covering the whole road: home, and FALSE says so
 	const Real bigGun[] = { 0.0f, 0.0f, 5000.0f };
-	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, bigGun, 1, &x, &y ) );
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, bigGun, 1, map, &x, &y ) );
 	CHECK_NEAR( 2000.0f, x, 0.01f );
 
 	// a fight on the doorstep: no room short of home either
-	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 100.0f, 0.0f, 60.0f, NULL, 0, &x, &y ) );
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 100.0f, 0.0f, 60.0f, NULL, 0, map, &x, &y ) );
 	CHECK_NEAR( 100.0f, x, 0.01f );
+}
+
+
+/** AI.cpp: the safe spot is picked from the whole map and not only the guns of the fight it left.  A gun the
+	 fight's list does not have, down the road home, moves the stop off the road as a gun in the list does. */
+TEST(a_losing_team_keeps_off_every_gun_on_the_map)
+{
+	Real x = 0.0f, y = 0.0f;
+	const Real bounds[] = { -1000.0f, -1000.0f, 3000.0f, 1000.0f };
+	AIInfluenceMap influence;
+	influence.reset( -1000.0f, -1000.0f, 4000.0f, 2000.0f, 60.0f );
+
+	// nothing on it: one step and the next, along the road
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y, &influence ) );
+	CHECK_NEAR( 120.0f, x, 0.01f );
+	CHECK_NEAR( 0.0f, y, 0.01f );
+
+	// a gun at 300 east reaching 200 covers the road from about 100 to 500; 45 degrees off it is clear at
+	// 120, and the list of the fight's guns is empty.  The same call without the map walks straight in
+	influence.stampEnemy( 300.0f, 0.0f, 0.0f, 200.0f, 900.0f );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y, &influence ) );
+	CHECK_NEAR( 84.853f, x, 0.01f );
+	CHECK_NEAR( 84.853f, y, 0.01f );
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y ) );
+	CHECK_NEAR( 120.0f, x, 0.01f );
+
+	// the map all covered: home, and FALSE says so
+	influence.stampEnemy( 0.0f, 0.0f, 0.0f, 5000.0f, 900.0f );
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, NULL, 0, bounds, &x, &y, &influence ) );
+	CHECK_NEAR( 2000.0f, x, 0.01f );
+}
+
+
+/** AI.cpp: what a unit hit does about the gun, the owner's rule: answer it if it can, leave if not, and no
+	 running from what ours can kill. */
+TEST(a_unit_hit_answers_the_gun_or_leaves_its_ground)
+{
+	// already shooting the gun, or some other gun: stays on it, whatever the odds
+	CHECK_EQ( (Int)AIFIRE_CARRY_ON, (Int)aiAnswerFire( TRUE, FALSE, TRUE, TRUE, 0.0f, 9000.0f, 1.0f, TRUE, FALSE ) );
+	CHECK_EQ( (Int)AIFIRE_CARRY_ON, (Int)aiAnswerFire( FALSE, TRUE, TRUE, TRUE, 0.0f, 9000.0f, 1.0f, TRUE, FALSE ) );
+	// shooting a building under a tower it can reach, or standing idle in a gun's reach: shoots back,
+	// at any odds, since walking off takes longer than the shot
+	CHECK_EQ( (Int)AIFIRE_SHOOT_BACK, (Int)aiAnswerFire( FALSE, FALSE, TRUE, TRUE, 100.0f, 9000.0f, 1.0f, TRUE, TRUE ) );
+	// out of reach, with enough near it: goes, and a group that can kill the gun does not run from it
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 4800.0f, 2400.0f, 1.0f, TRUE, FALSE ) );
+	// a gun with nothing else on its ground and the map not yet drawn over it: goes
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 100.0f, 0.0f, 1.0f, TRUE, FALSE ) );
+	// out of reach and outgunned at the gun's spot, or no way to get at it: leaves
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 1600.0f, 4800.0f, 1.0f, TRUE, FALSE ) );
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, FALSE, 9000.0f, 900.0f, 1.0f, TRUE, FALSE ) );
+	// ... unless it may not.  With an order it stays on that order rather than walking
+	CHECK_EQ( (Int)AIFIRE_CARRY_ON, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 1600.0f, 4800.0f, 1.0f, FALSE, FALSE ) );
+	// and with none no rule leaves it standing under the shells: at the gun, or off its ground if it cannot get there
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 1600.0f, 4800.0f, 1.0f, FALSE, TRUE ) );
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, FALSE, 1600.0f, 4800.0f, 1.0f, FALSE, TRUE ) );
+	// the rungs' odds: Easy's go at what Hard's leave
+	CHECK_EQ( (Int)AIFIRE_GO_KILL, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 3000.0f, 4800.0f, 0.6f, TRUE, FALSE ) );
+	CHECK_EQ( (Int)AIFIRE_LEAVE, (Int)aiAnswerFire( FALSE, FALSE, FALSE, TRUE, 3000.0f, 4800.0f, 1.0f, TRUE, FALSE ) );
+}
+
+
+/** AI.cpp: the owner's "no dance between two spots".  Sent back from a hold at a fight reading 1.1, between the
+	 retreat's even and Hard's 1.25 at a defence's edge, a team went in, took a hit, read 1.25 afresh, left, held
+	 and went in again, and going back restarted the hold's clock, so its cap never came. */
+TEST(a_unit_sent_at_a_gun_does_not_walk_to_and_fro)
+{
+	const Real margin = 1.25f;
+	const Real reading = 1.1f;
+	// what the hold's own rule sends back
+	CHECK_EQ( (Int)AIFALLBACK_RESUME, (Int)aiRetreatHoldDecision( TRUE, 300, reading, 1.0f, 300, 1800 ) );
+	// is not turned round by the reading either side of the odds
+	CHECK( reading < aiFireOddsNow( 1.25f, FALSE, margin ) );
+	CHECK( reading >= aiFireOddsNow( 1.25f, TRUE, margin ) );
+	// and one that does break off has had its try: its hold ends at home, not at the gun
+	CHECK( aiFireMayGoBack( FALSE ) );
+	CHECK( !aiFireMayGoBack( TRUE ) );
+}
+
+
+/** AI.cpp: a unit a step took away from a gun is done with that gun.  Pulled out hurt with the errand still
+	 open, it stood at its safe spot, read as idle, and was walked back to what had hurt it. */
+TEST(a_unit_pulled_out_hurt_is_not_sent_back_to_the_gun)
+{
+	CHECK( !aiFireAnswerOver( FALSE, FALSE, 600, 3600 ) );
+	CHECK( aiFireAnswerOver( FALSE, TRUE, 600, 3600 ) );			// a step took it, by its rejoin
+	CHECK( aiFireAnswerOver( TRUE, FALSE, 600, 3600 ) );			// the retreat took it
+	CHECK( aiFireAnswerOver( FALSE, FALSE, 3600, 3600 ) );		// gone off on something else by now
+}
+
+
+/** AI.cpp: who ends a hold.  The retreat ends those it looks at.  A hunter on the default team stood calm for
+	 forty seconds, out of every call-up, with nothing to send it on, and a rung with no retreat turned its unit
+	 back halfway to the quiet ground. */
+TEST(a_holder_nothing_sends_on_goes_free_once_it_has_stopped)
+{
+	const UnsignedInt hold = 600;
+	const UnsignedInt stale = 2400;
+	// the retreat's: only when it has lost track of it
+	CHECK( !aiHolderLetGo( TRUE, 2400, FALSE, hold, stale ) );
+	CHECK( aiHolderLetGo( TRUE, 2401, FALSE, hold, stale ) );
+	// nobody's: after the hold, and not while it is still walking there
+	CHECK( !aiHolderLetGo( FALSE, 600, FALSE, hold, stale ) );
+	CHECK( aiHolderLetGo( FALSE, 601, FALSE, hold, stale ) );
+	CHECK( !aiHolderLetGo( FALSE, 601, TRUE, hold, stale ) );
+	CHECK( aiHolderLetGo( FALSE, 2401, TRUE, hold, stale ) );
+}
+
+
+/** AI.cpp: the two ways a unit is kept from walking off.  A fight at home is fought, and a gun the retreat
+	 can see is the retreat's to judge, so a hit does not undo the fights it would hold.  A gun it cannot see,
+	 the long one past its radius or one in the fog, is this rule's; so is any gun on a rung with no retreat. */
+TEST(a_unit_hit_leaves_only_where_nothing_else_judges_the_fight)
+{
+	// home against a gun at home; at home under a long gun out past it is another matter, seen or not, since
+	// the retreat breaks off no fight at home and they stood there until they died
+	CHECK( !aiFireMayLeave( TRUE, TRUE, TRUE, FALSE, 500.0f, 300.0f ) );
+	CHECK( !aiFireMayLeave( TRUE, TRUE, TRUE, TRUE, 200.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( TRUE, FALSE, TRUE, FALSE, 500.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( TRUE, FALSE, TRUE, TRUE, 200.0f, 300.0f ) );
+	// known and within the retreat's look: not on a rung that retreats, yes on Easy
+	CHECK( !aiFireMayLeave( FALSE, FALSE, TRUE, TRUE, 200.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( FALSE, FALSE, FALSE, TRUE, 200.0f, 300.0f ) );
+	// past its look, or in the fog
+	CHECK( aiFireMayLeave( FALSE, FALSE, TRUE, TRUE, 301.0f, 300.0f ) );
+	CHECK( aiFireMayLeave( FALSE, FALSE, TRUE, FALSE, 200.0f, 300.0f ) );
+}
+
+
+/** AI.cpp: the two small readings the answers rest on. */
+TEST(outgunned_and_recently_hit_read_as_they_say)
+{
+	CHECK( aiOutgunned( 100.0f, 200.0f, 1.0f ) );
+	CHECK( !aiOutgunned( 200.0f, 200.0f, 1.0f ) );
+	CHECK( !aiOutgunned( 0.0f, 0.0f, 1.0f ) );			// nothing there: nothing to lose to
+	CHECK( !aiOutgunned( 150.0f, 200.0f, 0.6f ) );
+
+	CHECK( aiRecentlyHit( 100, 110, 20 ) );
+	CHECK( aiRecentlyHit( 100, 120, 20 ) );
+	CHECK( !aiRecentlyHit( 100, 121, 20 ) );
+	// the stamp a body starts with is in the future, and an unsigned subtraction read it as just hit
+	CHECK( !aiRecentlyHit( 0xffffffffu, 110, 20 ) );
+}
+
+
+/** Every rung answers, and the ladder test holds the order.  Hard's map stays on its one-second clock and its
+	 look on the twenty-frame tactics clock, so nothing here costs Hard a new rate. */
+TEST(every_rung_answers_fire)
+{
+	TAiData data;
+	for( Int i = 0; i < AISKILL_COUNT; ++i )
+	{
+		const AIDifficultyProfile &rung = data.m_skill[ i ];
+		CHECK( rung.m_influenceSeconds > 0.0f );
+		CHECK( rung.m_fireLookSeconds > 0.0f );
+		CHECK( rung.m_fireWordRadius >= 0.0f );
+		CHECK( rung.m_fireChargeOdds > 0.0f );
+		CHECK( rung.m_fireMemorySeconds > 0.0f );
+	}
+	const AIDifficultyProfile &hard = data.m_skill[ AISKILL_BRUTAL ];
+	CHECK_EQ( 1.0f, hard.m_influenceSeconds );
+	CHECK_EQ( 20, (Int)(hard.m_fireLookSeconds * LOGICFRAMES_PER_SECOND + 0.5f) );
+	// Easy answers each hit alone
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_fireWordRadius );
+}
+
+
+/** AI.cpp: a unit walking at a known defence is caught while the next stretch of its walk only reaches
+	 the slack round the gun, before it is in reach (AIPlayer::holdAtDefences). */
+TEST(a_walk_into_a_known_defence_is_seen_before_it_is_in_reach)
+{
+	// a gun at the origin reaching 200, the edge 30 past it, the walk looked at 120 ahead.  Straight at it
+	// from 300 the stretch ends at 180, inside the edge; walking away, or from 400 (ends at 280), not yet
+	CHECK( aiWalkEntersReach( 300.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	CHECK( !aiWalkEntersReach( 300.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	CHECK( !aiWalkEntersReach( 400.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	// walking past: 240 off the gun at the nearest is outside the edge, 220 off is inside it
+	CHECK( !aiWalkEntersReach( 50.0f, 240.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	CHECK( aiWalkEntersReach( 50.0f, 220.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
+	// already in reach: that is a fight, and the retreat's to judge
+	CHECK( !aiWalkEntersReach( 150.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 200.0f, 230.0f, 120.0f ) );
 }
 
 
@@ -18661,6 +19125,15 @@ TEST(scenario_parses_a_particles_line)
 	// the same count and position rules as spawn, because it shares spawn's parse
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "30 particles 0 X 0 760 850", &action ), (Int)SCENARIO_PARSE_BAD_COUNT );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "30 particles 0 X 5 760", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	// the gate's top-up: seat, template and the object count it holds the world at
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "18000 topup 3 GLATankScorpion 2000", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TOPUP );
+	CHECK_EQ( action.slot, 3 );
+	CHECK( action.selector == "GLATankScorpion" );
+	CHECK_EQ( action.count, 2000 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "18000 topup 3 GLATankScorpion", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "18000 topup 3 GLATankScorpion none", &action ), (Int)SCENARIO_PARSE_BAD_COUNT );
 }
 
 // A queued order that is not an order would never end a list when given without shift, and an order

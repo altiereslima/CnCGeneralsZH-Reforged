@@ -55,6 +55,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Weapon.h"
+#include "GameClient/ReachOverlay.h"
 
 #include <algorithm>
 #include <map>
@@ -253,6 +254,10 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_GIVEMONEY;
 	else if (token == "rank")
 		*action = SCENARIO_ACTION_RANK;
+	else if (token == "reachproof")
+		*action = SCENARIO_ACTION_REACHPROOF;
+	else if (token == "topup")
+		*action = SCENARIO_ACTION_TOPUP;
 	else
 		return FALSE;
 
@@ -354,11 +359,13 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_REPEAT:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_GIVEMONEY:		return SCENARIO_TOKENS_STANCE;
 		case SCENARIO_ACTION_RANK:				return SCENARIO_TOKENS_STANCE;
+		case SCENARIO_ACTION_REACHPROOF:	return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_CLICKSTOP:		return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_TALLY:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_PURCHASE:		return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_ARRIVE:			return SCENARIO_TOKENS_ARRIVE;
+		case SCENARIO_ACTION_TOPUP:				return SCENARIO_TOKENS_MOVE;
 	}
 	return SCENARIO_TOKENS_STOP;
 }
@@ -405,6 +412,11 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 
 	switch (actionType)
 	{
+		case SCENARIO_ACTION_TOPUP:
+			if (!parseWholeNumber( tokens[ 4 ], &action->count ) || action->count < 1)
+				return SCENARIO_PARSE_BAD_COUNT;
+			break;
+
 		case SCENARIO_ACTION_SPAWN:
 		case SCENARIO_ACTION_PARTICLES:
 		{
@@ -470,6 +482,17 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 			action->targetSelector = tokens[ 5 ];
 			if (actionType == SCENARIO_ACTION_SHIFTPOWER)
 				action->name = tokens[ SCENARIO_SHIFTPOWER_NAME_TOKEN ];
+			break;
+		}
+
+		case SCENARIO_ACTION_REACHPROOF:
+		{
+			if (!parseWholeNumber( tokens[ 4 ], &action->targetSlot ))
+				return SCENARIO_PARSE_BAD_SLOT;
+			action->targetSelector = tokens[ 5 ];
+			action->count = 400;		// sample points of each kind
+			if (count > 6 && (!parseWholeNumber( tokens[ 6 ], &action->count ) || action->count < 1))
+				return SCENARIO_PARSE_BAD_COUNT;
 			break;
 		}
 
@@ -551,6 +574,7 @@ const char *ScenarioDrill_parseResultName( ScenarioParseResult result )
 // ------------------------------------------------------------------------------------------------
 
 static std::vector<ScenarioAction> theScenarioActions;
+static std::vector<ScenarioAction> theScenarioTopups;
 static Int theScenarioCursor = 0;
 static Bool theScenarioLoaded = FALSE;
 static Int theScenarioActionsRun = 0;
@@ -622,6 +646,7 @@ static void resetScenario( void )
 	theScenarioArrivals.clear();
 	theScenarioResponses.clear();
 	theScenarioActions.clear();
+	theScenarioTopups.clear();
 	theScenarioCursor = 0;
 	theScenarioLoaded = FALSE;
 	theScenarioActionsRun = 0;
@@ -840,11 +865,11 @@ static Object *findNearestCivilian( const AsciiString &selector, const Coord3D *
 	  pathfinder puts every destination to: a tank set on a cliff or in the sea is taken away again
 	  rather than left to drive out.  Aircraft are not asked: anything on a JetAIUpdate, the Comanche
 	  included, is made on its ground-only taxiing set, which would refuse it on every cliff. */
-static Bool spawnOne( const ScenarioAction &action, const ThingTemplate *tmpl, Team *team, const Coord3D *pos )
+static Object *spawnOne( const ScenarioAction &action, const ThingTemplate *tmpl, Team *team, const Coord3D *pos )
 {
 	Object *obj = TheThingFactory->newObject( tmpl, team );
 	if (obj == NULL)
-		return FALSE;
+		return NULL;
 
 	obj->setOrientation( 0 );
 	obj->setPosition( pos );
@@ -862,7 +887,7 @@ static Bool spawnOne( const ScenarioAction &action, const ThingTemplate *tmpl, T
 							 action.frame, action.slot, action.selector.str(), pos->x, pos->y, type,
 							 cell != NULL ? cellNames[type] : "OFF_MAP"));
 		TheGameLogic->destroyObject( obj );
-		return FALSE;
+		return NULL;
 	}
 
 	for( BehaviorModule **m = obj->getBehaviorModules(); *m; ++m )
@@ -878,7 +903,58 @@ static Bool spawnOne( const ScenarioAction &action, const ThingTemplate *tmpl, T
 
 	team->setActive();
 	TheAI->pathfinder()->addObjectToPathfindMap( obj );
-	return TRUE;
+	return obj;
+}
+
+static Coord3D mapCentre( void )
+{
+	Region3D extent;
+	TheTerrainLogic->getExtent( &extent );
+	Coord3D centre;
+	centre.x = ( extent.lo.x + extent.hi.x ) * 0.5f;
+	centre.y = ( extent.lo.y + extent.hi.y ) * 0.5f;
+	centre.z = TheTerrainLogic->getGroundHeight( centre.x, centre.y );
+	return centre;
+}
+
+/** The frame-time gate's crowd.  Money, the team count and a bigger map all stop near 1500 objects,
+	  because population caps and the AI's spending stop there, so this is what gets a match to its
+	  target: one unit a frame at most, so the top-up is no burst of its own in the tail it measures,
+	  the file's lines taking turns on the frame number so every seat gets its share.  The count and
+	  the frame are logic state, so the same seed draws the same crowd.  It starts on the road from the
+	  seat's start towards the centre, on the first clear ground from 40% of the way out so it clears
+	  the base, and the small offset keeps a jam of them from standing on one point. */
+static void runTopups( UnsignedInt now )
+{
+	if (theScenarioTopups.empty())
+		return;
+	const ScenarioAction &line = theScenarioTopups[ now % theScenarioTopups.size() ];
+	if (TheGameLogic->getObjectCount() >= (UnsignedInt)line.count)
+		return;
+
+	AsciiString waypointName;
+	waypointName.format( "Player_%d_Start", line.slot + 1 );
+	const Waypoint *start = TheTerrainLogic->getWaypointByName( waypointName );
+	if (start == NULL)
+		return;
+
+	const Coord3D centre = mapCentre();
+	Coord3D pos;
+	for( Real along = 0.4f; along < 1.0f; along += 0.1f )
+	{
+		pos.x = start->getLocation()->x + ( centre.x - start->getLocation()->x ) * along + (Real)( now % 7 ) * 30.0f - 90.0f;
+		pos.y = start->getLocation()->y + ( centre.y - start->getLocation()->y ) * along + (Real)( now % 11 ) * 30.0f - 150.0f;
+		pos.z = TheTerrainLogic->getGroundHeight( pos.x, pos.y );
+		const PathfindCell *cell = TheAI->pathfinder()->getCell( LAYER_GROUND, &pos );
+		if (cell != NULL && cell->getType() == PathfindCell::CELL_CLEAR)
+			break;
+	}
+
+	Object *obj = spawnOne( line, TheThingFactory->findTemplate( line.selector, FALSE ), findPlayerForSlot( line.slot )->getDefaultTeam(), &pos );
+	if (obj == NULL)
+		return;
+	++theScenarioUnitsSpawned;
+	obj->getAI()->aiAttackMoveToPosition( &centre, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
 }
 
 static Bool executeSpawn( const ScenarioAction &action, Player *player, const Coord3D &centre )
@@ -1921,12 +1997,51 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_GIVEMONEY:
 		case SCENARIO_ACTION_TALLY:
 		case SCENARIO_ACTION_RESPOND:
+		case SCENARIO_ACTION_REACHPROOF:
+		case SCENARIO_ACTION_TOPUP:
 			ordered = FALSE;		// handled before the group is built
 			break;
 	}
 
 	TheAI->destroyGroup( group );
 	return ordered;
+}
+
+/** Every matching defence of the seat put through ReachOverlay_prove against the first matching unit
+	  of the target seat, which is moved about for it and put back. */
+static Bool executeReachProof( const ScenarioAction &action, Player *player )
+{
+	Player *targetPlayer = findPlayerForSlot( action.targetSlot );
+	Object *probe = NULL;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj && targetPlayer; obj = obj->getNextObject() )
+	{
+		if (obj->getControllingPlayer() == targetPlayer && !obj->isEffectivelyDead() && obj->getContainedBy() == NULL
+				&& selectorMatches( action.targetSelector, obj ))
+		{
+			probe = obj;
+			break;
+		}
+	}
+	if (probe == NULL)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d reachproof slot %d: no '%s' of slot %d to stand in\n",
+							 action.frame, action.slot, action.targetSelector.str(), action.targetSlot));
+		return FALSE;
+	}
+
+	Int proven = 0;
+	Int passed = 0;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if (obj->getControllingPlayer() != player || obj->isEffectivelyDead() || !selectorMatches( action.selector, obj ))
+			continue;
+		++proven;
+		if (ReachOverlay_prove( obj, probe, action.count ))
+			++passed;
+	}
+	DEBUG_LOG(("SCENARIO: frame %d reachproof slot %d '%s' against '%s': %d of %d passed\n",
+						 action.frame, action.slot, action.selector.str(), probe->getTemplate()->getName().str(), passed, proven));
+	return proven > 0 && passed == proven;
 }
 
 /** A placement click, as PlaceEventTranslator sends it: one MSG_DOZER_CONSTRUCT onto the message
@@ -2007,6 +2122,20 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 		return FALSE;
 	}
 
+	if (action.action == SCENARIO_ACTION_TOPUP)
+	{
+		if (TheThingFactory->findTemplate( action.selector, FALSE ) == NULL)
+		{
+			DEBUG_LOG(("SCENARIO: frame %d topup: no template named '%s'\n", action.frame, action.selector.str()));
+			return FALSE;
+		}
+		theScenarioTopups.push_back( action );
+		const Coord3D centre = mapCentre();
+		DEBUG_LOG(("SCENARIO: frame %d topup slot %d '%s' to %d objects, road to (%.0f,%.0f)\n", action.frame, action.slot,
+							 action.selector.str(), action.count, centre.x, centre.y));
+		return TRUE;
+	}
+
 	Coord3D position;
 	if (!resolveScenarioPosition( action, &position ))
 		return FALSE;
@@ -2037,6 +2166,9 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_TALLY)
 		return executeTally( action, player );
+
+	if (action.action == SCENARIO_ACTION_REACHPROOF)
+		return executeReachProof( action, player );
 
 	if (action.action == SCENARIO_ACTION_PURCHASE)
 		return executePurchase( action, player );
@@ -2075,7 +2207,10 @@ void ScenarioDrill_tick( void )
 	if (!theScenarioLoaded)
 		loadScenario();
 
-	updateStatues( now );
+	// the gate's crowd is there to measure the frame, and the statue count's walk of every unit would be in it
+	if (theScenarioTopups.empty())
+		updateStatues( now );
+	runTopups( now );
 
 	// a scenario file counts 30 Hz frames, so the files written before 60 Hz logic play at the same seconds
 	while (theScenarioCursor < (Int)theScenarioActions.size()

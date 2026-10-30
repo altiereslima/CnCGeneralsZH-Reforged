@@ -164,6 +164,7 @@ public:
 
 	void				Render (void);
 	virtual	void	Reset (void);
+	void				Reset_Keeping_Textures (void);	///< Reset, but the next Build_Textures fills the old text's textures again
 	void				Reset_Polys (void);
 
 	FontCharsClass *	Peek_Font( void )						{ return Font; }
@@ -256,6 +257,7 @@ private:
 	void	Record_Sentence_Chunk (void);
 	void	Allocate_New_Surface (const WideChar *text, bool justCalcExtents = false);
 	void	Release_Pending_Surfaces (void);
+	void	Release_Spare_Textures (void);
 	void	Build_Sentence_Centered (const WideChar *text, int *hkX, int *hkY);
 	Vector2	Build_Sentence_Not_Centered (const WideChar *text, int *hkX, int *hkY,bool justCalcExtents = false );		
 	//
@@ -264,6 +266,7 @@ private:
 	DynamicVectorClass<SentenceDataStruct>		SentenceData;
 	DynamicVectorClass<PendingSurfaceStruct>	PendingSurfaces;
 	DynamicVectorClass<RendererDataStruct>		Renderers;
+	DynamicVectorClass<TextureClass *>				SpareTextures;	///< the last text's, for Build_Textures to fill again (Reset)
 	FontCharsClass	*						Font;
 	Vector2											BaseLocation;
 	Vector2											Location;

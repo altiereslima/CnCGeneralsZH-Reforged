@@ -162,6 +162,15 @@ public:
 	SidesInfo *findSkirmishSideInfo(AsciiString name, Int* index = NULL);
 
 	void prepareForMP_or_Skirmish(void); // After a map is loaded, save & clear any players.
+	/// the map wrote its own scripts for its skirmish players (an Art of Defense map's waves), so
+	/// prepareForMP_or_Skirmish left SkirmishScripts.scb unread
+	Bool skirmishScriptsFromMap() const { return m_skirmishScriptsFromMap; }
+	/** The match is on a map the game ships, where the fork's own skirmish AI plays: one in the game's
+		* Maps folder (EA's, or a mod's in its archives) or one the random map generator made.  A player's
+		* own map, downloaded or hand-made, gets EA's AI and EA's SkirmishScripts.scb.  Decided from the
+		* map's path, which every machine in the match and the replay agree on. */
+	Bool forkAIMap() const { return m_forkAIMap; }
+	static Bool isForkAIMapPath(const AsciiString& mapPath);
 
 	/** The skirmish side a computer player on pt copies its scripts from, and in *teams (when asked) the
 		* record its teams are in.  Under -modfactions a mod faction takes its own mod's side of the same
@@ -214,6 +223,8 @@ protected:
 
 	TeamsInfoRec	m_teamrec;
 	TeamsInfoRec	m_skirmishTeamrec;
+	Bool				m_skirmishScriptsFromMap;
+	Bool				m_forkAIMap;
 
 	/// -modfactions: each mod's SkirmishScripts.scb players and teams; and the standard file's players for
 	/// sides the map has none for.  Kept out of m_skirmishSides, which a map's own sides nearly fill

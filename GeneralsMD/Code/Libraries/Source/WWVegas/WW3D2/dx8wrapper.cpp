@@ -2820,10 +2820,12 @@ void DX8Wrapper::Draw(
 
 	Apply_Render_State_Changes();
 
-	// -ffprobe only: the fixed-function inventory phase 2 has to write as HLSL, counted off the
-	// device rather than off this wrapper's cache.  Under D3D11 the device is behind that cache, so
-	// the sample flushes the wrapper's cached values to it first; only the draws it samples pay.
-	if (FixedFunctionProbe_Samples_Draw()) {
+	// The fixed-function inventory phase 2 had to write as HLSL, counted off the device rather than
+	// off this wrapper's cache.  Under D3D11 the device is behind that cache, so a sample sent every
+	// deferred state to it and read forty-odd back, an eighth of the mesh pass's draw time for a
+	// device nothing presents; the D3D11 frame has its own count of what it drew (-dx11 drew), and
+	// -d3d9 still takes the inventory.
+	if (!Direct3D11_Present_Is_Enabled() && FixedFunctionProbe_Samples_Draw()) {
 		Flush_Deferred_D3D9_State();
 		FixedFunctionProbe_Record(D3DDevice);
 	}

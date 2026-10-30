@@ -50,6 +50,7 @@
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "d3dx9math.h"
 #include "Common/GlobalData.h"
+#include "Common/LogicThread.h"
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
 #include "WW3D2/statistics.h"
 #include "Common/Debug.h"
@@ -963,7 +964,7 @@ is an optimized system that only uses the render objects bounding box to determi
 void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunCast)
 {
 	int i,j,k;
-	Vector3 hmapVertex,objPos;
+	Vector3 objPos;
 	AABoxClass box;
 	Matrix3D   objXform(1);
 	Real cx,cy,dx,dy;
@@ -1203,6 +1204,17 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 		endY = __max(endY,drawStartY);
 		endY = __min(endY,drawEdgeY);
 
+		/* The drawn extents are statics renderShadows sets, and the tree buffer queues its blobs from the
+			 terrain draw before that: on the first frame of a map smaller than the last one they are the
+			 last map's.  The fill below reads heights and flip bits unchecked, so the cells are kept on this
+			 map as well.  The extents never go below nought (setDrawOrg), so only the top needs it. */
+		const Int lastX = hmap->getXExtent()-1;
+		const Int lastY = hmap->getYExtent()-1;
+		startX = __min(startX,lastX);
+		endX = __min(endX,lastX);
+		startY = __min(startY,lastY);
+		endY = __min(endY,lastY);
+
 		//Check if decal too large to fit inside 65536 index buffer.
 		//try clipping each direction to < 104 since that's more than
 		//enough to cover typical map.
@@ -1238,9 +1250,6 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 			nShadowDecalPolysInBatch*3 > (SHADOW_DECAL_INDEX_SIZE-numIndex))
 			flushDecals(shadow->m_shadowTexture[0], shadow->m_type);
 
-		SHADOW_DECAL_VERTEX* pvVertices = decalStageVertices + nShadowDecalVertsInBatch;
-		UnsignedShort *pvIndices = decalStageIndices + nShadowDecalPolysInBatch*3;
-
 		//code to deal with rotated shadows based on sun direction, fix this later.  For now shadow rotates with object rotation.
 		//shadow->m_shadowTexture[0]->getDecalUVAxis(&uVector,&vVector);
 		//uVector *= 20.0f/dx;//shadow->m_decalRadius;	//scale texture to fit object
@@ -1254,72 +1263,76 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 */
 		DEBUG_ASSERTCRASH(numVerts == ((endY-startY+1)*(endX-startX+1)), ("queueDecal VB size mismatch"));
 
-		if(pvVertices)
+		/* Every decal's cells are laid again every pass.  A cache of them per decal was tried on
+			 2026-10-27 and saved next to nothing: most of a late game's decals turn or drift every pass
+			 (aura rings, the shade under smoke), and reading a cached copy back cost what the arithmetic
+			 it skipped did.  The fill is cheap instead.  What the loops read is taken into locals first,
+			 since a store through a vertex pointer otherwise makes the compiler fetch the members behind
+			 getHeight and m_diffuse again for every vertex. */
+		const UnsignedInt diffuse=shadow->m_diffuse;
+		const Int firstVertex=nShadowDecalVertsInBatch;
+		const UnsignedByte *heights=hmap->getDataPtr();
+		const Int heightRow=hmap->getXExtent();
+		const Real lift=0.01f * MAP_XY_FACTOR;
+
+		/* A vertex's texture coordinates are its dot products with the decal's axes.  The column's term
+			 and the row's are taken once each and summed in Vector3::Dot_Product's order, so every bit
+			 comes out as it did per vertex. */
+		Real columnX[104], columnU[104], columnV[104];	//the clip above keeps a row to 104 vertices
+		for (i=0; i<vertsPerRow; i++)
 		{
-			if (layerHeight)
-				for (j=startY; j <= endY; j++)
-				{
-					hmapVertex.Y=(float)(j-borderSize) * MAP_XY_FACTOR;
+			columnX[i]=(float)(startX+i-borderSize)*MAP_XY_FACTOR;
+			columnU[i]=uVector.X*(columnX[i]-objPos.X);
+			columnV[i]=vVector.X*(columnX[i]-objPos.X);
+		}
 
-					for (i=startX; i <= endX; i++)
-					{	
-						hmapVertex.X=(float)(i-borderSize)*MAP_XY_FACTOR;
-						hmapVertex.Z=__max((float)hmap->getHeight(i,j)*MAP_HEIGHT_SCALE,layerHeight);
-						pvVertices->x=hmapVertex.X;
-						pvVertices->y=hmapVertex.Y;
-						pvVertices->z=hmapVertex.Z;
-						pvVertices->diffuse=shadow->m_diffuse;
-						pvVertices->u=Vector3::Dot_Product(uVector, (hmapVertex-objPos))+uOffset;
-						pvVertices->v=Vector3::Dot_Product(vVector, (hmapVertex-objPos))+vOffset;
-						pvVertices++;
-					}
-				}
-			else
-			//insert each cell's bottom/left edge vertex
-			for (j=startY; j <= endY; j++)
+		//the clamp to the drawn terrain above keeps every cell inside the map, so heights and flip bits are read unchecked
+		SHADOW_DECAL_VERTEX *pvVertices = decalStageVertices + firstVertex;
+		for (j=startY; j <= endY; j++)
+		{
+			const Real y=(float)(j-borderSize) * MAP_XY_FACTOR;
+			const Real rowU=uVector.Y*(y-objPos.Y);
+			const Real rowV=vVector.Y*(y-objPos.Y);
+			const UnsignedByte *height=heights + j*heightRow + startX;
+			for (i=0; i<vertsPerRow; i++)
 			{
-				hmapVertex.Y=(float)(j-borderSize) * MAP_XY_FACTOR;
-
-				for (i=startX; i <= endX; i++)
-				{	
-					hmapVertex.X=(float)(i-borderSize)*MAP_XY_FACTOR;
-					hmapVertex.Z=(float)hmap->getHeight(i,j)*MAP_HEIGHT_SCALE+0.01f * MAP_XY_FACTOR;
-					pvVertices->x=hmapVertex.X;
-					pvVertices->y=hmapVertex.Y;
-					pvVertices->z=hmapVertex.Z;
-					pvVertices->diffuse=shadow->m_diffuse;
-					pvVertices->u=Vector3::Dot_Product(uVector, (hmapVertex-objPos))+uOffset;
-					pvVertices->v=Vector3::Dot_Product(vVector, (hmapVertex-objPos))+vOffset;
-					pvVertices++;
-				}
+				Real z=(float)height[i]*MAP_HEIGHT_SCALE;
+				z = layerHeight ? __max(z,layerHeight) : z+lift;	//off a bridge, each cell's bottom/left edge vertex lifted off the ground
+				pvVertices->x=columnX[i];
+				pvVertices->y=y;
+				pvVertices->z=z;
+				pvVertices->diffuse=diffuse;
+				pvVertices->u=columnU[i]+rowU+uVector.Z*(z-objPos.Z)+uOffset;
+				pvVertices->v=columnV[i]+rowV+vVector.Z*(z-objPos.Z)+vOffset;
+				pvVertices++;
 			}
 		}
 
-		{	//fill each cell's vertex indices
-			Int rowStart;
-			for (j=startY,rowStart=0; j<endY; j++,rowStart+=vertsPerRow)
+		//fill each cell's vertex indices
+		UnsignedShort *pvIndices = decalStageIndices + nShadowDecalPolysInBatch*3;
+		Int rowStart;
+		for (j=startY,rowStart=firstVertex; j<endY; j++,rowStart+=vertsPerRow)
+		{
+			for (i=rowStart,k=startX; k<endX; i++,k++)
 			{
-				for (i=rowStart,k=startX; k<endX; i++,k++)
-				{
-					///@todo: fix the winding order in heightmap to be in strip order like above!
-					if (hmap->getFlipState(k,j))
-					{	pvIndices[0]=i+1+nShadowDecalVertsInBatch;
-						pvIndices[1]=i+vertsPerRow+nShadowDecalVertsInBatch;
-						pvIndices[2]=i+nShadowDecalVertsInBatch;
-						pvIndices[3]=i+1+nShadowDecalVertsInBatch;
-						pvIndices[4]=i+1+vertsPerRow+nShadowDecalVertsInBatch;
-						pvIndices[5]=i+vertsPerRow+nShadowDecalVertsInBatch;
-					}
-					else
-					{	pvIndices[0]=i+nShadowDecalVertsInBatch;
-						pvIndices[1]=i+1+vertsPerRow+nShadowDecalVertsInBatch;
-						pvIndices[2]=i+vertsPerRow+nShadowDecalVertsInBatch;
-						pvIndices[3]=i+nShadowDecalVertsInBatch;
-						pvIndices[4]=i+1+nShadowDecalVertsInBatch;
-						pvIndices[5]=i+1+vertsPerRow+nShadowDecalVertsInBatch;
-					}
-					pvIndices += 6;
+				///@todo: fix the winding order in heightmap to be in strip order like above!
+				if (hmap->getQuickFlipState(k,j))
+				{	pvIndices[0]=i+1;
+					pvIndices[1]=i+vertsPerRow;
+					pvIndices[2]=i;
+					pvIndices[3]=i+1;
+					pvIndices[4]=i+1+vertsPerRow;
+					pvIndices[5]=i+vertsPerRow;
 				}
+				else
+				{	pvIndices[0]=i;
+					pvIndices[1]=i+1+vertsPerRow;
+					pvIndices[2]=i+vertsPerRow;
+					pvIndices[3]=i;
+					pvIndices[4]=i+1;
+					pvIndices[5]=i+1+vertsPerRow;
+				}
+				pvIndices += 6;
 			}
 		}
 
@@ -1539,6 +1552,15 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass & rinfo)
 					if (renderProjectedTerrainShadow(shadow, aaBox))
 						projectionCount++;
 					projector->Peek_Material_Pass()->UnInstall_Materials();
+
+					/* The objects the shadow falls on come from the partition, whose scans share iteration flags
+						 with the tick's (a desync) and whose modules the tick frees beside the render.  The window
+						 is open for every picture at every -logicthread setting, so the shadow falls on the
+						 terrain alone and every setting draws the same picture.
+						 ponytail: receivers lost for mods with SHADOW_PROJECTION (the fork's INI has none); the
+						 upgrade is the receivers gathered at W3DDisplay's takeReadsForRender. */
+					if (LogicThread::isInsideWindow())
+						continue;
 
 					SimpleObjectIterator *iter;
 					Object *obj;

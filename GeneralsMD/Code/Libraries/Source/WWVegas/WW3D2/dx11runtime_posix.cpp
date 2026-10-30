@@ -41,6 +41,8 @@ void Direct3D11_Enable(bool enabled) { Requested = enabled; }
 bool Direct3D11_Is_Enabled() { return Requested; }
 bool Direct3D11_Create(RenderWindow, unsigned, unsigned) { return false; }
 void Direct3D11_Release() {}
+void Direct3D11_Set_Sample_Count(unsigned) {}
+unsigned Direct3D11_Sample_Count() { return 0; }
 bool Direct3D11_Resize(unsigned, unsigned) { return false; }
 bool Direct3D11_Is_Active() { return false; }
 DX11DeviceClass * Direct3D11_Device() { return NULL; }

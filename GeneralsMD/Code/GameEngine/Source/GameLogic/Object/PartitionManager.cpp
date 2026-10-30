@@ -151,7 +151,8 @@ const Real HUGE_DIST_SQR = (HUGE_DIST*HUGE_DIST);
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-static PartitionContactList* TheContactList = NULL;
+static PartitionContactList* TheContactList = NULL;		///< set only while PartitionManager::update runs
+static PartitionContactList* thePairStore = NULL;			///< the list update reuses every frame
 
 //-----------------------------------------------------------------------------
 //         Local Types                                                      
@@ -1012,51 +1013,46 @@ PartitionManager *ThePartitionManager = NULL;  ///< the object manager singleton
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
-class PartitionContactListNode : public MemoryPoolObject
-{
-	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(PartitionContactListNode, "PartitionContactListNode" )
-
-public:
-	PartitionContactListNode*			m_nextHash;	///< next node with same hash value 
-	PartitionContactListNode*			m_next;			///< next node
-	PartitionData*								m_obj;			///< one object that is possibly colliding
-	PartitionData*								m_other;		///< the other object (or null for collisions with the terrain)
-	Int														m_hashValue;///< index into hash table 
-};
-
-inline PartitionContactListNode::~PartitionContactListNode() { }
-
-//-----------------------------------------------------------------------------
-
+/*
+	The pairs one PartitionManager::update finds, kept from frame to frame so that nothing is
+	allocated per pair.  EA's list took a pool block per pair through the pool's lock, and found
+	duplicates in a fixed 5381-socket chained hash; four hundred Raptors over one base make tens of
+	thousands of pairs a frame, so the chains grew long: the search was the costliest function of
+	that fight and the blocks were half of all the pool lock's work (issue 144, AOD Super V with
+	650 jets).  Here the pairs sit in an array in the order they
+	were found and the duplicate check is an open-addressed table that doubles with the pair count.
+	EA's list was walked newest first, so processContactList walks the array from the back: the
+	same pairs, compared by the same pointers, reach onCollide in the same order.
+*/
 class PartitionContactList
 {
 private:
 
-	/*
-		socketcount should be prime (and "not too close to a power of 2) for best results.
-		
-		if this one isn't large enough, try this website:
-		http://www.utm.edu/research/primes/lists/small/1000.txt
+	struct Contact
+	{
+		PartitionData*	m_obj;			///< one object that is possibly colliding
+		PartitionData*	m_other;		///< the other object
+		UnsignedInt			m_hash;			///< hashPartitionPair of the two
+	};
 
-		So how is this chosen? Eh, pretty much based on experimentation.
-	*/
-	enum { PartitionContactList_SOCKET_COUNT = 5381 };
+	struct Slot
+	{
+		Int							m_contact;		///< index into m_contacts
+		UnsignedInt			m_generation;	///< the slot is empty unless this is m_generation
+	};
 
+	enum { FIRST_SLOT_COUNT = 4096 };	// a power of two; 32KB, about the size of EA's table
 
-	PartitionContactListNode* m_contactHash[PartitionContactList_SOCKET_COUNT];
-	PartitionContactListNode* m_contactList;
+	std::vector<Contact>	m_contacts;
+	std::vector<Slot>			m_slots;
+	UnsignedInt						m_generation;
+
+	void growSlots();
 
 public:
 
-	PartitionContactList()
+	PartitionContactList() : m_slots(FIRST_SLOT_COUNT), m_generation(1)
 	{
-		memset(m_contactHash, 0, sizeof(m_contactHash));
-		m_contactList = NULL;
-	}
-
-	~PartitionContactList()
-	{
-		resetContactList();
 	}
 
 	/**
@@ -1231,6 +1227,8 @@ void CellAndObjectIntersection::addCoverage(PartitionCell *cell, PartitionData *
 	{
 		cell->friend_addToCellList(this);
 		cell->addPlayerCoi(module->friend_getCountedPlayer());
+		if (module->friend_isSightBlocker())
+			cell->addSightBlockerCoi();
 	}
 
 	m_cell = cell;
@@ -1248,6 +1246,8 @@ void CellAndObjectIntersection::removeAllCoverage()
 
 	m_cell->friend_removeFromCellList(this);
 	m_cell->removePlayerCoi(m_module->friend_getCountedPlayer());
+	if (m_module->friend_isSightBlocker())
+		m_cell->removeSightBlockerCoi();
 	m_cell = NULL;
 	m_module = NULL;
 }
@@ -1266,6 +1266,7 @@ PartitionCell::PartitionCell()
 	m_firstCoiInCell = NULL;
 	m_coiCount = 0;
 	m_playerCoiMask = PLAYERMASK_NONE;
+	m_sightBlockerCoiCount = 0;
 #ifdef PM_CACHE_TERRAIN_HEIGHT
 	m_loTerrainZ = HUGE_DIST;		// huge positive
 	m_hiTerrainZ = -HUGE_DIST;	// huge negative
@@ -1662,6 +1663,8 @@ PartitionData::PartitionData()
 	m_coiInUseCount = 0;
 	m_doneFlag = 0;
 	m_countedPlayer = -1;
+	m_sightBlocker = FALSE;
+	m_noCollide = FALSE;
 	m_dirtyStatus = NOT_DIRTY;
 	m_lastCell = NULL;
 	for (int i = 0; i < MAX_PLAYER_COUNT; ++i)
@@ -1761,8 +1764,9 @@ ObjectShroudStatus PartitionData::getShroudedStatus(Int playerIndex)
 
 	// answered before the cache, so no snapshot is taken and the site is not marked as seen: the
 	// building that goes up there later is news to this player like any other. Only a plan nobody
-	// has started can be hidden, so the relationship lookup waits until the Object is one.
-	if (m_object && Object_isAwaitingBuilder(m_object->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION),
+	// has started can be hidden, so the relationship lookup waits until the Object is one. The
+	// status bit goes first: Object_isAwaitingBuilder is false without it, and lives in another file.
+	if (m_object && m_object->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION) && Object_isAwaitingBuilder(m_object->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION),
 																					 m_object->getConstructionPercent()) &&
 			Object_isPlanHiddenFrom(m_object->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION),
 															m_object->getConstructionPercent(),
@@ -1787,9 +1791,10 @@ ObjectShroudStatus PartitionData::getShroudedStatus(Int playerIndex)
 		{
 			if( inTheAir && coi->getCell()->isAirSeenByPlayer(playerIndex) )
 				continue;
-			if( coi->getCell()->getShroudStatusForPlayer(playerIndex) == CELLSHROUD_SHROUDED )
+			const CellShroudStatus cellStatus = coi->getCell()->getShroudStatusForPlayer(playerIndex);
+			if( cellStatus == CELLSHROUD_SHROUDED )
 				++shroudedCells;
-			else if( coi->getCell()->getShroudStatusForPlayer(playerIndex) == CELLSHROUD_FOGGED )
+			else if( cellStatus == CELLSHROUD_FOGGED )
 				++foggedCells;
 		}
 
@@ -2126,6 +2131,11 @@ void PartitionData::addPossibleCollisions(PartitionContactList *ctList)
 
 	//DEBUG_LOG(("adding possible collision for %s\n",getObject()->getTemplate()->getName().str()));
 
+	// collidesWith turns down any pair with a NO_COLLIDE side before it looks at anything else, so
+	// such a pair is never listed: the rest keep their found order and their first orientation.
+	if (m_noCollide)
+		return;
+
 	CellAndObjectIntersection *myCoi = m_coiArray;
 	for (Int i = m_coiInUseCount; i > 0; --i, ++myCoi)
 	{
@@ -2136,7 +2146,7 @@ void PartitionData::addPossibleCollisions(PartitionContactList *ctList)
 		for (CellAndObjectIntersection *coi = cell->getFirstCoiInCell(); coi; coi = coi->getNextCoi())
 		{
 			PartitionData *that = coi->getModule();
-			if (this != that)
+			if (this != that && !that->m_noCollide)
 			{
 				ctList->addToContactList(this, that);
 			}
@@ -2150,21 +2160,27 @@ Bool PartitionData::collidesWith(const PartitionData *that, CollideLocAndNormal 
 	const Object *thisObj = this->getObject();
 	const Object *thatObj = that->getObject();
 
-	if( thisObj->isKindOf( KINDOF_NO_COLLIDE )  ||  thatObj->isKindOf( KINDOF_NO_COLLIDE ) )
+	// the kind, read once in attachToObject, since the template never changes
+	if( this->m_noCollide  ||  that->m_noCollide )
 		return FALSE; // A collision extent of zero size is still a point and can collide, but we don't always want to.
 
-	CollideInfo thisInfo(thisObj->getPosition(), thisObj->getGeometryInfo(), thisObj->getOrientation());
-	CollideInfo thatInfo(thatObj->getPosition(), thatObj->getGeometryInfo(), thatObj->getOrientation());
-
-	// invariant for all geometries: first do z collision check.
-	Real thisTop = thisInfo.position.z + thisInfo.geom.getMaxHeightAbovePosition();
-	Real thisBot = thisInfo.position.z - thisInfo.geom.getMaxHeightBelowPosition();
-	Real thatTop = thatInfo.position.z + thatInfo.geom.getMaxHeightAbovePosition();
-	Real thatBot = thatInfo.position.z - thatInfo.geom.getMaxHeightBelowPosition();
+	// invariant for all geometries: first do z collision check.  Most pairs a crowd makes end here,
+	// so the two CollideInfo copies wait until they are needed.
+	const GeometryInfo& thisGeomInfo = thisObj->getGeometryInfo();
+	const GeometryInfo& thatGeomInfo = thatObj->getGeometryInfo();
+	Real thisZ = thisObj->getPosition()->z;
+	Real thatZ = thatObj->getPosition()->z;
+	Real thisTop = thisZ + thisGeomInfo.getMaxHeightAbovePosition();
+	Real thisBot = thisZ - thisGeomInfo.getMaxHeightBelowPosition();
+	Real thatTop = thatZ + thatGeomInfo.getMaxHeightAbovePosition();
+	Real thatBot = thatZ - thatGeomInfo.getMaxHeightBelowPosition();
 	if (thisTop >= thatBot && thisBot <= thatTop)
 	{
-		GeometryType thisGeom = thisObj->getGeometryInfo().getGeomType();
-		GeometryType thatGeom = thatObj->getGeometryInfo().getGeomType();
+		CollideInfo thisInfo(thisObj->getPosition(), thisGeomInfo, thisObj->getOrientation());
+		CollideInfo thatInfo(thatObj->getPosition(), thatGeomInfo, thatObj->getOrientation());
+
+		GeometryType thisGeom = thisGeomInfo.getGeomType();
+		GeometryType thatGeom = thatGeomInfo.getGeomType();
 
 		//
 		// NOTE: This assumes geometry enumerations that start at GEOMETRY_FIRST AND depends on the
@@ -2454,6 +2470,10 @@ void PartitionData::attachToObject(Object* object)
 	// remember who contains us
 	m_object = object;
 
+	// what sightBlockingHeight looks for; an Object's template, and so its kinds, never changes
+	m_sightBlocker = object->isKindOf(KINDOF_STRUCTURE) || object->isKindOf(KINDOF_SHRUBBERY);
+	m_noCollide = object->isKindOf(KINDOF_NO_COLLIDE);
+
 	// we only snapshot things that are immobile and have something to draw.  Don't need ghostobjects for others.
 	if (object->isKindOf(KINDOF_IMMOBILE))
 	{	const ThingTemplate *tmplate=object->getTemplate();
@@ -2556,19 +2576,16 @@ void PartitionData::detachFromGhostObject(void)
 }
 
 //-----------------------------------------------------------------------------
-inline UnsignedInt hash2ints(Int a, Int b)
+/** [a,b] hashes to the same value as [b,a].  It hashes the addresses, which differ from machine to
+	machine, and that is safe here: the hash only says where in the table a pair is looked for, and
+	the order the pairs are handled in is the order they were found (PartitionContactList).  Hashing
+	the ObjectIDs instead read every candidate's Object, a cache miss per candidate. */
+inline UnsignedInt hashPartitionPair(const PartitionData *a, const PartitionData *b)
 {
-	// do it this way so that [a,b] always hashes to the same value as [b,a].
-	// this is unsophisticated but reasonable, since all ObjectIDs will
-	// quite likely be well below 65536...
-	if (a < b)
-	{
-		return (a<<16)+b;
-	}
-	else
-	{
-		return (b<<16)+a;
-	}
+	unsigned long long lo = (unsigned long long)(uintptr_t)(a < b ? a : b);
+	unsigned long long hi = (unsigned long long)(uintptr_t)(a < b ? b : a);
+	unsigned long long key = ((lo * 0x9E3779B97F4A7C15ull) ^ hi) * 0xBF58476D1CE4E5B9ull;
+	return (UnsignedInt)(key >> 32);
 }
 
 
@@ -2582,98 +2599,66 @@ void PartitionContactList::addToContactList( PartitionData *obj, PartitionData *
 	if (obj == other || obj == NULL || other == NULL)
 		return;
 	
-	Object* obj_obj = obj->getObject();
-	Object* other_obj = other->getObject();
-	if (obj_obj == NULL || other_obj == NULL)
+	if (obj->getObject() == NULL || other->getObject() == NULL)
 		return;
 
-	// compute hash index based on object's ids.
-	UnsignedInt hashValue = hash2ints(obj_obj->getID(), other_obj->getID());
-	hashValue %= PartitionContactList_SOCKET_COUNT;
+	UnsignedInt hashValue = hashPartitionPair(obj, other);
+	UnsignedInt mask = (UnsignedInt)m_slots.size() - 1;
 
-	// make sure given hit has not already been recorded 
-	for (PartitionContactListNode* cd = m_contactHash[ hashValue ]; cd; cd = cd->m_nextHash )
+	// make sure given hit has not already been recorded
+	for (UnsignedInt i = hashValue & mask; ; i = (i + 1) & mask)
 	{
-		if ((cd->m_obj == obj && cd->m_other == other) ||
-				(cd->m_obj == other && cd->m_other == obj)) 
+		Slot& slot = m_slots[i];
+		if (slot.m_generation != m_generation)
 		{
-			// already noted 
+			// new hit
+			slot.m_contact = (Int)m_contacts.size();
+			slot.m_generation = m_generation;
+			Contact ncd = { obj, other, hashValue };
+			m_contacts.push_back(ncd);
+			if (m_contacts.size() * 2 > m_slots.size())
+				growSlots();
+			return;
+		}
+
+		const Contact& cd = m_contacts[slot.m_contact];
+		if ((cd.m_obj == obj && cd.m_other == other) ||
+				(cd.m_obj == other && cd.m_other == obj))
+		{
+			// already noted
 			return;
 		}
 	}
-
-	// new hit 
-	PartitionContactListNode *ncd = newInstance(PartitionContactListNode);
-	ncd->m_obj = obj;
-	ncd->m_other = other;
-	ncd->m_hashValue = hashValue;
-
-	// add to hash table 
-	ncd->m_nextHash = m_contactHash[ hashValue ];
-	m_contactHash[ hashValue ] = ncd;
-
-	// add to list of contacts for this frame 
-	ncd->m_next = m_contactList;
-	m_contactList = ncd;
-
-
-#if 0
-
-Int depth = 0;
-for (PartitionContactListNode *cd2 = m_contactHash[ hashValue ]; cd2; cd2 = cd2->m_nextHash )
-{
-	depth++;
 }
-if (depth > 3)
-{
-	DEBUG_LOG(("depth is %d for %s %08lx (%d) - %s %08lx (%d)\n",
-		depth,obj_obj->getTemplate()->getName().str(),obj_obj,obj_obj->getID(),
-		other_obj->getTemplate()->getName().str(),other_obj,other_obj->getID()
-		));
 
-	for (cd2 = m_contactHash[ hashValue ]; cd2; cd2 = cd2->m_nextHash )
+//-----------------------------------------------------------------------------
+void PartitionContactList::growSlots()
+{
+	// every slot goes back to empty (generation 0, which m_generation never is) and each pair is
+	// put down again by its own hash
+	m_slots.assign(m_slots.size() * 2, Slot());
+
+	UnsignedInt mask = (UnsignedInt)m_slots.size() - 1;
+	for (Int c = 0; c < (Int)m_contacts.size(); ++c)
 	{
-		UnsignedInt rawhash = djb2hash2ints(cd2->m_obj->getObject()->getID(), cd2->m_other->getObject()->getID());
-		//hashValue %= PartitionContactList_SOCKET_COUNT;
-
-
-		DEBUG_LOG(("ENTRY: %s %08lx (%d) - %s %08lx (%d) [rawhash %d]\n",
-			cd2->m_obj->getObject()->getTemplate()->getName().str(),cd2->m_obj->getObject(),cd2->m_obj->getObject()->getID(),
-			cd2->m_other->getObject()->getTemplate()->getName().str(),cd2->m_other->getObject(),cd2->m_other->getObject()->getID(),
-			rawhash));
+		UnsignedInt i = m_contacts[c].m_hash & mask;
+		while (m_slots[i].m_generation == m_generation)
+			i = (i + 1) & mask;
+		m_slots[i].m_contact = c;
+		m_slots[i].m_generation = m_generation;
 	}
-}
-
-static Real aggtotal = 0;
-static Real aggfull = 0;
-static Real aggcount = 0;
-for (int ii = 0; ii < PartitionContactList_SOCKET_COUNT; ++ii)
-{
-	if (m_contactHash[ii])
-		aggfull += 1.0f;
-
-	for (cd2 = m_contactHash[ ii ]; cd2; cd2 = cd2->m_nextHash )
-	{
-		aggtotal += 1.0f;
-	}
-}
-aggcount += 1.0f;
-DEBUG_ASSERTLOG(((Int)aggcount)%1000!=0,("avg hash depth at %f is %f, fullness %f%%\n",
-aggcount,aggtotal/(aggcount*PartitionContactList_SOCKET_COUNT),(aggfull*100)/(aggcount*PartitionContactList_SOCKET_COUNT)));
-#endif
-
-
 }
 
 //-----------------------------------------------------------------------------
 void PartitionContactList::removeSpecificPartitionData(PartitionData* data)
 {
-	for (PartitionContactListNode* cd = m_contactList; cd; cd = cd->m_next)
+	for (size_t i = 0; i < m_contacts.size(); ++i)
 	{
-		if (cd->m_obj == data || cd->m_other == data)
+		Contact& cd = m_contacts[i];
+		if (cd.m_obj == data || cd.m_other == data)
 		{
-			cd->m_obj = NULL;
-			cd->m_other = NULL;
+			cd.m_obj = NULL;
+			cd.m_other = NULL;
 		}
 	}
 }
@@ -2681,27 +2666,40 @@ void PartitionContactList::removeSpecificPartitionData(PartitionData* data)
 //-----------------------------------------------------------------------------
 void PartitionContactList::resetContactList()
 {
-	// remove items from hash table 
-	PartitionContactListNode* cdnext;
-	for (PartitionContactListNode* cd = m_contactList; cd; cd = cdnext)
+	// a table one air battle grew to megabytes would make every later frame's lookups miss the
+	// cache, so it goes back down once the frame before needed a sixteenth of it
+	size_t lastCount = m_contacts.size();
+	m_contacts.clear();
+	if (m_slots.size() > FIRST_SLOT_COUNT && lastCount * 16 < m_slots.size())
 	{
-		cdnext = cd->m_next;
-		cd->deleteInstance();
+		size_t size = FIRST_SLOT_COUNT;
+		while (size < lastCount * 4)
+			size *= 2;
+		std::vector<Slot>(size).swap(m_slots);
+		m_generation = 1;
+		return;
 	}
 
-	memset(m_contactHash, 0, sizeof(m_contactHash));
-	m_contactList = NULL;
+	// a new generation empties every slot at once; only when the count wraps are they rewritten
+	if (++m_generation == 0)
+	{
+		m_slots.assign(m_slots.size(), Slot());
+		m_generation = 1;
+	}
 }
 
 //-----------------------------------------------------------------------------
 void PartitionContactList::processContactList()
 {
-	for (PartitionContactListNode* cd = m_contactList; cd; cd = cd->m_next) 
+	// newest first, the order EA's linked list was walked in.  Nothing below adds a pair, so the
+	// array does not move under the pointer.
+	for (Int i = (Int)m_contacts.size() - 1; i >= 0; --i)
 	{
+		Contact* cd = &m_contacts[i];
 		if (cd->m_obj == NULL || cd->m_other == NULL)
 			continue;
 
-		// we know that their partitions overlap; determine if they REALLY collide 
+		// we know that their partitions overlap; determine if they REALLY collide
 		// before proceeding...
 		CollideLocAndNormal cinfo;
 		if (!cd->m_obj->friend_collidesWith(cd->m_other, &cinfo))
@@ -2709,7 +2707,7 @@ void PartitionContactList::processContactList()
 
 		Object* obj = cd->m_obj->getObject();
 		Object* other = cd->m_other->getObject();
-		
+
 		if( obj->getStatusBits().test( OBJECT_STATUS_NO_COLLISIONS ) ||
 				other->getStatusBits().test( OBJECT_STATUS_NO_COLLISIONS ) )
 			continue;
@@ -2782,6 +2780,9 @@ PartitionManager::~PartitionManager()
 {
 
 	shutdown();
+
+	delete thePairStore;
+	thePairStore = NULL;
 
 }  // end ~PartitionManager
 
@@ -2942,12 +2943,15 @@ void PartitionManager::update()
 #ifdef INTENSE_DEBUG
 		Int cc = 0;
 #endif
-		if (!m_updatedSinceLastReset) 
+		if (!m_updatedSinceLastReset)
 		{
 			m_updatedSinceLastReset = true;
 		}
 
-		PartitionContactList ctList;
+		if (thePairStore == NULL)
+			thePairStore = MSGNEW("PartitionContactList") PartitionContactList;
+		PartitionContactList& ctList = *thePairStore;
+		ctList.resetContactList();
 		TheContactList = &ctList;
 		while (m_dirtyModules)
 		{
@@ -3436,6 +3440,9 @@ Object *PartitionManager::getClosestObjects(
 )
 {
 	//USE_PERF_TIMER(getClosestObjects)
+	// theIterFlag and each module's done flag below are shared by every scan; one from the render
+	// beside a tick lets the tick's own scan skip an object, so a different target and a desync
+	LOGIC_WINDOW_READ( WINDOW_PARTITION_ITERATE );
 
 #ifdef DUMP_PERF_STATS
 	if (TheGameLogic->getFrame() != s_gcoPerfFrame)
@@ -3542,6 +3549,17 @@ Object *PartitionManager::getClosestObjects(
 		}
 		maxRadiusLimit = -1;	// nothing left for the ring walk to find
 	}
+
+	/* Every offset past the on-map cell farthest from the centre lands off the map, where getCellAt
+		 returns NULL, yet a REALLY_FAR search that found nothing stepped through all of them. A ring's
+		 radius never shrinks as the offset grows on either axis, so the farthest corner cell bounds
+		 every on-map one. Its radius is at least its longer side less one, so a nearer limit, which is
+		 every small search, skips the lookup. */
+	ICoord2D farthestOnMap;
+	farthestOnMap.x = maxInt(cellCenterX, m_cellCountX - 1 - cellCenterX);
+	farthestOnMap.y = maxInt(cellCenterY, m_cellCountY - 1 - cellCenterY);
+	if (maxRadiusLimit >= maxInt(farthestOnMap.x, farthestOnMap.y))
+		maxRadiusLimit = minInt(maxRadiusLimit, calcMinRadius(farthestOnMap));
 
 	/*
 		m_radiusVec[curRadius] contains a list of the cells (foo) that could
@@ -4555,6 +4573,12 @@ static Real sightGroundHeight( PartitionCell *cell )
 static Real sightBlockingHeight( PartitionCell *cell, const Object *looker, const Object *lookerContainer )
 {
 	Real height = sightGroundHeight( cell );
+
+	// the walk below takes only structures and shrubbery, and a cell under a swarm of aircraft can hold
+	// a hundred COIs of neither (issue 144)
+	if( !cell->hasSightBlockerCoi() )
+		return height;
+
 	for( CellAndObjectIntersection *coi = cell->getFirstCoiInCell(); coi; coi = coi->getNextCoi() )
 	{
 		// a ghost object has no Object behind it
@@ -6047,7 +6071,7 @@ Bool PartitionFilterPossibleToAttack::allow(Object *objOther)
 	// picking its own target, so an explicit order to level one still goes through, and a tech
 	// building that shoots back is still shot back at.
 	//
-	if (m_obj->getControllingPlayer() && m_obj->getControllingPlayer()->getPlayerType() == PLAYER_COMPUTER &&
+	if (m_obj->getControllingPlayer() && m_obj->getControllingPlayer()->isForkMapComputer() &&
 			aiIsIncomeNotATarget(objOther->isKindOf(KINDOF_TECH_BUILDING),
 													 objOther->isKindOf(KINDOF_CAPTURABLE),
 													 objOther->isKindOf(KINDOF_TECH_BASE_DEFENSE)))

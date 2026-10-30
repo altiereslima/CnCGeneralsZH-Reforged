@@ -57,6 +57,19 @@ public:
 	void Request_Debug_Layer() { DebugLayerRequested = true; }
 	bool Has_Debug_Layer() const { return DebugLayerPresent; }
 
+	// Multisampling for the scene, asked for before Create: 0 or 1 is none, otherwise 2, 4, 8 or 16.
+	// The swap chain keeps one sample, because a flip chain refuses more; the scene is drawn into
+	// the post chain's multisampled target over a multisampled depth buffer, and resolved on its way
+	// to the screen.  Create_Views grants the most the device offers at or under the request for the
+	// scene's colour formats and its depth together, so an unsupported count degrades rather than
+	// failing the device.
+	void Request_Sample_Count(unsigned samples) { RequestedSamples = samples; }
+	// What Create_Views granted: one when the scene is not multisampled.
+	unsigned Get_Sample_Count() const { return SampleCount; }
+	// One sample for the rest of the run, resizes included: the backend could not make the pass
+	// that resolves the multisampled depth.
+	void Drop_Multisampling();
+
 	// A device with a window: swap chain, back buffer, depth buffer, the lot.  Width and height
 	// are the back buffer's, not the window's, so a borderless window and a fullscreen mode ask
 	// for the same thing.
@@ -78,9 +91,21 @@ public:
 	ID3D11Device * Get_Device() const { return Device; }
 	ID3D11DeviceContext * Get_Context() const { return Context; }
 	ID3D11RenderTargetView * Get_Back_Buffer_View() const { return BackBufferView; }
+	// The single-sample depth buffer: the swap chain's, a same-size render target's, and with
+	// multisampling the scene's depth resolved (DX11BackendClass::Resolve_Scene_Depth).
 	ID3D11DepthStencilView * Get_Depth_Stencil_View() const { return DepthStencilView; }
 	// The same surface read as a texture, for the pass that wants the frame's own depth.
 	ID3D11ShaderResourceView * Get_Depth_Texture() const { return DepthTexture; }
+	// The multisampled depth the scene is tested against while it goes into the post chain's
+	// multisampled target, and the same surface as a texture for the resolve.  Null at one sample.
+	ID3D11ShaderResourceView * Get_Multisampled_Depth_Texture() const { return SceneDepthTexture; }
+	// True while the scene view is the multisampled one.
+	bool Scene_Is_Multisampled() const { return SceneView != NULL && SceneDepthView != NULL; }
+	// The depth that goes with Get_Scene_View.
+	ID3D11DepthStencilView * Get_Scene_Depth_View() const
+	{
+		return Scene_Is_Multisampled() ? SceneDepthView : DepthStencilView;
+	}
 
 	// Where the scene goes, which is not always the swap chain.  The post-process chain hands its
 	// own texture's view over here at the top of every frame and the backend binds whatever it
@@ -134,6 +159,7 @@ private:
 		const DXGI_SWAP_CHAIN_DESC * swap_chain);
 	bool Create_Views();
 	void Release_Views();
+	unsigned Granted_Sample_Count() const;
 
 	ID3D11Device * Device;
 	ID3D11DeviceContext * Context;
@@ -143,8 +169,13 @@ private:
 	ID3D11DepthStencilView * DepthStencilView;
 	ID3D11Texture2D * DepthStencilTexture;
 	ID3D11ShaderResourceView * DepthTexture;
+	ID3D11Texture2D * SceneDepthSurface;
+	ID3D11DepthStencilView * SceneDepthView;
+	ID3D11ShaderResourceView * SceneDepthTexture;
 
 	D3D_FEATURE_LEVEL FeatureLevel;
+	unsigned RequestedSamples;
+	unsigned SampleCount;
 	unsigned Width;
 	unsigned Height;
 	bool Software;

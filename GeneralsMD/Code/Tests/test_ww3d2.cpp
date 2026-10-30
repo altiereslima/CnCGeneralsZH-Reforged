@@ -1767,6 +1767,7 @@ TEST(surface_draw_h_line_fills_the_run_inclusive_at_both_ends)
 // and nothing on screen would say why, so the ordering is pinned here across the sign.
 // ---------------------------------------------------------------------------------------------
 #include "sortingrenderer.h"
+#include <limits>
 
 TEST(sorting_depth_key_orders_the_way_the_depths_do)
 {
@@ -1778,4 +1779,188 @@ TEST(sorting_depth_key_orders_the_way_the_depths_do)
 
 	/* the same depth twice is the same key, which is what keeps equal depths in pooled order */
 	CHECK_EQ( SortingRendererClass::_Depth_Sort_Key( 3.25f ), SortingRendererClass::_Depth_Sort_Key( 3.25f ) );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The flush draws its sorted entries in runs, and an entry moves back past entries in other tiles
+// to join the last run of its own state.  The picture holds because two entries sharing a tile are
+// drawn in the order the sort gave them, and nothing passes a fixed entry or is passed by one.  Two
+// fires on either side of the screen interleaved in depth are what it is for: two runs, not eight.
+// ---------------------------------------------------------------------------------------------
+static bool sort_tiles_meet( const SortingRendererClass::SortTiles & a, const SortingRendererClass::SortTiles & b )
+{
+	return a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1;
+}
+
+static void set_sort_tiles( SortingRendererClass::SortTiles & tiles, unsigned x0, unsigned x1, unsigned y0, unsigned y1 )
+{
+	tiles.x0 = (unsigned char)x0;
+	tiles.x1 = (unsigned char)x1;
+	tiles.y0 = (unsigned char)y0;
+	tiles.y1 = (unsigned char)y1;
+}
+
+TEST(sorting_runs_join_only_past_entries_in_other_tiles)
+{
+	enum { MOST = 400 };
+	unsigned short states[ MOST ];
+	SortingRendererClass::SortTiles tiles[ MOST ];
+	unsigned order[ MOST ];
+	unsigned position[ MOST ];
+
+	/* two fires a screen apart, interleaved in depth */
+	for( unsigned e = 0; e < 8; ++e ) {
+		states[ e ] = (unsigned short)( e & 1 );
+		const unsigned x = ( e & 1 ) ? 28 : 2;
+		set_sort_tiles( tiles[ e ], x, x + 1, 10, 12 );
+	}
+	CHECK_EQ( SortingRendererClass::_Group_Runs( states, tiles, 8, order ), 2u );
+	for( unsigned k = 0; k < 4; ++k ) {
+		CHECK_EQ( order[ k ], 2 * k );
+		CHECK_EQ( order[ 4 + k ], 2 * k + 1 );
+	}
+
+	/* the same two over one another stay where the sort put them */
+	for( unsigned e = 0; e < 8; ++e )
+		set_sort_tiles( tiles[ e ], 10, 12, 10, 12 );
+	CHECK_EQ( SortingRendererClass::_Group_Runs( states, tiles, 8, order ), 8u );
+	for( unsigned k = 0; k < 8; ++k )
+		CHECK_EQ( order[ k ], k );
+
+	/* random pools of six states, the last of them fixed */
+	unsigned seed = 20261027u;
+	for( int pool = 0; pool < 300; ++pool ) {
+		seed = seed * 1664525u + 1013904223u;
+		const unsigned count = 1 + ( seed >> 8 ) % MOST;
+		for( unsigned e = 0; e < count; ++e ) {
+			seed = seed * 1664525u + 1013904223u;
+			const unsigned state = ( seed >> 8 ) % 6;
+			states[ e ] = (unsigned short)( state == 5 ? ( state | SortingRendererClass::SORT_STATE_FIXED ) : state );
+			const unsigned last = SortingRendererClass::SORT_TILE_GRID - 1;
+			const unsigned x = ( seed >> 12 ) % ( last + 1 ), y = ( seed >> 18 ) % ( last + 1 );
+			const unsigned span = ( ( seed >> 24 ) % 16 == 0 ) ? last : ( seed >> 28 ) % 6;
+			set_sort_tiles( tiles[ e ], x, x + span > last ? last : x + span, y, y + span > last ? last : y + span );
+		}
+		const unsigned runs = SortingRendererClass::_Group_Runs( states, tiles, count, order );
+
+		for( unsigned e = 0; e < count; ++e )
+			position[ e ] = MOST;
+		for( unsigned k = 0; k < count; ++k ) {
+			CHECK( order[ k ] < count );
+			CHECK_EQ( position[ order[ k ] ], (unsigned)MOST );		/* each entry once */
+			position[ order[ k ] ] = k;
+		}
+		unsigned changes = 0;
+		for( unsigned k = 1; k < count; ++k )
+			changes += states[ order[ k ] ] != states[ order[ k - 1 ] ];
+		CHECK_EQ( changes + 1, runs );
+
+		for( unsigned i = 0; i < count; ++i ) {
+			for( unsigned j = i + 1; j < count; ++j ) {
+				const bool held = sort_tiles_meet( tiles[ i ], tiles[ j ] )
+					|| ( ( states[ i ] | states[ j ] ) & SortingRendererClass::SORT_STATE_FIXED );
+				if( held )
+					CHECK( position[ i ] < position[ j ] );
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// An entry looks RUN_LOOK_BACK (64) runs back for its own state and no further, through a ring of
+// that many open runs.  Seventy states each in a tile of its own, cycled twice, put every second
+// entry's run seventy runs back: out of reach, so nothing joins, and no entry takes a ring slot a
+// later run has reused for its old run.  Sixty states cycled twice are in reach and pair up.
+// ---------------------------------------------------------------------------------------------
+static void set_state_tile( SortingRendererClass::SortTiles & tiles, unsigned state )
+{
+	const unsigned x = ( state % 32 ) * 2, y = ( state / 32 ) * 2;
+	set_sort_tiles( tiles, x, x, y, y );
+}
+
+TEST(sorting_runs_look_back_no_further_than_the_window)
+{
+	enum { PAST_REACH = 70, IN_REACH = 60 };
+	unsigned short states[ 2 * PAST_REACH ];
+	SortingRendererClass::SortTiles tiles[ 2 * PAST_REACH ];
+	unsigned order[ 2 * PAST_REACH ];
+
+	for( unsigned e = 0; e < 2 * PAST_REACH; ++e ) {
+		states[ e ] = (unsigned short)( e % PAST_REACH );
+		set_state_tile( tiles[ e ], e % PAST_REACH );
+	}
+	CHECK_EQ( SortingRendererClass::_Group_Runs( states, tiles, 2 * PAST_REACH, order ), 2u * PAST_REACH );
+	for( unsigned k = 0; k < 2 * PAST_REACH; ++k )
+		CHECK_EQ( order[ k ], k );
+
+	for( unsigned e = 0; e < 2 * IN_REACH; ++e ) {
+		states[ e ] = (unsigned short)( e % IN_REACH );
+		set_state_tile( tiles[ e ], e % IN_REACH );
+	}
+	CHECK_EQ( SortingRendererClass::_Group_Runs( states, tiles, 2 * IN_REACH, order ), (unsigned)IN_REACH );
+	for( unsigned state = 0; state < IN_REACH; ++state ) {
+		CHECK_EQ( order[ 2 * state ], state );
+		CHECK_EQ( order[ 2 * state + 1 ], state + IN_REACH );
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// An entry's tiles are its corners taken through the matrix its draw uses, widened past the
+// rasterizer's snapping.  Two triangles a thousandth either side of a tile's edge share a tile,
+// since a pixel on the edge can go to either; two a screen apart share none; a quad reaches its
+// fourth corner; and a corner the projection cannot put on the screen covers the whole grid.
+// ---------------------------------------------------------------------------------------------
+static SortingRendererClass::SortTiles sort_tiles_of( const float corners[][ 3 ], unsigned count, const float clip[ 16 ] )
+{
+	const float * pointers[ 4 ];
+	for( unsigned c = 0; c < count; ++c )
+		pointers[ c ] = corners[ c ];
+	return SortingRendererClass::_Entry_Tiles( pointers, count, clip );
+}
+
+static bool sort_tiles_whole( const SortingRendererClass::SortTiles & tiles )
+{
+	const unsigned last = SortingRendererClass::SORT_TILE_GRID - 1;
+	return tiles.x0 == 0 && tiles.x1 == last && tiles.y0 == 0 && tiles.y1 == last;
+}
+
+TEST(sorting_entry_tiles_come_from_the_corners_with_a_margin)
+{
+	/* w is the corner's z, so a corner at z 1 lands where its x and y say */
+	const float clip[ 16 ] = { 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 0, 1,  0, 0, 0, 0 };
+
+	/* x 0 is the edge between tiles 31 and 32 */
+	const float left[ 3 ][ 3 ] = { { -0.3f, -0.1f, 1.0f }, { -0.001f, -0.1f, 1.0f }, { -0.001f, 0.1f, 1.0f } };
+	const float right[ 3 ][ 3 ] = { { 0.001f, -0.1f, 1.0f }, { 0.3f, -0.1f, 1.0f }, { 0.001f, 0.1f, 1.0f } };
+	const SortingRendererClass::SortTiles left_tiles = sort_tiles_of( left, 3, clip );
+	const SortingRendererClass::SortTiles right_tiles = sort_tiles_of( right, 3, clip );
+	CHECK( sort_tiles_meet( left_tiles, right_tiles ) );
+	CHECK( !sort_tiles_whole( left_tiles ) );
+	CHECK( !sort_tiles_whole( right_tiles ) );
+
+	const float far_left[ 3 ][ 3 ] = { { -0.9f, -0.1f, 1.0f }, { -0.8f, -0.1f, 1.0f }, { -0.8f, 0.1f, 1.0f } };
+	const float far_right[ 3 ][ 3 ] = { { 0.8f, -0.1f, 1.0f }, { 0.9f, -0.1f, 1.0f }, { 0.8f, 0.1f, 1.0f } };
+	const SortingRendererClass::SortTiles far_right_tiles = sort_tiles_of( far_right, 3, clip );
+	CHECK( !sort_tiles_meet( sort_tiles_of( far_left, 3, clip ), far_right_tiles ) );
+
+	/* the same far right triangle twice as deep and twice as wide lands on the same tiles */
+	const float deeper[ 3 ][ 3 ] = { { 1.6f, -0.2f, 2.0f }, { 1.8f, -0.2f, 2.0f }, { 1.6f, 0.2f, 2.0f } };
+	const SortingRendererClass::SortTiles deeper_tiles = sort_tiles_of( deeper, 3, clip );
+	CHECK_EQ( deeper_tiles.x0, far_right_tiles.x0 );
+	CHECK_EQ( deeper_tiles.x1, far_right_tiles.x1 );
+	CHECK_EQ( deeper_tiles.y0, far_right_tiles.y0 );
+	CHECK_EQ( deeper_tiles.y1, far_right_tiles.y1 );
+
+	/* a quad: the far left triangle with a fourth corner out on the right */
+	const float quad[ 4 ][ 3 ] = { { -0.9f, -0.1f, 1.0f }, { -0.8f, -0.1f, 1.0f }, { -0.8f, 0.1f, 1.0f }, { 0.85f, 0.1f, 1.0f } };
+	CHECK( sort_tiles_meet( sort_tiles_of( quad, 4, clip ), far_right_tiles ) );
+
+	/* a corner on the eye's plane, a corner that is not a number, and a matrix that makes one */
+	const float nan = std::numeric_limits< float >::quiet_NaN();
+	const float at_eye[ 3 ][ 3 ] = { { 0.1f, 0.1f, 1.0f }, { 0.2f, 0.1f, 0.0f }, { 0.2f, 0.2f, 1.0f } };
+	const float broken[ 3 ][ 3 ] = { { 0.1f, 0.1f, 1.0f }, { nan, 0.1f, 1.0f }, { 0.2f, 0.2f, 1.0f } };
+	const float broken_clip[ 16 ] = { 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 0, 1,  nan, 0, 0, 0 };
+	CHECK( sort_tiles_whole( sort_tiles_of( at_eye, 3, clip ) ) );
+	CHECK( sort_tiles_whole( sort_tiles_of( broken, 3, clip ) ) );
+	CHECK( sort_tiles_whole( sort_tiles_of( far_right, 3, broken_clip ) ) );
 }

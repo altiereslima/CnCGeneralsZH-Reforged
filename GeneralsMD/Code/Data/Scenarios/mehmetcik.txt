@@ -1,0 +1,22 @@
+# TurkiyeInfantryMehmetcik on his own model, TRMEHM_SKN on the Red Guard's skeleton: two of them
+# stand, walk east, shoot three Rebels and are then run down by two Technicals, so idle, move,
+# fire, injured and death all play. Frames are retail frames, 30 a second.
+#
+#   cd source\GeneralsMD\Run
+#   .\generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionTurkiye -side 1 FactionGLA -seed 1 -maxframes 3600
+#     -scenario mehmetcik -logPrefix mehmetcik_
+#
+# For a look, -win -fps 120 -noFPSLimit in place of -headless and -camera 900 935.
+
+30    spawn      0  TurkiyeInfantryMehmetcik  2  760 920
+60    tally      0  TurkiyeInfantryMehmetcik
+300   move       0  TurkiyeInfantryMehmetcik     900 920
+600   spawn      1  GLAInfantryRebel          3  1100 935  25
+630   attack     0  TurkiyeInfantryMehmetcik  1  GLAInfantryRebel
+900   tally      1  GLAInfantryRebel
+900   tally      0  TurkiyeInfantryMehmetcik
+1050  spawn      1  GLAVehicleTechnical       2  1150 900  40
+1080  attackmove 1  GLAVehicleTechnical*         900 935
+1700  tally      0  TurkiyeInfantryMehmetcik

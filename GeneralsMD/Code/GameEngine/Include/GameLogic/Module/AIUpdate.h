@@ -595,7 +595,7 @@ public:
 	inline Real getPathExtraDistance() const { return m_pathExtraDistance; }
 
 	virtual Bool chooseLocomotorSet(LocomotorSetType wst);
-	void refreshVeterancySpeed();	///< the rank's speed bonus onto every locomotor in the set
+	void refreshVeterancySpeed();	///< the rank's speed bonus and pace aura onto every locomotor in the set
 
 	virtual CommandSourceType getLastCommandSource() const { return m_lastCommandSource; }
 

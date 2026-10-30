@@ -93,25 +93,24 @@ class SimpleObjectIterator : public ObjectIterator
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(SimpleObjectIterator, "SimpleObjectIteratorPool" )		
 private:
 
-	class PooledClump;
-
 	struct Clump
 	{
 		Clump				*m_nextClump;
 		Object			*m_obj;
-		PooledClump	*m_pooled;	// NULL when the clump is one of m_inlineClumps
 		Real				m_numeric;	// typically, dist-squared
 	};
 
-	// a query that finds more than INLINE_CLUMPS objects takes the rest from the pool
-	class PooledClump : public MemoryPoolObject
-	{
-		MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(PooledClump, "SimpleObjectIteratorClumpPool" )
-	public:
-		Clump m_clump;
-	};
+	enum { INLINE_CLUMPS = 64, POOLED_CLUMPS = 64 };
 
-	enum { INLINE_CLUMPS = 64 };
+	// a query that finds more than INLINE_CLUMPS objects takes the rest from the pool, POOLED_CLUMPS
+	// to a block
+	class PooledClumps : public MemoryPoolObject
+	{
+		MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(PooledClumps, "SimpleObjectIteratorClumpPool" )
+	public:
+		PooledClumps	*m_nextBlock;
+		Clump					m_clumps[POOLED_CLUMPS];
+	};
 
 	typedef Real (*ClumpCompareProc)(Clump *a, Clump *b);
 	static ClumpCompareProc theClumpCompareProcs[];
@@ -127,6 +126,8 @@ private:
 	Int					m_clumpCount;
 	Int					m_inlineClumpsUsed;
 	Clump				m_inlineClumps[INLINE_CLUMPS];
+	PooledClumps	*m_pooledBlocks;		// newest first
+	Int					m_pooledClumpsUsed;	// in m_pooledBlocks, the newest
 
 	void reset();
 

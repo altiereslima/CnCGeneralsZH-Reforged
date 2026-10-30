@@ -2106,6 +2106,11 @@ void BaseHeightMapRenderObjClass::takeWaypointsForRender(void)
 	m_waypointBuffer->takeReadsForRender();
 }
 
+void BaseHeightMapRenderObjClass::takePropShroudForRender(void)
+{
+	m_propBuffer->takeShroudForRender();
+}
+
 //=============================================================================
 Bool BaseHeightMapRenderObjClass::updateTreePosition(DrawableID id, Coord3D location, Real angle)
 {

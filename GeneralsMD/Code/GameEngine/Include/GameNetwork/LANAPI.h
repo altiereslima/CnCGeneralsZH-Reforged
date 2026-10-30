@@ -225,6 +225,7 @@ public:
 	virtual inline UnicodeString GetMyName( void ) { return m_name; }                 ///< What's my name?
 	virtual inline LANGameInfo* GetMyGame( void ) { return m_currentGame; }					      ///< What's my Game?
 	virtual inline UnsignedInt GetLocalIP( void ) { return m_localIP; }								///< What's my IP?
+	UnsignedInt GetRedirectedIP( void ) const { return m_transport->getRedirectedIP(); }	///< Where the system bound the lobby socket instead of GetLocalIP, 0 when it did not
 	virtual void fillInLANMessage( LANMessage *msg );																	///< Fill in default params
 	virtual void checkMOTD( void );
 

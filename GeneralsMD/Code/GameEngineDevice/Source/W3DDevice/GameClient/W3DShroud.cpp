@@ -204,6 +204,7 @@ void W3DShroud::init(WorldHeightMap *pMap, Real worldCellSizeX, Real worldCellSi
 
 	//clear entire texture to black
 	memset(m_srcTextureData,0,m_srcTexturePitch*srcHeight);
+	m_cellsWritten = TRUE;
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (TheGlobalData && TheGlobalData->m_fogOfWarOn)
@@ -319,10 +320,12 @@ void W3DShroud::setShroudLevel(Int x, Int y, W3DShroudLevel level, Bool textureO
 	if (!m_pSrcTexture)
 		return;
 
-	if (x < m_numCellsX && y < m_numCellsY)
+	if (x >= 0 && y >= 0 && x < m_numCellsX && y < m_numCellsY)
 	{
 		if (level < TheGlobalData->m_shroudAlpha)
 			level = TheGlobalData->m_shroudAlpha;
+
+		m_cellsWritten = TRUE;
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 		if (TheGlobalData && TheGlobalData->m_fogOfWarOn)
@@ -424,8 +427,9 @@ void W3DShroud::fillShroudData(W3DShroudLevel level)
 		pixel=( ((bluepixel&0xf8) >> 3) | ((greenpixel&0xfc)<<3) | ((redpixel&0xf8)<<8));
 	}
 
+	m_cellsWritten = TRUE;
 	UnsignedShort *ptr=(UnsignedShort *)m_srcTextureData;
-	Int pitch = m_srcTexturePitch >> 1;	//2 bytes per pointer increment 
+	Int pitch = m_srcTexturePitch >> 1;	//2 bytes per pointer increment
 	for (y=0; y<m_numCellsY; y++)
 	{
 		for (x=0; x<m_numCellsX; x++)
@@ -718,15 +722,9 @@ void W3DShroud::render(CameraClass *cam)
 		m_pDstTexture->Get_Filter().Set_Min_Filter(m_shroudFilter);
 	}
 
-	//Update video memory texture with sysmem copy
-	SurfaceClass* pDestSurface;
-	{
-		pDestSurface=m_pDstTexture->Get_Surface_Level(0);
-	}
-
 	RenderRect	srcRect;
 	RenderPoint	dstPoint={1,1};	//first row/column is reserved for border.
-	
+
 	srcRect.left=visStartX;
 	srcRect.top=visStartY;
 	srcRect.right=visEndX;
@@ -735,13 +733,27 @@ void W3DShroud::render(CameraClass *cam)
 #ifdef DO_FOG_INTERPOLATION
 	//interpolate current shroud state to the final one
 	interpolateFogLevels(&srcRect);
+	m_cellsWritten = TRUE;
 #endif
+
+	// Nothing goes up while no cell was written since the last copy: the fog was a D3D9 surface update
+	// and a Direct3D 11 compare of every row on every pass, and an observer's never changes.  A written
+	// pass still copies every cell, so the Direct3D 11 row compare sends only the rows that changed.
+	if (!m_cellsWritten && !m_clearDstTexture)
+		return;
+	m_cellsWritten = FALSE;
+
+	//Update video memory texture with sysmem copy
+	SurfaceClass* pDestSurface;
+	{
+		pDestSurface=m_pDstTexture->Get_Surface_Level(0);
+	}
 
 	if (m_clearDstTexture)
 	{	//we need to clear unused parts of the destination texture to a known
 		//color in order to keep map border in the state we want.
 		m_clearDstTexture=FALSE;
-		
+
 		fillBorderShroudData(m_boderShroudLevel, pDestSurface);
 	}
 

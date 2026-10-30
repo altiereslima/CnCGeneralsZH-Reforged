@@ -1883,7 +1883,7 @@ Object *DozerAIUpdate::construct( const ThingTemplate *what,
 		statusBits.set( OBJECT_STATUS_RECONSTRUCTING );
 
 	// create an object at the destination location
-	Object *obj = TheThingFactory->newObject( what, owningPlayer->getDefaultTeam(), statusBits );
+	Object *obj = TheThingFactory->newObject( what, owningPlayer->getDefaultTeam(), statusBits, getObject() );
 
 	// even though we haven't actually built anything yet, this keeps things tidy
 	obj->setProducer( getObject() );

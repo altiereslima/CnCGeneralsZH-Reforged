@@ -243,6 +243,7 @@ public:
 	Bool						m_initiallyDisabled;		///< manually controlled and disabled.
 	Bool						m_firesWhileTurning;    ///< so the firing state does not instantly expire the turning state
 	Bool						m_isAllowsPitch;				///< This type of turret can pitch up and down as well as spin
+	Bool						m_aimFromMuzzle;				///< dependent on allowspitch. Pitch the barrel down the line from its muzzle to the middle of the target (a tank gun)
 
 	TurretAIData();
 	static void buildFieldParse(MultiIniFieldParse& p);
@@ -283,6 +284,7 @@ public:
 	Real getPitchRate() const { return m_data->m_pitchRate; }
 	Real getFirePitch() const { return m_data->m_firePitch; }
 	Real getGroundUnitPitch() const { return m_data->m_groundUnitPitch; }
+	Bool isAimFromMuzzle() const { return m_data->m_aimFromMuzzle; }
 	Real getNaturalTurretPitch() const { return m_data->m_naturalTurretPitch;	}
 	Real getTurretFireAngleSweepForWeaponSlot( WeaponSlotType slot ) const;
 	Real getTurretSweepSpeedModifierForWeaponSlot( WeaponSlotType slot ) const;

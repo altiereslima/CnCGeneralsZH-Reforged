@@ -104,6 +104,25 @@ public:
 		return (bits&0x80000000u) ? 0x7FFFFFFFu-magnitude : 0x80000000u+magnitude;
 	}
 
+	/// The pixels a sorted entry can touch, as an inclusive range of the SORT_TILE_GRID by
+	/// SORT_TILE_GRID tiles the viewport is cut into.  Two entries in no common tile share no pixel.
+	enum { SORT_TILE_GRID = 64 };
+	struct SortTiles { unsigned char x0, x1, y0, y1; };
+	/// The tiles an entry's corners reach through clip, the world, view and projection its draw
+	/// multiplies them by as sixteen floats in D3DX order.  Each corner points at its x, y and z:
+	/// three are a triangle, four a quad.  The range is widened by a margin past the rasterizer's
+	/// snapping, and a corner at or behind the eye, or one that comes out NaN, covers the whole grid.
+	static SortTiles _Entry_Tiles(const float* const* corners, unsigned corner_count, const float* clip);
+	/// An entry's draw state for _Group_Runs with this bit set is one nothing may pass and that
+	/// joins no earlier run: it stays exactly where the depth sort put it.
+	enum { SORT_STATE_FIXED = 0x8000 };
+	/// The order a flush draws its depth sorted entries in.  An entry joins the latest earlier run of
+	/// its own draw state when every entry it would pass lies in other tiles, so each pixel still
+	/// blends the same draws in the same order; otherwise it stays where the sort put it.  Writes the
+	/// drawing order, entry indices, into order[] and returns how many runs that makes.
+	static unsigned _Group_Runs(const unsigned short* states, const SortTiles* tiles, unsigned count,
+		unsigned* order);
+
 	static void _Enable_Triangle_Draw(bool enable) { _EnableTriangleDraw=enable; }
 	static bool _Is_Triangle_Draw_Enabled() { return _EnableTriangleDraw; }
 };

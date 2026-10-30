@@ -277,10 +277,10 @@ protected:
 #endif
 	virtual Bool allow(Object *objOther)
 	{
+		// ask, don't reserve: EA reserved here, so every airfield the search tried on its way to the
+		// nearest kept a space for this jet, empty on the ground and closed to everyone, until it died
 		ParkingPlaceBehaviorInterface* pp = getPP(objOther->getID());
-		if (pp != NULL && pp->reserveSpace(m_id, 0.0f, NULL))
-			return true;
-		return false;
+		return pp != NULL && pp->canReserveSpace(m_id);
 	}
 };
 
@@ -306,7 +306,12 @@ static Object* findSuitableAirfield(Object* jet)
 	filters[numFilters++] = &filterMapStatus;
 	filters[numFilters] = NULL;
 
-	return ThePartitionManager->getClosestObject( jet, HUGE_DIST, FROM_CENTER_2D, filters );
+	// the one it picked is reserved, as the filter used to do, so nobody takes the space on the way there
+	Object* airfield = ThePartitionManager->getClosestObject( jet, HUGE_DIST, FROM_CENTER_2D, filters );
+	ParkingPlaceBehaviorInterface* pp = airfield ? getPP(airfield->getID()) : NULL;
+	if (pp != NULL && !pp->reserveSpace(jet->getID(), 0.0f, NULL))
+		return NULL;
+	return airfield;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -469,7 +474,14 @@ public:
 		// it might not have an owning airfield, and it might be trying to return
 		// simply due to being idle, not out of ammo. so check and don't die in that
 		// case, but just punt back out to idle.
-		if (!jetAI->isOutOfSpecialReloadAmmo() && jet->getProducerID() == INVALID_ID)
+		// Only a jet that never had an airfield, though. Returning for landing clears the producer of
+		// one whose airfield is gone, and that jet, still carrying a bomb, used to be punted out here
+		// too: idle, back ten seconds later, punted again, never burning and never landing, a damaged
+		// Aurora orbiting a full base for the rest of the match. It circles the ruin with the rest now.
+		// One with no fuel to burn (a Comanche, a Chinook) would hang over the ruin for good, so that
+		// one still goes back to idle as EA had it.
+		if (!jetAI->isOutOfSpecialReloadAmmo() && jet->getProducerID() == INVALID_ID &&
+				(!jetAI->friend_hadAirfield() || jetAI->friend_getOutOfAmmoDamagePerSecond() <= 0.0f))
 		{
 			return STATE_FAILURE;
 		}
@@ -1914,7 +1926,9 @@ JetAIStateMachine::JetAIStateMachine(Object *owner, AsciiString name) : AIStateM
 	defineState( ORIENT_FOR_PARKING_PLACE, newInstance(JetOrHeliParkOrientState)( this ), RELOAD_AMMO, AI_IDLE );
 	defineState( RELOAD_AMMO, newInstance(JetOrHeliReloadAmmoState)( this ), AI_IDLE, AI_IDLE );
 	defineState( RETURN_TO_DEAD_AIRFIELD, newInstance(JetOrHeliReturningToDeadAirfieldState)( this ), CIRCLING_DEAD_AIRFIELD, RETURN_TO_DEAD_AIRFIELD );
-	defineState( CIRCLING_DEAD_AIRFIELD, newInstance(JetOrHeliCirclingDeadAirfieldState)( this ), AI_IDLE, AI_IDLE );
+	// a free space found goes straight to landing on it: through idle, a jet still armed waited out
+	// ReturnToBaseIdleTime holding the space, and one with no such time never came down at all
+	defineState( CIRCLING_DEAD_AIRFIELD, newInstance(JetOrHeliCirclingDeadAirfieldState)( this ), RETURNING_FOR_LANDING, AI_IDLE );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2185,6 +2199,8 @@ UpdateSleepTime JetAIUpdate::update()
 	Object* jet = getObject();
 
 	ParkingPlaceBehaviorInterface* pp = getPP(getObject()->getProducerID());
+	if (pp != NULL)
+		setFlag(HAD_AIRFIELD, true);
 
 	// a kamikaze whose target is gone takes the dearest enemy left in the area it was sent to that no
 	// other drone of its swarm is heading for, the dearest of all when every one has a drone already, or
