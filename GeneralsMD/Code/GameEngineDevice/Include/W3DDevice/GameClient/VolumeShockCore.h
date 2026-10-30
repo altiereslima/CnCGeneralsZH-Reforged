@@ -30,7 +30,11 @@ const float CapRelease = 60.0f;			// units another blast must move a nuclear cap
 struct ShockClass { float speed, push, r0, seconds, disperse; };
 
 // First numbers, tuned by eye on volshock; speeds and lifetimes are the ones addShock had.
-const ShockClass Nuclear = { 420.0f, 300.0f, 150.0f, 2.5f, 0.6f };
+// (push 300 and a 0.6 share took a first nuke's cloud off the screen inside 3 s of the second; a
+// 0.4 share and the shell's stretch left a released cap's soot at a fifth to a third, a thin veil,
+// and 0.2 still a tan veil with no cap body in it.  The push stays: 250 is what lets volshock's third
+// nuke, 434 units off, release the second's cap at all, about 58 units against the 57 it needs)
+const ShockClass Nuclear = { 420.0f, 250.0f, 150.0f, 2.5f, 0.1f };
 const ShockClass NukeCannon = { 250.0f, 60.0f, 60.0f, 1.5f, 0.4f };
 const ShockClass Scud = { 260.0f, 60.0f, 50.0f, 1.2f, 0.3f };
 const ShockClass StructureFall = { 140.0f, 30.0f, 40.0f, 1.0f, 0.2f };

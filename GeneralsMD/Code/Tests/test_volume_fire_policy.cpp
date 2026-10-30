@@ -190,9 +190,13 @@ TEST(volume_shock_passage_moves_a_point_by_the_fronts_displacement)
 		// D falls as the front runs through the point, so the sum sits within a few per cent of D there
 		CHECK_NEAR((float)moved, displacement(one.c, meet), 0.05f * displacement(one.c, meet));
 	}
-	// the second nuke moves the first's cap about half its 160-unit radius
-	CHECK(displacement(Nuclear, 390.0f / Nuclear.speed) > 70.0f);
-	CHECK(displacement(Nuclear, 390.0f / Nuclear.speed) < 100.0f);
+	// holdCaps measures to the first nuke's cap middle, about 230 units over the ground.  The second
+	// 390 units off moves it about 40% of its 160-unit radius, enough to let it go (hold under 0.05,
+	// 57 units); one 520 units off only loosens it
+	const float capNear = std::hypot(390.0f, 230.0f), capFar = std::hypot(520.0f, 230.0f);
+	CHECK(displacement(Nuclear, capNear / Nuclear.speed) > CapRelease);
+	CHECK(displacement(Nuclear, capNear / Nuclear.speed) < 70.0f);
+	CHECK(displacement(Nuclear, capFar / Nuclear.speed) < 0.95f * CapRelease);
 	// past three widths the shell is cut: erfc(3), about two parts in a hundred thousand
 	CHECK_EQ(profile(100.0f + 3.01f * 25.0f, 100.0f, 25.0f), 0.0f);
 	CHECK(std::erfc(3.0) < 1e-4);
@@ -211,9 +215,14 @@ TEST(volume_shock_passage_mixes_away_its_share)
 		CHECK_NEAR(kept, 1.0f - dispersed(c, age), 1e-4f);
 		CHECK(dispersed(c, age) <= c.disperse);
 	}
-	// a Scud next to an earlier puff thins it by about a tenth, a nuke over the other's cap by half
+	// a Scud next to an earlier puff thins it by about a tenth, and a nuke over the other's cap by its
+	// whole tenth too (its push there would mix away 40%; that, and later a fifth, with the shell's
+	// stretch left a released cap too thin to draw as more than a veil)
 	CHECK_NEAR(dispersed(Scud, 100.0f / Scud.speed), 0.13f, 0.03f);
-	CHECK_NEAR(dispersed(Nuclear, 390.0f / Nuclear.speed), 0.55f, 0.06f);
+	CHECK_NEAR(dispersed(Nuclear, std::hypot(390.0f, 230.0f) / Nuclear.speed), Nuclear.disperse, 1e-6f);
+	CHECK_NEAR(Nuclear.disperse, 0.1f, 1e-6f);
+	// volshock's nuke 3, 434 units from nuke 2, still lets nuke 2's cap go (about 230 units up)
+	CHECK(displacement(Nuclear, std::hypot(434.0f, 230.0f) / Nuclear.speed) > 0.95f * CapRelease);
 	// a cap lets go once moved CapRelease units, and holds while barely touched
 	CHECK_EQ(capHold(0.0f), 1.0f);
 	CHECK_EQ(capHold(CapRelease), 0.0f);
