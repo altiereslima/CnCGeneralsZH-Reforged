@@ -178,13 +178,9 @@ const float ShortEndFade = 1.5f;		// seconds a tank's, a building's, a launch's 
 // At most this many at once (Low, High), on free slabs only: past that a shot keeps the game's own flash.
 const float MuzzleHeatHalfLife = 0.07f, MuzzleLife = 1.6f, MuzzleEndFade = 0.6f;
 const unsigned MuzzleCap[3] = { 0, 3, 6 };
-// A nuclear cap another blast has let go of (VolumeShock::capHold) is free smoke, thinning out at this
-// half-life, and its volume ends this long after.  At 6 s the cap's body was gone two seconds after
-// its release and only a veil stayed; 18 s ends it, end fade included, just before volshock's third
-// nuke lands 19 s after the second.  One only loosened spills what the front pushed off it at up to
-// LoosenedSpillHalfLife, the 4 s it had before the released cloud was slowed: a cap that stays
-// loosened keeps that spill for the rest of its 90 s.
-const float NukeDisperseHalfLife = 10.0f, NukeDisperseLife = 18.0f, LoosenedSpillHalfLife = 4.0f;
+// A nuclear cap only loosened by another blast spills what the front pushed off it at up to this: a cap
+// that stays loosened keeps it for the rest of its life.  (VolumeShockCore.h has the cloud's length.)
+const float LoosenedSpillHalfLife = 4.0f;
 // A rotor's column under its disc, units/s down (MoverPass), the same at any height; the sheet along
 // the ground and the dust ring take it as close as the ground is.  Air particles in a jet's or a
 // rotor's wake move at this share of its speed there (nudge).
@@ -3024,7 +3020,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		const float capR = (std::min)(6.5f * (1 - std::exp(-t / 0.12f)) + 7.0f * (1 - std::exp(-(std::max)(t - 1.0f, 0.0f) / 5.0f))
 			+ 0.04f * (std::max)(t - 20.0f, 0.0f), 16.0f);
 		const float capH = capR * (0.95f - 0.57f * smoothstep01(t, 1.0f, 9.0f));
-		const float fade = 1 - smoothstep01(t, 50.0f, 85.0f);
+		const float fade = 1 - smoothstep01(t, VolumeShock::NukeFadeFrom, VolumeShock::NukeLife);
 		// thin while it is fire, so its hot middle shows through the cooler rim; thick smoke once it
 		// has cooled.  At 0.35 the eye saw only the rim's outer cells, and at its first heat those
 		// burned the whole ball one flat white
@@ -3046,7 +3042,7 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		flashWide = (std::max)(capR, 4.0f);
 		flashTall = 1.2f;
 		// the cap's heat: a white-yellow middle for the first second, yellow-orange at two, red embers by ten
-		power[2] = 1.2f * std::exp(-t / 0.6f) + 1.9f * std::exp(-t / 9.0f);
+		power[2] = (1.2f * std::exp(-t / 0.6f) + 1.9f * std::exp(-t / 9.0f)) * fade;
 		if (t < 1.0f) { power[0] = 70.0f * std::exp(-t / 0.5f); power[3] = 0.3f; }
 		// the base surge: a ring front of dust racing out along the ground, far past the fireball,
 		// slowing as it goes, 42 cells (420 units) out over a 1.6 s constant.  It drops dust all
@@ -3079,10 +3075,13 @@ void schedule(const Volume &volume, unsigned slab, float t, DrawConstants *draw)
 		// take, where at 0.26 and 0.75 the cooled cap read as one flat grey-brown
 		shade = 0.34f;
 		sunShare = 1.0f;
-		billows = smoothstep01(t, 5.0f, 9.0f);	// once it is thick smoke: the thin fireball keeps its soft glow
-		spared = 1 - smoothstep01(t, 4.0f, 8.0f);
-		// dark smoke round the fire at first, cream once it is lit only by the sun, greyer late
-		const float cream = smoothstep01(t, 3.0f, 12.0f), grey = smoothstep01(t, 20.0f, 50.0f);
+		// once it is thick smoke: the thin fireball keeps its soft glow, and as the soot fades the hard
+		// surface softens to half and the thin dust is spared, as a cap let go does below.  Under the
+		// surface's 0.3 to 0.55 the whole cloud would go in a moment, a hard cut.
+		billows = smoothstep01(t, 5.0f, 9.0f) * (0.5f + 0.5f * fade);
+		spared = (std::max)(1 - smoothstep01(t, 4.0f, 8.0f), 1 - fade);
+		// dark smoke round the fire at first, cream once it is lit only by the sun, greyer as it goes
+		const float cream = smoothstep01(t, 3.0f, 12.0f), grey = smoothstep01(t, VolumeShock::NukeFadeFrom, VolumeShock::NukeLife);
 		const float early[3] = { 0.32f, 0.22f, 0.16f }, lit[3] = { 0.88f, 0.84f, 0.78f }, late[3] = { 0.80f, 0.79f, 0.78f };
 		for (unsigned i = 0; i < 3; ++i) soot[i] = early[i] + (lit[i] - early[i]) * cream + (late[i] - lit[i]) * grey;
 		// the fire's gain low while the fireball is hottest, so its lumps and its cooler rim show
@@ -3306,7 +3305,8 @@ void step(ID3D11DeviceContext *context, unsigned t, int now, float dt, float sec
 			sim.Thin[slab][0] = std::pow(0.5f, dt / TankSootHalfLife);
 		// a nuclear cap another blast let go of thins out as free smoke, and while it is only loosened what
 		// the front pushed off it drifts aside instead of fading at the cap's own spill rate
-		if (volume.kind == Nuclear && volume.hold < 0.05f) sim.Thin[slab][0] = std::pow(0.5f, dt / NukeDisperseHalfLife);
+		if (volume.kind == Nuclear && volume.hold < 0.05f) sim.Thin[slab][0] = std::pow(0.5f, dt / VolumeShock::NukeDisperseHalfLife);
+		else if (volume.kind == Nuclear && volume.live && secondsSince(volume, now) > VolumeShock::NukeFadeFrom) sim.Thin[slab][0] = std::pow(0.5f, dt / VolumeShock::NukeFadeHalfLife);
 		sim.Spill[slab][0] = std::pow(0.5f, dt / (CapSpillHalfLife + (LoosenedSpillHalfLife - CapSpillHalfLife) * (1 - volume.hold)));
 		const bool rolls = (volume.kind == Structure && !volume.standing) || volume.kind == Launch || volume.kind == Muzzle;
 		// (not a bomb's: its small mushroom's stem would fall out of it)
@@ -3621,25 +3621,19 @@ void holdCaps(int now)
 		const float capZ = volume.blast[2] + 2.0f + 20.0f * (1 - std::exp(-t / 3.2f));	// schedule's
 		const float middle[3] = { volume.origin[0] + (volume.blast[0] + 0.5f) * volume.cell,
 			volume.origin[1] + (volume.blast[1] + 0.5f) * volume.cell, volume.origin[2] + (capZ + 0.5f) * volume.cell };
-		const Shock *hardest = nullptr;	// TEMPORARY (stage 1 retune): named in the log line below
-		float hardestShift = 0;
 		for (const Shock &shock : shocks) {
 			const float age = float(now - shock.born) / LOGICFRAMES_PER_SECOND;
 			if (!shock.checked || age < 0 || age > shock.c.seconds || spares(volume, (int)slot, shock)) continue;
 			const float d[3] = { middle[0] - shock.at[0], middle[1] - shock.at[1], middle[2] - shock.at[2] };
-			const float shift = VolumeShock::shiftAt(shock.c, age, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]),
+			volume.capPushed += VolumeShock::shiftAt(shock.c, age, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]),
 				(float)frames / LOGICFRAMES_PER_SECOND);
-			volume.capPushed += shift;
-			if (shift > hardestShift) { hardest = &shock; hardestShift = shift; }
 		}
 		volume.hold = VolumeShock::capHold(volume.capPushed);
 		if (volume.hold < 0.05f) {
-			volume.life = (std::min)(volume.life, now - volume.born + int(NukeDisperseLife * LOGICFRAMES_PER_SECOND));
+			volume.life = VolumeShock::releasedLife(volume.life, now - volume.born, LOGICFRAMES_PER_SECOND);
 			static unsigned released = 0;
 			if (released++ < 8)
-				DEBUG_LOG(("VOLSMOKE: frame %d, nuclear cap %u (born %d) let go: other blasts moved it %.0f units, the last by a push %.0f front born %d at (%.0f, %.0f, %.0f), owner %d\n",
-					now, slot, volume.born, volume.capPushed, hardest ? hardest->c.push : 0.0f, hardest ? hardest->born : -1,
-					hardest ? hardest->at[0] : 0.0f, hardest ? hardest->at[1] : 0.0f, hardest ? hardest->at[2] : 0.0f, hardest ? hardest->owner : -1));
+				DEBUG_LOG(("VOLSMOKE: frame %d, nuclear cap %u let go: other blasts moved it %.0f units\n", now, slot, volume.capPushed));
 		}
 	}
 }
@@ -4403,7 +4397,7 @@ bool screenRect(const float boxLow[3], const float boxHigh[3], const float viewP
 // fall 3.5, its ground roll the half second past the old 3.  A launch's 4, its cloud's roll.
 float lifeOf(Kind kind, float scale)
 {
-	return kind == TankDeath ? 4.25f : kind == Structure ? 3.5f : kind == Nuclear ? 90.0f : kind == Launch ? 4.0f
+	return kind == TankDeath ? 4.25f : kind == Structure ? 3.5f : kind == Nuclear ? VolumeShock::NukeLife : kind == Launch ? 4.0f
 		: kind == Muzzle ? MuzzleLife : kind == Shell && scale < 2.0f ? 4.0f : 12.0f;
 }
 // (a gun's at 1.5 units, its 48 cells 72 units across: the dust round the tank's front and the fireball's whole reach)
@@ -4899,12 +4893,6 @@ bool Takes(ParticleSystem *system)
 			Coord3D where;
 			system->getPosition(&where);
 			addShock(where, *known->second, (int)TheGameLogic->getFrame());
-			// TEMPORARY (stage 1 retune): what starts each nuclear front, for the cap a nuke's own later
-			// front lets go 3 to 4 s after it lands in the cost runs
-			static unsigned nuclearFronts = 0;
-			if (known->second->push >= VolumeShock::Nuclear.push && nuclearFronts++ < 16)
-				DEBUG_LOG(("VOLSMOKE: frame %d, nuclear front from '%s' at (%.0f, %.0f, %.0f)\n", (int)TheGameLogic->getFrame(),
-					tmplate->getName().str(), where.x, where.y, where.z));
 		}
 	}
 	// a building's or a wreck's fire burns in a fire slab, or keeps its billboards; never the air's
@@ -5142,10 +5130,6 @@ bool Takes(ParticleSystem *system)
 					|| (rankOf(volumes[i]) == rankOf(volumes[slot]) && volumes[i].born < volumes[slot].born))
 				slot = i;
 		++droppedCount;
-		// TEMPORARY (stage 1 retune): which blast a nuke's slab goes to
-		if (volumes[slot].kind == Nuclear || type == Nuclear)
-			DEBUG_LOG(("VOLSMOKE: frame %d, '%s' (kind %d) %s slab %u from a kind %d born at frame %d\n", now, own, (int)type,
-				rankOf(volumes[slot]) > rank ? "dropped, not taking" : "takes", slot, (int)volumes[slot].kind, volumes[slot].born));
 		if (rankOf(volumes[slot]) > rank) {
 			if (type == Structure) DEBUG_LOG(("VOLSMOKE: frame %d, a structure's blast dropped: every slab held a higher rank\n", now));
 			pruneSets();
@@ -5267,7 +5251,7 @@ bool Takes(ParticleSystem *system)
 		addShock(where, kind.scale >= 3.0f ? VolumeShock::NukeCannon : VolumeShock::shell(kind.scale), now, (int)slot);
 	pruneSets();
 	takenSystems.insert(id);
-	if (claimedCount++ < 8 || type == Nuclear)	// TEMPORARY (stage 1 retune): every nuclear one
+	if (claimedCount++ < 8)
 		DEBUG_LOG(("VOLSMOKE: frame %d, %s volume %u for '%s' at (%.0f, %.0f, %.0f), %.0f units wide\n", now,
 			type == TankDeath ? "tank" : type == Shell ? "shell" : type == Airburst ? "airburst" : type == Structure ? "structure"
 				: type == Launch ? "launch" : "nuclear", slot,

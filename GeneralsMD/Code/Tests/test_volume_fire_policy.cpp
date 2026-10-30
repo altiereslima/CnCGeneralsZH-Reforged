@@ -229,6 +229,25 @@ TEST(volume_shock_passage_mixes_away_its_share)
 	CHECK(capHold(10.0f) > 0.8f);
 }
 
+TEST(volume_shock_nuclear_cloud_lasts_as_long_as_the_games_own)
+{
+	using namespace VolumeShock;
+	CHECK_NEAR(NukeLife, 22.33f, 0.01f);
+	// the fade leaves under a fifth of the soot for the end fade to take, not a thick cloud to cut
+	CHECK(NukeFadeFrom < NukeLife);
+	CHECK(std::pow(0.5f, (NukeLife - NukeFadeFrom) / NukeFadeHalfLife) < 0.2f);
+	// a second nuke at any moment ends the first's cloud sooner or leaves it be, and never makes it outlast
+	// that; let go early it stays for as long as a cap's own fade would thin it
+	const int fps = 60, life = int(NukeLife * fps);
+	for (int age = 0; age <= life; age += 30) {
+		CHECK(releasedLife(life, age, fps) <= life);
+		CHECK(releasedLife(life, age, fps) >= age);
+	}
+	CHECK_EQ(releasedLife(life, 3 * fps, fps), int((3.0f + NukeDisperseLife) * fps));
+	CHECK_EQ(releasedLife(life, 15 * fps, fps), life);
+	CHECK(NukeDisperseLife >= NukeLife - NukeFadeFrom - 1.0f);
+}
+
 TEST(volume_shock_templates_that_start_a_front)
 {
 	using namespace VolumeShock;

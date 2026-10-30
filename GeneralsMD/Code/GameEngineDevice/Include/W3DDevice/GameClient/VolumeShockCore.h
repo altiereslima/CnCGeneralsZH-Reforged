@@ -25,6 +25,26 @@ const float DisperseScale = 150.0f;		// a passage that moves smoke this far mixe
 const float StirShare = 0.15f;			// the eddies a passage leaves, as a share of its particle speed
 const float CapRelease = 60.0f;			// units another blast must move a nuclear cap's middle to let it go
 
+// A nuclear cloud lasts as long as the game's own nuke with the setting Off, seconds.  The last smoke of
+// FX_Nuke, FX_NukeGLA and SupW_FX_Nuke is the MushroomCloudRing: InitialDelay 2000 ms, then SystemLifetime
+// 10 + Lifetime 600 retail frames at 30 a second, its alpha reaching 0 on the last.  (The Shockwave ends
+// at 20.2 s and the stem at 16.2.  Only the Flare runs longer, 50 + 700 frames to 25 s, an additive lens
+// flare already down to 21 of 255 at 20 s.)
+const float NukeLife = 2.0f + (10 + 600) / 30.0f;
+// Whole until NukeFadeFrom; from there nothing lays it again as thick and its soot thins at
+// NukeFadeHalfLife, down to under a fifth when the end fade takes the rest.
+const float NukeFadeFrom = 10.0f, NukeFadeHalfLife = 5.0f;
+// A cap another blast has let go of (capHold) is free smoke thinning at this half-life, and its volume
+// ends this long after, or at NukeLife if that is sooner.  The same half-life as the fade, so the
+// cloud a second nuke shoves away is there as long as one left alone; at 90 s of life these were 10
+// and 18 s, and at 6 s with the cap's hard surface the cap's body was gone two seconds after its release.
+const float NukeDisperseHalfLife = 5.0f, NukeDisperseLife = 12.0f;
+inline int releasedLife(int life, int age, int framesPerSecond)
+{
+	const int end = age + int(NukeDisperseLife * framesPerSecond);
+	return end < life ? end : life;
+}
+
 // speed units/s, push units at the blast, r0 units (where D has halved), seconds it runs, the most of
 // the smoke one passage mixes away
 struct ShockClass { float speed, push, r0, seconds, disperse; };
