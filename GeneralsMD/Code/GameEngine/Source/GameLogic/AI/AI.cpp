@@ -832,6 +832,28 @@ Int AI_threatScore( Int templateThreatValue, Int buildCost, Bool threatensMe,
 
 //-----------------------------------------------------------------------------
 /**
+ * Whether a candidate of the scripted-priority search below takes the lead, Object-free so
+ * test_gameengine can link to it.
+ *
+ * That search used to sort every enemy on the map near to far, a stable merge sort over the
+ * gathered list, and let a candidate lead only on a higher priority after distance or an equal
+ * one with a higher priority before it. So the pick was the best by those two, then the smaller
+ * distance, then whichever the gathered list held first. One pass over the unsorted list that
+ * compares on all of it and keeps the incumbent on a full tie picks the same Object. A hunting
+ * unit asks for this over the whole map once a second, and the sort was 7% of its time.
+ */
+Bool AI_attackPriorityTakesLead( Int modPriority, Int curPriority, Real distSqr,
+																 Int bestModPriority, Int bestCurPriority, Real bestDistSqr )
+{
+	if (modPriority != bestModPriority)
+		return modPriority > bestModPriority;
+	if (curPriority != bestCurPriority)
+		return curPriority > bestCurPriority;
+	return distSqr < bestDistSqr;
+}
+
+//-----------------------------------------------------------------------------
+/**
  * Return the closest enemy, according to the qualifiers.
  */
 static Bool AI_filtersAllow( PartitionFilter **filters, Object *candidate )
@@ -1009,9 +1031,13 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 	Object *bestEnemy = NULL;
 	Int			effectivePriority=0;
 	Int			actualPriority=0;
-	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(me, range, FROM_BOUNDINGSPHERE_2D, gatherFilters, ITER_SORTED_NEAR_TO_FAR, enemyPlayers);
+	Real		bestDistSqr=0.0f;
+	// unsorted, see AI_attackPriorityTakesLead; each entry carries the distance the gather measured,
+	// which is what getDistanceSquared would measure again
+	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(me, range, FROM_BOUNDINGSPHERE_2D, gatherFilters, ITER_FASTEST, enemyPlayers);
 	MemoryPoolObjectHolder holder(iter);
-	for (Object *theEnemy = iter->first(); theEnemy; theEnemy = iter->next()) 
+	Real distSqr;
+	for (Object *theEnemy = iter->firstWithNumeric(&distSqr); theEnemy; theEnemy = iter->nextWithNumeric(&distSqr))
 	{
 		Int curPriority = info->getPriority(theEnemy->getTemplate());
 		if (curPriority == 0) 
@@ -1029,18 +1055,17 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 			}
 		}
 
-		Real distSqr = ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D);
 		Real dist = sqrt(distSqr);
 		Int modifier = floatToIntAsMsvc(dist/TheAI->getAiData()->m_attackPriorityDistanceModifier);
 		Int modPriority = curPriority-modifier;
 		if (modPriority < 1)
 			modPriority = 1;
-		const Bool takesLead = modPriority > effectivePriority ||
-			(modPriority == effectivePriority && curPriority > actualPriority);
-		if (takesLead && AI_filtersAllow(filters + numGatherFilters, theEnemy))
+		if (AI_attackPriorityTakesLead(modPriority, curPriority, distSqr, effectivePriority, actualPriority, bestDistSqr)
+			&& AI_filtersAllow(filters + numGatherFilters, theEnemy))
 		{
 			effectivePriority = modPriority;
 			actualPriority = curPriority;
+			bestDistSqr = distSqr;
 			bestEnemy = theEnemy;
 		}
 	}	

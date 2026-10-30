@@ -3205,6 +3205,74 @@ TEST(attack_move_shoots_the_biggest_threat_first)
 	CHECK_EQ( AI_threatScore( 0, 1000, false, -5.0f, MOD ), 1000 );
 }
 
+/* AI.cpp: the scripted-priority search a hunter runs over the whole map picks in one pass over
+   the unsorted list what the near-to-far sort and the lead loop over it picked, ties included,
+   or every replay moves. */
+extern Bool AI_attackPriorityTakesLead( Int modPriority, Int curPriority, Real distSqr,
+																				Int bestModPriority, Int bestCurPriority, Real bestDistSqr );
+
+TEST(attack_priority_pick_needs_no_sort)
+{
+	enum { N = 24 };
+	/* few distances, so equal distances and equal priorities after distance come up often */
+	const Real DIST[] = { 0.0f, 50.0f, 100.0f, 110.0f, 200.0f, 500.0f };
+	UnsignedInt seed = 12345;
+	for (Int round = 0; round < 2000; ++round)
+	{
+		Int modP[N], curP[N];
+		Real distSqr[N];
+		Bool allowed[N];
+		for (Int i = 0; i < N; ++i)
+		{
+			seed = seed * 1664525u + 1013904223u;
+			const Real dist = DIST[(seed >> 16) % 6];
+			curP[i] = (Int)((seed >> 8) % 5) + 1;
+			distSqr[i] = dist * dist;
+			allowed[i] = ((seed >> 24) & 3) != 0;
+			modP[i] = curP[i] - (Int)(dist / 100.0f);
+			if (modP[i] < 1)
+				modP[i] = 1;
+		}
+
+		/* the old way: a stable sort near to far, then the lead on a higher (modP, curP) */
+		Int order[N];
+		for (Int i = 0; i < N; ++i)
+		{
+			Int j = i;
+			for ( ; j > 0 && distSqr[order[j - 1]] > distSqr[i]; --j)
+				order[j] = order[j - 1];
+			order[j] = i;
+		}
+		Int sortedPick = -1, e = 0, a = 0;
+		for (Int k = 0; k < N; ++k)
+		{
+			const Int i = order[k];
+			if ((modP[i] > e || (modP[i] == e && curP[i] > a)) && allowed[i])
+			{
+				e = modP[i];
+				a = curP[i];
+				sortedPick = i;
+			}
+		}
+
+		Int onePassPick = -1, bestMod = 0, bestCur = 0;
+		Real bestDistSqr = 0.0f;
+		for (Int i = 0; i < N; ++i)
+		{
+			if (AI_attackPriorityTakesLead(modP[i], curP[i], distSqr[i], bestMod, bestCur, bestDistSqr) && allowed[i])
+			{
+				bestMod = modP[i];
+				bestCur = curP[i];
+				bestDistSqr = distSqr[i];
+				onePassPick = i;
+			}
+		}
+		CHECK_EQ( onePassPick, sortedPick );
+		if (onePassPick != sortedPick)
+			break;
+	}
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // Particle ground collision
 //
