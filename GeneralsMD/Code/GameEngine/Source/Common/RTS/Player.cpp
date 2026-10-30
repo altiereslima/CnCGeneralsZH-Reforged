@@ -2015,6 +2015,17 @@ void Player::removeTemplateCountMember(Object *obj)
 }
 
 //=============================================================================
+Bool Player::hasTemplateMember(const ThingTemplate *tmpl) const
+{
+	for (std::vector<TemplateCountMembers>::const_iterator it = m_templateCountMembers.begin(); it != m_templateCountMembers.end(); ++it)
+	{
+		if (!it->m_objects.empty() && it->m_template->isEquivalentTo(tmpl))
+			return true;
+	}
+	return false;
+}
+
+//=============================================================================
 void Player::countObjectsByThingTemplate(Int numTmplates, const ThingTemplate* const * things, Bool ignoreDead, Int *counts, Bool ignoreUnderConstruction ) const
 {
 	for (Int i = 0; i < numTmplates; ++i)

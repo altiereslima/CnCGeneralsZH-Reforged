@@ -668,6 +668,9 @@ public:
 	void addTemplateCountMember(Object *obj);
 	void removeTemplateCountMember(Object *obj);
 
+	/// whether any member of our teams, dead or alive, has a template equivalent to tmpl
+	Bool hasTemplateMember(const ThingTemplate *tmpl) const;
+
 	/**
 		simply returns the number of buildings owned by this player
 	*/
