@@ -66,7 +66,9 @@
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 #include "W3DDevice/GameClient/W3DSmudge.h"
+#include "W3DDevice/GameClient/W3DWater.h"
 #include "GameClient/View.h"
+#include "GameClient/Snow.h"
 #include "GameClient/CommandXlat.h"
 #include "GameClient/Display.h"
 #include "GameClient/Water.h"
@@ -379,9 +381,13 @@ static void pushProtoHazeFrame(void)
 		warmth = max(min(daylight, 1.0f), 0.0f);
 	}
 	DX11Post_Set_Haze(colour, top, rise, strength, PROTO_HAZE_REACH, water, towardSun, warmth);
+}
 
-	// The fog the terrain draws, through the terrain's own mapping (ShroudTextureShader::set): the
-	// texture starts a cell before the draw origin, a texel to a cell.
+// The fog the terrain draws, through the terrain's own mapping (ShroudTextureShader::set): the
+// texture starts a cell before the draw origin, a texel to a cell.  The haze and the Ambient Occlusion
+// option read it.
+static void pushShroudFrame(void)
+{
 	W3DShroud *shroud = (TheTerrainRenderObject != NULL) ? TheTerrainRenderObject->getShroud() : NULL;
 	if (shroud != NULL && shroud->getShroudTexture() != NULL)
 	{
@@ -395,13 +401,99 @@ static void pushProtoHazeFrame(void)
 		Direct3D11_Set_Haze_Shroud(NULL, wholeRect);
 	}
 }
+
+// The Weather option's haze: the same still layer, over all the ground, in the kind's colour.
+static void pushWeatherHaze(void)
+{
+	float colour[3];
+	Real strength;
+	TheSnowManager->getWeatherHaze(colour, &strength);
+	const float up[3] = { 0.0f, 0.0f, 1.0f };
+	DX11Post_Set_Haze(colour, 1.0e5f, 1.0f, strength, PROTO_HAZE_REACH, -1.0e6f, up, 0.0f);
+}
+
+/* The Atmosphere option (DX11Post_Set_Atmosphere).  The horizon's colour goes by the time of day, scaled by
+	the map's own light as the weather's haze is, so a map with a dim or tinted sun gets the sky that goes
+	with it; under the Weather option it is the weather's colour.  A map whose script drew EA's skybox keeps
+	that, and the isometric camera has no far ground to fade. */
+static const Real ATMOSPHERE_START = 500.0f;		// the least eye distance the fade starts at
+static const Real ATMOSPHERE_SCALE = 2200.0f;		// how far past it the fade takes to reach about two thirds
+static const Real ATMOSPHERE_STRENGTH = 0.85f;		// the most of the horizon's colour the far ground takes
+static const Real ATMOSPHERE_SKY_FLOOR = 0.7f;		// a night's sky keeps this much, or the stars go
+static const float ATMOSPHERE_HORIZON[TIME_OF_DAY_COUNT][3] = {
+	{ 0.72f, 0.80f, 0.90f },	// invalid, as afternoon
+	{ 0.80f, 0.80f, 0.84f },	// morning
+	{ 0.72f, 0.80f, 0.90f },	// afternoon
+	{ 0.80f, 0.58f, 0.44f },	// evening
+	{ 0.07f, 0.10f, 0.18f } };	// night
+
+static void pushAtmosphere(Bool weatherHaze)
+{
+	static Bool s_on = FALSE;
+	const Bool on = TheGlobalData->m_atmosphere && !TheGlobalData->m_classicGraphics && Direct3D11_Present_Is_Enabled()
+		&& !TheGlobalData->m_drawSkyBox && !TheGlobalData->m_isometricCamera
+		&& TheTerrainRenderObject != NULL && TheTerrainRenderObject->getMap() != NULL
+		&& TheWaterRenderObj != NULL && TheWaterRenderObj->getSkyTexture() != NULL;
+	if (on)
+	{
+		const GlobalData::TerrainLighting &sun = TheGlobalData->m_terrainLighting[TheGlobalData->m_timeOfDay][0];
+		const float light[3] = { min(sun.ambient.red + sun.diffuse.red, 1.0f), min(sun.ambient.green + sun.diffuse.green, 1.0f),
+			min(sun.ambient.blue + sun.diffuse.blue, 1.0f) };
+		float horizon[3];
+		float tint[3];
+		for (Int i = 0; i < 3; ++i)
+		{
+			horizon[i] = ATMOSPHERE_HORIZON[TheGlobalData->m_timeOfDay][i] * light[i];
+			tint[i] = max(light[i], ATMOSPHERE_SKY_FLOOR);
+		}
+		if (weatherHaze)
+		{
+			Real strength;
+			TheSnowManager->getWeatherHaze(horizon, &strength);
+			memcpy(tint, horizon, sizeof(tint));
+		}
+		TextureClass *sky = TheWaterRenderObj->getSkyTexture();
+		if (!sky->Is_Initialized())
+			sky->Init();
+		// The ground under the focus, at the map's lowest: a height at the focus would pulse the fade as
+		// the camera scrolled over a ridge, and reading the logic's is a read inside the overlap window.
+		WorldHeightMap *map = TheTerrainRenderObject->getMap();
+		Direct3D11_Set_Atmosphere(horizon, tint, ATMOSPHERE_START, ATMOSPHERE_SCALE, ATMOSPHERE_STRENGTH,
+			TheTerrainRenderObject->getMinHeight(),
+			(map->getXExtent() - 1 - map->getBorderSizeInline() * 2) * MAP_XY_FACTOR,
+			(map->getYExtent() - 1 - map->getBorderSizeInline() * 2) * MAP_XY_FACTOR, sky->Peek_D3D_Base_Texture());
+	}
+	else if (s_on)
+	{
+		const float none[3] = { 0.0f, 0.0f, 0.0f };
+		DX11Post_Set_Atmosphere(none, none, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, NULL);
+	}
+	s_on = on;
+}
 #endif
 
 void W3DShaderManager::pushProtoHaze(void)
 {
 #if defined(_WIN32)
-	if (TheGlobalData->m_mapLight && Direct3D11_Is_Active())
+	// The kind is NONE unless the option is on and Direct3D 11 presents.  Weather's haze takes the place
+	// of the Warm Light one while it lasts.  Either option goes off live, and the haze holds what it was
+	// last handed.
+	const Bool weatherHaze = TheSnowManager != NULL && TheSnowManager->getWeatherKind() != WEATHER_KIND_NONE
+		&& TheSnowManager->isVisible();
+	static Bool s_hazed = FALSE;
+	if (weatherHaze)
+		pushWeatherHaze();
+	else if (TheGlobalData->m_mapLight && Direct3D11_Is_Active())
 		pushProtoHazeFrame();
+	else if (s_hazed)
+	{
+		const float none[3] = { 0.0f, 0.0f, 0.0f };
+		DX11Post_Set_Haze(none, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, none, 0.0f);
+	}
+	s_hazed = weatherHaze || TheGlobalData->m_mapLight;
+	pushAtmosphere(weatherHaze);
+	if ((TheGlobalData->m_mapLight || TheGlobalData->m_ambientOcclusion || TheGlobalData->m_atmosphere || weatherHaze) && Direct3D11_Is_Active())
+		pushShroudFrame();
 #endif
 }
 
@@ -417,6 +509,7 @@ static Int fixedFunctionBloomIntensity(void)
 		const GlowTuning tuning = glowTuning();
 		DX11Post_Set_Bloom(tuning.threshold, tuning.intensity, tuning.additiveGain, tuning.blurPasses);
 		DX11Post_Set_Grade(TheGlobalData->m_lightingStyle == LIGHTING_STYLE_REFORGED ? 1.0f : 0.0f);
+		DX11Post_Set_Internal_Hdr(TheGlobalData->m_internalHdr != FALSE);
 #endif
 		return 0;
 	}

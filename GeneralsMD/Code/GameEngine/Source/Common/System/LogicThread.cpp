@@ -112,6 +112,7 @@ namespace
 	std::exception_ptr	s_overlapError;
 	LogicClock::time_point	s_overlapStart;
 	Real				s_overlapTickMS = 0.0f;
+	Real				s_overlapSyncMS = 0.0f;		///< how far into the pass this tick started
 	Real				s_overlapWaitMS = 0.0f;
 	Int					s_overlappedTicks = 0;
 	Real				s_overlapWaitTotalMS = 0.0f;
@@ -319,6 +320,7 @@ void LogicThread::parkRender( void )
 	if( !s_renderBeside )
 		return;
 	s_parkWanted = TRUE;
+	s_doneCv.notify_one();		// the main thread may be in tickOutlastsNextPicture
 	s_parkCv.wait( lock, []{ return !s_renderBeside; } );
 }
 
@@ -354,6 +356,7 @@ static void startOverlap( void )
 	TheGameClient->setFrame( TheGameLogic->getFrame() );
 	TheGameLogic->growObjectLookupForTick();
 	jitter();
+	s_overlapSyncMS = GameEngine_msSincePassStart();
 	s_overlapStart = LogicClock::now();
 	// open before the tick wakes, so nothing the main thread does beside it reads as outside the window
 	LogicThread::g_windowOpen.store( 1, std::memory_order_relaxed );
@@ -414,6 +417,36 @@ void LogicThread::OverlapWindow::open( Bool mayOverlap )
 }
 
 //-------------------------------------------------------------------------------------------------
+/* Behind the clock the next tick is due the whole time, so the rule in closeOrDrawAgain never draws
+	 again and the eye waits on the tick: sync + a 13 ms tick is an 18 ms frame on the 2000 object crowd
+	 with 4 ms of picture in it.  Wait for the tick only as long as the sync point and a picture still
+	 fit in a 60 Hz frame after it, then draw once more, timed to end as the last tick's length says this
+	 one does, since a picture still going when the tick ends holds the next tick up.  A picture that
+	 fills the frame by itself (a slow card) gains nothing from a second one.  A present that waits for
+	 the refresh never gets one either: the sync point ate the start of that refresh, so the picture's
+	 own length looks like room, and the second picture's whole refresh halved the game's speed. */
+static Bool tickOutlastsNextPicture( Real pictureMS )
+{
+#if defined(_WIN32)
+	const Bool presentWaitsForRefresh = TheGlobalData->m_vsync;
+#else
+	const Bool presentWaitsForRefresh = TRUE;	// the SDL GPU swapchain's VSYNC, whatever was asked for
+#endif
+	if( presentWaitsForRefresh || !TheGameEngine->isPassPacedByClock() )
+		return FALSE;
+	const Real PICTURE_BUDGET_MS = 15.0f;		// 16.7 less the flush and the sync point's slower passes
+	if( pictureMS >= PICTURE_BUDGET_MS )
+		return FALSE;
+	const Real latestStartMS = PICTURE_BUDGET_MS - s_overlapSyncMS - pictureMS;
+	const Real tickLeftMS = s_overlapTickMS - elapsedMS( s_overlapStart, LogicClock::now() );
+	const Real startMS = tickLeftMS <= latestStartMS ? latestStartMS : std::min( latestStartMS, tickLeftMS - pictureMS );
+	// whole microseconds: a float duration added to the steady clock rounds away the wait
+	const std::chrono::microseconds wait( (long long)( std::max( startMS, 0.0f ) * 1000.0f ) );
+	std::unique_lock<std::mutex> lock( s_lock );
+	return !s_doneCv.wait_for( lock, wait, []{ return s_tickDone || s_parkWanted; } );
+}
+
+//-------------------------------------------------------------------------------------------------
 Bool LogicThread::OverlapWindow::closeOrDrawAgain( Real pictureMS )
 {
 	if( m_open && s_overlapRunning )
@@ -426,7 +459,7 @@ Bool LogicThread::OverlapWindow::closeOrDrawAgain( Real pictureMS )
 		}
 		// the plan's rule, wait only once the next tick is due, with the next picture's length taken off
 		// so a picture never holds the next tick up; the last picture stands in for the next one
-		if( running && TheGameEngine->msUntilNextTickDue() > pictureMS )
+		if( running && ( TheGameEngine->msUntilNextTickDue() > pictureMS || tickOutlastsNextPicture( pictureMS ) ) )
 		{
 			++s_extraPictures;
 			return TRUE;

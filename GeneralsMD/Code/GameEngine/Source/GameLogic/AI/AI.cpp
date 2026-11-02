@@ -1382,12 +1382,12 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	* with the odds at a known defence's edge.  fireMem is how long a gun it has lost sight of stays on its
 	* map, and with it the ground it covers.
 	*
-	*                      scoutS maxSc decis  cntr  mass   ttk  indiv team infl focus save harv expand guard hoard econ micro  gate  answer massU  bankS  floor payoff upgr    nonc  share backlog push   minPow  siege  beam  strikeE strikeT swDef                     stall  lost retry  stage  spot arty    inflS fireLook word   odds   fireMem */
+	*                      scoutS maxSc decis  cntr  mass   ttk  indiv team infl focus save harv expand guard hoard econ micro  gate  answer massU  bankS  floor payoff upgr    nonc  share backlog push   minPow  siege  beam  strikeE strikeT swDef                     stall  lost retry  stage  spot arty    inflS fireLook word   odds   fireMem  watch watchOdds dodge */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
-	/* Easy      */ { 75.0f, 1,  7.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0, FALSE, FALSE, FALSE, FALSE, FALSE, 120.0f, 6000, 4.0f, 720.0f, 0.05f, 0.05f,  90.0f, 360.0f, 1500.0f,  80.0f, 0.00f, 0.0f, 2.0f, 3,                        300.0f, 3, 300.0f, FALSE, 1, 1.00f, 4.0f, 3.00f,   0.0f, 0.60f, 10.0f },
-	/* Medium    */ { 45.0f, 1,  3.0f,  0.50f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  6000, FALSE, FALSE, FALSE, FALSE, FALSE,  60.0f, 5000, 2.5f, 420.0f, 0.05f, 0.25f,  75.0f, 300.0f, 2000.0f, 120.0f, 1.00f, 2.0f, 1.0f, 6,                        240.0f, 2, 240.0f, TRUE,  1, 0.50f, 2.0f, 1.00f, 150.0f, 0.80f, 20.0f },
-	/* Hard      */ { 25.0f, 2,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  30.0f, 4000, 1.5f, 180.0f, 0.05f, 1.00f,  45.0f, 240.0f, 4500.0f, 160.0f, 0.25f, 3.0f, 0.0f, DEFENSES_PER_SUPERWEAPON, 180.0f, 2, 180.0f, TRUE,  2, 0.25f, 1.0f, 0.33f, 300.0f, 1.00f, 40.0f }
+	/* Easy      */ { 75.0f, 1,  7.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0, FALSE, FALSE, FALSE, FALSE, FALSE, 120.0f, 6000, 4.0f, 720.0f, 0.05f, 0.05f,  90.0f, 360.0f, 1500.0f,  80.0f, 0.00f, 0.0f, 2.0f, 3,                        300.0f, 3, 300.0f, FALSE, 1, 1.00f, 4.0f, 3.00f,   0.0f, 0.60f, 10.0f, 16.0f, 1.0f, 3.25f },
+	/* Medium    */ { 45.0f, 1,  3.0f,  0.50f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  6000, FALSE, FALSE, FALSE, FALSE, FALSE,  60.0f, 5000, 2.5f, 420.0f, 0.05f, 0.25f,  75.0f, 300.0f, 2000.0f, 120.0f, 1.00f, 2.0f, 1.0f, 6,                        240.0f, 2, 240.0f, TRUE,  1, 0.50f, 2.0f, 1.00f, 150.0f, 0.80f, 20.0f,  6.0f, 1.5f, 1.50f },
+	/* Hard      */ { 25.0f, 2,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  30.0f, 4000, 1.5f, 180.0f, 0.05f, 1.00f,  45.0f, 240.0f, 4500.0f, 160.0f, 0.25f, 3.0f, 0.0f, DEFENSES_PER_SUPERWEAPON, 180.0f, 2, 180.0f, TRUE,  2, 0.25f, 1.0f, 0.33f, 300.0f, 1.00f, 40.0f,  2.0f, 2.0f, 0.33f }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1541,6 +1541,28 @@ Bool aiHolderLetGo( Bool retreatSeesIt, UnsignedInt heldFrames, Bool moving, Uns
 	if( heldFrames > staleFrames )
 		return TRUE;
 	return !retreatSeesIt && !moving && heldFrames > holdFrames;
+}
+
+//-------------------------------------------------------------------------------------------------
+void aiStrikeDodgeSpot( Real x, Real y, Real clumpX, Real clumpY, Real reach, const Real *bounds, Int tie, Real *outX, Real *outY )
+{
+	Real dx = x - clumpX;
+	Real dy = y - clumpY;
+	Real length = (Real)sqrt( dx * dx + dy * dy );
+	if( length < 1.0f )
+	{
+		dx = (tie & 1) ? 1.0f : -1.0f;
+		dy = (tie & 2) ? 1.0f : -1.0f;
+		length = (Real)sqrt( 2.0f );
+	}
+	dx *= reach / length;
+	dy *= reach / length;
+	if( x + dx < bounds[ 0 ] || x + dx > bounds[ 2 ] )
+		dx = -dx;
+	if( y + dy < bounds[ 1 ] || y + dy > bounds[ 3 ] )
+		dy = -dy;
+	*outX = x + dx;
+	*outY = y + dy;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2248,6 +2270,12 @@ Real aiWinChance( Real myPower, Real enemyPower )
 }
 
 //-------------------------------------------------------------------------------------------------
+Real aiSideWinChance( Real myPower, Real alliedPower, Real enemyPower, Int enemyAllies, Real allyShare )
+{
+	return aiWinChance( myPower + alliedPower * allyShare, enemyPower * (1.0f + INT_TO_REAL( enemyAllies ) * allyShare) );
+}
+
+//-------------------------------------------------------------------------------------------------
 AIPressure aiPressureLevel( Real chance, Bool enemyBaseInSight, AIPressure current )
 {
 	const Real FINISH_AT = 0.85f;
@@ -2457,6 +2485,9 @@ void AI::parseSkillLevel(INI *ini, void *instance, void* /*store*/, const void* 
 		{ "FireWordRadius",						INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_fireWordRadius ) },
 		{ "FireChargeOdds",						INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_fireChargeOdds ) },
 		{ "FireMemorySeconds",				INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_fireMemorySeconds ) },
+		{ "BaseWatchSeconds",					INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_baseWatchSeconds ) },
+		{ "BaseWatchOdds",						INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_baseWatchOdds ) },
+		{ "StrikeDodgeSeconds",				INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_strikeDodgeSeconds ) },
 		{ NULL, NULL, NULL, 0 }
 	};
 

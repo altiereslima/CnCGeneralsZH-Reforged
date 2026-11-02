@@ -38,8 +38,12 @@ param(
 	[string] $Exe = "generals.exe",
 	# switches to add to the run
 	[string[]] $ExtraArgs = @(),
-	# the game's user data folder (ZH_USER_DATA_DIR). Empty: the player's own, in Documents
+	# the game's user data folder (ZH_USER_DATA_DIR). Empty: one of this script's own under TEMP, so the
+	# picture measured is never the Options.ini of whoever runs it
 	[string] $UserDataDir = "",
+	# copied to Options.ini there. Empty: a file the folder already has stays, and a folder with none
+	# gets reforged-look.ini, the setup the gate measures, the Reforged picture at High
+	[string] $Options = "",
 	# minutes of wall clock before a run is killed and counted as no result
 	[int] $TimeoutMinutes = 180
 )
@@ -53,12 +57,12 @@ $HistogramTopMS = 64		# the log's frame time histogram: past this a percentile r
 
 $exePath = Join-Path $RunDir $Exe
 if (-not (Test-Path $exePath)) { throw "no $Exe in $RunDir" }
-if ($UserDataDir -ne "") {
-	New-Item -ItemType Directory -Force $UserDataDir | Out-Null
-	$env:ZH_USER_DATA_DIR = (Resolve-Path $UserDataDir).Path
-} else {
-	Remove-Item Env:\ZH_USER_DATA_DIR -ErrorAction SilentlyContinue
-}
+if ($UserDataDir -eq "") { $UserDataDir = Join-Path $env:TEMP "gate60hz_userdata" }
+New-Item -ItemType Directory -Force $UserDataDir | Out-Null
+$env:ZH_USER_DATA_DIR = (Resolve-Path $UserDataDir).Path
+$optionsFile = Join-Path $env:ZH_USER_DATA_DIR "Options.ini"
+if ($Options -ne "") { Copy-Item $Options $optionsFile }
+elseif (-not (Test-Path $optionsFile)) { Copy-Item "$PSScriptRoot\reforged-look.ini" $optionsFile }
 
 $lastFrame = $Minutes * 60 * 60
 $prefix = "gate60hz_"

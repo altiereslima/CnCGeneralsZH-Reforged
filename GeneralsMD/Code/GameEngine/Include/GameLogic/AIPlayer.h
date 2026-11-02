@@ -274,6 +274,7 @@ public:
 	AIPersonality getAIPersonality(void) const {return m_persona;}
 	Bool superweaponIsPlan(void) const;	///< a Tech AI, or a GLA Air AI whose SCUD Storm stands in for the air force: its first superweapon is rushed
 	void noteTeamRequest(AITeamRequestKind kind, Int from, Int enemy, const Coord3D *pos);	///< an ally asks (aiPostTeamRequest)
+	void noteStrikeLaunched(const Player *launcher);	///< a superweapon went up, the word every seat hears: who fired, not where (dodgeStrike)
 	/// HEADLESS PERSONA: one line of what this seat's personality did over the match, for ai-batch
 	void logPersonaSummary(void);
 
@@ -777,7 +778,11 @@ protected:
 	Bool isAtHome(const Coord3D *pos) const;			///< within two base radii of the base center
 	Bool isBaseUnderAttack(void) const;						///< hit lately, with a known enemy that can shoot standing at home
 	Object *homeIntruder(Int *count, std::vector<AIVisibleEnemy> *army) const;	///< the enemy nearest the base center while the base is under attack
+	Object *baseSquatter(Int *count, std::vector<AIVisibleEnemy> *army) const;	///< the known enemy nearest the base center inside the base, hit or not, a building and a worker included
 	void defendHome(void);												///< a base under attack trains fighters from its bank and sends its idle units in
+	void sendAtSquatter(Object *squatter, Real worth, const std::vector<Object *> &owned);	///< the nearest idle fighters at home, up to worth in combat power
+	void dodgeStrike(void);												///< the rung's beat after the word of an enemy launch, the helicopters leave where they stand
+	UnsignedInt m_strikeNoticeFrame;							///< when the word of an enemy launch came, 0 when it has been acted on
 	Real waitingPower(Team *team, AIGroup *group) const;	///< what a team has for a wave, less the members out on orders; they join the group if one is given
 
 	/** How hard this AI leans on its current enemy: its chance against him, looked at again on the

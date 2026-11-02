@@ -812,7 +812,12 @@ void Player::update()
 	{
 		UnsignedInt now = TheGameLogic->getFrame();
 		//Only check and post the message once every second so we don't spam the message stream to account for lag.
-		if( now % LOGICFRAMES_PER_SECOND == 0 )
+		// Not while a mission's script holds the player's input, as EA's input gate kept it out: retaliation
+		// in an opening cinematic set the player's idle props shooting at what the script needs alive.  On
+		// China's first mission they killed the bomb truck short of the area its detonation waits for, so the
+		// cinematic never ended.
+		const Bool inputHeldByMission = TheGameLogic->isInSinglePlayerGame() && TheScriptEngine->isInputHeldByScript();
+		if( now % LOGICFRAMES_PER_SECOND == 0 && !inputHeldByMission )
 		{
 			if( TheGlobalData->m_clientRetaliationModeEnabled != isLogicalRetaliationModeEnabled() )
 			{
@@ -1331,6 +1336,12 @@ void Player::noteTeamRequest( Int kind, Int from, Int enemy, const Coord3D *pos 
 {
 	if( m_ai )
 		m_ai->noteTeamRequest( (AITeamRequestKind)kind, from, enemy, pos );
+}
+
+void Player::noteStrikeLaunched( const Player *launcher )
+{
+	if( m_ai )
+		m_ai->noteStrikeLaunched( launcher );
 }
 
 //-------------------------------------------------------------------------------------------------

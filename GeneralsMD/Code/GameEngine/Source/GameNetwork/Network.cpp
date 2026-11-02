@@ -46,6 +46,7 @@
 #include "strtok_r.h"
 #include "GameClient/Shell.h"
 #include "Common/CRCDebug.h"
+#include "Common/LogicThread.h"
 #include "GameLogic/GameLogic.h"
 
 #include "Common/RandomValue.h"
@@ -390,7 +391,9 @@ void Network::setSawCRCMismatch( void )
 	m_sawCRCMismatch = TRUE;
 
 	TheScriptActions->closeWindows( TRUE );
-	m_messageWindow = TheWindowManager->winCreateFromScript("Menus/CRCMismatch.wnd");
+	// the tick calls this, beside the render: the window list is the render's until the flush, which
+	// runs this behind closeWindows' destroy
+	LogicThread::callAfterTick( [this]() { m_messageWindow = TheWindowManager->winCreateFromScript("Menus/CRCMismatch.wnd"); } );
 	TheScriptEngine->startEndGameTimer();
 
 	TheRecorder->logCRCMismatch();

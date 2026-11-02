@@ -44,6 +44,7 @@
 #include "Common/GameType.h"
 #include "Common/LogicThread.h"
 #include "WorldHeightMap.h"
+#include "W3DDevice/GameClient/GroundMarks.h"
 
 // The lights one terrain relight takes in, the rest dropped.  Only the vertex path reads it: the
 // Direct3D 11 frame lights the ground per pixel and takes BLAST_LIGHT_SLOTS (32) instead.  Was 20.
@@ -192,6 +193,10 @@ public:
 	/// Update the diffuse value from static light info for one vertex.
 	void doTheLight(VERTEX_FORMAT *vb, Vector3*light, Vector3*normal, RefRenderObjListIterator *pLightsIterator, UnsignedByte alpha);
 	void addScorch(Vector3 location, Real radius, Scorches type);
+	/// The Battle Marks option: a burn that fades, on the ring's fixed cap.  Nothing without the option.
+	void addGroundMark(const Vector3 &location, Real radius, Int type);
+	/// The option, and a picture that draws it: Direct3D 11 and not Classic.
+	static Bool groundMarksOn(void);
 	/// Everything added so far came with the map and is not to be thrown away to make room.
 	void markScorchesStatic(void);
 	void addTree(DrawableID id, Coord3D location, Real scale, Real angle,
@@ -315,6 +320,11 @@ protected:
 	// NOTE: This argument (contrary to most of the rest of the engine), is in degrees, not radians.
 	Real		m_curImpassableSlope;
 
+	GroundMarks::Ring m_groundMarks;	///< drawn from the same buffers as the scorches, newest first and in at most half of them
+	UnsignedInt m_groundMarksBuilt;		///< logic frame they last went into the buffers
+	Bool m_groundMarksPending;				///< one was added since
+
+	void updateGroundMarks(void);	 ///<Decide whether this frame rebuilds the buffers for the marks.
 	void updateScorches(void);	 ///<Update m_vertexScorch and m_indexScorch so all scorches will be drawn.
 	void allocateScorchBuffers(void);	 ///<allocate static buffers for drawing scorch marks.
 	void freeScorchBuffers(void);		 ///< frees up scorch buffers.

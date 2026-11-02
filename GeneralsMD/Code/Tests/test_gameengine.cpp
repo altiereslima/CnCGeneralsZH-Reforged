@@ -1292,6 +1292,33 @@ TEST(armor_skips_an_unknown_damage_type)
 	remove( TEST_INI );
 }
 
+/* Water Splashes goes by the same names as Battle Marks and takes every list that scorches, a nuke's
+	 among them, whatever its name; a muzzle flash shakes the view and splashes nothing. */
+TEST(water_splashes_take_blasts_by_name_and_every_list_that_scorches)
+{
+	CHECK( bootOnce() );
+	if( TheFXListStore == NULL )
+		TheFXListStore = NEW FXListStore;
+
+	writeFile( TEST_INI,
+		"FXList SplashTest_ShellDetonation\r\n"
+		"End\r\n"
+		"FXList SplashTest_Muzzle\r\n"
+		"End\r\n"
+		"FXList SplashTest_Nuke\r\n"
+		"  TerrainScorch\r\n"
+		"    Type = RANDOM\r\n"
+		"    Radius = 120\r\n"
+		"  End\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+	remove( TEST_INI );
+
+	CHECK_NEAR( TheFXListStore->findFXList( "SplashTest_ShellDetonation" )->getSplashRadius(), 10.0f, 0.01f );
+	CHECK_NEAR( TheFXListStore->findFXList( "SplashTest_Muzzle" )->getSplashRadius(), 0.0f, 0.01f );
+	CHECK_NEAR( TheFXListStore->findFXList( "SplashTest_Nuke" )->getSplashRadius(), 120.0f, 0.01f );
+}
+
 /* Data\INI\FXListReforged.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
 	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
 	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.
@@ -1578,6 +1605,12 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 	CHECK_EQ( GameEngine_logicCatchupMaxFrames( 60 ), 6 );
 	CHECK_EQ( GameEngine_logicCatchupMaxFrames( 15 ), 2 );
 	CHECK_EQ( GameEngine_logicCatchupMaxFrames( 0 ), 1 );
+
+	/* A tick that fits leaves the picture on time, one that does not waits for the next pass, and a
+	   picture already late pays the debt, or a 25 ms render would slow the match to its own rate. */
+	CHECK( GameEngine_catchupTickFitsPicture( 8.0f, 4.0f ) );
+	CHECK( !GameEngine_catchupTickFitsPicture( 10.0f, 7.0f ) );
+	CHECK( GameEngine_catchupTickFitsPicture( 25.0f, 7.0f ) );
 
 	/* A 300fps renderer (3.33ms/frame) at 30fps logic: 900 render frames span
 	   3 seconds, which must yield 90 logic frames, not 900. */
@@ -5646,6 +5679,19 @@ TEST(player_game_speed_is_normal_or_turbo)
 	CHECK_EQ( ClampPlayerGameSpeed( ConvertRetailFrames( 5 ) ), LOGICFRAMES_PER_SECOND );
 }
 
+TEST(mission_cinematic_runs_at_the_speed_its_script_asks_for)
+{
+	/* CHI01's opening asks for 23 of retail's 30 and for 0 when it hands the game back; USA06 hands it
+	   back with 30.  Below 30 is the cinematic's pace, turbo mode or not; the rest is the match's speed. */
+	const Int normal = LOGICFRAMES_PER_SECOND;
+	const Int turbo = LOGICFRAMES_PER_SECOND * 2;
+	CHECK_EQ( GameEngine_missionFramesPerSecond( 23, normal ), 46 );
+	CHECK_EQ( GameEngine_missionFramesPerSecond( 23, turbo ), 46 );
+	CHECK_EQ( GameEngine_missionFramesPerSecond( 0, normal ), normal );
+	CHECK_EQ( GameEngine_missionFramesPerSecond( 0, turbo ), turbo );
+	CHECK_EQ( GameEngine_missionFramesPerSecond( RETAIL_LOGICFRAMES_PER_SECOND, turbo ), turbo );
+}
+
 TEST(match_speed_is_frames_per_second_limit_doubled_by_turbo)
 {
 	/* Every MSG_NEW_GAME a player starts passes this: GameData.ini's normal speed, or -fps for a test,
@@ -6739,7 +6785,7 @@ TEST(particlesys_debris_trails_option_destroys_only_marked_systems)
 
 	GlobalData *savedData = TheWritableGlobalData;
 	TheWritableGlobalData = NEW GlobalData;
-	CHECK( TheGlobalData->m_explosionDebrisTrails );
+	CHECK( !TheGlobalData->m_explosionDebrisTrails );
 
 	UserPreferences pref;
 	TheWritableGlobalData->m_explosionDebrisTrails = FALSE;
@@ -6783,7 +6829,7 @@ TEST(particlesys_debris_trails_option_destroys_only_marked_systems)
 
 /* BuildWithoutWorker, on by default, is a live bool row with a check box on Options > Controls,
 	 and it round-trips through Options.ini. */
-TEST(options_build_without_worker_row_defaults_on_and_round_trips)
+TEST(options_build_without_worker_row_defaults_off_and_round_trips)
 {
 	const OptionDef *def = findOptionDef( "BuildWithoutWorker" );
 	CHECK( def != NULL );
@@ -6793,8 +6839,8 @@ TEST(options_build_without_worker_row_defaults_on_and_round_trips)
 
 	GlobalData *savedData = TheWritableGlobalData;
 	TheWritableGlobalData = NEW GlobalData;
-	CHECK( TheGlobalData->m_buildWithoutWorker );
-	CHECK_EQ( def->get(), 1 );
+	CHECK( !TheGlobalData->m_buildWithoutWorker );
+	CHECK_EQ( def->get(), 0 );
 
 	UserPreferences pref;
 	TheWritableGlobalData->m_buildWithoutWorker = FALSE;
@@ -7572,6 +7618,21 @@ TEST(gameslot_restores_the_pre_randomization_setup_on_a_restart)
 	fixed.reset();
 	CHECK( !fixed.hasSavedOriginalSetup() );
 	CHECK_EQ( fixed.getOriginalColor(), -1 );
+}
+
+/* The army list's bar: the thumb's ends are the list's ends, and a thumb pulled past them stops. */
+TEST(faction_picker_bar_reaches_both_ends_of_the_list)
+{
+	const Int scrollMax = 2500, track = 684, thumb = 145;
+	CHECK_EQ( FactionPickerThumbTop( 0, scrollMax, track, thumb ), 0 );
+	CHECK_EQ( FactionPickerThumbTop( scrollMax, scrollMax, track, thumb ), track - thumb );
+	CHECK_EQ( FactionPickerThumbTop( 0, 0, track, track ), 0 );
+	CHECK_EQ( FactionPickerScrollAtThumb( 0, scrollMax, track, thumb ), 0 );
+	CHECK_EQ( FactionPickerScrollAtThumb( track - thumb, scrollMax, track, thumb ), scrollMax );
+	CHECK_EQ( FactionPickerScrollAtThumb( -30, scrollMax, track, thumb ), 0 );
+	CHECK_EQ( FactionPickerScrollAtThumb( track, scrollMax, track, thumb ), scrollMax );
+	const Int there = FactionPickerScrollAtThumb( FactionPickerThumbTop( 1000, scrollMax, track, thumb ), scrollMax, track, thumb );
+	CHECK( there > 990 && there <= 1000 );
 }
 
 /* A front-end title is set in capitals, and towupper in the C locale stops at ASCII: the army
@@ -9536,7 +9597,7 @@ TEST(health_bar_mode_round_trips_through_options_ini)
 	GlobalData *saved = TheWritableGlobalData;
 	TheWritableGlobalData = NEW GlobalData;
 
-	CHECK_EQ( TheGlobalData->m_healthBarMode, (Int)HEALTH_BAR_ALWAYS );
+	CHECK_EQ( TheGlobalData->m_healthBarMode, (Int)HEALTH_BAR_SELECTION );
 
 	TheWritableGlobalData->m_healthBarMode = HEALTH_BAR_SMART;
 
@@ -13402,6 +13463,13 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_fireChargeOdds > lower.m_fireChargeOdds );
 		CHECK( upper.m_fireMemorySeconds > lower.m_fireMemorySeconds );
 
+		// an enemy in the base that has not fired: looks sooner and sends more
+		CHECK( upper.m_baseWatchSeconds < lower.m_baseWatchSeconds );
+		CHECK( upper.m_baseWatchOdds > lower.m_baseWatchOdds );
+
+		// the word of a launch: its helicopters leave sooner
+		CHECK( upper.m_strikeDodgeSeconds < lower.m_strikeDodgeSeconds );
+
 		// capabilities only ever switch on as you climb, never off again
 		CHECK( upper.m_massBeforeAttacking >= lower.m_massBeforeAttacking );
 		CHECK( upper.m_retreatIndividualUnits >= lower.m_retreatIndividualUnits );
@@ -14010,6 +14078,26 @@ TEST(a_unit_pulled_out_hurt_is_not_sent_back_to_the_gun)
 /** AI.cpp: who ends a hold.  The retreat ends those it looks at.  A hunter on the default team stood calm for
 	 forty seconds, out of every call-up, with nothing to send it on, and a rung with no retreat turned its unit
 	 back halfway to the quiet ground. */
+TEST(a_helicopter_hearing_a_launch_clears_any_blast_it_stands_in)
+{
+	const Real bounds[ 4 ] = { 0.0f, 0.0f, 5000.0f, 5000.0f };
+	const Real reach = 450.0f;
+	Real x, y;
+	// away from the middle of its group
+	aiStrikeDodgeSpot( 1000.0f, 1000.0f, 900.0f, 1000.0f, reach, bounds, 0, &x, &y );
+	CHECK_EQ( 1450.0f, x );
+	CHECK_EQ( 1000.0f, y );
+	// alone: a line of its own, by the tie, and the full distance
+	aiStrikeDodgeSpot( 1000.0f, 1000.0f, 1000.0f, 1000.0f, reach, bounds, 3, &x, &y );
+	CHECK( x > 1000.0f && y > 1000.0f );
+	CHECK( fabs( sqrt( (x - 1000.0f) * (x - 1000.0f) + (y - 1000.0f) * (y - 1000.0f) ) - reach ) < 0.01f );
+	aiStrikeDodgeSpot( 1000.0f, 1000.0f, 1000.0f, 1000.0f, reach, bounds, 0, &x, &y );
+	CHECK( x < 1000.0f && y < 1000.0f );
+	// the map's edge turns it back
+	aiStrikeDodgeSpot( 100.0f, 1000.0f, 200.0f, 1000.0f, reach, bounds, 0, &x, &y );
+	CHECK_EQ( 550.0f, x );
+}
+
 TEST(a_holder_nothing_sends_on_goes_free_once_it_has_stopped)
 {
 	const UnsignedInt hold = 600;
@@ -15058,6 +15146,13 @@ TEST(pressure_rises_with_the_chance_of_winning_and_falls_back_with_it)
 	CHECK( aiWinChance( 8000.0f, 1000.0f ) > aiWinChance( 8000.0f, 4000.0f ) );
 	// one rifleman against an empty field is not a rout
 	CHECK( aiWinChance( 200.0f, 0.0f ) < 0.65f );
+
+	// no allies on either side is the plain chance, and even teams are the plain even match
+	CHECK_NEAR( aiWinChance( 3000.0f, 9000.0f ), aiSideWinChance( 3000.0f, 0.0f, 9000.0f, 0, 1.0f ), 0.0001f );
+	CHECK_NEAR( 0.5f, aiSideWinChance( 4000.0f, 12000.0f, 4000.0f, 3, 1.0f ), 0.0001f );
+	// seven against one player three times the size of each: not outmatched, though each is alone
+	CHECK_EQ( AIPRESSURE_PRESS, aiPressureLevel( aiSideWinChance( 3000.0f, 18000.0f, 9000.0f, 0, 1.0f ), TRUE, AIPRESSURE_DEFEND ) );
+	CHECK_EQ( AIPRESSURE_DEFEND, aiPressureLevel( aiSideWinChance( 3000.0f, 18000.0f, 9000.0f, 5, 1.0f ), FALSE, AIPRESSURE_NORMAL ) );
 
 	CHECK_EQ( AIPRESSURE_NORMAL, aiPressureLevel( 0.5f, TRUE, AIPRESSURE_NORMAL ) );
 	CHECK_EQ( AIPRESSURE_PRESS, aiPressureLevel( aiWinChance( 9000.0f, 3000.0f ), TRUE, AIPRESSURE_NORMAL ) );
@@ -16587,7 +16682,7 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 	CHECK( bars != NULL );
 	CHECK( bars->widgetName != NULL && bars->widgetName[ 0 ] != '\0' );
 
-	/* The two mouse habits are Controls check boxes again, on by default. */
+	/* The two mouse habits are Controls check boxes again, off by default. */
 	static const char *const habits[] =
 	{
 		"FormationDrag", "EdgeScrollInWindowedMode", NULL
@@ -16597,7 +16692,7 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 		const OptionDef *def = findOptionDef( habits[ i ] );
 		CHECK( def != NULL );
 		CHECK( def->widgetName != NULL && def->widgetName[ 0 ] != '\0' );
-		CHECK_EQ( def->get(), 1 );
+		CHECK_EQ( def->get(), 0 );
 	}
 
 	/* The snaps, grid placement and the opening zoom are Controls check boxes, off by default, under
@@ -16666,10 +16761,10 @@ TEST(an_options_ini_naming_the_removed_input_scheme_and_wasd_keys_still_loads)
 	TheWritableGlobalData = saved;
 }
 
-TEST(order_lines_are_a_live_check_box_that_starts_on)
+TEST(order_lines_are_a_live_check_box_that_starts_off)
 {
 	/* The lines are rebuilt from the units every frame, so the box takes effect at Accept, and a player
-		 who never opens the menu keeps the lines the game has drawn since they were added. */
+		 who never opens the menu sees no line, as retail drew none. */
 	const OptionDef *def = findOptionDef( "OrderLines" );
 	CHECK( def != NULL );
 	if( def == NULL )
@@ -16682,10 +16777,10 @@ TEST(order_lines_are_a_live_check_box_that_starts_on)
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 
-	CHECK( scratch->m_showOrderLines );
-	def->set( 0 );
 	CHECK( !scratch->m_showOrderLines );
-	CHECK_EQ( def->get(), 0 );
+	def->set( 1 );
+	CHECK( scratch->m_showOrderLines );
+	CHECK_EQ( def->get(), 1 );
 
 	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
@@ -16878,7 +16973,7 @@ TEST(bloom_levels_carry_the_percentages_the_shader_reads)
 
 	// what GlobalData's constructor put there, before anything below scribbles on it
 	const Int shippedIntensity = TheGlobalData->m_bloomIntensity;
-	CHECK_EQ( bloom->get(), 2 );		// a fresh install starts on Medium, not Off
+	CHECK_EQ( bloom->get(), 0 );		// a fresh install starts on Off, the Classic picture
 
 	// off is off, and nothing else is: a level that mapped to 0 would be a silent second Off entry
 	bloom->set( 0 );
@@ -16974,7 +17069,7 @@ TEST(vsync_is_off_until_the_player_asks)
 	TheWritableGlobalData = saved;
 }
 
-TEST(texture_filter_defaults_to_anisotropic)
+TEST(texture_filter_defaults_to_bilinear)
 {
 	const OptionDef *filter = findOptionDef( "TextureFilter" );
 	CHECK( filter != NULL );
@@ -16994,8 +17089,8 @@ TEST(texture_filter_defaults_to_anisotropic)
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 
-	// 2 is anisotropic. 0 anisotropy is "whatever the card offers", not a downgrade to off.
-	CHECK_EQ( scratch->m_textureFilterMode, 2 );
+	// 0 is retail's bilinear. 0 anisotropy is "whatever the card offers", read once the filter is 2.
+	CHECK_EQ( scratch->m_textureFilterMode, 0 );
 	CHECK_EQ( scratch->m_anisotropyLevel, 0 );
 	CHECK_EQ( scratch->m_vsync, FALSE );
 
@@ -17040,7 +17135,7 @@ TEST(start_zoom_and_drag_threshold_are_rows_that_change_nothing_until_asked)
 /* The corner box is the player's to switch off, under a key of its own.  ShowHudOverlay left the
 	 catalog with a "no" still sitting in old Options.ini files, and a row under that name would
 	 read it back and take the box away from people who never asked. */
-TEST(net_box_is_a_check_box_that_starts_on_under_its_own_key)
+TEST(net_box_is_a_check_box_that_starts_off_under_its_own_key)
 {
 	const OptionDef *def = findOptionDef( "ShowNetBox" );
 	CHECK( def != NULL );
@@ -17055,9 +17150,9 @@ TEST(net_box_is_a_check_box_that_starts_on_under_its_own_key)
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 
-	CHECK( scratch->m_showNetBox );
-	def->set( 0 );
 	CHECK( !scratch->m_showNetBox );
+	def->set( 1 );
+	CHECK( scratch->m_showNetBox );
 
 	TheWritableGlobalData = saved;
 	delete scratch;
@@ -17230,6 +17325,19 @@ TEST(graphics_quality_slider_only_ever_turns_settings_up)
 	// Modern water is opt-in: a preset gave it to the sea of the main menu's shell map at 11 to 45 ms a pass
 	CHECK( findGraphicsQualityRow( "ComboBoxWaterStyle" ) == NULL );
 
+	// the looks of 2026-10-31 rise above High, which stays the picture the Classic box's untick gives,
+	// and every one is on at Ultra and a fork's row, so a Classic page keeps them off
+	static const char *const aboveHigh[] = { "CheckInternalHdr", "CheckHemiAmbient", "CheckGroundMarks", "CheckStructureCollapse",
+		"CheckWaterSplashes", "CheckAtmosphere", "CheckAmbientOcclusion", "CheckFirelight", "CheckWeather" };
+	for( Int i = 0; i < (Int)( sizeof( aboveHigh ) / sizeof( aboveHigh[ 0 ] ) ); ++i )
+	{
+		const GraphicsQualityRow *look = findGraphicsQualityRow( aboveHigh[ i ] );
+		CHECK( look != NULL );
+		CHECK_EQ( look->values[ TheGraphicsQualityAnchors[ STATIC_GAME_LOD_HIGH ] ], 0 );
+		CHECK_EQ( look->values[ TheGraphicsQualityAnchors[ STATIC_GAME_LOD_ULTRA ] ], 1 );
+		CHECK( graphicsQualityRowIsReforged( *look ) );
+	}
+
 	// the slider's own position is a catalog row with exactly the table's steps
 	const OptionDef *slider = findOptionDef( "GraphicsQuality" );
 	CHECK( slider != NULL );
@@ -17248,41 +17356,111 @@ TEST(graphics_quality_slider_only_ever_turns_settings_up)
 /* A preset is its column at startup, catalog rows included, while Options.ini has no quality step:
 	 the file's own keys win over the column, a file the slider has saved is left alone, and with no
 	 preset named the first preset applied fills only the rows nothing set after the load. */
-TEST(a_preset_brings_its_column_until_the_slider_has_saved_a_step)
+/* A preset named in Options.ini is EA's detail settings.  A row the fork added comes on only from a
+	 line of its own, which the menu writes when it shows the preset and the player accepts. */
+TEST(a_preset_in_the_file_turns_on_no_row_without_a_line)
 {
 	GlobalData *saved = TheWritableGlobalData;
 	TheWritableGlobalData = NEW GlobalData;
-	CHECK( !TheGlobalData->m_teamGlow );
 
 	UserPreferences pref;
 	pref[ AsciiString( "StaticGameLOD" ) ] = AsciiString( "Ultra" );
-	pref[ AsciiString( "MapLight" ) ] = AsciiString( "no" );
-	loadOptionsFromPreferences( pref );
-	CHECK( TheGlobalData->m_teamGlow );
-	CHECK( !TheGlobalData->m_mapLight );
-	CHECK_EQ( findOptionDef( "Smoke" )->get(), 1 );
-
-	TheWritableGlobalData->m_teamGlow = FALSE;
-	pref[ AsciiString( "GraphicsQuality" ) ] = AsciiString( "4" );
+	pref[ AsciiString( "MapLight" ) ] = AsciiString( "yes" );
 	loadOptionsFromPreferences( pref );
 	CHECK( !TheGlobalData->m_teamGlow );
-	applyGraphicsQualityColumnAtStartup( STATIC_GAME_LOD_ULTRA );
-	CHECK( !TheGlobalData->m_teamGlow );
-
-	UserPreferences none;
-	loadOptionsFromPreferences( none );
-	CHECK( !TheGlobalData->m_teamGlow );
-	TheWritableGlobalData->m_lightingStyle = LIGHTING_STYLE_CLASSIC;	// a switch after the load
-	applyGraphicsQualityColumnAtStartup( STATIC_GAME_LOD_MEDIUM );
-	CHECK( TheGlobalData->m_teamGlow );
-	CHECK_EQ( TheGlobalData->m_lightingStyle, (Int)LIGHTING_STYLE_CLASSIC );
-	// once only
-	TheWritableGlobalData->m_teamGlow = FALSE;
-	applyGraphicsQualityColumnAtStartup( STATIC_GAME_LOD_MEDIUM );
-	CHECK( !TheGlobalData->m_teamGlow );
+	CHECK( !TheGlobalData->m_waterFoam );
+	CHECK_EQ( findOptionDef( "Smoke" )->get(), 0 );
+	CHECK_EQ( findOptionDef( "MSAA" )->get(), 0 );
+	CHECK( TheGlobalData->m_mapLight );
 
 	delete TheWritableGlobalData;
 	TheWritableGlobalData = saved;
+}
+
+/* The owner's rule of 2026-10-31: no Options.ini is the Classic game with everything the fork added
+	 off.  These rows are the ones whose first run value differs from an on/off reading of the name:
+	 LegacySound's on is retail, and the volumes and levels sit at retail's number. */
+TEST(no_options_file_is_the_classic_game_with_every_added_row_off)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	static const char *const off[] =
+	{
+		"CameraBoundaryMargin", "EdgeScrollInWindowedMode", "CameraSnapTo45", "BuildGrid", "BuildSnapTo45",
+		"BuildSnapToNeighbour", "BuildNudge", "WheelZoomToCursor", "IsometricCamera", "OpenAtMaxZoom", "TurboMode",
+		"DynamicMusic", "FormationDrag", "BuildWithoutWorker", "ChromaLighting", "TextureFilter", "Bloom", "MSAA",
+		"VSync", "WaterStyle", "CloudStyle", "LightingStyle", "OrderLines", "ShowNetBox", "UseShadowVolumesForSkins",
+		"ShadowsForProjectiles", "ShadowsForProps", "ShadowsForParticles", "VolumetricSmokeShadows", "SmokeFireLighting",
+		"DebrisTrails", "MapLight", "TeamGlow", "WaterFoam", "GroundMarks", "Firelight", "HemiAmbient", "AmbientOcclusion",
+		"Weather", "WaterSplashes", "Atmosphere", "StructureCollapse", "SmoothMotion", "InternalHdr", "Smoke", "ParticleBounce",
+		NULL
+	};
+	for( Int i = 0; off[ i ] != NULL; ++i )
+		CHECK_EQ( findOptionDef( off[ i ] )->get(), 0 );
+
+	CHECK_EQ( findOptionDef( "ClassicGraphics" )->get(), 1 );
+	CHECK_EQ( findOptionDef( "LegacySound" )->get(), 1 );
+	CHECK_EQ( findOptionDef( "HealthBars" )->get(), (Int)HEALTH_BAR_SELECTION );
+	CHECK_EQ( findOptionDef( "AmbientVolume" )->get(), 80 );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
+/* Classic Graphics reads FXListReforged.ini, which is what keeps the INI checksum one for both looks, and
+	 keeps none of it: EA's list stands, a name only the fork has plays nothing. */
+TEST(classic_keeps_eas_fx_list_while_reading_the_forks_file)
+{
+	CHECK( bootOnce() );
+	if( TheFXListStore == NULL )
+		TheFXListStore = NEW FXListStore;
+
+	writeFile( TEST_INI, "FXList ClassicTest_Ea\r\n  TerrainScorch\r\n    Type = RANDOM\r\n    Radius = 120\r\n  End\r\nEnd\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+	writeFile( TEST_INI,
+		"FXList ClassicTest_Ea\r\n  TerrainScorch\r\n    Type = RANDOM\r\n    Radius = 30\r\n  End\r\nEnd\r\n"
+		"FXList ClassicTest_Fork\r\n  TerrainScorch\r\n    Type = RANDOM\r\n    Radius = 30\r\n  End\r\nEnd\r\n"
+		"FXList SupW_ClassicTest_Ea\r\n  TerrainScorch\r\n    Type = RANDOM\r\n    Radius = 30\r\n  End\r\nEnd\r\n" );
+	TheFXListStore->setClassicDropsBlocks( TRUE );
+	CHECK( loadIni( TEST_INI ) );
+	TheFXListStore->setClassicDropsBlocks( FALSE );
+	remove( TEST_INI );
+
+	CHECK_NEAR( TheFXListStore->findFXList( "ClassicTest_Ea" )->getSplashRadius(), 120.0f, 0.01f );
+	CHECK( TheFXListStore->findFXList( "ClassicTest_Fork" ) != NULL );
+	CHECK_NEAR( TheFXListStore->findFXList( "ClassicTest_Fork" )->getSplashRadius(), 0.0f, 0.01f );
+	CHECK( TheFXListStore->findFXList( "SupW_ClassicTest_Ea" ) == TheFXListStore->findFXList( "ClassicTest_Ea" ) );
+}
+
+/* The menu's Defaults puts a row on what it held before the file reached it, whatever the file says. */
+TEST(an_options_row_remembers_its_value_from_before_the_file)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	UserPreferences pref;
+	pref[ "TeamGlow" ] = "yes";
+	pref[ "ClassicGraphics" ] = "no";
+	loadOptionsFromPreferences( pref );
+	loadOptionsFromPreferences( pref );
+
+	CHECK_EQ( findOptionDef( "TeamGlow" )->get(), 1 );
+	CHECK_EQ( optionDefaultValue( *findOptionDef( "TeamGlow" ) ), 0 );
+	CHECK_EQ( optionDefaultValue( *findOptionDef( "ClassicGraphics" ) ), 1 );
+	CHECK_EQ( optionDefaultValue( *findOptionDef( "LegacySound" ) ), 1 );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
+/* While Classic Graphics is ticked the slider moves EA's rows alone, and the menu reads this to say which. */
+TEST(the_quality_table_knows_the_forks_rows_from_eas)
+{
+	CHECK( graphicsQualityRowIsReforged( *findGraphicsQualityRow( "CheckTeamGlow" ) ) );
+	CHECK( graphicsQualityRowIsReforged( *findGraphicsQualityRow( "ComboBoxBloom" ) ) );
+	CHECK( !graphicsQualityRowIsReforged( *findGraphicsQualityRow( "Check3DShadows" ) ) );
+	CHECK( !graphicsQualityRowIsReforged( *findGraphicsQualityRow( "CheckCloudShadows" ) ) );
 }
 
 /* The particle ring has no control on the options pages, so a Custom mix between two presets takes
@@ -17320,12 +17498,12 @@ TEST(effects_page_rows_reach_the_fields_the_command_line_switches_set)
 		const OptionDef *def = findOptionDef( shadows[ i ] );
 		CHECK( def != NULL );
 		CHECK_EQ( (Int)def->kind, (Int)OPTION_BOOL );
-		// on until the player says otherwise, as GameData.ini had them
-		CHECK_EQ( def->get(), 1 );
-		def->set( 0 );
+		// off until the player says otherwise; EA's shadows are the detail preset's
 		CHECK_EQ( def->get(), 0 );
+		def->set( 1 );
+		CHECK_EQ( def->get(), 1 );
 	}
-	CHECK_EQ( (Int)scratch->m_shadowsForProps, 0 );
+	CHECK_EQ( (Int)scratch->m_shadowsForProps, 1 );
 
 	const OptionDef *smoke = findOptionDef( "Smoke" );
 	CHECK( smoke != NULL );
@@ -18282,9 +18460,9 @@ TEST(build_placement_preview_defaults_are_the_ones_the_game_always_used)
 	// and the income trickle is off unless somebody asks for it
 	CHECK_EQ( scratch->m_moneyPerMinute, 0 );
 
-	// a left drag with the move, attack move or guard key armed draws a formation line; that is on
-	// unless somebody turns it off
-	CHECK( scratch->m_formationDrag );
+	// a left drag with the move, attack move or guard key armed draws a formation line once somebody
+	// turns that on
+	CHECK( !scratch->m_formationDrag );
 
 	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
@@ -19252,6 +19430,10 @@ TEST(scenario_parses_the_order_lines)
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1 ChinaGattlingCannon", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TALLY );
 	CHECK_STR( action.selector.str(), "ChinaGattlingCannon" );
+	CHECK_EQ( action.count, -1 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1 ChinaGattlingCannon 0", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( action.count, 0 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1 ChinaGattlingCannon some", &action ), (Int)SCENARIO_PARSE_BAD_COUNT );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 
 	// the stance key
@@ -19578,14 +19760,14 @@ TEST(camera_scroll_clocks_are_independent_and_handle_timer_wrap)
 	CHECK_NEAR(second.sample(9000, 33), 3.0f, 0.00001f);
 }
 
-TEST(camera_preferences_default_to_a_finite_map_margin)
+TEST(camera_preferences_default_to_retails_map_limit)
 {
 	CHECK(bootOnce());
 	GlobalData *saved = TheWritableGlobalData;
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 	CHECK(scratch->m_useCameraConstraints);
-	CHECK_EQ(scratch->m_cameraBoundaryMargin, 200);
+	CHECK_EQ(scratch->m_cameraBoundaryMargin, 0);
 	// -noViewLimit is the only way off, EA's switch; Options.ini has no row for it
 	CHECK(findOptionDef("UseCameraConstraints") == NULL);
 	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
@@ -20377,6 +20559,15 @@ TEST(modfactions_ai_side_lookups_take_the_mods_own_first)
 	CHECK( data.findBuildList( AsciiString( "Russia" ), -1 ) == NULL );
 }
 
+// A plain Random stays with retail's armies under any mod: a mod's faction plays only when it is picked
+TEST(modfactions_stay_out_of_a_plain_random)
+{
+	PlayerTemplate faction;
+	CHECK( !faction.isRandomExcluded() );
+	faction.setModIndex( 0 );
+	CHECK( faction.isRandomExcluded() );
+}
+
 // -modfactions: which skirmish player's scripts a computer player runs.  Its own mod's of its side
 // beats retail's, retail's stands in for a mod without any, and another mod's never fits
 TEST(modfactions_skirmish_side_fit)
@@ -20512,6 +20703,29 @@ TEST(save_older_than_60hz_loads_only_as_mission_save)
 #include "test_game_results.inc"
 #include "test_map_ini_rollback.inc"
 #include "test_hostile_map.inc"
+
+#include "GameClient/Snow.h"
+
+TEST(weather_kind_goes_by_the_map)
+{
+	CHECK_EQ( (Int)weatherKindForMap( TRUE, TRUE, 100, 100 ), (Int)WEATHER_KIND_NONE );
+	CHECK_EQ( (Int)weatherKindForMap( TRUE, FALSE, 0, 100 ), (Int)WEATHER_KIND_NONE );
+	CHECK_EQ( (Int)weatherKindForMap( FALSE, TRUE, 100, 100 ), (Int)WEATHER_KIND_SNOW );
+	CHECK_EQ( (Int)weatherKindForMap( FALSE, FALSE, 41, 100 ), (Int)WEATHER_KIND_SAND );
+	CHECK_EQ( (Int)weatherKindForMap( FALSE, FALSE, 40, 100 ), (Int)WEATHER_KIND_RAIN );
+	CHECK_EQ( (Int)weatherKindForMap( FALSE, FALSE, 0, 0 ), (Int)WEATHER_KIND_RAIN );
+}
+
+TEST(a_weather_drop_keeps_its_world_place_as_the_tile_follows_the_camera)
+{
+	CHECK_NEAR( weatherWrap( 100.0f, 0.0f, 1024.0f ), 100.0f, 0.001f );
+	CHECK_NEAR( weatherWrap( 1124.0f, 0.0f, 1024.0f ), 100.0f, 0.001f );
+	CHECK_NEAR( weatherWrap( -100.0f, 0.0f, 1024.0f ), 924.0f, 0.001f );
+	// a pan that leaves the drop inside the tile does not move it
+	CHECK_NEAR( weatherWrap( 700.0f, 300.0f, 1024.0f ), weatherWrap( 700.0f, 500.0f, 1024.0f ), 0.001f );
+	// one it leaves behind comes round a whole tile on
+	CHECK_NEAR( weatherWrap( 700.0f, 800.0f, 1024.0f ), 1724.0f, 0.001f );
+}
 
 #include "GameLogic/AI.h"
 

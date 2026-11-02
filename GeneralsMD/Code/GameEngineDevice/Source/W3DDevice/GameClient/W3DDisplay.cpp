@@ -1300,6 +1300,16 @@ void W3DDisplay::init( void )
 		}
 	}
 
+	// the setup this run draws: every option as it stands now the preset is in, and what ClassicGraphics took back
+	logOptionCatalog();
+	DEBUG_LOG(("OPTIONS in force: detail %s reduction %d particles %d volumes %d decals %d lightmap %d softwater %d scaffolds %d sway %d heat %d dynamicLOD %d trees %d; shadow map %d post chain '%s' smooth motion %d\n",
+						 TheGameLODManager->getStaticGameLODLevelName(TheGameLODManager->getStaticLODLevel()),
+						 TheGlobalData->m_textureReductionFactor, TheGlobalData->m_maxParticleCount,
+						 (Int)TheGlobalData->m_useShadowVolumes, (Int)TheGlobalData->m_useShadowDecals,
+						 (Int)TheGlobalData->m_useLightMap, (Int)TheGlobalData->m_showSoftWaterEdge, (Int)!TheGlobalData->m_useDrawModuleLOD,
+						 (Int)TheGlobalData->m_useTreeSway, (Int)TheGlobalData->m_useHeatEffects, (Int)TheGlobalData->m_enableDynamicLOD, (Int)TheGlobalData->m_useTrees,
+						 (Int)TheGlobalData->m_shadowMap, TheGlobalData->m_direct3D11PostChain.str(), (Int)TheGlobalData->m_smoothMotion));
+
 	if (TheGlobalData->m_displayGamma != 1.0f)
 		setGamma(TheGlobalData->m_displayGamma,0.0f,1.0f,FALSE);
 
@@ -2658,6 +2668,15 @@ AGAIN:
 		const UnsignedInt MAX_SYNC_STEP_MS = TheW3DFrameLengthInMsec * 4 * LOGICFRAMES_PER_RETAIL_FRAME;
 		if (deltaMs > MAX_SYNC_STEP_MS)
 			deltaMs = MAX_SYNC_STEP_MS;
+		// a cinematic that slowed the game slows the animations with it, or soldiers march on the spot
+		const Real missionRate = GameEngine_missionTimeRate();
+		if (missionRate < 1.0f)
+		{
+			static Real slowedMs = 0.0f;
+			slowedMs += deltaMs * missionRate;
+			deltaMs = (UnsignedInt)slowedMs;
+			slowedMs -= deltaMs;
+		}
 		// a recorded picture is its share of a logic frame however long it took to draw and save, so the
 		// clock moves that much too, or the footage plays every animation fast.  Read off the pictures'
 		// own clock rather than added up: a 60 Hz frame is not a whole number of milliseconds, and

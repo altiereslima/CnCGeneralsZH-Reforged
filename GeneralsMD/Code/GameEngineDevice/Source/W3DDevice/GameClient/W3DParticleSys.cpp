@@ -32,6 +32,7 @@
 #include "Lib/Clock.h"
 #include "GameClient/Color.h"
 #include "W3DDevice/GameClient/W3DParticleSys.h"
+#include "W3DDevice/GameClient/FireLights.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/HeightMap.h"
@@ -271,12 +272,11 @@ static void addFireLight( Real w, Real x, Real y, Real z, Real sq, Real fade )
 		s_fireLights.push_back( fire );
 }
 
-/** One additive or Emissive system as a point light, if it is bright enough.  An Emissive body's
-	* colour stays white while its flipbook cools to soot, so its weight falls with the life left. */
-static void gatherFireLight( ParticleSystem *sys, Real fade )
+/** A system's flames as weighted sums.  An Emissive body's colour stays white while its flipbook cools
+	* to soot, so its weight falls with the life left. */
+static void sumFlames( ParticleSystem *sys, FireLights::Flames &flames )
 {
 	const Bool emissive = sys->getTemplate()->isEmissive();
-	Real w = 0.0f, x = 0.0f, y = 0.0f, z = 0.0f, sq = 0.0f;
 	for (Particle *p = sys->getFirstParticle(); p; p = p->m_systemNext)
 	{
 		const RGBColor *c = p->getColor();
@@ -286,13 +286,63 @@ static void gatherFireLight( ParticleSystem *sys, Real fade )
 		if (pw <= 0.0f)
 			continue;
 		const Coord3D *pos = p->getPosition();
-		w += pw;
-		x += pw * pos->x;
-		y += pw * pos->y;
-		z += pw * pos->z;
-		sq += pw * (pos->x * pos->x + pos->y * pos->y + pos->z * pos->z);
+		flames.add( pw, pos->x, pos->y, pos->z );
 	}
-	addFireLight( w, x, y, z, sq, fade );
+}
+
+/** One additive or Emissive system as a point light, if it is bright enough. */
+static void gatherFireLight( ParticleSystem *sys, Real fade )
+{
+	FireLights::Flames flames;
+	sumFlames( sys, flames );
+	addFireLight( flames.w, flames.x, flames.y, flames.z, flames.sq, fade );
+}
+
+// The Firelight option's lights, picked by the last doParticles for the next frame's terrain and
+// models: the scene takes them first and these cost nothing but the walk over the flames in view.
+static FireLights::Gather	s_firelightGroups;
+static FireLights::Light	s_firelights[ FireLights::MAX_LIGHTS ];
+static Int								s_firelightCount = 0;
+
+const FireLights::Light *getFirelights( Int *count )
+{
+	*count = s_firelightCount;
+	return s_firelights;
+}
+
+/** The flames in view, grouped, then the strongest as lights.  A FireLook template that draws by
+	* adding light is a flame or a blast; its smoke, FireLook or not, blends.  A FireLook system is never
+	* on the GPU path (isGpuEligible), so nothing here pays for a closed form, and the systems were filed
+	* once a particle update (m_frameFires). */
+static void gatherFirelights( const AABoxClass &view, UnsignedInt frame, const std::vector<ParticleSystem *> &systems, const std::vector<Real> &fades )
+{
+	s_firelightGroups.clear();
+	for (size_t i = 0; i < systems.size(); ++i)
+	{
+		// the view is filed once a particle update and a system can run out of particles before the next
+		Particle *first = systems[ i ]->getFirstParticle();
+		if (first == NULL
+				|| WWMath::Fabs( first->getPosition()->x - view.Center.X ) > view.Extent.X + FireLights::MAX_REACH
+				|| WWMath::Fabs( first->getPosition()->y - view.Center.Y ) > view.Extent.Y + FireLights::MAX_REACH)
+			continue;
+		FireLights::Flames flames;
+		sumFlames( systems[ i ], flames );
+		flames.scale( fades[ i ] );
+		s_firelightGroups.add( flames );
+	}
+	const float center[3] = { view.Center.X, view.Center.Y, view.Center.Z };
+	const float extent[3] = { view.Extent.X, view.Extent.Y, view.Extent.Z };
+	s_firelightCount = s_firelightGroups.pick( center, extent, frame, s_firelights );
+
+#ifdef DEBUG_LOGGING
+	static UnsignedInt s_nextLog = 0;
+	if (frame >= s_nextLog && s_firelightCount > 0)
+	{
+		s_nextLog = frame + 10 * LOGICFRAMES_PER_SECOND;
+		DEBUG_LOG(( "FIRELIGHT frame %u: %d flame systems, %d groups in view, %d lit, strongest %.2f\n",
+			frame, (Int)systems.size(), s_firelightGroups.count(), s_firelightCount, s_firelights[ 0 ].strength ));
+	}
+#endif
 }
 
 /** The same for a GPU system, from the spawns it keeps (ParticleSystem::getGpuSample) aged in closed
@@ -1831,8 +1881,11 @@ void W3DParticleSystemManager::reset()
 {
 	ParticleSystemManager::reset();
 	s_fireLightsValid = FALSE;
+	s_firelightCount = 0;
 	m_frameViewValid = FALSE;	// its systems are gone
 	m_frameView.clear();
+	m_frameFires.clear();
+	m_frameFireFades.clear();
 	m_fieldSystems.clear();
 	m_sunMapCasters.clear();
 	invalidateGroundFields();	// the object IDs it holds belong to the game that ended
@@ -1892,6 +1945,8 @@ void W3DParticleSystemManager::refreshFrameView( void )
 		return;
 
 	m_frameView.clear();
+	m_frameFires.clear();
+	m_frameFireFades.clear();
 	m_fieldSystems.clear();
 	for (ParticleSystemListIt it = m_allParticleSystemList.begin(); it != m_allParticleSystemList.end(); ++it)
 	{
@@ -1918,6 +1973,12 @@ void W3DParticleSystemManager::refreshFrameView( void )
 		} else view.owner = sys->getAttachedObject();
 #endif
 		m_frameView.push_back( view );
+		if (sys->getTemplate()->isFireLook()
+				&& (sys->getShaderType() == ParticleSystemInfo::ADDITIVE || sys->getTemplate()->isEmissive()))
+		{
+			m_frameFires.push_back( sys );
+			m_frameFireFades.push_back( fade );
+		}
 	}
 	refreshGpuSystems();
 
@@ -2150,6 +2211,13 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 	fillJob.extentY = beY;
 	fillJob.extentZ = beZ;
 	fillJob.lightCount = 0;
+	// A reflecting water's mirror comes here first with its own, smaller box; the picks are the frame's.
+	if (!ShaderClass::Is_Backface_Culling_Inverted())
+	{
+		s_firelightCount = 0;
+		if (TheGlobalData->m_firelight && Direct3D11_Lights_Per_Pixel())
+			gatherFirelights( bbox, m_lastLogicFrameUpdate, m_frameFires, m_frameFireFades );
+	}
 	// Only a CPU drawn smoke system takes a light (pickSmokeLights); with none, the walk over every
 	// fire, a GPU one's samples aged in closed form, is a third of a frame thrown away.
 	Bool smokeDrawn = FALSE;
@@ -2609,6 +2677,10 @@ UnsignedInt W3DParticleSystemManager::gpuSlotFor( ParticleSystem *system )
 		taken.reuseFrame = 0;
 		ParticleGpuSystemEntry &entry = m_gpuEntries[ slot ];
 		particleGpuSystemEntryBuild( *system, &entry );
+		// taken once a slot, so the Weather option switched in a match reaches the systems made after it
+		const Coord3D drift = system->getDriftWithWeather();
+		entry.m_drift[ 0 ] = drift.x;
+		entry.m_drift[ 1 ] = drift.y;
 		entry.m_textureSlice = slice;
 		entry.m_flags = PARTICLE_GPU_ALIVE | ( system->isGpuGroundClamped() ? PARTICLE_GPU_GROUND_CLAMPED : 0u );
 		// the fade is taken at the sync point (refreshGpuSystems), which runs before the next draw

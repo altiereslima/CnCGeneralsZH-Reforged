@@ -2155,7 +2155,7 @@ void W3DModelDraw::allocateContactShadow(void)
 	// shadow and a contact patch would follow it around looking like a stain.
 	const ThingTemplate *tmplate = getDrawable() ? getDrawable()->getTemplate() : NULL;
 	if (m_contactShadow != NULL || m_renderObject == NULL || tmplate == NULL
-			|| TheW3DShadowManager == NULL || !TheGlobalData->m_contactShadows
+			|| TheW3DShadowManager == NULL || !TheGlobalData->m_contactShadows || TheGlobalData->m_classicGraphics
 			|| !tmplate->isKindOf( KINDOF_STRUCTURE ))
 		return;
 
@@ -2262,7 +2262,7 @@ void W3DModelDraw::getRenderCostRecursive(RenderCost & rc,RenderObjClass * robj)
 	and a kept shadow was a building-shaped hole in the light on empty ground. */
 static Bool keepsShadowInFog(const Drawable *draw)
 {
-	if (draw == NULL)
+	if (draw == NULL || TheGlobalData->m_classicGraphics)
 		return FALSE;
 
 	const Object *obj = draw->getObject();
@@ -2479,7 +2479,7 @@ void W3DModelDraw::doDrawModule(const Matrix3D* transformMtx)
 	// show where the enemy does not.  Rooftop lamps on buildings and aircraft lights stay beams only.
 	s_headlightDrawn = TRUE;
 	if (m_hasHeadlights && !m_hideHeadlights && m_renderObject && !m_renderObject->Is_Hidden()
-		&& Direct3D11_Is_Active())
+		&& Direct3D11_Is_Active() && !TheGlobalData->m_classicGraphics)
 	{
 		const Drawable* draw = getDrawable();
 		const Object* obj = draw->getObject();
@@ -2946,8 +2946,9 @@ void W3DModelDraw::handleClientTurretPositioning()
 				}
 			}
 
-			// do turret pitch, if any
-			if (tur.m_turretPitchBone != 0)
+			// do turret pitch, if any.  The pitch the fork's data gave a stabilized gun is the logic's aim:
+			// under Classic Graphics the barrel stays as modelled, as EA's tanks had it
+			if (tur.m_turretPitchBone != 0 && !(TheGlobalData->m_classicGraphics && getW3DModelDrawModuleData()->m_stabilizedTurretPitch))
 			{
 				if (m_curState)
 					turretPitch += tur.m_turretArtPitch;

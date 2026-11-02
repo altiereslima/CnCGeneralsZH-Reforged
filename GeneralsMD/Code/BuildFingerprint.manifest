@@ -263,6 +263,10 @@ Data/Scenarios/artillery.txt
 Data/Scenarios/aurorablast.txt
 Data/Scenarios/aurorafog.txt
 Data/Scenarios/avengerlasers.txt
+Data/Scenarios/baseintruder_barracks.txt
+Data/Scenarios/baseintruder_patriot.txt
+Data/Scenarios/baseintruder_tunnel.txt
+Data/Scenarios/baseintruder_worker.txt
 Data/Scenarios/beambase.txt
 Data/Scenarios/beamsteer.txt
 Data/Scenarios/blastcheck.txt
@@ -280,6 +284,7 @@ Data/Scenarios/debristrails.txt
 Data/Scenarios/debristrails3.txt
 Data/Scenarios/defencereach.txt
 Data/Scenarios/deployguard.txt
+Data/Scenarios/deploystall.txt
 Data/Scenarios/dozerloss.txt
 Data/Scenarios/dragonfirewall.txt
 Data/Scenarios/dragonflame.txt
@@ -322,6 +327,7 @@ Data/Scenarios/hero_loop_07.txt
 Data/Scenarios/hero_loop_08.txt
 Data/Scenarios/hero_loop_09.txt
 Data/Scenarios/hero_loop_10.txt
+Data/Scenarios/hillbunker.txt
 Data/Scenarios/hitrun.txt
 Data/Scenarios/hpbar.txt
 Data/Scenarios/infantrywalk.txt
@@ -439,6 +445,10 @@ Data/Scenarios/standinfake.txt
 Data/Scenarios/stashbeside.txt
 Data/Scenarios/statues.txt
 Data/Scenarios/stealthintruder.txt
+Data/Scenarios/strikeair_nuke.txt
+Data/Scenarios/strikeair_nukehelix.txt
+Data/Scenarios/strikeair_particle.txt
+Data/Scenarios/strikeair_scud.txt
 Data/Scenarios/sun_cloak.txt
 Data/Scenarios/sun_trees.txt
 Data/Scenarios/swhole.txt
@@ -1755,6 +1765,7 @@ GameEngine/Source/GameNetwork/WOLBrowser/WebBrowserPosix.cpp
 GameEngine/Source/GameNetwork/udp.cpp
 GameEngine/Source/Precompiled/PreRTS.cpp
 GameEngineDevice/GameEngineDevice.dsp
+GameEngineDevice/Include/MilesAudioDevice/AudioFileLoader.h
 GameEngineDevice/Include/MilesAudioDevice/AudioMixPolicy.h
 GameEngineDevice/Include/MilesAudioDevice/MilesAudioManager.h
 GameEngineDevice/Include/PosixDevice/Common/PosixFileResolutionDump.h
@@ -1778,8 +1789,10 @@ GameEngineDevice/Include/W3DDevice/Common/W3DModuleFactory.h
 GameEngineDevice/Include/W3DDevice/Common/W3DRadar.h
 GameEngineDevice/Include/W3DDevice/Common/W3DThingFactory.h
 GameEngineDevice/Include/W3DDevice/GameClient/BaseHeightMap.h
+GameEngineDevice/Include/W3DDevice/GameClient/FireLights.h
 GameEngineDevice/Include/W3DDevice/GameClient/FlatHeightMap.h
 GameEngineDevice/Include/W3DDevice/GameClient/GpuParticles.h
+GameEngineDevice/Include/W3DDevice/GameClient/GroundMarks.h
 GameEngineDevice/Include/W3DDevice/GameClient/HeightMap.h
 GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DDebrisDraw.h
 GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DDefaultDraw.h
@@ -1800,6 +1813,7 @@ GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DTankTruckDraw.h
 GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DTracerDraw.h
 GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DTreeDraw.h
 GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DTruckDraw.h
+GameEngineDevice/Include/W3DDevice/GameClient/StructureCollapse.h
 GameEngineDevice/Include/W3DDevice/GameClient/SunShadowCasterCull.h
 GameEngineDevice/Include/W3DDevice/GameClient/TerrainTex.h
 GameEngineDevice/Include/W3DDevice/GameClient/TileData.h
@@ -1995,6 +2009,7 @@ GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DBufferManager.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DProjectedShadow.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DShadow.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DVolumetricShadow.cpp
+GameEngineDevice/Source/W3DDevice/GameClient/StructureCollapse.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/TileData.cpp
 GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp
@@ -3211,6 +3226,7 @@ Tests/test_ffvertex.cpp
 Tests/test_ffvertexcompile.cpp
 Tests/test_ffvertexd3d9.cpp
 Tests/test_fingerprint_manifest.sh
+Tests/test_fire_lights.cpp
 Tests/test_first_launch_chooser.sh
 Tests/test_fontchars.cpp
 Tests/test_fpucontrol.cpp
@@ -3220,6 +3236,7 @@ Tests/test_gameengine_stubs.cpp
 Tests/test_gametext_csf.cpp
 Tests/test_global_new_alignment.cpp
 Tests/test_glyph_rasteriser.cpp
+Tests/test_ground_marks.cpp
 Tests/test_harness.h
 Tests/test_hazard_cloud_policy.cpp
 Tests/test_hostile_map.inc

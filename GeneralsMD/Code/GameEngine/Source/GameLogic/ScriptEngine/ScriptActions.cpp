@@ -38,6 +38,7 @@
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/GameAudio.h"
 #include "Common/GameEngine.h"
+#include "Common/INI.h"
 #include "Common/LogicThread.h"
 #include "Common/MapObject.h"							// For MAP_XY_FACTOR
 #include "Common/PartitionSolver.h"
@@ -3297,6 +3298,7 @@ void ScriptActions::doMergeTeamIntoTeam(const AsciiString& teamSrcName, const As
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doDisableInput()
 {
+	TheScriptEngine->setInputHeldByScript( TRUE );
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (!TheGlobalData->m_disableScriptedInputDisabling)
 #endif
@@ -3322,6 +3324,7 @@ void ScriptActions::doDisableInput()
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doEnableInput()
 {
+	TheScriptEngine->setInputHeldByScript( FALSE );
 	LogicThread::callAfterTick( []{
 		TheInGameUI->setInputEnabled(true);
 		TheMouse->setVisibility(true);
@@ -3408,12 +3411,19 @@ void ScriptActions::doMusicTrackChange(const AsciiString& newTrackName, Bool fad
 		TheAudio->removeAudioEvent(AHSV_StopTheMusic);
 	}
 
-	AudioEventRTS event(newTrackName);
+	// The scripts a human runs are retail's and name retail's tracks; on a mod's faction he hears that
+	// mod's track of the name.  Only this machine's music player reads the answer.
+	const PlayerTemplate *localFaction = ThePlayerList->getLocalPlayer()->getPlayerTemplate();
+	const AsciiString track = localFaction != NULL && localFaction->getModIndex() >= 0
+		? TheModNamespace.modName(localFaction->getModIndex(), MODNAME_AUDIOEVENT, newTrackName) : newTrackName;
+	DEBUG_LOG(("MUSIC track %s\n", track.str()));
+
+	AudioEventRTS event(track);
 	event.setShouldFade(fadein);
 	event.setPlayerIndex(ThePlayerList->getLocalPlayer()->getPlayerIndex());
 	TheAudio->addAudioEvent(&event);
 
-	TheScriptEngine->setCurrentTrackName(newTrackName);
+	TheScriptEngine->setCurrentTrackName(track);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -7181,8 +7191,15 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 			// (LOGIC-THREAD.md hazard 24), which is when the engine next paces anyway
 			const Int asked = pAction->getParameter(0)->getInt();
 			LogicThread::callAfterTick( [asked]{
-				// A match someone plays, or its replay, keeps the speed it started at: normal, or turbo
-				// mode's twice that.  Only the shell map's scripts may still pace themselves.
+				// A mission's cinematic slows the game down, and its voices and music are timed to that speed:
+				// a line the script starts 70 frames after the last one needs the 3 seconds 23 frames a second
+				// gives it.  Skirmish, a network room or a replay keeps the speed it started at: normal, or
+				// turbo mode's twice that.  The shell map's scripts pace themselves as they always did.
+				if (TheGameLogic->isInSinglePlayerGame() && !TheGameLogic->isInReplayGame())
+				{
+					TheGameEngine->setFramesPerSecondLimit( GameEngine_missionFramesPerSecond( asked, GameEngine_matchFramesPerSecond( TheGlobalData->m_turboMode ) ) );
+					return;
+				}
 				if (!TheGameLogic->isInShellGame())
 					return;
 				if (!asked)

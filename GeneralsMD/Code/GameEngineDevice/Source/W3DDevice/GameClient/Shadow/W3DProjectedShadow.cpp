@@ -146,26 +146,6 @@ int SHADOW_DECAL_INDEX_SIZE=SHADOW_DECAL_INDEX_COUNT;
 static SHADOW_DECAL_VERTEX decalStageVertices[SHADOW_DECAL_VERTEX_COUNT];
 static UnsignedShort decalStageIndices[SHADOW_DECAL_INDEX_COUNT];
 
-/** Copy one staged range into a streaming buffer and its Direct3D 11 twin.  While Direct3D 11
-		presents, Direct3D 9 draws nothing indexed, so its buffer is left alone and the twin is written
-		in place; a twin the device refused keeps the Direct3D 9 copy, as the per-decal locks did. */
-template <class D3D9_BUFFER>
-static Bool uploadDecalRange(D3D9_BUFFER *d3d9Buffer, DX11BufferTwinClass *twin, const void *source,
-	UnsignedInt byteOffset, UnsignedInt byteCount, UnsignedInt lockFlags)
-{
-	const Bool d3d9Draws = !Direct3D11_Present_Is_Enabled() || twin == NULL;
-	void *d3d9Memory = NULL;
-	if (d3d9Draws && d3d9Buffer->Lock(byteOffset, byteCount, &d3d9Memory, lockFlags) != D3D_OK)
-		return FALSE;	//a lost device refuses the lock
-	DX11BufferLockClass lock;
-	void *target = lock.Begin(twin, d3d9Memory, byteOffset, byteCount, lockFlags, d3d9Draws);
-	memcpy(target != NULL ? target : d3d9Memory, source, byteCount);
-	lock.End();
-	if (d3d9Draws)
-		d3d9Buffer->Unlock();
-	return TRUE;
-}
-
 
 class W3DShadowTexture;	//forward reference
 class W3DShadowTextureManager;	//forward reference
@@ -813,10 +793,10 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 	nShadowDecalStartBatchVertex = nShadowDecalVertsInBuf;
 	nShadowDecalStartBatchIndex = nShadowDecalIndicesInBuf;
 	const Bool uploaded =
-		uploadDecalRange(shadowDecalVertexBufferD3D, shadowDecalVertexTwin, decalStageVertices,
+		uploadStreamingRange(shadowDecalVertexBufferD3D, shadowDecalVertexTwin, decalStageVertices,
 			nShadowDecalVertsInBuf*sizeof(SHADOW_DECAL_VERTEX), nShadowDecalVertsInBatch*sizeof(SHADOW_DECAL_VERTEX),
 			vertexFlags)
-		&& uploadDecalRange(shadowDecalIndexBufferD3D, shadowDecalIndexTwin, decalStageIndices,
+		&& uploadStreamingRange(shadowDecalIndexBufferD3D, shadowDecalIndexTwin, decalStageIndices,
 			nShadowDecalIndicesInBuf*sizeof(UnsignedShort), numIndex*sizeof(UnsignedShort), indexFlags);
 	nShadowDecalVertsInBuf += nShadowDecalVertsInBatch;
 	nShadowDecalIndicesInBuf += numIndex;
@@ -1064,7 +1044,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 			 same fraction, so a capped streak still starts at the shadow of the tail rather than
 			 floating off it. */
 		Real stretch = 1.0f;
-		if (sunCasts && heightAboveGround > DECAL_AIRBORNE_HEIGHT)
+		if (sunCasts && heightAboveGround > DECAL_AIRBORNE_HEIGHT && !TheGlobalData->m_classicGraphics)
 		{
 			const Real lift = __min((heightAboveGround - DECAL_AIRBORNE_HEIGHT) / DECAL_AIRBORNE_BLEND, 1.0f);
 			const Real axisLength = uVector.Length();
