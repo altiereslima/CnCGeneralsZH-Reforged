@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "60069824716e17c3a2efbcf643b472095f3282ff",
+    "head_commit": "386cf9507a9488fe65dc1c54e7e36405ede98ad5",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "8ac70232e004e776cb6d725a87ffd09739edac9f",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "81c281a187d74762b1b51499292473afcb139972",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "01694f14b3ee94f66425fdde6d50a79670ba59b4",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "254c9265474c609e36b9327e67bbd8108665a31b",
-        "GeneralsMD/Code/Data/Patch.str": "283e17ffb993b7ffd40af8a7ddbddd9794f079ea",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "13b51950053f258759ff2515f00f6c10ff67885d",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "efc3afd3c381c109b3fbb7dccdb2d9404c536316",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "22d75f2685d776e45bd1bb7f7bf9813a88a749f1",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "0d7c84128c401b843b512186926337a1acc35724",
+        "GeneralsMD/Code/Data/Patch.str": "23eafe02a2adcf292f69abfde296c7fb78bbad3d",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "1af8f15c265e1204b74b087bab3f9d16d9821224",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
         "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "717e59dce543150596028264a1950af357b76ed7",
-        "GeneralsMD/Code/CMakeLists.txt": "551826db4ccd445b86f90e4b7b4b98b720d3e131",
+        "GeneralsMD/Code/CMakeLists.txt": "81b82b12734b931a54062b99cee8ed2f6a1a44a2",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "f912431471a640658fdd8309ac9b87bf22f15b83",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "b21b0c76488f1ba233753110832b10182acf21f4",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "95fb1c7af4d37b4c5b6738bcd02c60d15f98bbfc",
     }
 }
 
@@ -137,14 +137,12 @@ def validate(repo):
     need(command_line, "/* -language <english|turkish|german|ukrainian|russian|french>: ", "CommandLine.cpp -language comment")
     result["checks"]["command_line_language_anchor"] = "PASS"
 
-    # Stage 13: the corner box hidden by default, through upstream's own ShowNetBox switch.
-    need(cpp, "\tm_showNetBox = TRUE;\n", "GlobalData.cpp net box default")
-    unconditional(cpp, "\tm_showNetBox = TRUE;\n", "GlobalData.cpp net box default")
+    # Stage 13: the corner box hidden by default, upstream's own ShowNetBox default since 3.5.1.
+    from apply_stage13 import NETBOX_DEFAULT
+    need(cpp, NETBOX_DEFAULT, "GlobalData.cpp net box default (upstream's own since 3.5.1)")
+    unconditional(cpp, NETBOX_DEFAULT, "GlobalData.cpp net box default")
     if '{ "ShowNetBox",' not in catalog or "OPT_WND( \"CheckNetBox\" )" not in catalog:
         raise RuntimeError("OptionsCatalog.cpp: ShowNetBox sem a caixa de seleção CheckNetBox no menu")
-    test = (code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig")
-    from apply_stage13 import NETBOX_TEST
-    need(test, NETBOX_TEST, "test_gameengine net box default check")
     result["checks"]["net_box_anchors"] = "PASS"
 
     # Stage 2, step 12: Data\PortugueseBrazil joins the trees a -mod never replaces.

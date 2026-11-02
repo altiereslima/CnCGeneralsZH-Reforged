@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 # A caixa do canto superior direito (relógio da partida, taxas de quadros e, em rede, a conexão)
-# vem ligada para todos no upstream. A edição PT-BR começa com ela escondida.
+# vinha ligada para todos no upstream. A edição PT-BR começa com ela escondida.
 #
 # Desde a v2.3.0 o upstream deu à caixa uma chave própria, com controle no menu de opções:
 # ShowNetBox ("Info Box" desde a 2.6). A edição PT-BR só muda o padrão para desligado;
@@ -14,22 +14,13 @@ import sys
 # no catálogo. O upstream agora exige que essa linha não exista (ela voltaria a ler um "no" antigo
 # do Options.ini), e com ela o menu mostraria a opção nova marcada sem caixa nenhuma na tela.
 
-# O teste do upstream que lê o padrão da caixa e a desliga pela opção; o validador confere.
-NETBOX_TEST = (
-    "\tCHECK( scratch->m_showNetBox );\n"
-    "\tdef->set( 0 );\n"
-    "\tCHECK( !scratch->m_showNetBox );\n"
-)
+# Desde a 3.5.1 (ffa57fbc, "the game opens classic with every added setting off") o próprio upstream
+# começa com a caixa escondida. O estágio não muda mais nada: só confere que o padrão continua
+# desligado, para a edição perceber se o upstream voltar atrás.
+NETBOX_DEFAULT = "\tm_showNetBox = FALSE;\n"
 
 def fail(msg):
     raise SystemExit("STAGE13: " + msg)
-
-def replace_once(path, old, new):
-    text = path.read_text(encoding="utf-8")
-    n = text.count(old)
-    if n != 1:
-        fail(f"{path}: esperado 1 bloco, encontrado {n}")
-    path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="")
 
 def main():
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
@@ -46,26 +37,10 @@ def main():
     finally:
         sys.argv = old_argv
 
-    # 1) Padrão desligado.
-    replace_once(
-        code / "GameEngine" / "Source" / "Common" / "GlobalData.cpp",
-        "\tm_showNetBox = TRUE;\n",
-        "\t// PT-BR edition: the corner box starts hidden; the Info Box option\n"
-        "\t// (ShowNetBox in Options.ini) brings it back.\n"
-        "\tm_showNetBox = FALSE;\n",
-    )
-
-    # 2) O teste do upstream que exige a caixa ligada de início passa a exigir o contrário.
-    test = code / "Tests" / "test_gameengine.cpp"
-    replace_once(
-        test,
-        NETBOX_TEST,
-        "\tCHECK( !scratch->m_showNetBox );\t// PT-BR edition: off until the player ticks it\n"
-        "\tdef->set( 1 );\n"
-        "\tCHECK( scratch->m_showNetBox );\n"
-        "\tdef->set( 0 );\n"
-        "\tCHECK( !scratch->m_showNetBox );\n",
-    )
+    # O padrão do upstream já é o da edição.
+    cpp = (code / "GameEngine" / "Source" / "Common" / "GlobalData.cpp").read_text(encoding="utf-8")
+    if cpp.count(NETBOX_DEFAULT) != 1:
+        fail("GlobalData.cpp: o upstream não começa mais com a caixa do canto escondida")
 
     print("STAGE13 APPLY PASS")
     print("Corner box hidden by default; the Info Box option (ShowNetBox) shows it.")
