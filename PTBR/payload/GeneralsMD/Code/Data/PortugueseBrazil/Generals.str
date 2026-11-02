@@ -5214,6 +5214,10 @@ GUI:AlternateMouse
 "Mouse Alternativo"
 END
 
+GUI:AmbientOcclusion
+"Oclusão de Ambiente"
+END
+
 GUI:AmbientVolume
 "Volume - Ambiente"
 END
@@ -5280,6 +5284,10 @@ END
 
 GUI:AssignNewHotkey
 "Atribuir Novo Atalho"
+END
+
+GUI:Atmosphere
+"Atmosfera"
 END
 
 GUI:Audio
@@ -5960,6 +5968,10 @@ END
 
 GUI:BuildWithoutWorker
 "Obra sem Trabalhador"
+END
+
+GUI:CameraShake
+"Tremor da Câmera"
 END
 
 GUI:Campaign
@@ -6790,6 +6802,10 @@ GUI:FF_ON
 "Avanço Rápido Ligado"
 END
 
+GUI:Firelight
+"Luz do Fogo"
+END
+
 GUI:FireWallPort
 "Porta do Firewall:"
 END
@@ -7024,6 +7040,10 @@ END
 
 GUI:GroundLighting
 "Padrão do Terreno"
+END
+
+GUI:GroundMarks
+"Marcas de Batalha"
 END
 
 GUI:GroupRoom1
@@ -7316,6 +7336,10 @@ END
 
 GUI:HelpDescription
 "Exibir texto de ajuda"
+END
+
+GUI:HemiAmbient
+"Luz do Céu e do Chão"
 END
 
 GUI:Hide
@@ -7740,6 +7764,10 @@ END
 
 GUI:INTERFACE
 "Interface"
+END
+
+GUI:InternalHdr
+"Mapeamento HDR Interno"
 END
 
 GUI:InternetDisconnectionMenuBody1
@@ -9586,6 +9614,10 @@ GUI:SmokeFireLighting
 "Fogo Ilumina a Fumaça"
 END
 
+GUI:SmoothMotion
+"Movimento Suave"
+END
+
 GUI:SmoothWater
 "Margens Suaves"
 END
@@ -9708,6 +9740,10 @@ END
 
 GUI:Struct
 "Estrut."
+END
+
+GUI:StructureCollapse
+"Edifícios Desabando"
 END
 
 GUI:SummaryBuildingsBuilt
@@ -10302,6 +10338,10 @@ GUI:WaterFoam
 "Espuma na Água"
 END
 
+GUI:WaterSplashes
+"Respingos na Água"
+END
+
 GUI:WaterStyle
 "Estilo da água"
 END
@@ -10320,6 +10360,10 @@ END
 
 GUI:Waypt
 "Coordn."
+END
+
+GUI:Weather
+"Clima"
 END
 
 GUI:WeatherEffects
@@ -16906,6 +16950,10 @@ TOOLTIP:AlternateMouse
 "O botão direito do mouse passa a iniciar as ações das unidades no campo de batalha (atacar, mover, etc)."
 END
 
+TOOLTIP:AmbientOcclusion
+"Cantos e o chão embaixo do que está sobre ele ficam mais escuros, então um tanque assenta na areia em vez de flutuar sobre ela. A água e a névoa de guerra ficam de fora. Só no Direct3D 11, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
+END
+
 TOOLTIP:AmbientVolume
 "Pássaros, vento, água e o burburinho de uma cidade. O volume dos efeitos sonoros não mexe mais nesses sons, então a batalha pode continuar alta enquanto o mundo ao redor fica quieto."
 END
@@ -16932,6 +16980,10 @@ END
 
 TOOLTIP:AssignHotkeyCurrent
 "O comando ao qual este Atalho está atribuído no momento."
+END
+
+TOOLTIP:Atmosphere
+"O chão longe da câmera desbota para a cor do céu, e onde o mapa acaba ou a câmera fica deitada você vê um céu conforme a hora do dia do mapa em vez de preto. O chão perto da câmera fica nítido e a névoa de guerra continua escura. Só a sua imagem muda: nada no jogo lê isso, e os outros jogadores veem a própria configuração. Só no Direct3D 11, e desligado nos Gráficos Clássicos."
 END
 
 TOOLTIP:AudioDevice
@@ -17302,6 +17354,10 @@ TOOLTIP:ButtonClear
 "Limpa a caixa de texto com o nome do jogador."
 END
 
+TOOLTIP:CameraShake
+"Explosões fazem a câmera tremer. Uma bomba nuclear ou um grande edifício desabando por perto a sacodem com força por um instante. Desmarque para manter a visão parada. Vale ao pressionar Aceitar."
+END
+
 TOOLTIP:Campaign1
 "Campanha 1"
 END
@@ -17335,7 +17391,7 @@ TOOLTIP:ChromaLighting
 END
 
 TOOLTIP:ClassicGraphics
-"O jogo como era em 2003: texturas e terreno originais, as antigas sombras duras, sem detalhe de relevo e sem brilho ou nitidez. Desativado, usa o visual Reforged. Entra em vigor na próxima inicialização do jogo."
+"O jogo como era em 2003: texturas e terreno originais, as antigas sombras duras, sem detalhe de relevo e sem brilho ou nitidez. O jogo abre assim. Desmarque para o visual Reforged: a predefinição Alta preenche as caixas, e você pode mover a barra a partir daí. Entra em vigor na próxima inicialização do jogo."
 END
 
 TOOLTIP:ClearButton
@@ -17494,6 +17550,10 @@ TOOLTIP:ExtraAnimations
 "Os edifícios sobem dentro dos andaimes durante a construção. Entra em vigor no próximo mapa."
 END
 
+TOOLTIP:Firelight
+"Edifícios em chamas, destroços e explosões lançam uma luz laranja tremulante no chão, nas paredes e nas unidades ao redor. Aparece mais em mapas noturnos. Só no Direct3D 11, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
+END
+
 TOOLTIP:FireWallPort
 "Porta aberta no firewall:"
 END
@@ -17570,6 +17630,10 @@ TOOLTIP:GroundLighting
 "Um leve padrão de luz e sombra sobre o terreno, para que a repetição dos ladrilhos do chão apareça menos. Custa pouco. Entra em vigor ao clicar em Aceitar."
 END
 
+TOOLTIP:GroundMarks
+"Projéteis e mísseis deixam queimaduras no chão, um edifício destruído deixa uma mancha escura com rachaduras, uma bomba nuclear deixa um anel queimado e as marcas de esteira dos tanques ficam escuras por mais tempo. Elas somem em cerca de quatro minutos. Só no Direct3D 11, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
+END
+
 TOOLTIP:HasConflictingUpgradeDefault
 "Atualizações conflitantes não podem ser compradas."
 END
@@ -17588,6 +17652,10 @@ END
 
 TOOLTIP:Help
 ""
+END
+
+TOOLTIP:HemiAmbient
+"Os modelos recebem a luz ambiente do mapa do céu acima e do chão abaixo em vez de por igual, então o teto de um tanque fica mais claro que a parte de baixo. As paredes mantêm a luz que tinham e um mapa noturno continua escuro. Só no Direct3D 11, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
 END
 
 TOOLTIP:HotkeyChange
@@ -17628,6 +17696,10 @@ END
 
 TOOLTIP:InputScheme
 "Moderno: o botão esquerdo seleciona, o direito dá ordens, o botão do meio move a câmera e as teclas em grade acionam a barra de comandos. Clássico: usa mouse e teclado como no jogo original, sem as adições modernas."
+END
+
+TOOLTIP:InternalHdr
+"Fogo, explosões e lasers acima do branco mantêm a cor até a sua tela em vez de acabar num branco chapado, e as cores dos times guardam um pouco mais da sua. O chão e as paredes longe do fogo ficam como estavam. Isso é dentro da imagem do jogo: seu monitor continua recebendo uma imagem normal, e um monitor HDR não recebe sinal HDR. Só no Direct3D 11, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
 END
 
 TOOLTIP:InvalidGameVersion
@@ -18070,6 +18142,10 @@ TOOLTIP:SmokeFireLighting
 "A fumaça ao lado de um fogo ganha a luz laranja dele. Entra em vigor ao clicar em Aceitar."
 END
 
+TOOLTIP:SmoothMotion
+"Numa tela acima de 60 Hz, as unidades são desenhadas entre as duas últimas posições em vez de ficarem paradas em cada uma até a próxima. Uma tela de 60 Hz não muda nada. Só a sua imagem muda: nada no jogo lê isso, e os outros jogadores veem a própria configuração. Vale ao pressionar Aceitar."
+END
+
 TOOLTIP:SmoothWater
 "A água vai sumindo na margem em vez de terminar numa linha dura. Entra em vigor no próximo mapa."
 END
@@ -18216,6 +18292,10 @@ END
 
 TOOLTIP:StopSearch
 "Abortar busca atual"
+END
+
+TOOLTIP:StructureCollapse
+"Um edifício destruído afunda no chão sob a explosão em vez de sumir num quadro, ou de virar entulho de uma vez. Só a sua imagem muda: não bloqueia nada, nada no jogo lê isso, e os outros jogadores veem a própria configuração. Só no Direct3D 11, e desligado nos Gráficos Clássicos."
 END
 
 TOOLTIP:Superweapons
@@ -18382,12 +18462,20 @@ TOOLTIP:WaterFoam
 "Rios e lagos ganham pontos de espuma e uma faixa dela ao longo da margem, e as sombras do sol caem sobre a água. As ondas do mar não mudam. Só no Direct3D 11 com a água Clássica, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
 END
 
+TOOLTIP:WaterSplashes
+"Um projétil, uma bomba ou um corpo que cai na água levanta um respingo e espalha anéis pela superfície. Só a sua imagem muda: nada no jogo lê isso, e os outros jogadores veem a própria configuração. Só no Direct3D 11 com a água Clássica, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
+END
+
 TOOLTIP:WaterStyle
 "Clássico usa a água, os brilhos, os reflexos e os rastros originais. Moderno acrescenta ondas, detalhes nas margens e espuma nos cascos. Vale ao pressionar Aceitar."
 END
 
 TOOLTIP:WaterWaves
 "Ativa/Desativa a animação de ondas nas margens. Desative esta opção para melhorar o desempenho do jogo."
+END
+
+TOOLTIP:Weather
+"Cai chuva, ou sopra areia num mapa de deserto e neve num mapa nevado, e um vento curva as árvores e inclina a fumaça. Um mapa com chuva ou neve próprias as mantém e recebe só o vento. Só a sua imagem muda: o que as unidades veem e acertam continua igual, e os outros jogadores veem a própria configuração. Só no Direct3D 11, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
 END
 
 TOOLTIP:WeatherEffects
