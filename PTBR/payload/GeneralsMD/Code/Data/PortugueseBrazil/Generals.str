@@ -314,8 +314,16 @@ Chat:Observers
 "Visão do Observador"
 END
 
+Color:Azure
+"Azul-celeste"
+END
+
 Color:Blue
 "Azul"
+END
+
+Color:Crimson
+"Carmesim"
 END
 
 Color:Gold
@@ -324,6 +332,10 @@ END
 
 Color:Green
 "Verde"
+END
+
+Color:Lavender
+"Lavanda"
 END
 
 Color:Orange
@@ -342,8 +354,16 @@ Color:Red
 "Vermelho"
 END
 
+Color:Salmon
+"Salmão"
+END
+
 Color:SkyBlue
 "Azul Claro"
+END
+
+Color:Teal
+"Verde-azulado"
 END
 
 CONTROLBAR:A10ThunderboltMissileStrike
@@ -1147,7 +1167,7 @@ CONTROLBAR:ConstructTurkiyeRadarTower
 END
 
 CONTROLBAR:ConstructTurkiyeSiper
-"B&unker Siper"
+"Bunker Sip&er"
 END
 
 CONTROLBAR:ConstructTurkiyeSupplyCenter
@@ -1184,6 +1204,10 @@ END
 
 CONTROLBAR:ConstructTurkiyeVehicleKorkut
 "Defesa Antiaérea K&orkut"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleMobileRadar
+"Radar &Móvel"
 END
 
 CONTROLBAR:ConstructTurkiyeVehicleSakarya
@@ -1422,6 +1446,30 @@ CONTROLBAR:ICBMShortcut
 "ICBM"
 END
 
+CONTROLBAR:IdleAircraft
+"Aeronave Ociosa"
+END
+
+CONTROLBAR:IdleAircraftDescription
+"Clique para selecionar a próxima aeronave ociosa"
+END
+
+CONTROLBAR:IdleInfantry
+"Infantaria Ociosa"
+END
+
+CONTROLBAR:IdleInfantryDescription
+"Clique para selecionar a próxima infantaria ociosa"
+END
+
+CONTROLBAR:IdleVehicle
+"Veículo Ocioso"
+END
+
+CONTROLBAR:IdleVehicleDescription
+"Clique para selecionar o próximo veículo terrestre ocioso"
+END
+
 CONTROLBAR:IdleWorker
 "Trabalhador Ocioso"
 END
@@ -1479,7 +1527,7 @@ CONTROLBAR:Infa_ToolTipChinaScienceInfantryParadrop
 END
 
 CONTROLBAR:Infa_ToolTipChinaScienceRedGuardTraining
-"Todos os Minicanhoneiros são produzidos três patentes acima de Veterano"
+"Todos os Minicanhoneiros serão produzidos como unidades de Elite"
 END
 
 CONTROLBAR:Infa_ToolTipChinaUpgradeRedGuardCaptureBuilding
@@ -2107,11 +2155,11 @@ CONTROLBAR:ToolTipChinaScienceArtilleryBarrage
 END
 
 CONTROLBAR:ToolTipChinaScienceARtilleryTraining
-"Canhões Nucleares e Canhões Inferno são criados três patentes acima"
+"Canhões Nucleares e Canhões Inferno são criados como veteranos."
 END
 
 CONTROLBAR:ToolTipChinaScienceBattlemasterTraining
-"Todos os Battlemasters são criados seis patentes acima"
+"Todos os Battlemasters são criados como armas de elite"
 END
 
 CONTROLBAR:ToolTipChinaScienceCarpetBomb
@@ -2155,7 +2203,7 @@ CONTROLBAR:ToolTipChinaScienceOverlordTraining
 END
 
 CONTROLBAR:ToolTipChinaScienceRedGuardTraining
-"Todos os Guardas Vermelhos são criados três patentes acima, como Cabos"
+"Todos os Guardas Vermelhos são criados como veteranos."
 END
 
 CONTROLBAR:ToolTipChinaScienceTankHunterTraining
@@ -2280,6 +2328,10 @@ END
 
 CONTROLBAR:ToolTipEvacuate
 "Ordena que todas as unidades evacuem a estrutura/transporte."
+END
+
+CONTROLBAR:ToolTipEvacuateAt
+"Ir ao local escolhido e mandar todas as unidades saírem\nAlt: descarregar aqui"
 END
 
 CONTROLBAR:ToolTipFakeGLABuilding
@@ -2579,7 +2631,7 @@ CONTROLBAR:ToolTipGLAScienceSneakAttack
 END
 
 CONTROLBAR:ToolTipGLAScienceTechnicalTraining
-"Todos os Técnicos são criados três patentes acima"
+"Todos os Técnicos são criados como veteranos."
 END
 
 CONTROLBAR:ToolTipGLASCUDAnthraxWarhead
@@ -2807,11 +2859,7 @@ CONTROLBAR:TooltipTurkiyeCommandoRaid
 END
 
 CONTROLBAR:TooltipTurkiyeElectronicBlinding
-"Cegueira Eletrônica \n Recarga: 4:00"
-END
-
-CONTROLBAR:TooltipTurkiyeFireMission
-"Missão de Fogo \n Recarga: 4:00"
+"Guerra Eletrônica \n Recarga: 4:00"
 END
 
 CONTROLBAR:ToolTipTurkiyeHarekatMerkezi
@@ -2862,48 +2910,60 @@ CONTROLBAR:ToolTipTurkiyeLandMine
 "Uma carga enterrada no chão. Requer o Kit de Minas."
 END
 
-CONTROLBAR:TooltipTurkiyeMinefield
-"Campo Minado \n Recarga: 4:00"
-END
-
 CONTROLBAR:ToolTipTurkiyeRadarTower
 "Olho fixo: vê a 500 para a artilharia. Consome energia. Um alvo."
 END
 
 CONTROLBAR:TooltipTurkiyeRapidDeployment
-"Mobilização Rápida \n Recarga: 3:00"
+"Desembarque Gokbey \n Recarga: 3:00"
+END
+
+CONTROLBAR:TooltipTurkiyeSatelliteGuidance
+"Guiagem por Satélite \n Recarga: 5:00"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceAkinciAesa
+"O radar do Akinci alcança 1000 em vez de 750."
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceCommandoRaid
 "Um Boina Bordô e duas equipes de observação saltam de paraquedas onde você apontar: olhos e cargas atrás das linhas inimigas. \n \n Ordenado por: Quartel-General"
 END
 
+CONTROLBAR:ToolTipTurkiyeScienceEarlyWarning
+"Todo radar da Turquia alcança um quarto mais longe: Quartel-General, Torre de Radar, Koral, Akinci e Radar Móvel."
+END
+
 CONTROLBAR:ToolTipTurkiyeScienceElectronicBlinding
-"Todo inimigo com um edifício na área do alvo perde o radar por 30 segundos. \n \n Ordenado por: Quartel-General"
+"Todo inimigo com um edifício na área do alvo perde o radar por 30 segundos, e a área fica bloqueada pelo mesmo tempo: drones e observadores inimigos dentro dela não veem nada, e mísseis guiados que a atravessam perdem a trava. \n \n Ordenado por: Quartel-General"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceFireMission
-"Trinta e seis projéteis pesados caem sobre o alvo vindos de fora do mapa. \n \n Ordenado por: Quartel-General"
+CONTROLBAR:ToolTipTurkiyeScienceLaserDesignation
+"Equipes de Observação e Bayraktars marcam o que atacam. Um alvo marcado conta como dentro da cobertura de radar onde quer que esteja, então todo foguete guiado por radar mantém a trava nele."
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceFuelResupply
-"Os drones Bayraktar levam uma munição a mais em cada missão."
-END
-
-CONTROLBAR:ToolTipTurkiyeScienceMinefield
-"Um avião de carga semeia um campo minado onde você apontar. \n \n Ordenado por: Quartel-General"
+CONTROLBAR:ToolTipTurkiyeScienceMobileRadar
+"A Fábrica produz o Radar Móvel, um caminhão de radar que cobre 900 ao redor enquanto está parado."
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceRapidDeployment
-"Um avião de carga solta seis Mehmetcik e dois atiradores Sungur onde você apontar. \n \n Ordenado por: Quartel-General"
+"Fuzileiros Mehmetcik e atiradores Sungur saltam de paraquedas onde você apontar: seis no nível 1, dez no nível 2, catorze e um Kirpi no nível 3. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceSatelliteGuidance
+"Por 45 segundos o mapa inteiro conta como cobertura de radar da Turquia: todo foguete guiado por radar mantém a trava, e inimigos em movimento aparecem através da névoa. \n \n Ordenado por: Quartel-General"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceSwarmMunition
-"Uma munição vagante circula onde você apontar e mergulha no alvo mais caro que encontrar. \n \n Ordenado por: Quartel-General"
+"Munições vagantes circulam onde você apontar, e cada uma mergulha no alvo mais caro que encontrar: uma no nível 1, três no nível 2, cinco no nível 3. \n \n Ordenado por: Quartel-General"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceSwarmStrike
-"Um enxame de munições caça os dez alvos mais valiosos em uma área ampla, uma munição para cada. Uma base compacta mal sente; um exército espalhado, sim. \n \n Ordenado por: Quartel-General"
+CONTROLBAR:ToolTipTurkiyeScienceTayfun
+"Um míssil balístico Tayfun cai sobre o alvo. Dentro da cobertura de radar ele sempre acerta; fora dela cai no ponto uma vez em cinco e erra longe nas outras. \n \n Ordenado por: Quartel-General"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceUavRecon
+"Um VANT circula a área do alvo por 30 segundos e informa cada unidade inimiga nela, parada ou em movimento, e o que ela é. A névoa continua, mas a área conta como cobertura de radar. \n \n Ordenado por: Quartel-General"
 END
 
 CONTROLBAR:ToolTipTurkiyeSiper
@@ -2911,11 +2971,7 @@ CONTROLBAR:ToolTipTurkiyeSiper
 END
 
 CONTROLBAR:TooltipTurkiyeSwarmMunition
-"Munição Vagante \n Recarga: 3:00"
-END
-
-CONTROLBAR:TooltipTurkiyeSwarmStrike
-"Ataque de Enxame \n Recarga: 6:00"
+"Enxame de VANTs \n Recarga: 3:00"
 END
 
 CONTROLBAR:ToolTipTurkiyeTankAltay
@@ -2924,6 +2980,14 @@ END
 
 CONTROLBAR:ToolTipTurkiyeTankKoral
 "Veículo de guerra eletrônica; seu feixe desliga edifícios inimigos a 400."
+END
+
+CONTROLBAR:TooltipTurkiyeTayfun
+"Míssil Tayfun \n Recarga: 4:00"
+END
+
+CONTROLBAR:TooltipTurkiyeUavRecon
+"Reconhecimento por VANT \n Recarga: 2:00"
 END
 
 CONTROLBAR:ToolTipTurkiyeVehicleBayraktar
@@ -2948,6 +3012,10 @@ END
 
 CONTROLBAR:ToolTipTurkiyeVehicleKorkut
 "Defesa antiaérea: canhões duplos com alcance de 350 contra aeronaves. Não pode atirar no solo."
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleMobileRadar
+"Um radar sobre rodas: parado, cobre 900 ao redor; em movimento, não cobre nada. Sem arma. \n \n Requer: Radar Móvel (patente 3)"
 END
 
 CONTROLBAR:ToolTipTurkiyeVehicleSakarya
@@ -3034,6 +3102,10 @@ CONTROLBAR:ToolTipUpgradeGLAWorkerRealCommandSet
 "Alterna a barra de comando para construir estruturas verdadeiras"
 END
 
+CONTROLBAR:ToolTipUpgradeTurkiyeAkkor
+"Todo Altay leva uma carga de interceptação que estoura um míssil ou foguete a cada três segundos."
+END
+
 CONTROLBAR:ToolTipUpgradeTurkiyeArmorPack
 "Kirpi e Altay ganham 20% mais vida."
 END
@@ -3046,16 +3118,28 @@ CONTROLBAR:ToolTipUpgradeTurkiyeFuelCell
 "O Bayraktar fica sobre o alvo pelo dobro do tempo, com o dobro de munições."
 END
 
+CONTROLBAR:ToolTipUpgradeTurkiyeGokdogan
+"Os caças Kizilelma disparam o Gokdogan: alcance de 360 em vez de 280, dano de 130 em vez de 100."
+END
+
 CONTROLBAR:ToolTipUpgradeTurkiyeMineKit
 "Os Engenheiros de Combate podem colocar minas."
 END
 
 CONTROLBAR:ToolTipUpgradeTurkiyePrecisionGuidance
-"Disparos contra terreno que ninguém vê se espalham quatro vezes menos."
+"Foguetes disparados fora da cobertura de radar acertam dois tiros em cinco, em vez de um."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeSiperReinforced
+"Concreto e cobertura superior: todo Siper aguenta metade a mais antes de cair."
 END
 
 CONTROLBAR:ToolTipUpgradeTurkiyeSwarmSoftware
 "As munições do Bayraktar escolhem o próprio alvo: o inimigo mais caro ao alcance."
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeTargetClassification
+"Contatos de radar mostram o que são: infantaria, veículo, defesa antiaérea, artilharia, aeronave ou defesa."
 END
 
 CONTROLBAR:ToolTipUpgradeTurkiyeThermal
@@ -3371,35 +3455,35 @@ CONTROLBAR:TransportExit
 END
 
 CONTROLBAR:TurkiyeCommandoRaid
-"&Incursão de Comandos"
+"Incursão de Coman&dos"
 END
 
 CONTROLBAR:TurkiyeElectronicBlinding
-"&Cegueira Eletrônica"
-END
-
-CONTROLBAR:TurkiyeFireMission
-"Missão de &Fogo"
+"Guerra Eletrônica (&W)"
 END
 
 CONTROLBAR:TurkiyeKarguSwarm
 "Enxame &Kargu"
 END
 
-CONTROLBAR:TurkiyeMinefield
-"Campo &Minado"
+CONTROLBAR:TurkiyeRapidDeployment
+"Desembarque Gokbey (&L)"
 END
 
-CONTROLBAR:TurkiyeRapidDeployment
-"Mobilização &Rápida"
+CONTROLBAR:TurkiyeSatelliteGuidance
+"Guiagem por Saté&lite"
 END
 
 CONTROLBAR:TurkiyeSwarmMunition
-"&Munição Vagante"
+"Enxame de VANTs (&R)"
 END
 
-CONTROLBAR:TurkiyeSwarmStrike
-"Ataque de &Enxame"
+CONTROLBAR:TurkiyeTayfun
+"&Míssil Tayfun"
+END
+
+CONTROLBAR:TurkiyeUavRecon
+"Reconhecimento por VANT (&U)"
 END
 
 CONTROLBAR:UnderConstructionDesc
@@ -3726,6 +3810,10 @@ CONTROLBAR:UpgradeSuicideBomb
 "Habilidade de Demolições"
 END
 
+CONTROLBAR:UpgradeTurkiyeAkkor
+"&Proteção Ativa AKKOR"
+END
+
 CONTROLBAR:UpgradeTurkiyeArmorPack
 "&Casco Reforçado"
 END
@@ -3738,16 +3826,28 @@ CONTROLBAR:UpgradeTurkiyeFuelCell
 "Célula de Com&bustível"
 END
 
+CONTROLBAR:UpgradeTurkiyeGokdogan
+"Mísseis &Gokdogan"
+END
+
 CONTROLBAR:UpgradeTurkiyeMineKit
 "&Kit de Minas"
 END
 
 CONTROLBAR:UpgradeTurkiyePrecisionGuidance
-"Guiagem de &Precisão"
+"Guiagem &Inercial"
+END
+
+CONTROLBAR:UpgradeTurkiyeSiperReinforced
+"Siper Re&forçado"
 END
 
 CONTROLBAR:UpgradeTurkiyeSwarmSoftware
 "Soft&ware de Enxame"
+END
+
+CONTROLBAR:UpgradeTurkiyeTargetClassification
+"Classificação de Alvos (&T)"
 END
 
 CONTROLBAR:UpgradeTurkiyeThermal
@@ -5186,6 +5286,10 @@ GUI:AIPersonaTurtle
 "Tartaruga"
 END
 
+GUI:AircraftAltitudeLine
+"Linhas de Altitude"
+END
+
 GUI:AllowableMaps
 "Mapas Permitidos"
 END
@@ -5639,7 +5743,7 @@ GUI:BioFeatures_Pos3
 END
 
 GUI:BioFeatures_Pos4
-"Tanque Emperor \n Lançamento de Tanques \n Todos os tanques começam três patentes acima \n Tanques mais baratos \n Aeronaves mais caras \n Sem Canhões Nucleares nem Canhões Inferno"
+"Emperor \n Lançamento de Tanques \n Battlemasters veteranos \n Tanques mais baratos \n Aeronaves mais caras \n Sem Mísseis Nucleares nem Canhões Inferno"
 END
 
 GUI:BioFeatures_Pos5
@@ -5651,7 +5755,7 @@ GUI:BioFeatures_Pos6
 END
 
 GUI:BioFeatures_Pos7
-"Transporte de Tropas de Assalto \n Helix de Assalto \n Postos Avançados de Ataque \n Bunkers Fortificados \n Minicanhoneiros \n Black Lotus invade sistemas mais rapidamente \n Hackers invadem sistemas mais rapidamente \n Minicanhoneiros paraquedistas \n Toda a infantaria começa três patentes acima"
+"Transporte de Tropas de Assalto \n Helix de Assalto \n Postos Avançados de Ataque \n Bunkers Fortificados \n Minicanhoneiros \n Black Lotus invade sistemas mais rapidamente \n Hackers invadem sistemas mais rapidamente \n Minicanhoneiros paraquedistas \n Toda a infantaria começa veterana"
 END
 
 GUI:BioFeatures_Pos8
@@ -7282,6 +7386,10 @@ GUI:GuardDescription
 "Faz com que o(s) objeto(s) selecionado(s) entre(m) no modo 'proteger área'."
 END
 
+GUI:Handicap
+"Desvantagem"
+END
+
 GUI:Hard
 "Brutal"
 END
@@ -7442,6 +7550,14 @@ GUI:HotkeysClear
 "SEM TECLA"
 END
 
+GUI:HotkeysCommandAUTO_GARRISON
+"Ocupar edifícios próximos"
+END
+
+GUI:HotkeysCommandAUTO_REPAIR
+"Ir se reparar ou se curar"
+END
+
 GUI:HotkeysCommandBar
 "Barra de comando"
 END
@@ -7488,6 +7604,10 @@ END
 
 GUI:HotkeysCommandDIPLOMACY
 "Diplomacia"
+END
+
+GUI:HotkeysCommandHOLD_POSITION
+"Manter posição"
 END
 
 GUI:HotkeysCommandPLACE_BEACON
@@ -7586,12 +7706,28 @@ GUI:HotkeysCommandSIGNAL_DEFEND
 "Sinal: defender aqui"
 END
 
+GUI:HotkeysCommandTOGGLE_ATTACKMOVE
+"Mover atacando (próximo clique)"
+END
+
 GUI:HotkeysCommandTOGGLE_CAMERA_TRACKING_DRAWABLE
 "Câmera segue a seleção"
 END
 
 GUI:HotkeysCommandTOGGLE_FAST_FORWARD_REPLAY
 "Acelerar o replay"
+END
+
+GUI:HotkeysCommandTOGGLE_FORCEATTACK
+"Forçar ataque (próximo clique)"
+END
+
+GUI:HotkeysCommandTOGGLE_GUARD
+"Proteger (próximo clique)"
+END
+
+GUI:HotkeysCommandTOGGLE_MOVE
+"Mover (próximo clique)"
 END
 
 GUI:HotkeysCommandTOGGLE_PAUSE
@@ -7630,10 +7766,6 @@ GUI:HotkeysFixed
 "O mesmo padrão em toda barra: A mover e atacar, S parar, G proteger, Y ponto de encontro, V evacuar, C invasão de combate, N vender, H minas, rede de camuflagem e a troca da construção falsa. Alterar muda a tecla."
 END
 
-GUI:HotkeysForceAttack
-"Segure para atirar no que estiver sob o cursor. Shift mais esta tecla ainda desenha uma caixa de seleção. O padrão é Ctrl."
-END
-
 GUI:HotkeysGameKey
 "A tecla original do jogo é %s."
 END
@@ -7654,10 +7786,6 @@ GUI:HotkeysPick
 "Escolha um comando ou um botão e depois clique duas vezes nele ou pressione Alterar."
 END
 
-GUI:HotkeysPressForceAttack
-"Pressione uma tecla, ou só Ctrl ou Alt. Shift não pode ser a tecla de segurar. Esc cancela."
-END
-
 GUI:HotkeysPressHold
 "Pressione uma tecla, ou só Ctrl, Alt ou Shift. Esc cancela."
 END
@@ -7672,6 +7800,30 @@ END
 
 GUI:HTTPProxy
 "Proxy HTTP:"
+END
+
+GUI:HudArmies
+"Exércitos"
+END
+
+GUI:HudCameraDirector
+"Diretor"
+END
+
+GUI:HudCameraFree
+"Livre"
+END
+
+GUI:HudCameraPlayer
+"Jogador"
+END
+
+GUI:HudFog
+"Névoa"
+END
+
+GUI:HudNetWorth
+"Patrimônio"
 END
 
 GUI:HudNoDozerLeft
@@ -7690,12 +7842,52 @@ GUI:HudProductionStrip
 "Fila de produção"
 END
 
+GUI:HudReconSiha
+"RECONHECIMENTO SIHA"
+END
+
+GUI:HudStandings
+"Classificação"
+END
+
 GUI:HudStatArmy
 "Valor do exército"
 END
 
+GUI:HudStatCash
+"Dinheiro"
+END
+
+GUI:HudStatIncome
+"Renda por minuto"
+END
+
+GUI:HudStatIncomeValue
+"%ls/min"
+END
+
+GUI:HudStatKills
+"Abates / perdas"
+END
+
+GUI:HudStatPower
+"Energia"
+END
+
+GUI:HudStatRank
+"Patente do general"
+END
+
+GUI:HudStatRankValue
+"Patente %d"
+END
+
 GUI:HudToggles
 "Painéis"
+END
+
+GUI:HudWatch
+"Assistir"
 END
 
 GUI:HumanSlot
@@ -10970,10 +11162,6 @@ LAN:ErrorGameStarted
 "Esta partida já foi iniciada."
 END
 
-LAN:ErrorModMismatch
-"Este jogo usa mods diferentes. Mods do host: %s. Inicie o jogo com os mesmos mods, na mesma ordem, para entrar."
-END
-
 LAN:ErrorNoGameSelected
 "Selecione uma partida primeiro."
 END
@@ -11008,10 +11196,6 @@ END
 
 LAN:NeedMoreTeams
 "São necessárias pelo menos 2 equipes para iniciar a partida."
-END
-
-LAN:NoMod
-"nenhum"
 END
 
 LAN:OK
@@ -15546,6 +15730,10 @@ OBJECT:TurkiyeVehicleKorkut
 "Defesa Antiaérea Korkut"
 END
 
+OBJECT:TurkiyeVehicleMobileRadar
+"Radar Móvel"
+END
+
 OBJECT:TurkiyeVehicleSakarya
 "Lança-Foguetes Sakarya"
 END
@@ -15748,486 +15936,6 @@ END
 
 RADAR:UnitUnderAttack
 "Unidade sob ataque."
-END
-
-RANK:America0
-"E-1 Soldado"
-END
-
-RANK:America1
-"E-2 Soldado"
-END
-
-RANK:America10
-"E-9 Sargento-Mor"
-END
-
-RANK:America11
-"E-9 Sargento-Mor de Comando"
-END
-
-RANK:America12
-"E-9 Sargento-Mor do Exército"
-END
-
-RANK:America13
-"W-1 Suboficial"
-END
-
-RANK:America14
-"W-2 Suboficial-Chefe"
-END
-
-RANK:America15
-"W-3 Suboficial-Chefe"
-END
-
-RANK:America16
-"W-4 Suboficial-Chefe"
-END
-
-RANK:America17
-"W-5 Suboficial-Chefe"
-END
-
-RANK:America18
-"O-1 Segundo-Tenente"
-END
-
-RANK:America19
-"O-2 Primeiro-Tenente"
-END
-
-RANK:America2
-"E-3 Soldado de Primeira Classe"
-END
-
-RANK:America20
-"O-3 Capitão"
-END
-
-RANK:America21
-"O-4 Major"
-END
-
-RANK:America22
-"O-5 Tenente-Coronel"
-END
-
-RANK:America23
-"O-6 Coronel"
-END
-
-RANK:America24
-"O-7 General de Brigada"
-END
-
-RANK:America25
-"O-8 General de Divisão"
-END
-
-RANK:America26
-"O-9 Tenente-General"
-END
-
-RANK:America27
-"O-10 General"
-END
-
-RANK:America28
-"General do Exército"
-END
-
-RANK:America3
-"E-4 Especialista"
-END
-
-RANK:America4
-"E-4 Cabo"
-END
-
-RANK:America5
-"E-5 Sargento"
-END
-
-RANK:America6
-"E-6 Segundo-Sargento"
-END
-
-RANK:America7
-"E-7 Sargento de Primeira Classe"
-END
-
-RANK:America8
-"E-8 Sargento-Mestre"
-END
-
-RANK:America9
-"E-8 Primeiro-Sargento"
-END
-
-RANK:China0
-"Sem Patente"
-END
-
-RANK:China1
-"Soldado"
-END
-
-RANK:China10
-"Segundo-Tenente"
-END
-
-RANK:China11
-"Primeiro-Tenente"
-END
-
-RANK:China12
-"Capitão"
-END
-
-RANK:China13
-"Major"
-END
-
-RANK:China14
-"Tenente-Coronel"
-END
-
-RANK:China15
-"Coronel"
-END
-
-RANK:China16
-"Coronel Sênior"
-END
-
-RANK:China17
-"General de Divisão"
-END
-
-RANK:China18
-"Tenente-General"
-END
-
-RANK:China19
-"General"
-END
-
-RANK:China2
-"Soldado de Primeira Classe"
-END
-
-RANK:China3
-"Cabo"
-END
-
-RANK:China4
-"Sargento"
-END
-
-RANK:China5
-"Sargento de Segunda Classe"
-END
-
-RANK:China6
-"Sargento de Primeira Classe"
-END
-
-RANK:China7
-"Sargento-Mestre de Terceira Classe"
-END
-
-RANK:China8
-"Sargento-Mestre de Segunda Classe"
-END
-
-RANK:China9
-"Sargento-Mestre de Primeira Classe"
-END
-
-RANK:GLA0
-"Sem Patente"
-END
-
-RANK:GLA1
-"Recruta"
-END
-
-RANK:GLA10
-"Capitão de Incursão"
-END
-
-RANK:GLA11
-"Capitão de Coluna"
-END
-
-RANK:GLA12
-"Comandante de Ataque"
-END
-
-RANK:GLA13
-"Comandante de Campo"
-END
-
-RANK:GLA14
-"Comandante de Setor"
-END
-
-RANK:GLA15
-"Senhor da Guerra"
-END
-
-RANK:GLA16
-"Senhor da Guerra Regional"
-END
-
-RANK:GLA17
-"Grão-Senhor da Guerra"
-END
-
-RANK:GLA18
-"General"
-END
-
-RANK:GLA19
-"Grande General"
-END
-
-RANK:GLA2
-"Irregular"
-END
-
-RANK:GLA20
-"Libertador Supremo"
-END
-
-RANK:GLA3
-"Combatente"
-END
-
-RANK:GLA4
-"Saqueador"
-END
-
-RANK:GLA5
-"Saqueador Veterano"
-END
-
-RANK:GLA6
-"Membro de Esquadrão"
-END
-
-RANK:GLA7
-"Líder de Esquadrão"
-END
-
-RANK:GLA8
-"Líder de Célula"
-END
-
-RANK:GLA9
-"Líder de Célula Sênior"
-END
-
-RANK:NextRank
-"Próxima patente %d/%d XP"
-END
-
-RANK:PerkAURA_CAPTURE
-"Aura: captura edifícios %d%% mais rápido"
-END
-
-RANK:PerkAURA_DRILL
-"Aura: treina unidades até o grau %d"
-END
-
-RANK:PerkAURA_GUARD
-"Aura: %d%% menos dano recebido"
-END
-
-RANK:PerkAURA_MEND
-"Aura: cura %d,%02d%% por segundo"
-END
-
-RANK:PerkAURA_PACE
-"Aura: velocidade +%d%%"
-END
-
-RANK:PerkAURA_RADIUS
-"Alcance da aura +%d%%"
-END
-
-RANK:PerkAURA_RANGE
-"Aura: alcance da artilharia +%d%%"
-END
-
-RANK:PerkAURA_RATE_OF_FIRE
-"Aura: cadência de tiro +%d%%"
-END
-
-RANK:PerkAURA_SIGHT
-"Aura: visão +%d%%"
-END
-
-RANK:PerkAURA_SPOILS
-"Aura: eliminações por perto rendem %d%% do custo da vítima"
-END
-
-RANK:PerkAURA_STEADY
-"Aura: paralisia, PEM e subjugação %d%% mais curtas"
-END
-
-RANK:PerkDEATH_RALLY
-"Quando cai, aliados próximos recebem %d%% menos dano por 10 segundos"
-END
-
-RANK:PerkDESIGNATE
-"Marca o que atinge por %d segundos: todos atiram 50%% mais rápido nele"
-END
-
-RANK:PerkDESIGNATE_REVEAL
-"Sua marca revela alvos furtivos"
-END
-
-RANK:PerkDETECT
-"Detecta unidades furtivas a até %d"
-END
-
-RANK:PerkHEALTH
-"Vida +%d%%"
-END
-
-RANK:PerkLAST_STAND
-"Abaixo de 35%% de vida: cadência de tiro +%d%%"
-END
-
-RANK:PerkMEND
-"Fora de combate: cura %d,%02d%% por segundo"
-END
-
-RANK:PerkRANGE
-"Alcance +%d%%"
-END
-
-RANK:PerkRATE_OF_FIRE
-"Cadência de tiro +%d%%"
-END
-
-RANK:PerkSALVAGE_CRATE
-"Deixa uma caixa de sucata quando cai"
-END
-
-RANK:PerkSCATTER
-"Dispersão da artilharia -%d%%"
-END
-
-RANK:PerkSCAVENGE
-"Suas eliminações rendem %d%% do custo da vítima"
-END
-
-RANK:PerkSIGHT
-"Visão +%d%%"
-END
-
-RANK:PerkSPEED
-"Velocidade +%d%%"
-END
-
-RANK:PerkSPOTTER
-"Observa para a artilharia"
-END
-
-RANK:PerkSTILL_GUARD
-"Parado: %d%% menos dano recebido"
-END
-
-RANK:Turkiye0
-"Sem Patente"
-END
-
-RANK:Turkiye1
-"Er"
-END
-
-RANK:Turkiye10
-"Astsubay Kıdemli Başçavuş"
-END
-
-RANK:Turkiye11
-"Teğmen"
-END
-
-RANK:Turkiye12
-"Üsteğmen"
-END
-
-RANK:Turkiye13
-"Yüzbaşı"
-END
-
-RANK:Turkiye14
-"Binbaşı"
-END
-
-RANK:Turkiye15
-"Yarbay"
-END
-
-RANK:Turkiye16
-"Albay"
-END
-
-RANK:Turkiye17
-"Tuğgeneral"
-END
-
-RANK:Turkiye18
-"Tümgeneral"
-END
-
-RANK:Turkiye19
-"Korgeneral"
-END
-
-RANK:Turkiye2
-"Onbaşı"
-END
-
-RANK:Turkiye20
-"Orgeneral"
-END
-
-RANK:Turkiye21
-"Mareşal"
-END
-
-RANK:Turkiye3
-"Çavuş"
-END
-
-RANK:Turkiye4
-"Uzman Çavuş"
-END
-
-RANK:Turkiye5
-"Astsubay Çavuş"
-END
-
-RANK:Turkiye6
-"Astsubay Kıdemli Çavuş"
-END
-
-RANK:Turkiye7
-"Astsubay Üstçavuş"
-END
-
-RANK:Turkiye8
-"Astsubay Kıdemli Üstçavuş"
-END
-
-RANK:Turkiye9
-"Astsubay Başçavuş"
 END
 
 SCIENCE:ChinaArtilleryBarrage
@@ -16462,36 +16170,64 @@ SCIENCE:TempName
 "Nome Temporário da Habilidade"
 END
 
+SCIENCE:TurkiyeAkinciAesa
+"AESA do Akinci"
+END
+
 SCIENCE:TurkiyeCommandoRaid
 "Incursão de Comandos"
 END
 
+SCIENCE:TurkiyeEarlyWarning
+"Alerta Antecipado"
+END
+
 SCIENCE:TurkiyeElectronicBlinding
-"Cegueira Eletrônica"
+"Guerra Eletrônica"
 END
 
-SCIENCE:TurkiyeFireMission
-"Missão de Fogo"
+SCIENCE:TurkiyeLaserDesignation
+"Designação a Laser"
 END
 
-SCIENCE:TurkiyeFuelResupply
-"Reabastecimento de Combustível"
-END
-
-SCIENCE:TurkiyeMinefield
-"Campo Minado"
+SCIENCE:TurkiyeMobileRadar
+"Radar Móvel"
 END
 
 SCIENCE:TurkiyeRapidDeployment
-"Mobilização Rápida"
+"Desembarque Gokbey 1"
+END
+
+SCIENCE:TurkiyeRapidDeployment2
+"Desembarque Gokbey 2"
+END
+
+SCIENCE:TurkiyeRapidDeployment3
+"Desembarque Gokbey 3"
+END
+
+SCIENCE:TurkiyeSatelliteGuidance
+"Guiagem por Satélite"
 END
 
 SCIENCE:TurkiyeSwarmMunition
-"Munição Vagante"
+"Enxame de VANTs 1"
 END
 
-SCIENCE:TurkiyeSwarmStrike
-"Ataque de Enxame"
+SCIENCE:TurkiyeSwarmMunition2
+"Enxame de VANTs 2"
+END
+
+SCIENCE:TurkiyeSwarmMunition3
+"Enxame de VANTs 3"
+END
+
+SCIENCE:TurkiyeTayfun
+"Míssil Tayfun"
+END
+
+SCIENCE:TurkiyeUavRecon
+"Reconhecimento por VANT"
 END
 
 SCIENCE:USAA10Strike1
@@ -16942,6 +16678,10 @@ TOOLTIP:AdvanceOptionsCancel
 "Sai do Menu de Opções Avançadas de Vídeo sem aplicar suas alterações."
 END
 
+TOOLTIP:AircraftAltitudeLine
+"Uma linha fina de cada aeronave no ar até o chão logo abaixo dela. Onde ela toca é onde o avião realmente está, e o comprimento é a altura em que ele voa. Aeronaves estacionadas não têm linha."
+END
+
 TOOLTIP:AlreadyUpgradedDefault
 "Esta atualização já foi pesquisada."
 END
@@ -16964,6 +16704,202 @@ END
 
 TOOLTIP:ArchiveReplays
 "Mantém cada partida gravada com um nome próprio em vez de sobrescrever sempre o replay anterior."
+END
+
+TOOLTIP:ArmorAFG_Comanche
+"Helicóptero"
+END
+
+TOOLTIP:ArmorAFG_CountermeasuresComanche
+"Helicóptero"
+END
+
+TOOLTIP:ArmorAirplane
+"Aeronave"
+END
+
+TOOLTIP:ArmorAntiAirVehicle
+"Veículo"
+END
+
+TOOLTIP:ArmorAssaultCrawler
+"Tanque"
+END
+
+TOOLTIP:ArmorAvalanche
+"Tanque"
+END
+
+TOOLTIP:ArmorAvenger
+"Veículo"
+END
+
+TOOLTIP:ArmorBaseDefense
+"Defesa"
+END
+
+TOOLTIP:ArmorBattleBusStructureTough
+"Fortificado"
+END
+
+TOOLTIP:ArmorBattleBusStructureToughPlusOne
+"Fortificado"
+END
+
+TOOLTIP:ArmorBattleBusStructureToughPlusTwo
+"Fortificado"
+END
+
+TOOLTIP:ArmorBattleBusTruck
+"Veículo"
+END
+
+TOOLTIP:ArmorBattleBusTruckPlusOne
+"Veículo"
+END
+
+TOOLTIP:ArmorBattleBusTruckPlusTwo
+"Veículo"
+END
+
+TOOLTIP:ArmorChemReb_Human
+"Infantaria"
+END
+
+TOOLTIP:ArmorChemSuitHuman
+"Infantaria"
+END
+
+TOOLTIP:ArmorChinook
+"Helicóptero"
+END
+
+TOOLTIP:ArmorComanche
+"Helicóptero"
+END
+
+TOOLTIP:ArmorCountermeasuresAirplane
+"Aeronave"
+END
+
+TOOLTIP:ArmorCountermeasuresComanche
+"Helicóptero"
+END
+
+TOOLTIP:ArmorCountermeasuresSpectreGunship
+"Aeronave"
+END
+
+TOOLTIP:ArmorDemoGenTerrorist
+"Infantaria"
+END
+
+TOOLTIP:ArmorDozer
+"Veículo"
+END
+
+TOOLTIP:ArmorDragonTank
+"Tanque"
+END
+
+TOOLTIP:ArmorFireBase
+"Defesa"
+END
+
+TOOLTIP:ArmorGLAUpgradedStructure
+"Fortificado"
+END
+
+TOOLTIP:ArmorGLAUpgradedStructureTough
+"Fortificado"
+END
+
+TOOLTIP:ArmorHazMatHuman
+"Infantaria"
+END
+
+TOOLTIP:ArmorHuman
+"Infantaria"
+END
+
+TOOLTIP:ArmorHumvee
+"Veículo"
+END
+
+TOOLTIP:ArmorInfGen_Human
+"Infantaria"
+END
+
+TOOLTIP:ArmorInvulnerable
+"Invulnerável"
+END
+
+TOOLTIP:ArmorInvulnerableAll
+"Invulnerável"
+END
+
+TOOLTIP:ArmorMine
+"Mina"
+END
+
+TOOLTIP:ArmorNo
+"Nenhuma"
+END
+
+TOOLTIP:ArmorQuadCannon
+"Veículo"
+END
+
+TOOLTIP:ArmorSentryDrone
+"Drone"
+END
+
+TOOLTIP:ArmorSpectreGunship
+"Aeronave"
+END
+
+TOOLTIP:ArmorStingerSite
+"Defesa"
+END
+
+TOOLTIP:ArmorStingerSoldier
+"Infantaria"
+END
+
+TOOLTIP:ArmorStructure
+"Edifício"
+END
+
+TOOLTIP:ArmorStructureInternetCenter
+"Edifício"
+END
+
+TOOLTIP:ArmorStructureTough
+"Fortificado"
+END
+
+TOOLTIP:ArmorTank
+"Tanque"
+END
+
+TOOLTIP:ArmorToxinTruck
+"Veículo"
+END
+
+TOOLTIP:ArmorTruck
+"Veículo"
+END
+
+TOOLTIP:ArmorUpgradedTank
+"Tanque"
+END
+
+TOOLTIP:ArmorVulnerableAll
+"Nenhuma"
+END
+
+TOOLTIP:ArmorWall
+"Muro"
 END
 
 TOOLTIP:AsianText
@@ -17634,6 +17570,10 @@ TOOLTIP:GroundMarks
 "Projéteis e mísseis deixam queimaduras no chão, um edifício destruído deixa uma mancha escura com rachaduras, uma bomba nuclear deixa um anel queimado e as marcas de esteira dos tanques ficam escuras por mais tempo. Elas somem em cerca de quatro minutos. Só no Direct3D 11, e desligado nos Gráficos Clássicos. Vale ao pressionar Aceitar."
 END
 
+TOOLTIP:Handicap
+"Enfraquece este jogador na proporção. Em 50%: metade da vida e do dano das unidades e edifícios, metade da cura e o dobro do tempo de construção, pesquisa e poderes especiais."
+END
+
 TOOLTIP:HasConflictingUpgradeDefault
 "Atualizações conflitantes não podem ser compradas."
 END
@@ -17939,7 +17879,7 @@ TOOLTIP:OptionsDefaults
 END
 
 TOOLTIP:OrderLines
-"Mostra uma linha de cada unidade selecionada até seu destino e por todos os pontos colocados na fila. Desativar não remove os marcadores desses pontos."
+"Uma linha de cada unidade selecionada até o destino e por todos os pontos que ela tem na fila. Desligado, uma ordem simples não desenha linha nem marcador, e um clique não deixa anel no chão; uma rota na fila mantém a linha e os marcadores."
 END
 
 TOOLTIP:ParticleBounce
@@ -18222,32 +18162,16 @@ TOOLTIP:StatAttackSpeed
 "Velocidade de ataque"
 END
 
-TOOLTIP:StatAttackSpeedHint
-"(disparos por segundo, recargas incluídas)"
-END
-
 TOOLTIP:StatDamage
 "Dano"
-END
-
-TOOLTIP:StatDamageHint
-"(arma principal, um disparo, antes da blindagem)"
 END
 
 TOOLTIP:StatDamagePerSecond
 "Dano por segundo"
 END
 
-TOOLTIP:StatDamagePerSecondHint
-"(dano × velocidade de ataque)"
-END
-
 TOOLTIP:StatHealth
 "Vida"
-END
-
-TOOLTIP:StatHealthHint
-"(dano que aguenta depois da blindagem)"
 END
 
 TOOLTIP:StatNewWeapon
@@ -18274,20 +18198,8 @@ TOOLTIP:StatRange
 "Alcance"
 END
 
-TOOLTIP:StatRangeHint
-"(10 é um quadrado da grade de posicionamento)"
-END
-
 TOOLTIP:StatSeconds
 "%ds"
-END
-
-TOOLTIP:StatTime
-"Tempo de construção"
-END
-
-TOOLTIP:StatTimeHint
-"(com a sua energia e as suas fábricas agora)"
 END
 
 TOOLTIP:StopSearch
@@ -18834,8 +18746,20 @@ UPGRADE:TranqDarts
 "Dardos Tranquilizantes"
 END
 
+UPGRADE:TurkiyeAkinciAesa
+"AESA do Akinci"
+END
+
+UPGRADE:TurkiyeAkkor
+"Proteção Ativa AKKOR"
+END
+
 UPGRADE:TurkiyeArmorPack
 "Casco Reforçado"
+END
+
+UPGRADE:TurkiyeEarlyWarning
+"Alerta Antecipado"
 END
 
 UPGRADE:TurkiyeExtendedRange
@@ -18846,8 +18770,12 @@ UPGRADE:TurkiyeFuelCell
 "Célula de Combustível"
 END
 
-UPGRADE:TurkiyeFuelResupply
-"Reabastecimento de Combustível"
+UPGRADE:TurkiyeGokdogan
+"Mísseis Gokdogan"
+END
+
+UPGRADE:TurkiyeLaserDesignation
+"Designação a Laser"
 END
 
 UPGRADE:TurkiyeMineKit
@@ -18855,11 +18783,19 @@ UPGRADE:TurkiyeMineKit
 END
 
 UPGRADE:TurkiyePrecisionGuidance
-"Guiagem de Precisão"
+"Guiagem Inercial"
+END
+
+UPGRADE:TurkiyeSiperReinforced
+"Siper Reforçado"
 END
 
 UPGRADE:TurkiyeSwarmSoftware
 "Software de Enxame"
+END
+
+UPGRADE:TurkiyeTargetClassification
+"Classificação de Alvos"
 END
 
 UPGRADE:TurkiyeThermal
