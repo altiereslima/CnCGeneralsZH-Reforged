@@ -45,7 +45,6 @@
 #include "BuildFingerprint.h"		// ZH_BUILD_FINGERPRINT, generated at build time (N1)
 #include "Common/EarlyOptions.h"	// findUserDataDirectory
 #include "Common/file.h"
-#include "Common/ArchiveFileSystem.h"
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
 #include "Common/GameLOD.h"	// STATIC_GAME_LOD_HIGH, whose step on the quality slider is the slider's default
@@ -53,7 +52,6 @@
 #include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/Registry.h"
-#include "Common/ThingTemplate.h"
 #include "Common/UserPreferences.h"
 #include "Common/version.h"
 
@@ -84,345 +82,6 @@ static void parseIgnoredField( INI *, void *, void *, const void * )
 // A map's map.ini can carry a GameData block.  Retail is 40; a tiny cell makes the partition grid
 // millions of cells on a large map, a huge one leaves the whole map in a handful of cells.
 static const INI::RealRange PARTITION_CELL_SIZE_RANGE = { 20.0f, 400.0f };
-
-// A side's weapon table exists from its first line on, so a side BalanceReforged.ini never names
-// keeps a NULL table and the global WeaponBonus lines.
-static void parseVeterancyWeaponBonus( INI *ini, void *, void *store, const void * )
-{
-	WeaponBonusSet **table = (WeaponBonusSet **)store;
-	if( *table == NULL )
-		*table = newInstance( WeaponBonusSet );
-	(*table)->parseWeaponBonusSet( ini );
-}
-
-const char *const TheVeterancySideNames[VETERANCY_SIDE_COUNT] = { "America", "China", "GLA", "Turkiye" };
-
-// A ladder line holds one value per side, America, China, GLA and Turkiye, written into the same RankLadder
-// member of each; the member's offset rides in userData and store is m_rankLadder.
-static void parseLadderInts( INI *ini, void *, void *store, const void *member )
-{
-	for( Int side = 0; side < VETERANCY_SIDE_COUNT; ++side )
-		*(Int *)( (char *)( (RankLadder *)store + side ) + (size_t)member ) = INI::scanInt( ini->getNextToken() );
-}
-
-static void parseLadderReals( INI *ini, void *, void *store, const void *member )
-{
-	for( Int side = 0; side < VETERANCY_SIDE_COUNT; ++side )
-		*(Real *)( (char *)( (RankLadder *)store + side ) + (size_t)member ) = INI::scanReal( ini->getNextToken() );
-}
-
-static void parseLadderPercents( INI *ini, void *, void *store, const void *member )
-{
-	for( Int side = 0; side < VETERANCY_SIDE_COUNT; ++side )
-		*(Real *)( (char *)( (RankLadder *)store + side ) + (size_t)member ) = INI::scanPercentToReal( ini->getNextToken() );
-}
-
-const char *const TheRankPerkNames[RANK_PERK_COUNT + 1] =
-{
-	"SIGHT", "STILL_GUARD", "MEND", "SPOTTER", "SCATTER", "DEATH_RALLY", "DETECT", "AURA_RADIUS",
-	"RATE_OF_FIRE", "RANGE", "HEALTH", "SPEED", "LAST_STAND", "SCAVENGE", "DESIGNATE", "DESIGNATE_REVEAL",
-	"SALVAGE_CRATE",
-	"AURA_RATE_OF_FIRE", "AURA_SIGHT", "AURA_GUARD", "AURA_RANGE", "AURA_MEND", "AURA_PACE", "AURA_DRILL",
-	"AURA_STEADY", "AURA_CAPTURE", "AURA_SPOILS", NULL
-};
-
-const char *const TheRankAuraNames[RANK_AURA_COUNT] =
-{
-	"RateOfFire", "Sight", "Guard", "Range", "Mend", "Pace", "Drill", "Steady", "Capture", "Spoils", "Rally"
-};
-
-const char *const TheRankReachNames[RANK_REACH_COUNT + 1] = { "UNITS", "INFANTRY", "STRUCTURES", NULL };
-
-// Perk_<side> = grade kind [value [radius [reach]]].  userData is the side, store is m_rankLadder.
-static void parseLadderPerk( INI *ini, void *, void *store, const void *side )
-{
-	const char *tokens[ 5 ] = { ini->getNextToken(), ini->getNextToken() };
-	Int count = 2;
-	while( count < 5 && ( tokens[ count ] = ini->getNextTokenOrNull() ) != NULL )
-		++count;
-	( (RankLadder *)store + (size_t)side )->addPerkLine( tokens, count );
-}
-
-#define LADDER_FIELD( token, parser, member ) \
-	{ token, parser, (const void *)offsetof( RankLadder, member ), offsetof( GlobalData, m_rankLadder ) }
-
-/** The Veterancy block, BalanceReforged.ini's: its own keyword rather than a second GameData block,
-	* because parseGameDataDefinition also re-reads Options.ini, which would overrule the command line. */
-static const FieldParse theVeterancyFieldParseTable[] =
-{
-	LADDER_FIELD( "Grades",				parseLadderInts,			m_grades ),
-	LADDER_FIELD( "Top",					parseLadderReals,			m_top ),
-	LADDER_FIELD( "VeteranPin",		parseLadderInts,			m_pin[LEVEL_VETERAN] ),
-	LADDER_FIELD( "ElitePin",			parseLadderInts,			m_pin[LEVEL_ELITE] ),
-	LADDER_FIELD( "HeroicPin",		parseLadderInts,			m_pin[LEVEL_HEROIC] ),
-	LADDER_FIELD( "HeroStart",		parseLadderInts,			m_heroStart ),
-	LADDER_FIELD( "RateOfFire",		parseLadderPercents,	m_statTop[RANK_STAT_RATE_OF_FIRE] ),
-	LADDER_FIELD( "Damage",				parseLadderPercents,	m_statTop[RANK_STAT_DAMAGE] ),
-	LADDER_FIELD( "Health",				parseLadderPercents,	m_statTop[RANK_STAT_HEALTH] ),
-	LADDER_FIELD( "Range",				parseLadderPercents,	m_statTop[RANK_STAT_RANGE] ),
-	LADDER_FIELD( "Speed",				parseLadderPercents,	m_statTop[RANK_STAT_SPEED] ),
-	LADDER_FIELD( "SelfRepair",		parseLadderPercents,	m_statTop[RANK_STAT_SELF_REPAIR] ),
-	LADDER_FIELD( "AuraRadius",		parseLadderReals,			m_auraRadius ),
-	{ "Perk_America",					parseLadderPerk,			(const void *)VETERANCY_SIDE_AMERICA,	offsetof( GlobalData, m_rankLadder ) },
-	{ "Perk_China",						parseLadderPerk,			(const void *)VETERANCY_SIDE_CHINA,		offsetof( GlobalData, m_rankLadder ) },
-	{ "Perk_GLA",							parseLadderPerk,			(const void *)VETERANCY_SIDE_GLA,			offsetof( GlobalData, m_rankLadder ) },
-	{ "Perk_Turkiye",					parseLadderPerk,			(const void *)VETERANCY_SIDE_TURKIYE,	offsetof( GlobalData, m_rankLadder ) },
-	{ "AuraRateOfFireCap",		INI::parsePercentToReal,	NULL,	offsetof( GlobalData, m_rankAuraRateOfFireCap ) },
-	{ "DrillRate",						INI::parsePercentToReal,	NULL,	offsetof( GlobalData, m_rankDrillRate ) },
-	{ "SalvageCrate",					INI::parseAsciiString,		NULL,	offsetof( GlobalData, m_rankSalvageCrate ) },
-	{ "RallyTime",						INI::parseDurationUnsignedInt,	NULL,	offsetof( GlobalData, m_rankRallyTime ) },
-	{ "AuraRing_RateOfFire",	RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_RATE_OF_FIRE] ) },
-	{ "AuraRing_Sight",				RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_SIGHT] ) },
-	{ "AuraRing_Guard",				RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_GUARD] ) },
-	{ "AuraRing_Range",				RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_RANGE] ) },
-	{ "AuraRing_Rally",				RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_RALLY] ) },
-	{ "AuraRing_Mend",				RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_MEND] ) },
-	{ "AuraRing_Pace",				RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_PACE] ) },
-	{ "AuraRing_Drill",				RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_DRILL] ) },
-	{ "AuraRing_Steady",			RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_STEADY] ) },
-	{ "AuraRing_Capture",			RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_CAPTURE] ) },
-	{ "AuraRing_Spoils",			RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL,	offsetof( GlobalData, m_rankAuraRing[RANK_AURA_SPOILS] ) },
-	{ "WorthGain",						INI::parseReal,				NULL,	offsetof( GlobalData, m_rankWorthGain ) },
-	{ "CrateGrades",					INI::parseInt,				NULL,	offsetof( GlobalData, m_rankCrateGrades ) },
-	{ "WeaponBonus_America",	parseVeterancyWeaponBonus,	NULL,	offsetof( GlobalData, m_veterancyWeaponBonus[VETERANCY_SIDE_AMERICA] ) },
-	{ "WeaponBonus_China",		parseVeterancyWeaponBonus,	NULL,	offsetof( GlobalData, m_veterancyWeaponBonus[VETERANCY_SIDE_CHINA] ) },
-	{ "WeaponBonus_GLA",			parseVeterancyWeaponBonus,	NULL,	offsetof( GlobalData, m_veterancyWeaponBonus[VETERANCY_SIDE_GLA] ) },
-	{ "SelfRepairDelay",			INI::parseDurationUnsignedInt,	NULL,	offsetof( GlobalData, m_veterancySelfRepairDelay ) },
-	{ NULL,	NULL,	NULL,	0 }
-};
-
-#undef LADDER_FIELD
-
-/*static*/ void GlobalData::parseVeterancyDefinition( INI *ini )
-{
-	ini->initFromINI( TheWritableGlobalData, theVeterancyFieldParseTable );
-	for( Int side = 0; side < VETERANCY_SIDE_COUNT; ++side )
-	{
-		RankLadder &ladder = TheWritableGlobalData->m_rankLadder[ side ];
-		if( ladder.m_grades > 0
-				&& ( ladder.m_grades > RANK_GRADES_MAX || ladder.m_pin[LEVEL_HEROIC] > ladder.m_grades || ladder.m_top < ladder.m_grades
-					|| ladder.m_pin[LEVEL_VETERAN] <= 0 || ladder.m_pin[LEVEL_VETERAN] >= ladder.m_pin[LEVEL_ELITE]
-					|| ladder.m_pin[LEVEL_ELITE] >= ladder.m_pin[LEVEL_HEROIC] || ladder.m_heroStart > ladder.m_grades ) )
-			throw INI_INVALID_DATA;
-		ladder.finish( TheWritableGlobalData->m_rankWorthGain );
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-void RankLadder::clear()
-{
-	m_grades = 0;
-	m_top = 0.0f;
-	for( Int level = 0; level < LEVEL_COUNT; ++level )
-		m_pin[ level ] = level;
-	m_heroStart = 0;
-	m_ratio = 1.0f;
-	for( Int stat = 0; stat < RANK_STAT_COUNT; ++stat )
-		m_statTop[ stat ] = stat == RANK_STAT_SELF_REPAIR ? 0.0f : 1.0f;
-	m_auraRadius = 0.0f;
-	for( Int grade = 0; grade <= RANK_GRADES_MAX; ++grade )
-	{
-		m_total[ grade ] = (Real)grade;
-		for( Int stat = 0; stat < RANK_STAT_COUNT; ++stat )
-			m_stat[ grade ][ stat ] = stat == RANK_STAT_SELF_REPAIR ? 0.0f : 1.0f;
-		for( Int perk = 0; perk < RANK_PERK_COUNT; ++perk )
-		{
-			m_perkAt[ grade ][ perk ] = m_perk[ grade ][ perk ] = 0.0f;
-			m_radiusAt[ grade ][ perk ] = m_radius[ grade ][ perk ] = 0.0f;
-			m_reachAt[ grade ][ perk ] = m_reach[ grade ][ perk ] = RANK_REACH_UNITS;
-		}
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/** grade kind [value [radius [reach]]]: the value a percent, a plain number (DETECT's radius,
-	* AURA_DRILL's grade, DESIGNATE's seconds), or nothing for 1 (SPOTTER); an aura line's own radius;
-	* INFANTRY or STRUCTURES for who it reaches.  A bad token throws, as the INI scanners do. */
-//-------------------------------------------------------------------------------------------------
-void RankLadder::addPerkLine( const char *const *tokens, Int count )
-{
-	const Int grade = INI::scanInt( tokens[ 0 ] );
-	const Int perk = INI::scanIndexList( tokens[ 1 ], TheRankPerkNames );
-	if( grade < 0 || grade > RANK_GRADES_MAX )
-		throw INI_INVALID_DATA;
-	const char *value = count > 2 ? tokens[ 2 ] : NULL;
-	m_perkAt[ grade ][ perk ] = value == NULL ? 1.0f
-		: value[ strlen( value ) - 1 ] == '%' ? INI::scanPercentToReal( value ) : INI::scanReal( value );
-	m_radiusAt[ grade ][ perk ] = count > 3 ? INI::scanReal( tokens[ 3 ] ) : 0.0f;
-	m_reachAt[ grade ][ perk ] = count > 4 ? (RankReach)INI::scanIndexList( tokens[ 4 ], TheRankReachNames ) : RANK_REACH_UNITS;
-}
-
-//-------------------------------------------------------------------------------------------------
-// The stat table needs a natural logarithm and an exponential.  The CRT's differ by a bit between
-// Windows, macOS and Linux, and a player on any of them can join any other, so these two use only
-// + - * /, which are exact everywhere: ln by halving into [1, 2) and the atanh series, e by
-// Taylor's series on what is left over a whole number of ln 2.
-//-------------------------------------------------------------------------------------------------
-static const double RANK_LN2 = 0.69314718055994530942;
-
-static double rankLn( double x )
-{
-	Int twos = 0;
-	while( x >= 2.0 ) { x *= 0.5; ++twos; }
-	while( x < 1.0 ) { x *= 2.0; --twos; }
-	const double y = ( x - 1.0 ) / ( x + 1.0 ), y2 = y * y;
-	double term = y, sum = 0.0;
-	for( Int odd = 1; odd < 61; odd += 2, term *= y2 )
-		sum += term / odd;
-	return 2.0 * sum + twos * RANK_LN2;
-}
-
-static double rankExp( double x )
-{
-	const Int twos = (Int)( x / RANK_LN2 );
-	const double rest = x - twos * RANK_LN2;
-	double term = 1.0, sum = 1.0;
-	for( Int n = 1; n < 30; ++n )
-	{
-		term *= rest / n;
-		sum += term;
-	}
-	for( Int i = 0; i < twos; ++i ) sum *= 2.0;
-	for( Int i = 0; i > twos; --i ) sum *= 0.5;
-	return sum;
-}
-
-//-------------------------------------------------------------------------------------------------
-// The ratio by halving, multiplication only, so every machine finds the same one.
-//-------------------------------------------------------------------------------------------------
-void RankLadder::finish( Real worthGain )
-{
-	if( m_grades <= 0 )
-		return;
-
-	Real low = 1.0f, high = 2.0f;
-	for( Int pass = 0; pass < 60; ++pass )
-	{
-		const Real ratio = ( low + high ) * 0.5f;
-		Real sum = 0.0f, step = 1.0f;
-		for( Int grade = 0; grade < m_grades; ++grade, step *= ratio )
-			sum += step;
-		( sum < m_top ? low : high ) = ratio;
-	}
-	m_ratio = ( low + high ) * 0.5f;
-
-	Real step = 1.0f;
-	m_total[ 0 ] = 0.0f;
-	for( Int grade = 1; grade <= RANK_GRADES_MAX; ++grade, step *= m_ratio )
-		m_total[ grade ] = m_total[ grade - 1 ] + step;
-
-	const Real topWorth = 1.0f + worthGain;
-	for( Int grade = 0; grade <= RANK_GRADES_MAX; ++grade )
-	{
-		const Real held = MIN( m_total[ grade ], m_top );
-		const double share = rankLn( 1.0 + worthGain * sqrt( (double)held / m_top ) ) / rankLn( (double)topWorth );
-		for( Int stat = 0; stat < RANK_STAT_COUNT; ++stat )
-			m_stat[ grade ][ stat ] = stat == RANK_STAT_SELF_REPAIR ? (Real)( m_statTop[ stat ] * share )
-																	: (Real)rankExp( share * rankLn( (double)m_statTop[ stat ] ) );
-		// a line as strong as the one carried replaces it, and brings its own receivers and radius,
-		// or keeps the radius before it when it names none (GLA's rate-of-fire aura II)
-		for( Int perk = 0; perk < RANK_PERK_COUNT; ++perk )
-		{
-			const Real own = m_perkAt[ grade ][ perk ];
-			const Real held = grade > 0 ? m_perk[ grade - 1 ][ perk ] : 0.0f;
-			const Real heldRadius = grade > 0 ? m_radius[ grade - 1 ][ perk ] : 0.0f;
-			const Bool replaces = own > 0.0f && own >= held;
-			m_perk[ grade ][ perk ] = replaces ? own : held;
-			m_radius[ grade ][ perk ] = replaces && m_radiusAt[ grade ][ perk ] > 0.0f ? m_radiusAt[ grade ][ perk ] : heldRadius;
-			m_reach[ grade ][ perk ] = replaces ? m_reachAt[ grade ][ perk ] : ( grade > 0 ? m_reach[ grade - 1 ][ perk ] : RANK_REACH_UNITS );
-		}
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-Int RankLadder::threshold( Int unitValue, Int grade ) const
-{
-	return REAL_TO_INT_FLOOR( unitValue * m_total[ MIN( grade, m_grades ) ] + 0.5f );
-}
-
-//-------------------------------------------------------------------------------------------------
-Int RankLadder::gradeOf( Int unitValue, Int experience ) const
-{
-	Int grade = 0;
-	while( grade < m_grades && experience >= threshold( unitValue, grade + 1 ) )
-		++grade;
-	return grade;
-}
-
-//-------------------------------------------------------------------------------------------------
-VeterancyLevel RankLadder::levelOf( Int grade ) const
-{
-	Int level = LEVEL_REGULAR;
-	while( level < LEVEL_LAST && grade >= m_pin[ level + 1 ] )
-		++level;
-	return (VeterancyLevel)level;
-}
-
-//-------------------------------------------------------------------------------------------------
-Int RankLadder::clipGain( Int unitValue, Int experience, Int gain ) const
-{
-	const Int grade = gradeOf( unitValue, experience );
-	if( grade + 2 > m_grades )
-		return gain;
-	return MIN( gain, MAX( 0, threshold( unitValue, grade + 2 ) - 1 - experience ) );
-}
-
-//-------------------------------------------------------------------------------------------------
-Int RankLadder::insigniaIndex( Int grade, Bool hero ) const
-{
-	if( !hero )
-		return grade;
-	return m_heroStart + ( m_grades - m_heroStart ) * grade / m_grades;
-}
-
-//-------------------------------------------------------------------------------------------------
-Real RankLadder::perk( Int grade, RankPerk perk ) const
-{
-	return m_perk[ MIN( grade, MAX( m_grades, 0 ) ) ][ perk ];
-}
-
-//-------------------------------------------------------------------------------------------------
-static RankPerk auraPerk( RankAura aura )
-{
-	return aura == RANK_AURA_RALLY ? RANK_PERK_DEATH_RALLY : (RankPerk)( RANK_PERK_AURA_RATE_OF_FIRE + aura );
-}
-
-//-------------------------------------------------------------------------------------------------
-Real RankLadder::auraRadius( Int grade, RankAura aura ) const
-{
-	const Real own = aura == RANK_AURA_RALLY ? 0.0f : m_radius[ MIN( grade, MAX( m_grades, 0 ) ) ][ auraPerk( aura ) ];
-	return ( own > 0.0f ? own : m_auraRadius ) * MAX( 1.0f, perk( grade, RANK_PERK_AURA_RADIUS ) );
-}
-
-//-------------------------------------------------------------------------------------------------
-RankReach RankLadder::auraReach( Int grade, RankAura aura ) const
-{
-	return m_reach[ MIN( grade, MAX( m_grades, 0 ) ) ][ auraPerk( aura ) ];
-}
-
-//-------------------------------------------------------------------------------------------------
-Real RankLadder::aura( Int grade, RankAura aura ) const
-{
-	return perk( grade, auraPerk( aura ) );
-}
-
-//-------------------------------------------------------------------------------------------------
-Int RankLadder::drillGain( Int unitValue, Int experience, Int capGrade, Real rate ) const
-{
-	// ponytail: whole points a second, so a small E (the Red Guard's 5) climbs faster than its share;
-	// a fractional carry would need saving
-	const Int room = threshold( unitValue, capGrade ) - experience;
-	return room > 0 ? MIN( room, MAX( 1, REAL_TO_INT_FLOOR( unitValue * rate + 0.5f ) ) ) : 0;
-}
-
-//-------------------------------------------------------------------------------------------------
-/*static*/ Int RankLadder::unitValue( const ThingTemplate *thing )
-{
-	Int value = thing->getExperienceValue( LEVEL_REGULAR );
-	if( value <= 0 )
-		value = thing->getExperienceRequired( LEVEL_VETERAN ) / 2;
-	return MAX( value, 1 );
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
@@ -1121,6 +780,7 @@ GlobalData::GlobalData()
 	{
 		m_autoSkirmishSide[ slot ].clear(); // every faction still comes out of the seed unless -side names one
 		m_autoSkirmishTeam[ slot ] = AUTO_SKIRMISH_TEAM_UNSET; // and every team out of -teams unless -team names one
+		m_autoSkirmishHandicap[ slot ] = 100; // and every seat at full health unless -handicap names it
 		m_autoSkirmishSeatName[ slot ].clear(); // and every computer seat is called by its difficulty unless -seatname names it
 		m_autoSkirmishPersona[ slot ] = -1; // and plays the personality -aipersonaall or -aipersona2 gives it
 	}
@@ -1345,6 +1005,7 @@ GlobalData::GlobalData()
 	// the words the game shipped with until somebody picks a translation
 	m_textLanguage = TEXT_LANGUAGE_ENGLISH;
 	m_showOrderLines = FALSE;
+	m_aircraftAltitudeLine = TRUE;		// the owner's word: on until a player turns it off
 
 	m_particleEdit = FALSE;
 
@@ -1482,7 +1143,6 @@ GlobalData::GlobalData()
 
 	m_isBreakableMovie = FALSE;
 	m_breakTheMovie = FALSE;
-	m_modFactions = FALSE;
 
 	setTimeOfDay( m_timeOfDay );
 
@@ -1503,18 +1163,6 @@ GlobalData::GlobalData()
 
 	m_defaultStructureRubbleHeight = 1.0f;
 	m_weaponBonusSet = newInstance(WeaponBonusSet);
-
-	for (i = 0; i < VETERANCY_SIDE_COUNT; ++i)
-	{
-		m_veterancyWeaponBonus[i] = NULL;
-		m_rankLadder[i].clear();
-	}
-	m_rankWorthGain = 1.4f;
-	m_rankCrateGrades = 3;
-	m_veterancySelfRepairDelay = 0;
-	m_rankAuraRateOfFireCap = 0.0f;
-	m_rankDrillRate = 0.0f;
-	m_rankRallyTime = 0;
 
 	m_shellMapName.set("Maps\\ShellMap1\\ShellMap1.map");
 	m_shellMapOn =TRUE;
@@ -1643,7 +1291,6 @@ GlobalData::GlobalData()
 	m_useAlternateMouse = FALSE;
 
 	computeExeCRC();
-	m_baseExeCRC = m_exeCRC;
 
 }  // end GlobalData
 
@@ -1657,69 +1304,12 @@ GlobalData::~GlobalData( void )
 	if (m_weaponBonusSet)
 		m_weaponBonusSet->deleteInstance();
 
-	// a map's override is a memberwise copy sharing the original's side tables, so only the original
-	// owns them
-	for (Int side = 0; side < VETERANCY_SIDE_COUNT && m_theOriginal == this; ++side)
-		if (m_veterancyWeaponBonus[side])
-			m_veterancyWeaponBonus[side]->deleteInstance();
-
 	if( m_theOriginal == this )	{
 		m_theOriginal = NULL;
 		TheWritableGlobalData = NULL;
 	}
 
 }  // end ~GlobalData
-
-//-------------------------------------------------------------------------------------------------
-/** The side a unit's rank belongs to: its template's Side, so a general's copy (ChinaTankGeneral) is
-	* China and a captured tank keeps the bonuses of the army that trained it. */
-//-------------------------------------------------------------------------------------------------
-/*static*/ VeterancySide GlobalData::veterancySideOf( const ThingTemplate *thing )
-{
-	const AsciiString &side = thing->getDefaultOwningSide();
-	if( side.startsWith( "America" ) )
-		return VETERANCY_SIDE_AMERICA;
-	if( side.startsWith( "China" ) )
-		return VETERANCY_SIDE_CHINA;
-	if( side.startsWith( "GLA" ) )
-		return VETERANCY_SIDE_GLA;
-	if( side.startsWith( "Turkiye" ) )
-		return VETERANCY_SIDE_TURKIYE;
-	return VETERANCY_SIDE_NONE;
-}
-
-//-------------------------------------------------------------------------------------------------
-const WeaponBonusSet *GlobalData::getVeterancyWeaponBonus( const ThingTemplate *thing, VeterancyLevel level ) const
-{
-	if( level == LEVEL_REGULAR )
-		return NULL;
-	const VeterancySide side = veterancySideOf( thing );
-	return side == VETERANCY_SIDE_NONE ? NULL : m_veterancyWeaponBonus[ side ];
-}
-
-//-------------------------------------------------------------------------------------------------
-const RankLadder *GlobalData::getRankLadder( const ThingTemplate *thing ) const
-{
-	const VeterancySide side = veterancySideOf( thing );
-	return side == VETERANCY_SIDE_NONE || m_rankLadder[ side ].m_grades <= 0 ? NULL : &m_rankLadder[ side ];
-}
-
-//-------------------------------------------------------------------------------------------------
-Real GlobalData::getRankStat( const ThingTemplate *thing, Int grade, RankStat stat ) const
-{
-	const RankLadder *ladder = getRankLadder( thing );
-	if( ladder )
-		return ladder->m_stat[ MIN( grade, ladder->m_grades ) ][ stat ];
-	return stat == RANK_STAT_SELF_REPAIR ? 0.0f : 1.0f;
-}
-
-//-------------------------------------------------------------------------------------------------
-Real GlobalData::getRankHealthBonus( const ThingTemplate *thing, VeterancyLevel level, Int grade ) const
-{
-	const RankLadder *ladder = getRankLadder( thing );
-	return ladder ? getRankStat( thing, grade, RANK_STAT_HEALTH ) * ( 1.0f + ladder->perk( grade, RANK_PERK_HEALTH ) )
-								: m_healthBonus[ level ];
-}
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -1852,10 +1442,7 @@ GlobalData *GlobalData::newOverride( void )
 }  // end newOveride
 
 //-------------------------------------------------------------------------------------------------
-/** The build fingerprint, the version and the two multiplayer scripts as they resolve now: once at
-	* construction, and again after -mod mounts its archives (parseCommandLine), since a mod's
-	* SkirmishScripts.scb or MultiplayerScripts.scb is the one the match runs.  Without -mod it runs once
-	* and the value is what it always was. */
+/** The build fingerprint, the version and the multiplayer scripts, once at construction. */
 //-------------------------------------------------------------------------------------------------
 void GlobalData::computeExeCRC( void )
 {
@@ -1868,29 +1455,13 @@ void GlobalData::computeExeCRC( void )
 		UnsignedInt version = TheVersion->getVersionNumber();
 		exeCRC.computeCRC( &version, sizeof(UnsignedInt) );
 	}
-	// Add in MP scripts to the EXE CRC, since the game will go out of sync if they change
-	// -modfactions: then each mod's own SkirmishScripts.scb, which its factions' computer players run
-	// (SidesList::loadModSkirmishScripts)
+	// Add in MP scripts to the EXE CRC, since the game will go out of sync if they change,
 	// and EA's own SkirmishScripts.scb, which a player's own map runs (SidesList::prepareForMP_or_Skirmish)
-	std::vector<Int> focus( 3, FILE_FOCUS_ALL );
-	for (Int mod = 0; m_modFactions && mod < (Int)m_mods.size(); ++mod)
-		focus.push_back( mod );
-	for (size_t s = 0; s < focus.size(); ++s)
+	const char *scripts[] = { "Data\\Scripts\\SkirmishScripts.scb", "Data\\Scripts\\MultiplayerScripts.scb",
+		"Data\\Scripts\\SkirmishScriptsRetail.scb" };
+	for (size_t s = 0; s < ARRAY_SIZE( scripts ); ++s)
 	{
-		const char *script = s == 1 ? "Data\\Scripts\\MultiplayerScripts.scb"
-											 : s == 2 ? "Data\\Scripts\\SkirmishScriptsRetail.scb" : "Data\\Scripts\\SkirmishScripts.scb";
-		File *fp = NULL;
-		if (focus[s] == FILE_FOCUS_ALL)
-		{
-			fp = TheFileSystem->openFile( script, File::READ | File::BINARY );
-		}
-		else
-		{
-			TheFileSystem->setFocus( focus[s] );
-			if (TheFileSystem->doesFileExist( script ))
-				fp = TheFileSystem->openFile( script, File::READ | File::BINARY );
-			TheFileSystem->setFocus( FILE_FOCUS_ALL );
-		}
+		File *fp = TheFileSystem->openFile( scripts[s], File::READ | File::BINARY );
 		if (fp == NULL)
 			continue;
 		unsigned char crcBlock[blockSize];
@@ -1902,38 +1473,18 @@ void GlobalData::computeExeCRC( void )
 		fp->close();
 	}
 
-	// Two facts SidesList::prepareForMP_or_Skirmish reads that the files above may not show, hashed only
+	// A fact SidesList::prepareForMP_or_Skirmish reads that the files above do not show, hashed only
 	// when set so an ordinary machine's value is the one it always was.  With no user data folder a
-	// player's own map reads as one of the game's and gets the fork's AI; and a mod can ship a copy of
-	// the fork's SkirmishScripts.scb byte for byte, which keeps EA's off a player's own map.
+	// player's own map reads as one of the game's and gets the fork's AI.
 	const Bool noUserDataDir = m_userDataDir.isEmpty();
 	if (noUserDataDir)
 	{
 		const UnsignedInt noUserData = 0x4E4F5544;	// "NOUD"
 		exeCRC.computeCRC( &noUserData, sizeof( noUserData ) );
 	}
-	Bool modScripts = FALSE;
-	if (TheFileSystem && TheArchiveFileSystem)
-	{
-		Bool inModArchive = FALSE;
-		modScripts = TheFileSystem->modLooseFile( AsciiString( "data\\Scripts\\SkirmishScripts.scb" ), &inModArchive ).isNotEmpty() || inModArchive;
-		if (modScripts)
-		{
-			const UnsignedInt modScriptsMark = 0x4D4F4453;	// "MODS"
-			exeCRC.computeCRC( &modScriptsMark, sizeof( modScriptsMark ) );
-		}
-
-		// A mod's CommandSet.ini keeps its sets from the fork's corrections (CommandStore), and a copy
-		// byte for byte of EA's would hash the same as no copy at all.
-		if( TheFileSystem->modLooseFile( AsciiString( "Data\\INI\\CommandSet.ini" ), &inModArchive ).isNotEmpty() || inModArchive )
-		{
-			const UnsignedInt modSetsMark = 0x4D4F4443;	// "MODC"
-			exeCRC.computeCRC( &modSetsMark, sizeof( modSetsMark ) );
-		}
-	}
 
 	m_exeCRC = exeCRC.get();
-	DEBUG_LOG(("EXE CRC: 0x%8.8X (no user data folder %d, a mod's skirmish scripts %d)\n", m_exeCRC, noUserDataDir, modScripts));
+	DEBUG_LOG(("EXE CRC: 0x%8.8X (no user data folder %d)\n", m_exeCRC, noUserDataDir));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2010,7 +1561,7 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	TheWritableGlobalData->m_windowMode = TheWritableGlobalData->m_windowed
 			? WINDOW_MODE_WINDOWED : WINDOW_MODE_FULLSCREEN;
 
-	// These are loop bounds into fixed arrays, allocation sizes and divisors, and a mod's GameData
+	// These are loop bounds into fixed arrays, allocation sizes and divisors, and a GameData.ini
 	// can hold anything.  The road buffers index with 16 bits and allocate four past the maximum.
 	const Int maxRoadBufferSize = 65535 - 4;
 	GlobalData *data = TheWritableGlobalData;

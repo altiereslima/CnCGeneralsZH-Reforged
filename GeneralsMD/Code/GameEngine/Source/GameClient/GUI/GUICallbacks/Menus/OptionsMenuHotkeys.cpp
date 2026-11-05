@@ -52,7 +52,7 @@
 namespace
 {
 
-enum { BAR_SLOTS = 14 };	///< ControlBar.wnd's ButtonCommand01 to 14; 15 to 18 are for scripts
+enum { BAR_SLOTS = MAX_COMMANDS_PER_SET };	///< ButtonCommand01 to 18; which of them the bar uses is ControlBar::hasCommandWindow
 
 struct BarObject
 {
@@ -128,14 +128,6 @@ AsciiString hotkeysPath( void )
 	AsciiString path = TheGlobalData->getPath_UserData();
 	path.concat( "Hotkeys.ini" );
 	return path;
-}
-
-const HotkeyCommandRow *forceAttackRow( void )
-{
-	for( size_t each = 0; each < s_rows.size(); each++ )
-		if( s_rows[ each ].id == "BEGIN_FORCEATTACK" )
-			return &s_rows[ each ];
-	return NULL;
 }
 
 /// What a command answers to in a match with the keys on the page: the player's, else the launcher's
@@ -221,13 +213,16 @@ std::map< std::string, WideChar > buttonKeys( void )
 	return keys;
 }
 
-/// A button's key on a bar as text: Force Attack's chord, else its letter; empty for none.
-UnicodeString buttonKeyText( const CommandButton *button, const std::map< std::string, WideChar >& keys )
+/// A button's letter in a bar's slot as text; empty for none.
+UnicodeString buttonKeyText( const BarObject *object, Int slot, const std::map< std::string, WideChar >& keys )
 {
-	if( button->getCommandType() == GUI_COMMAND_FORCE_ATTACK )
-		return wide( Hotkeys_chordText( bindingOf( *forceAttackRow() ) ) );
+	const CommandButton *button = object->slots[ slot ];
+	Int types[ BAR_SLOTS ], ranks[ BAR_SLOTS ];
+	for( Int each = 0; each < BAR_SLOTS; each++ )
+		types[ each ] = object->slots[ each ] ? object->slots[ each ]->getCommandType() : GUI_COMMAND_NONE;
+	HotKeyManager::commandBarUpgradeRanks( types, BAR_SLOTS, ranks );
 	const WideChar letter = HotKeyManager::buttonKeyIn( button->getName(),
-		TheGameText->fetchEnglishHotKey( button->getTextLabel() ), button->getCommandType(), keys );
+		TheGameText->fetchEnglishHotKey( button->getTextLabel() ), button->getCommandType(), keys, slot, ranks[ slot ] );
 	return letterText( letter );
 }
 
@@ -260,7 +255,6 @@ Bool shownText( const UnicodeString& text )
 void findBars( void )
 {
 	s_factions.clear();
-	const CommandButton *force = TheControlBar->findCommandButton( AsciiString( "Command_ForceAttack" ) );
 	for( Int index = 0; index < ThePlayerTemplateStore->getPlayerTemplateCount(); index++ )
 	{
 		const PlayerTemplate *side = ThePlayerTemplateStore->getNthPlayerTemplate( index );
@@ -282,26 +276,20 @@ void findBars( void )
 			const CommandSet *set = thing ? TheControlBar->findCommandSet( thing->friend_getCommandSetString() ) : NULL;
 			if( set == NULL )
 				continue;
-			const CommandButton *slots[ MAX_COMMANDS_PER_SET ];
-			Int types[ MAX_COMMANDS_PER_SET ];
-			for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
-			{
-				const CommandButton *button = set->getCommandButton( slot );
-				slots[ slot ] = ( button && !BitTest( button->getOptions(), SCRIPT_ONLY ) ) ? button : NULL;
-				types[ slot ] = slots[ slot ] ? slots[ slot ]->getCommandType() : GUI_COMMAND_NONE;
-			}
-			const Int forceSlot = ControlBar_forceAttackSlot( types, MAX_COMMANDS_PER_SET, ControlBar_forceFires( thing ) );
-			if( forceSlot >= 0 && force )
-				slots[ forceSlot ] = force;
 			BarObject object;
 			object.building = thing->isKindOf( KINDOF_STRUCTURE );
 			Bool any = FALSE;
 			for( Int slot = 0; slot < BAR_SLOTS; slot++ )
 			{
-				// a button with no picture is a leftover no player sees, and what only it builds is not reached
-				object.slots[ slot ] = ( slots[ slot ] && slots[ slot ]->getButtonImage() ) ? slots[ slot ] : NULL;
-				const CommandButton *button = object.slots[ slot ];
-				if( button == NULL )
+				// the windows as the bar fills them (ControlBar::populateCommand), so a slot here is the
+				// slot a Name@slot key and the grid's letters mean
+				const CommandButton *button = set->getCommandButton( slot );
+				if( !TheControlBar->hasCommandWindow( slot ) || ( button && BitTest( button->getOptions(), SCRIPT_ONLY ) ) )
+					button = NULL;
+				object.slots[ slot ] = button;
+				// a button with no picture is a blank cell on the bar that still holds its key and its
+				// place among the upgrades; it is not listed, and what only it builds is not reached
+				if( button == NULL || button->getButtonImage() == NULL )
 					continue;
 				any = TRUE;
 				const GUICommandType type = button->getCommandType();
@@ -346,7 +334,7 @@ std::map< KeyText, std::vector< UnicodeString > > barClashes( const BarObject *o
 	for( Int slot = 0; slot < BAR_SLOTS; slot++ )
 		if( object->slots[ slot ] )
 		{
-			const UnicodeString key = buttonKeyText( object->slots[ slot ], keys );
+			const UnicodeString key = buttonKeyText( object, slot, keys );
 			if( !key.isEmpty() )
 				byKey[ key.str() ].push_back( buttonName( object->slots[ slot ] ) );
 		}
@@ -446,20 +434,18 @@ void fillButtons( void )
 	}
 	const std::map< std::string, WideChar > keys = buttonKeys();
 	const std::map< KeyText, std::vector< UnicodeString > > clashes = barClashes( object );
-	// a cameo is 61 by 48 on the bar; a third of that keeps fourteen rows to a short scroll
+	// a cameo is 61 by 48 on the bar; a third of that keeps a bar's rows to a short scroll
 	const Int height = 22;
 	Int selectedRow = -1;
-	// the bar's own order: two rows of seven read down each column, 1 over 2
+	// the bar's own order: two rows, seven across, read down each column, 1 over 2
 	for( Int slot = 0; slot < BAR_SLOTS; slot++ )
 	{
 		const CommandButton *button = object->slots[ slot ];
-		if( button == NULL )
+		if( button == NULL || button->getButtonImage() == NULL )
 			continue;
-		const UnicodeString key = buttonKeyText( button, keys );
+		const UnicodeString key = buttonKeyText( object, slot, keys );
 		const Bool waiting = s_capture == CAPTURE_BUTTON && button == s_button;
-		const Bool changed = button->getCommandType() == GUI_COMMAND_FORCE_ATTACK
-			? s_file.commands.count( "BEGIN_FORCEATTACK" ) != 0
-			: s_file.buttons.count( HotKeyManager::fileButtonName( button->getName() ) ) != 0;
+		const Bool changed = s_file.buttons.count( button->getName().str() ) != 0;
 		const Int at = GadgetListBoxAddEntryImage( s_buttonList, button->getButtonImage(), -1, 0, height, height * 61 / 48 );
 		GadgetListBoxAddEntryText( s_buttonList, buttonName( button ), changed ? CHANGED_COLOR : TEXT_COLOR, at, 1 );
 		GadgetListBoxAddEntryText( s_buttonList,
@@ -538,15 +524,12 @@ void updateNote( void )
 	}
 	else if( s_active == 1 && s_button )
 	{
-		const Bool force = s_button->getCommandType() == GUI_COMMAND_FORCE_ATTACK;
-		const WideChar fixed = force ? 0 : HotKeyManager::fixedKey( s_button->getName(), s_button->getCommandType() );
-		const std::string name = HotKeyManager::fileButtonName( s_button->getName() );
-		changed = force ? s_file.commands.count( "BEGIN_FORCEATTACK" ) != 0 : s_file.buttons.count( name ) != 0;
+		const WideChar fixed = HotKeyManager::fixedKey( s_button->getName(), s_button->getCommandType() );
+		const std::string name = s_button->getName().str();
+		changed = s_file.buttons.count( name ) != 0;
 		canChange = TRUE;
 		if( s_capture == CAPTURE_BUTTON )
-			note = TheGameText->fetch( force ? "GUI:HotkeysPressForceAttack" : "GUI:HotkeysPressLetter" );
-		else if( force )
-			note = TheGameText->fetch( "GUI:HotkeysForceAttack" );
+			note = TheGameText->fetch( "GUI:HotkeysPressLetter" );
 		else if( changed )
 		{
 			const UnicodeString key = letterText( fixed != 0 ? fixed : TheGameText->fetchEnglishHotKey( s_button->getTextLabel() ) );
@@ -615,12 +598,10 @@ void applySelected( const HotkeyBinding *binding, Bool backToGame )
 		setCommand( s_rows[ s_commandRow ].id, backToGame ? NULL : binding );
 	else if( s_active == 1 && s_button )
 	{
-		if( s_button->getCommandType() == GUI_COMMAND_FORCE_ATTACK )
-			setCommand( "BEGIN_FORCEATTACK", backToGame ? NULL : binding );
-		else if( backToGame )
-			s_file.buttons.erase( HotKeyManager::fileButtonName( s_button->getName() ) );
+		if( backToGame )
+			s_file.buttons.erase( s_button->getName().str() );
 		else
-			s_file.buttons[ HotKeyManager::fileButtonName( s_button->getName() ) ] = binding->key.size() == 5 ? binding->key.substr( 4 ) : std::string();
+			s_file.buttons[ s_button->getName().str() ] = binding->key.size() == 5 ? binding->key.substr( 4 ) : std::string();
 	}
 	s_capture = CAPTURE_NONE;
 	refresh();
@@ -768,14 +749,12 @@ Bool OptionsHotkeysKey( UnsignedByte key, Int state )
 	const Bool ctrl = BitTest( state, KEY_STATE_CONTROL ), alt = BitTest( state, KEY_STATE_ALT ), shift = BitTest( state, KEY_STATE_SHIFT );
 	const Bool ctrlKey = key == KEY_LCTRL || key == KEY_RCTRL, altKey = key == KEY_LALT || key == KEY_RALT;
 	const Bool shiftKey = key == KEY_LSHIFT || key == KEY_RSHIFT;
-	const Bool force = s_capture == CAPTURE_BUTTON && s_button->getCommandType() == GUI_COMMAND_FORCE_ATTACK;
-	const Bool hold = force || ( s_capture == CAPTURE_COMMAND && s_rows[ s_commandRow ].hold );
+	const Bool hold = s_capture == CAPTURE_COMMAND && s_rows[ s_commandRow ].hold;
 
 	if( hold )
 	{
-		// a modifier let go with no key between is the hold alone.  Shift cannot be Force Attack's:
-		// Shift on top of that hold queues the circle.
-		const char *alone = ctrlKey ? "CTRL" : altKey ? "ALT" : ( shiftKey && !force ) ? "SHIFT" : NULL;
+		// a modifier let go with no key between is the hold alone
+		const char *alone = ctrlKey ? "CTRL" : altKey ? "ALT" : shiftKey ? "SHIFT" : NULL;
 		if( alone )
 		{
 			if( down )
@@ -788,9 +767,9 @@ Bool OptionsHotkeysKey( UnsignedByte key, Int state )
 			return TRUE;
 		}
 		const std::string name = keyName( key );
-		if( down && !( force && shift ) && !name.empty() )
+		if( down && !name.empty() )
 		{
-			const HotkeyBinding binding( name, modifierName( ctrl, alt, !force && shift ) );
+			const HotkeyBinding binding( name, modifierName( ctrl, alt, shift ) );
 			applySelected( &binding, FALSE );
 		}
 		else if( down )
@@ -804,8 +783,10 @@ Bool OptionsHotkeysKey( UnsignedByte key, Int state )
 		return TRUE;
 	if( s_capture == CAPTURE_BUTTON )
 	{
-		// a button takes a letter and nothing else
-		if( name.size() == 5 && isalpha( (unsigned char)name[ 4 ] ) )
+		// a button takes a key that types one letter or digit, bare: the bar finds its button by the
+		// character the key types (HotKeyManager::nameOf), and a stroke with Ctrl or Alt is the
+		// command map's (barHoldsKey). A digit on a showing button takes the stroke from that team key
+		if( name.size() == 5 && isalnum( (unsigned char)name[ 4 ] ) )
 		{
 			const HotkeyBinding letter( name, "NONE" );
 			applySelected( &letter, FALSE );

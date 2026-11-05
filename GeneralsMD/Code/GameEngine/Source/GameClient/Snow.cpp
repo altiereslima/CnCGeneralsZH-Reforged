@@ -92,10 +92,10 @@ void SnowManager::updateIniSettings(void)
 
 /* The Weather option's wind.  Strength 1 is a sandstorm.  Sway and lean are radians over the default
 	breeze's 0.055 of each, the smoke's drift is world units per particle update; a smoke column rises
-	about twice that, so it leans by some 25 degrees. */
+	about eight times that, so it leans by some 7 degrees. */
 static const Real WEATHER_SWAY = 0.11f;
 static const Real WEATHER_LEAN = 0.16f;
-static const Real WEATHER_SMOKE_DRIFT = 0.5f;
+static const Real WEATHER_SMOKE_DRIFT = 0.125f;
 static const Short WEATHER_BREEZE_PERIOD = LOGICFRAMES_PER_SECOND * 3;
 static const Short WEATHER_BREEZE_VERSION = 0x2000;	// past any count a map's scripts reach, so trees notice the switch
 static BreezeInfo s_weatherBreeze;
@@ -126,7 +126,7 @@ void SnowManager::getWeatherHaze(float colour[3], Real *strength) const
 {
 	static const float COLOURS[WEATHER_KIND_COUNT][3] = {
 		{ 0.0f, 0.0f, 0.0f }, { 0.50f, 0.54f, 0.60f }, { 0.74f, 0.58f, 0.38f }, { 0.82f, 0.86f, 0.92f } };
-	static const Real STRENGTHS[WEATHER_KIND_COUNT] = { 0.0f, 0.24f, 0.70f, 0.28f };
+	static const Real STRENGTHS[WEATHER_KIND_COUNT] = { 0.0f, 0.10f, 0.20f, 0.12f };
 	const GlobalData::TerrainLighting &sun = TheGlobalData->m_terrainLighting[TheGlobalData->m_timeOfDay][0];
 	const Real red = min(sun.ambient.red + sun.diffuse.red, 1.0f);
 	const Real green = min(sun.ambient.green + sun.diffuse.green, 1.0f);

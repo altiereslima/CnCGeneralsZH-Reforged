@@ -38,6 +38,32 @@ CONTROLBAR:ToolTipForceAttack
 "The next click attacks whatever is under the pointer, the ground and your own side included. Click the button again to call it off."
 END
 
+// the idle buttons at the right end of the command grid, under EA's idle worker
+
+CONTROLBAR:IdleInfantry
+"Idle Infantry"
+END
+
+CONTROLBAR:IdleInfantryDescription
+"Click to select the next idle infantry"
+END
+
+CONTROLBAR:IdleVehicle
+"Idle Vehicle"
+END
+
+CONTROLBAR:IdleVehicleDescription
+"Click to select the next idle ground vehicle"
+END
+
+CONTROLBAR:IdleAircraft
+"Idle Aircraft"
+END
+
+CONTROLBAR:IdleAircraftDescription
+"Click to select the next idle aircraft"
+END
+
 GUI:OrderHoldPositionDescription
 "The selected units guard the spot they stand on and fight whatever comes near, without chasing it out of the area."
 END
@@ -858,7 +884,15 @@ GUI:OrderLines
 END
 
 TOOLTIP:OrderLines
-"A line from each selected unit to where it is going, and on through every point it has queued. Off, the markers on those points stay."
+"A line from each selected unit to where it is going, and on through every point it has queued. Off, a single order draws no line and no marker and a click leaves no ring on the ground; a queued route keeps its line and markers."
+END
+
+GUI:AircraftAltitudeLine
+"Aircraft Altitude Lines"
+END
+
+TOOLTIP:AircraftAltitudeLine
+"A thin line from each aircraft in the air straight down to the ground under it. Where it touches is where the plane really is, and its length is how high it flies. Parked aircraft have none."
 END
 
 GUI:PlayerColors
@@ -928,10 +962,6 @@ END
 
 // The build tooltip card's figures, a label and its value each.
 
-TOOLTIP:StatTime
-"Build time"
-END
-
 TOOLTIP:StatSeconds
 "%ds"
 END
@@ -984,33 +1014,203 @@ TOOLTIP:StatNewWeaponFigures
 "%d damage, %d range"
 END
 
-// The gloss after each figure on the card: what it counts, as the card computes it.  Damage is the
-// main weapon's primary damage a shot, the weapon that does the most a second; attack speed spreads
-// a clip's reload over its shots; range is in world units, 10 to a pathfinding cell, the square the
-// placement grid draws; build time counts the player's power and how many factories make the unit.
+// The card's armour cell: the class of the unconditioned ArmorSet's armour, TOOLTIP:Armor and the
+// Armor block's name with its first "Armor" taken out.  Short, a cell is about sixty pixels wide.
 
-TOOLTIP:StatHealthHint
-"(damage it can take after armor)"
+TOOLTIP:ArmorNo
+"None"
 END
 
-TOOLTIP:StatDamageHint
-"(main weapon, one shot, before armor)"
+TOOLTIP:ArmorVulnerableAll
+"None"
 END
 
-TOOLTIP:StatAttackSpeedHint
-"(shots a second, reloads counted)"
+TOOLTIP:ArmorInvulnerable
+"Invulnerable"
 END
 
-TOOLTIP:StatDamagePerSecondHint
-"(damage × attack speed)"
+TOOLTIP:ArmorInvulnerableAll
+"Invulnerable"
 END
 
-TOOLTIP:StatRangeHint
-"(10 is one square of the placement grid)"
+TOOLTIP:ArmorHuman
+"Infantry"
 END
 
-TOOLTIP:StatTimeHint
-"(with your power and factories now)"
+TOOLTIP:ArmorHazMatHuman
+"Infantry"
+END
+
+TOOLTIP:ArmorChemSuitHuman
+"Infantry"
+END
+
+TOOLTIP:ArmorInfGen_Human
+"Infantry"
+END
+
+TOOLTIP:ArmorChemReb_Human
+"Infantry"
+END
+
+TOOLTIP:ArmorDemoGenTerrorist
+"Infantry"
+END
+
+TOOLTIP:ArmorStingerSoldier
+"Infantry"
+END
+
+TOOLTIP:ArmorTruck
+"Vehicle"
+END
+
+TOOLTIP:ArmorHumvee
+"Vehicle"
+END
+
+TOOLTIP:ArmorDozer
+"Vehicle"
+END
+
+TOOLTIP:ArmorToxinTruck
+"Vehicle"
+END
+
+TOOLTIP:ArmorAntiAirVehicle
+"Vehicle"
+END
+
+TOOLTIP:ArmorQuadCannon
+"Vehicle"
+END
+
+TOOLTIP:ArmorAvenger
+"Vehicle"
+END
+
+TOOLTIP:ArmorBattleBusTruck
+"Vehicle"
+END
+
+TOOLTIP:ArmorBattleBusTruckPlusOne
+"Vehicle"
+END
+
+TOOLTIP:ArmorBattleBusTruckPlusTwo
+"Vehicle"
+END
+
+TOOLTIP:ArmorTank
+"Tank"
+END
+
+TOOLTIP:ArmorUpgradedTank
+"Tank"
+END
+
+TOOLTIP:ArmorDragonTank
+"Tank"
+END
+
+TOOLTIP:ArmorAssaultCrawler
+"Tank"
+END
+
+TOOLTIP:ArmorAvalanche
+"Tank"
+END
+
+TOOLTIP:ArmorAirplane
+"Aircraft"
+END
+
+TOOLTIP:ArmorCountermeasuresAirplane
+"Aircraft"
+END
+
+TOOLTIP:ArmorSpectreGunship
+"Aircraft"
+END
+
+TOOLTIP:ArmorCountermeasuresSpectreGunship
+"Aircraft"
+END
+
+TOOLTIP:ArmorComanche
+"Helicopter"
+END
+
+TOOLTIP:ArmorAFG_Comanche
+"Helicopter"
+END
+
+TOOLTIP:ArmorCountermeasuresComanche
+"Helicopter"
+END
+
+TOOLTIP:ArmorAFG_CountermeasuresComanche
+"Helicopter"
+END
+
+TOOLTIP:ArmorChinook
+"Helicopter"
+END
+
+TOOLTIP:ArmorSentryDrone
+"Drone"
+END
+
+TOOLTIP:ArmorMine
+"Mine"
+END
+
+TOOLTIP:ArmorStructure
+"Building"
+END
+
+TOOLTIP:ArmorStructureInternetCenter
+"Building"
+END
+
+TOOLTIP:ArmorStructureTough
+"Fortified"
+END
+
+TOOLTIP:ArmorGLAUpgradedStructure
+"Fortified"
+END
+
+TOOLTIP:ArmorGLAUpgradedStructureTough
+"Fortified"
+END
+
+TOOLTIP:ArmorBattleBusStructureTough
+"Fortified"
+END
+
+TOOLTIP:ArmorBattleBusStructureToughPlusOne
+"Fortified"
+END
+
+TOOLTIP:ArmorBattleBusStructureToughPlusTwo
+"Fortified"
+END
+
+TOOLTIP:ArmorBaseDefense
+"Defense"
+END
+
+TOOLTIP:ArmorFireBase
+"Defense"
+END
+
+TOOLTIP:ArmorStingerSite
+"Defense"
+END
+
+TOOLTIP:ArmorWall
+"Wall"
 END
 
 // Under the figures: a unit's upgrades, or on an upgrade's card the units it changes.
@@ -1208,6 +1408,77 @@ GUI:HudStatArmy
 "Army value"
 END
 
+// The spectator's rack: the stats its dial ranks every player by, the first also the broadcast's
+// list of every player's cash plus what everything he has standing cost
+GUI:HudNetWorth
+"Net worth"
+END
+
+GUI:HudStatCash
+"Cash"
+END
+
+GUI:HudStatIncome
+"Income per minute"
+END
+
+GUI:HudStatKills
+"Kills / losses"
+END
+
+GUI:HudStatRank
+"General's rank"
+END
+
+GUI:HudStatPower
+"Power"
+END
+
+// a row's number under the income stat, "$1,840/min"
+GUI:HudStatIncomeValue
+"%ls/min"
+END
+
+// a row's number under the rank stat
+GUI:HudStatRankValue
+"Rank %d"
+END
+
+// the rack's top drawer: the camera lever, the fog and the armies drawer
+GUI:HudWatch
+"Watch"
+END
+
+// the camera's own again
+GUI:HudCameraFree
+"Free"
+END
+
+// the camera goes to the biggest fight on the map by itself
+GUI:HudCameraDirector
+"Director"
+END
+
+// the camera shows what the followed player's own screen shows
+GUI:HudCameraPlayer
+"Player"
+END
+
+// the followed player's fog of war, so the spectator sees only what he sees
+GUI:HudFog
+"Fog"
+END
+
+// each player's units, most first, with how many he has
+GUI:HudArmies
+"Armies"
+END
+
+// the rack's drawer of every player ranked by the dial's stat
+GUI:HudStandings
+"Standings"
+END
+
 // The cheat panel the console's "trainer" command opens.
 GUI:CheatPanelTitle
 "Cheats"
@@ -1358,14 +1629,6 @@ END
 
 TOOLTIP:CloudStyle
 "Classic uses the original toxin and radiation effects. Volumetric adds moving smoke, darker nuclear haze and heat shimmer. Applies when you press Accept, to the clouds already on the field too."
-END
-
-LAN:ErrorModMismatch
-"This game runs different mods. The host's mods: %s. Start the game with the same mods, in the same order, to join."
-END
-
-LAN:NoMod
-"none"
 END
 
 GUI:SaveFromOlderGame
@@ -1718,10 +1981,6 @@ GUI:HotkeysPressLetter
 "Press a letter, or Esc to cancel"
 END
 
-GUI:HotkeysPressForceAttack
-"Press a key, or Ctrl or Alt alone. Shift cannot be the hold. Esc cancels."
-END
-
 GUI:HotkeysPressHold
 "Press a key, or Ctrl, Alt or Shift alone. Esc cancels."
 END
@@ -1748,10 +2007,6 @@ END
 
 GUI:HotkeysButtonMoved
 "The game gave it the letter of a fixed key, so the launcher moved it."
-END
-
-GUI:HotkeysForceAttack
-"Hold to fire on whatever is under the pointer. Shift plus this key still draws a selection box. Default is Ctrl."
 END
 
 GUI:HotkeysPick
@@ -1964,6 +2219,34 @@ END
 
 GUI:HotkeysCommandBEGIN_PREFER_SELECTION
 "Add to selection (hold)"
+END
+
+GUI:HotkeysCommandAUTO_GARRISON
+"Garrison nearby buildings"
+END
+
+GUI:HotkeysCommandAUTO_REPAIR
+"Go get repaired or healed"
+END
+
+GUI:HotkeysCommandTOGGLE_ATTACKMOVE
+"Attack move (next click)"
+END
+
+GUI:HotkeysCommandTOGGLE_FORCEATTACK
+"Force Attack (next click)"
+END
+
+GUI:HotkeysCommandTOGGLE_GUARD
+"Guard (next click)"
+END
+
+GUI:HotkeysCommandTOGGLE_MOVE
+"Move (next click)"
+END
+
+GUI:HotkeysCommandHOLD_POSITION
+"Hold position"
 END
 
 // The match load screen (LoadScreenBoard in LoadScreen.cpp)
@@ -2179,6 +2462,15 @@ END
 
 GUI:AIPersona
 "Personality"
+END
+
+// The lobby's handicap column, one box a seat
+GUI:Handicap
+"Handicap"
+END
+
+TOOLTIP:Handicap
+"Weakens this player in proportion. At 50 percent: half the health and damage on units and buildings, half the healing, twice the build, research and special power times."
 END
 
 // What a computer player with a personality says in chat: when a wave leaves (two lines), when its
@@ -2545,487 +2837,6 @@ GUI:GraphNoData
 "Nothing was recorded in this match."
 END
 
-RANK:NextRank
-"Next rank %d/%d XP"
-END
-
-RANK:PerkSIGHT
-"Sight +%d%%"
-END
-
-RANK:PerkSTILL_GUARD
-"Standing still: %d%% less damage taken"
-END
-
-RANK:PerkMEND
-"Out of combat: heals %d.%02d%% a second"
-END
-
-RANK:PerkSPOTTER
-"Spots for the artillery"
-END
-
-RANK:PerkSCATTER
-"Artillery scatter -%d%%"
-END
-
-RANK:PerkDEATH_RALLY
-"When it falls, allies nearby take %d%% less damage for 10 seconds"
-END
-
-RANK:PerkDETECT
-"Detects stealth within %d"
-END
-
-RANK:PerkAURA_RADIUS
-"Aura reach +%d%%"
-END
-
-RANK:PerkAURA_RATE_OF_FIRE
-"Aura: rate of fire +%d%%"
-END
-
-RANK:PerkAURA_SIGHT
-"Aura: sight +%d%%"
-END
-
-RANK:PerkAURA_GUARD
-"Aura: %d%% less damage taken"
-END
-
-RANK:PerkAURA_RANGE
-"Aura: artillery range +%d%%"
-END
-
-RANK:PerkRATE_OF_FIRE
-"Rate of fire +%d%%"
-END
-
-RANK:PerkRANGE
-"Range +%d%%"
-END
-
-RANK:PerkHEALTH
-"Health +%d%%"
-END
-
-RANK:PerkSPEED
-"Speed +%d%%"
-END
-
-RANK:PerkLAST_STAND
-"Below 35%% health: rate of fire +%d%%"
-END
-
-RANK:PerkSCAVENGE
-"Its kills pay %d%% of the victim's cost"
-END
-
-RANK:PerkDESIGNATE
-"Marks what it hits for %d seconds: everyone fires 50%% faster at it"
-END
-
-RANK:PerkDESIGNATE_REVEAL
-"Its mark reveals stealthed targets"
-END
-
-RANK:PerkSALVAGE_CRATE
-"Leaves a salvage crate when it falls"
-END
-
-RANK:PerkAURA_MEND
-"Aura: heals %d.%02d%% a second"
-END
-
-RANK:PerkAURA_PACE
-"Aura: speed +%d%%"
-END
-
-RANK:PerkAURA_DRILL
-"Aura: trains units up to grade %d"
-END
-
-RANK:PerkAURA_STEADY
-"Aura: paralysis, EMP and subdual %d%% shorter"
-END
-
-RANK:PerkAURA_CAPTURE
-"Aura: captures buildings %d%% faster"
-END
-
-RANK:PerkAURA_SPOILS
-"Aura: kills nearby pay %d%% of the victim's cost"
-END
-
-RANK:America0
-"E-1 Private"
-END
-
-RANK:America1
-"E-2 Private"
-END
-
-RANK:America2
-"E-3 Private First Class"
-END
-
-RANK:America3
-"E-4 Specialist"
-END
-
-RANK:America4
-"E-4 Corporal"
-END
-
-RANK:America5
-"E-5 Sergeant"
-END
-
-RANK:America6
-"E-6 Staff Sergeant"
-END
-
-RANK:America7
-"E-7 Sergeant First Class"
-END
-
-RANK:America8
-"E-8 Master Sergeant"
-END
-
-RANK:America9
-"E-8 First Sergeant"
-END
-
-RANK:America10
-"E-9 Sergeant Major"
-END
-
-RANK:America11
-"E-9 Command Sergeant Major"
-END
-
-RANK:America12
-"E-9 Sergeant Major of the Army"
-END
-
-RANK:America13
-"W-1 Warrant Officer"
-END
-
-RANK:America14
-"W-2 Chief Warrant Officer"
-END
-
-RANK:America15
-"W-3 Chief Warrant Officer"
-END
-
-RANK:America16
-"W-4 Chief Warrant Officer"
-END
-
-RANK:America17
-"W-5 Chief Warrant Officer"
-END
-
-RANK:America18
-"O-1 Second Lieutenant"
-END
-
-RANK:America19
-"O-2 First Lieutenant"
-END
-
-RANK:America20
-"O-3 Captain"
-END
-
-RANK:America21
-"O-4 Major"
-END
-
-RANK:America22
-"O-5 Lieutenant Colonel"
-END
-
-RANK:America23
-"O-6 Colonel"
-END
-
-RANK:America24
-"O-7 Brigadier General"
-END
-
-RANK:America25
-"O-8 Major General"
-END
-
-RANK:America26
-"O-9 Lieutenant General"
-END
-
-RANK:America27
-"O-10 General"
-END
-
-RANK:America28
-"General of the Army"
-END
-
-RANK:China0
-"Unranked"
-END
-
-RANK:China1
-"Private"
-END
-
-RANK:China2
-"Private First Class"
-END
-
-RANK:China3
-"Corporal"
-END
-
-RANK:China4
-"Sergeant"
-END
-
-RANK:China5
-"Staff Sergeant Second Class"
-END
-
-RANK:China6
-"Staff Sergeant First Class"
-END
-
-RANK:China7
-"Master Sergeant Third Class"
-END
-
-RANK:China8
-"Master Sergeant Second Class"
-END
-
-RANK:China9
-"Master Sergeant First Class"
-END
-
-RANK:China10
-"Second Lieutenant"
-END
-
-RANK:China11
-"First Lieutenant"
-END
-
-RANK:China12
-"Captain"
-END
-
-RANK:China13
-"Major"
-END
-
-RANK:China14
-"Lieutenant Colonel"
-END
-
-RANK:China15
-"Colonel"
-END
-
-RANK:China16
-"Senior Colonel"
-END
-
-RANK:China17
-"Major General"
-END
-
-RANK:China18
-"Lieutenant General"
-END
-
-RANK:China19
-"General"
-END
-
-RANK:GLA0
-"Unranked"
-END
-
-RANK:GLA1
-"Recruit"
-END
-
-RANK:GLA2
-"Irregular"
-END
-
-RANK:GLA3
-"Fighter"
-END
-
-RANK:GLA4
-"Raider"
-END
-
-RANK:GLA5
-"Hardened Raider"
-END
-
-RANK:GLA6
-"Squadhand"
-END
-
-RANK:GLA7
-"Squad Leader"
-END
-
-RANK:GLA8
-"Cell Leader"
-END
-
-RANK:GLA9
-"Senior Cell Leader"
-END
-
-RANK:GLA10
-"Raid Captain"
-END
-
-RANK:GLA11
-"Column Captain"
-END
-
-RANK:GLA12
-"Strike Commander"
-END
-
-RANK:GLA13
-"Field Commander"
-END
-
-RANK:GLA14
-"Sector Commander"
-END
-
-RANK:GLA15
-"Warlord"
-END
-
-RANK:GLA16
-"Regional Warlord"
-END
-
-RANK:GLA17
-"High Warlord"
-END
-
-RANK:GLA18
-"General"
-END
-
-RANK:GLA19
-"Grand General"
-END
-
-RANK:GLA20
-"Supreme Liberator"
-END
-
-// Turkiye's ladder, the Turkish Land Forces' ranks under their Turkish names in every language
-RANK:Turkiye0
-"Unranked"
-END
-
-RANK:Turkiye1
-"Er"
-END
-
-RANK:Turkiye2
-"Onbaşı"
-END
-
-RANK:Turkiye3
-"Çavuş"
-END
-
-RANK:Turkiye4
-"Uzman Çavuş"
-END
-
-RANK:Turkiye5
-"Astsubay Çavuş"
-END
-
-RANK:Turkiye6
-"Astsubay Kıdemli Çavuş"
-END
-
-RANK:Turkiye7
-"Astsubay Üstçavuş"
-END
-
-RANK:Turkiye8
-"Astsubay Kıdemli Üstçavuş"
-END
-
-RANK:Turkiye9
-"Astsubay Başçavuş"
-END
-
-RANK:Turkiye10
-"Astsubay Kıdemli Başçavuş"
-END
-
-RANK:Turkiye11
-"Teğmen"
-END
-
-RANK:Turkiye12
-"Üsteğmen"
-END
-
-RANK:Turkiye13
-"Yüzbaşı"
-END
-
-RANK:Turkiye14
-"Binbaşı"
-END
-
-RANK:Turkiye15
-"Yarbay"
-END
-
-RANK:Turkiye16
-"Albay"
-END
-
-RANK:Turkiye17
-"Tuğgeneral"
-END
-
-RANK:Turkiye18
-"Tümgeneral"
-END
-
-RANK:Turkiye19
-"Korgeneral"
-END
-
-RANK:Turkiye20
-"Orgeneral"
-END
-
-RANK:Turkiye21
-"Mareşal"
-END
-
 // The Turkiye faction (PlayerTemplateReforged.ini, TurkiyeReforged.ini). Units, buildings, buttons, upgrades.
 
 INI:FactionTurkiye
@@ -3265,7 +3076,7 @@ OBJECT:TurkiyeSiper
 END
 
 CONTROLBAR:ConstructTurkiyeSiper
-"Siper B&unker"
+"Sip&er Bunker"
 END
 
 CONTROLBAR:ToolTipTurkiyeSiper
@@ -3297,15 +3108,15 @@ CONTROLBAR:ToolTipUpgradeTurkiyeExtendedRange
 END
 
 UPGRADE:TurkiyePrecisionGuidance
-"Precision Guidance"
+"Inertial Guidance"
 END
 
 CONTROLBAR:UpgradeTurkiyePrecisionGuidance
-"&Precision Guidance"
+"&Inertial Guidance"
 END
 
 CONTROLBAR:ToolTipUpgradeTurkiyePrecisionGuidance
-"Shots at ground nobody sees spread four times less."
+"Rockets fired outside radar cover hit two shots in five, up from one."
 END
 
 UPGRADE:TurkiyeArmorPack
@@ -3388,76 +3199,200 @@ CONTROLBAR:ConstructTurkiyePatriotBattery
 "H&isar Battery"
 END
 
-SCIENCE:TurkiyeMinefield
-"Minefield"
+SCIENCE:TurkiyeLaserDesignation
+"Laser Designation"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceMinefield
-"A cargo plane sows a minefield wherever you point. \n \n Deploy from: Headquarters"
+CONTROLBAR:ToolTipTurkiyeScienceLaserDesignation
+"Spotter Teams and Bayraktars paint what they attack. A painted target counts as inside radar coverage wherever it stands, so every radar-guided rocket keeps its lock on it."
 END
 
-CONTROLBAR:TurkiyeMinefield
-"Mine&field"
+UPGRADE:TurkiyeLaserDesignation
+"Laser Designation"
 END
 
-CONTROLBAR:TooltipTurkiyeMinefield
-"Minefield \n Recharge: 4:00"
+SCIENCE:TurkiyeEarlyWarning
+"Early Warning"
 END
 
-SCIENCE:TurkiyeFuelResupply
-"Fuel Resupply"
+CONTROLBAR:ToolTipTurkiyeScienceEarlyWarning
+"Every Turkiye radar reaches a quarter further: Headquarters, Radar Tower, Koral, Akinci and Mobile Radar."
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceFuelResupply
-"Bayraktar drones carry one more munition on every sortie."
+UPGRADE:TurkiyeEarlyWarning
+"Early Warning"
+END
+
+SCIENCE:TurkiyeUavRecon
+"UAV Recon"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceUavRecon
+"A UAV circles the target area for 30 seconds and reports every enemy unit in it, parked or moving, and what it is. The fog stays, but the area counts as radar coverage. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeUavRecon
+"&UAV Recon"
+END
+
+CONTROLBAR:TooltipTurkiyeUavRecon
+"UAV Recon \n Recharge: 2:00"
+END
+
+GUI:HudReconSiha
+"SIHA RECON"
+END
+
+SCIENCE:TurkiyeMobileRadar
+"Mobile Radar"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceMobileRadar
+"The Factory builds the Mobile Radar, a radar truck that covers 900 around it while it stands still."
+END
+
+OBJECT:TurkiyeVehicleMobileRadar
+"Mobile Radar"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleMobileRadar
+"&Mobile Radar"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleMobileRadar
+"A radar on wheels: parked, it covers 900 around it; driving, it covers nothing. No weapon. \n \n Requires: Mobile Radar (rank 3)"
+END
+
+SCIENCE:TurkiyeAkinciAesa
+"Akinci AESA"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceAkinciAesa
+"The Akinci's radar reaches 1000 instead of 750."
+END
+
+UPGRADE:TurkiyeAkinciAesa
+"Akinci AESA"
 END
 
 SCIENCE:TurkiyeSwarmMunition
-"Loitering Munition"
+"UAV Swarm 1"
+END
+
+SCIENCE:TurkiyeSwarmMunition2
+"UAV Swarm 2"
+END
+
+SCIENCE:TurkiyeSwarmMunition3
+"UAV Swarm 3"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceSwarmMunition
-"One loitering munition circles where you point and dives on the most expensive target it finds. \n \n Deploy from: Headquarters"
+"Loitering munitions circle where you point, and each dives on the most expensive target it finds: one at level 1, three at level 2, five at level 3. \n \n Deploy from: Headquarters"
 END
 
 CONTROLBAR:TurkiyeSwarmMunition
-"Loitering &Munition"
+"UAV Swa&rm"
 END
 
 CONTROLBAR:TooltipTurkiyeSwarmMunition
-"Loitering Munition \n Recharge: 3:00"
+"UAV Swarm \n Recharge: 3:00"
 END
 
 SCIENCE:TurkiyeElectronicBlinding
-"Electronic Blinding"
+"Electronic Warfare"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceElectronicBlinding
-"Every enemy with a building in the target area loses its radar for 30 seconds. \n \n Deploy from: Headquarters"
+"Every enemy with a building in the target area loses its radar for 30 seconds, and the area stays jammed as long: enemy drones and spotters in it see nothing, and guided missiles crossing it lose their lock. \n \n Deploy from: Headquarters"
 END
 
 CONTROLBAR:TurkiyeElectronicBlinding
-"Electronic &Blinding"
+"Electronic &Warfare"
 END
 
 CONTROLBAR:TooltipTurkiyeElectronicBlinding
-"Electronic Blinding \n Recharge: 4:00"
+"Electronic Warfare \n Recharge: 4:00"
 END
 
-SCIENCE:TurkiyeSwarmStrike
-"Swarm Strike"
+SCIENCE:TurkiyeSatelliteGuidance
+"Satellite Guidance"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceSwarmStrike
-"A swarm of munitions hunts down the ten most valuable targets in a wide area, one munition each. A packed base shrugs it off; a spread-out army does not. \n \n Deploy from: Headquarters"
+CONTROLBAR:ToolTipTurkiyeScienceSatelliteGuidance
+"For 45 seconds the whole map counts as Turkiye radar coverage: every radar-guided rocket keeps its lock, and moving enemies show through the fog. \n \n Deploy from: Headquarters"
 END
 
-CONTROLBAR:TurkiyeSwarmStrike
-"S&warm Strike"
+CONTROLBAR:TurkiyeSatelliteGuidance
+"Sa&tellite Guidance"
 END
 
-CONTROLBAR:TooltipTurkiyeSwarmStrike
-"Swarm Strike \n Recharge: 6:00"
+CONTROLBAR:TooltipTurkiyeSatelliteGuidance
+"Satellite Guidance \n Recharge: 5:00"
+END
+
+SCIENCE:TurkiyeTayfun
+"Tayfun Missile"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceTayfun
+"A Tayfun ballistic missile comes down on the target. Inside radar coverage it always hits; outside it lands on the point one time in five and misses wide the rest. \n \n Deploy from: Headquarters"
+END
+
+CONTROLBAR:TurkiyeTayfun
+"Tayfun &Missile"
+END
+
+CONTROLBAR:TooltipTurkiyeTayfun
+"Tayfun Missile \n Recharge: 4:00"
+END
+
+UPGRADE:TurkiyeTargetClassification
+"Target Classification"
+END
+
+CONTROLBAR:UpgradeTurkiyeTargetClassification
+"&Target Classification"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeTargetClassification
+"Radar contacts show what they are: infantry, vehicle, air defense, artillery, aircraft or a defense."
+END
+
+UPGRADE:TurkiyeAkkor
+"AKKOR Active Protection"
+END
+
+CONTROLBAR:UpgradeTurkiyeAkkor
+"AKKOR Active &Protection"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeAkkor
+"Every Altay carries a hard-kill charge that bursts one incoming missile or rocket every three seconds."
+END
+
+UPGRADE:TurkiyeGokdogan
+"Gokdogan Missiles"
+END
+
+CONTROLBAR:UpgradeTurkiyeGokdogan
+"Gokdogan &Missiles"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeGokdogan
+"Kizilelma fighters fire the Gokdogan: 360 range instead of 280, 130 damage instead of 100."
+END
+
+UPGRADE:TurkiyeSiperReinforced
+"Reinforced Siper"
+END
+
+CONTROLBAR:UpgradeTurkiyeSiperReinforced
+"Rein&forced Siper"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeSiperReinforced
+"Concrete and overhead cover: every Siper takes half as much again before it falls."
 END
 
 UPGRADE:TurkiyeThermal
@@ -3496,40 +3431,28 @@ CONTROLBAR:ToolTipUpgradeTurkiyeSwarmSoftware
 "Bayraktar munitions pick their own target: the most expensive enemy in reach."
 END
 
-UPGRADE:TurkiyeFuelResupply
-"Fuel Resupply"
+SCIENCE:TurkiyeRapidDeployment
+"Gokbey Landing 1"
 END
 
-SCIENCE:TurkiyeRapidDeployment
-"Rapid Deployment"
+SCIENCE:TurkiyeRapidDeployment2
+"Gokbey Landing 2"
+END
+
+SCIENCE:TurkiyeRapidDeployment3
+"Gokbey Landing 3"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceRapidDeployment
-"A cargo plane drops six Mehmetcik and two Sungur gunners wherever you point. \n \n Deploy from: Headquarters"
+"Mehmetcik riflemen and Sungur gunners parachute wherever you point: six at level 1, ten at level 2, fourteen and a Kirpi at level 3. \n \n Deploy from: Headquarters"
 END
 
 CONTROLBAR:TurkiyeRapidDeployment
-"&Rapid Deployment"
+"Gokbey &Landing"
 END
 
 CONTROLBAR:TooltipTurkiyeRapidDeployment
-"Rapid Deployment \n Recharge: 3:00"
-END
-
-SCIENCE:TurkiyeFireMission
-"Fire Mission"
-END
-
-CONTROLBAR:ToolTipTurkiyeScienceFireMission
-"Thirty-six heavy shells fall on the target from off the map. \n \n Deploy from: Headquarters"
-END
-
-CONTROLBAR:TurkiyeFireMission
-"Fire M&ission"
-END
-
-CONTROLBAR:TooltipTurkiyeFireMission
-"Fire Mission \n Recharge: 4:00"
+"Gokbey Landing \n Recharge: 3:00"
 END
 
 SCIENCE:TurkiyeCommandoRaid
@@ -3541,7 +3464,7 @@ CONTROLBAR:ToolTipTurkiyeScienceCommandoRaid
 END
 
 CONTROLBAR:TurkiyeCommandoRaid
-"&Commando Raid"
+"Comman&do Raid"
 END
 
 CONTROLBAR:TooltipTurkiyeCommandoRaid
@@ -3659,7 +3582,7 @@ GUI:FactionPickPool
 "Random picks one of the %d armies ticked on the left, out of %d. Click an army to tick it or take it out."
 END
 
-// %s is a side's name as its heading reads (USA, China, a mod's side): the pool is that side and nothing else.
+// %s is a side's name as its heading reads (USA, China, Turkiye): the pool is that side and nothing else.
 GUI:FactionPickRandomSide
 "Random %s"
 END
@@ -3672,39 +3595,34 @@ GUI:FactionPickSideNameHint
 "Click a side's name to play a random army of that side."
 END
 
-// The trainings and the generals' born veterans give grades on the rank ladder instead of a whole
-// level: three for EA's Veteran, six for its Elite.
-
-CONTROLBAR:ToolTipChinaScienceARtilleryTraining
-"Nuke Cannons and Inferno Cannons are built three ranks up"
+// the fork's player colours (MultiplayerReforged.ini); EA's eight are in the CSF
+Color:Crimson
+"Crimson"
 END
 
-CONTROLBAR:ToolTipGLAScienceTechnicalTraining
-"All Technicals will be created three ranks up"
+Color:Azure
+"Azure"
 END
 
-CONTROLBAR:ToolTipChinaScienceBattlemasterTraining
-"All Battlemasters will be built six ranks up"
+Color:Salmon
+"Salmon"
 END
 
-GUI:BioFeatures_Pos4
-"Emperor Tank \n Tank Drop \n All tanks start three ranks up \n Tanks cost less \n Aircraft cost more \n No Nuke or Inferno Cannons"
+Color:Teal
+"Teal"
 END
 
-GUI:BioFeatures_Pos7
-"Assault Troop Transport \n Assault Helix \n Attack Outpost \n Fortified Bunkers \n Mini-Gunner \n Black Lotus hacks faster \n Hackers hack faster \n Mini-Gunner Paradrop \n All Infantry start three ranks up"
-END
-
-CONTROLBAR:ToolTipChinaScienceRedGuardTraining
-"All Red Guard will be built three ranks up, as Corporals"
-END
-
-CONTROLBAR:Infa_ToolTipChinaScienceRedGuardTraining
-"All Mini-Gunners will be built three ranks above Veteran"
+Color:Lavender
+"Lavender"
 END
 
 // the LAN lobby's error box when the system bound the socket on another adapter; the first %ls is the
 // LAN IP chosen in Options, the second the address the system bound instead
 GUI:SocketRedirected
 "The LAN IP is %ls, but the system put the game's connection on %ls. A VPN split tunnel or a firewall redirected it, so nobody on your network can hear you. Turn split tunnelling off for the game and try again."
+END
+
+// A vehicle transport's Evacuate asks for a spot, the transport goes there and empties; Alt empties it where it stands
+CONTROLBAR:ToolTipEvacuateAt
+"Go to the chosen spot and order all units to exit\nAlt: unload here"
 END

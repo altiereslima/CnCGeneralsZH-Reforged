@@ -318,7 +318,7 @@ static Bool Locomotor_projectileChasesStraight(Object* obj, const Vector3& toGoa
 //-------------------------------------------------------------------------------------------------
 // A missile that holds its cruise height until it has locked keeps EA's whole flight: level at the
 // preferred height, then the cheat straight down onto the goal. Its data can count on that.
-// ShockWave's cluster missile holds 500 until 0.01 from its goal and splits into warheads where it
+// A cluster missile that holds 500 until 0.01 from its goal and splits into warheads where it
 // passes 420 over the ground coming down. The cruise curve split it 180 to 270 short of the aim;
 // held level, the arc after the lock looped it 230 past, the goal lying almost straight under a
 // level nose. A Scud or a Tomahawk dives before its lock and keeps the curve.
@@ -686,8 +686,7 @@ LocomotorTemplate* LocomotorStore::findLocomotorTemplate(NameKeyType namekey)
   LocomotorTemplateMap::iterator it = m_locomotorTemplates.find(namekey);
   if (it == m_locomotorTemplates.end())
 	{
-		NameKeyType retailKey;
-		return TheModNamespace.findRetailKey(namekey, MODNAME_LOCOMOTOR, &retailKey) ? findLocomotorTemplate(retailKey) : NULL;
+		return NULL;
 	}
 	else
 		return (*it).second;
@@ -702,8 +701,7 @@ const LocomotorTemplate* LocomotorStore::findLocomotorTemplate(NameKeyType namek
   LocomotorTemplateMap::const_iterator it = m_locomotorTemplates.find(namekey);
   if (it == m_locomotorTemplates.end())
 	{
-		NameKeyType retailKey;
-		return TheModNamespace.findRetailKey(namekey, MODNAME_LOCOMOTOR, &retailKey) ? findLocomotorTemplate(retailKey) : NULL;
+		return NULL;
 	}
 	else
 	{
@@ -811,7 +809,6 @@ Locomotor::Locomotor(const LocomotorTemplate* tmpl)
 	m_brakingFactor = 1.0f;
 	m_maxLift = BIGNUM;
 	m_maxSpeed = BIGNUM;
-	m_speedFactor = 1.0f;
 	m_speedScale = 1.0f;
 	m_maxAccel = BIGNUM;
 	m_maxBraking = BIGNUM;
@@ -852,7 +849,6 @@ Locomotor::Locomotor(const Locomotor& that)
 	m_brakingFactor = that.m_brakingFactor;
 	m_maxLift = that.m_maxLift;
 	m_maxSpeed = that.m_maxSpeed;
-	m_speedFactor = that.m_speedFactor;
 	m_speedScale = that.m_speedScale;
 	m_maxAccel = that.m_maxAccel;
 	m_maxBraking = that.m_maxBraking;
@@ -884,7 +880,6 @@ Locomotor& Locomotor::operator=(const Locomotor& that)
 		m_brakingFactor = that.m_brakingFactor;
 		m_maxLift = that.m_maxLift;
 		m_maxSpeed = that.m_maxSpeed;
-		m_speedFactor = that.m_speedFactor;
 		m_speedScale = that.m_speedScale;
 		m_maxAccel = that.m_maxAccel;
 		m_maxBraking = that.m_maxBraking;
@@ -927,13 +922,14 @@ void Locomotor::crc( Xfer *xfer )
 	* 3: m_diveDistance
 	* 4: m_yawRate, m_driveAccelX, m_driveAccelY
 	* 5: m_driveSpeed, m_driveFrame
-	* 6: m_speedFactor
-	* 7: m_speedScale */
+	* 6: m_speedFactor, a rank's speed; versions 6 and 7 read it and throw it away
+	* 7: m_speedScale
+	* 8: no m_speedFactor */
 // ------------------------------------------------------------------------------------------------
 void Locomotor::xfer( Xfer *xfer )
 {
 	// version
-	const XferVersion currentVersion = 7;
+	const XferVersion currentVersion = 8;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -974,8 +970,11 @@ void Locomotor::xfer( Xfer *xfer )
 		xfer->xferUnsignedInt(&m_driveFrame);
 	}
 
-	if (version >= 6)
-		xfer->xferReal(&m_speedFactor);
+	if (version >= 6 && version <= 7)
+	{
+		Real discardSpeedFactor;
+		xfer->xferReal(&discardSpeedFactor);
+	}
 
 	if (version >= 7)
 		xfer->xferReal(&m_speedScale);
@@ -1008,7 +1007,6 @@ Real Locomotor::getMaxSpeedForCondition(BodyDamageType condition) const
 		speed = m_template->m_maxSpeedDamaged;
 	speed *= m_speedScale;
 
-	speed *= m_speedFactor;
 	if (speed > m_maxSpeed)
 		speed = m_maxSpeed;
 
@@ -1016,7 +1014,7 @@ Real Locomotor::getMaxSpeedForCondition(BodyDamageType condition) const
 }
 
 //-------------------------------------------------------------------------------------------------
-Real Locomotor::getMaxTurnRate(BodyDamageType condition) const
+Real Locomotor::getMaxTurnRate(BodyDamageType condition, const Object* obj) const
 {
 	Real turn;
 
@@ -1025,6 +1023,24 @@ Real Locomotor::getMaxTurnRate(BodyDamageType condition) const
 	else
 		turn = m_template->m_maxTurnRateDamaged;
 
+	/* A tank, car or bike swings onto a new order half as fast again as EA's TurnRate, and a healthy
+		 one no slower than GROUND_MIN_TURN_DEG_PER_SEC: EA's 60 degrees a second left an Overlord three
+		 seconds pointing the wrong way after a reversal. One scale for both rates, taken from the healthy
+		 one, so a damaged hull still turns slower by EA's ratio. Aircraft on treads or wheels (a
+		 helicopter or jet taxiing) keep their number. */
+	const Real GROUND_TURN_RATE_FACTOR = 1.5f;
+	const Real GROUND_MIN_TURN_DEG_PER_SEC = 100.0f;
+	if (obj != NULL && isGroundDrive() && !obj->isKindOf(KINDOF_AIRCRAFT))
+	{
+		Real scale = GROUND_TURN_RATE_FACTOR;
+		Real healthy = m_template->m_maxTurnRate;
+		Real minTurn = ConvertAngularVelocityInDegreesPerSecToRadsPerFrame(GROUND_MIN_TURN_DEG_PER_SEC);
+		if (healthy > 0.0f && healthy * scale < minTurn)
+			scale = minTurn / healthy;	// a TurnRate of 0, a hull that cannot turn, stays 0
+		turn *= scale;
+	}
+
+	// the per-instance cap (setMaxTurnRate) has the last word over the scale above
 	if (turn > m_maxTurnRate)
 		turn = m_maxTurnRate;
 
@@ -1151,7 +1167,7 @@ void Locomotor::locoUpdate_moveTowardsAngle(Object* obj, Real goalAngle)
 PhysicsTurningType Locomotor::rotateTowardsPosition(Object* obj, const Coord3D& goalPos, Real *relAngle)
 {
 	BodyDamageType bdt = obj->getBodyModule()->getDamageState();
-	Real turnRate = getMaxTurnRate(bdt);
+	Real turnRate = getMaxTurnRate(bdt, obj);
 
 	PhysicsTurningType rotating = rotateObjAroundLocoPivot(obj, goalPos, turnRate, relAngle);
 	return rotating;
@@ -1340,8 +1356,8 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& chase
 	if (*blocked) 
 	{
 		physics->scrubVelocity2D(desiredSpeed); // stop if we are about to run into the blocking object.
-		Real turnRate = getMaxTurnRate(obj->getBodyModule()->getDamageState());
-		if (m_template->m_wanderWidthFactor == 0.0f) 
+		Real turnRate = getMaxTurnRate(obj->getBodyModule()->getDamageState(), obj);
+		if (m_template->m_wanderWidthFactor == 0.0f)
 		{
 			*blocked = (TURN_NONE != rotateObjAroundLocoPivot(obj, goalPos, turnRate));
 		}
@@ -1512,9 +1528,21 @@ void Locomotor::moveTowardsPositionTreads(Object* obj, PhysicsBehavior *physics,
 
 	Real dx = obj->getPosition()->x - goalPos.x;
 	Real dy = obj->getPosition()->y - goalPos.y;
-	
 
-	Real goalSpeed = (1.0f - angleCoeff) * desiredSpeed;
+
+	/* EA's speed fell to nothing at 45 degrees off the heading, so a tank stopped dead and pivoted
+		 after nearly every move order. It rolls through the turn now, slower the tighter it is, and
+		 stands to pivot only past TREAD_PIVOT_ANGLE, a hairpin. A helicopter taxiing on treads keeps
+		 EA's. */
+	const Real TREAD_PIVOT_ANGLE = PI * 0.75f;
+	Real rollCoeff = angleCoeff;
+	if (!obj->isKindOf(KINDOF_AIRCRAFT))
+	{
+		rollCoeff = (Real)fabs( relAngle ) / TREAD_PIVOT_ANGLE;
+		if (rollCoeff > 1.0f)
+			rollCoeff = 1.0f;
+	}
+	Real goalSpeed = (1.0f - rollCoeff) * desiredSpeed;
 
 
 //	if (speed < m_minTurnSpeed)
@@ -1606,7 +1634,7 @@ void Locomotor::moveTowardsPositionWheels(Object* obj, PhysicsBehavior *physics,
 {
 	BodyDamageType bdt = obj->getBodyModule()->getDamageState();
 	Real maxSpeed = getMaxSpeedForCondition(bdt);
-	Real maxTurnRate = getMaxTurnRate(bdt);
+	Real maxTurnRate = getMaxTurnRate(bdt, obj);
 	Real maxAcceleration = getMaxAcceleration(bdt);
 
 	// sanity, we cannot use desired speed that is greater than our max speed we are capable of moving at
@@ -4077,13 +4105,6 @@ Locomotor* LocomotorSet::findLocomotor(LocomotorSurfaceTypeMask t)
 			return curLocomotor;
 	}
 	return NULL;
-}
-
-//-------------------------------------------------------------------------------------------------
-void LocomotorSet::setSpeedFactor(Real factor)
-{
-	for (LocomotorVector::iterator it = m_locomotors.begin(); it != m_locomotors.end(); ++it)
-		(*it)->setSpeedFactor(factor);
 }
 
 

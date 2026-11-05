@@ -489,6 +489,26 @@ Color:Pink
 "Pembe"
 END
 
+Color:Crimson
+"Kızıl"
+END
+
+Color:Azure
+"Gök Mavisi"
+END
+
+Color:Salmon
+"Somon"
+END
+
+Color:Teal
+"Turkuaz"
+END
+
+Color:Lavender
+"Lavanta"
+END
+
 GUI:ShowBehindBuildings
 "Binaların arkasındaki ısı izi AÇIK"
 END
@@ -2589,14 +2609,6 @@ LAN:ErrorCRCMismatch
 "Oyun bir uyumsuzluk tespit etti. Çok oyunculu oyun, oyuncular arasındaki senkronizasyon verisini kaybetti. Rakibiniz sürümünü değiştirmiş olabilir; onu Yok Sayma Listenize eklemek isteyebilirsiniz"
 END
 
-LAN:ErrorModMismatch
-"Bu oyun başka modlarla oynanıyor. Kurucunun modları: %s. Katılmak için oyunu aynı modlarla, aynı sırayla başlatın."
-END
-
-LAN:NoMod
-"yok"
-END
-
 LAN:ErrorGameStarted
 "Üzgünüz, bu oyun zaten başladı"
 END
@@ -4487,6 +4499,30 @@ END
 
 CONTROLBAR:IdleWorkerDescription
 "Sonraki boştaki işçiyi seçmek için tıklayın"
+END
+
+CONTROLBAR:IdleInfantry
+"Boştaki Piyade"
+END
+
+CONTROLBAR:IdleInfantryDescription
+"Sonraki boştaki piyadeyi seçmek için tıklayın"
+END
+
+CONTROLBAR:IdleVehicle
+"Boştaki Araç"
+END
+
+CONTROLBAR:IdleVehicleDescription
+"Sonraki boştaki kara aracını seçmek için tıklayın"
+END
+
+CONTROLBAR:IdleAircraft
+"Boştaki Hava Aracı"
+END
+
+CONTROLBAR:IdleAircraftDescription
+"Sonraki boştaki hava aracını seçmek için tıklayın"
 END
 
 CONTROLBAR:Beacon
@@ -7346,7 +7382,7 @@ CONTROLBAR:ToolTipChinaScienceNukeCannon
 END
 
 CONTROLBAR:ToolTipChinaScienceRedGuardTraining
-"Tüm Kızıl Muhafızlar üç rütbe yukarıda, Onbaşı olarak üretilir"
+"Tüm Kızıl Muhafızlar kıdemli olarak üretilir"
 END
 
 CONTROLBAR:ToolTipChinaScienceClusterMines
@@ -7354,7 +7390,7 @@ CONTROLBAR:ToolTipChinaScienceClusterMines
 END
 
 CONTROLBAR:ToolTipChinaScienceARtilleryTraining
-"Nükleer Toplar ve Cehennem Topları üç rütbe yukarıda üretilir"
+"Nükleer Toplar ve Cehennem Topları kıdemli olarak üretilir"
 END
 
 CONTROLBAR:ToolTipChinaScienceArtilleryBarrage
@@ -7378,7 +7414,7 @@ CONTROLBAR:ToolTipGLaScienceMarauderTank
 END
 
 CONTROLBAR:ToolTipGLAScienceTechnicalTraining
-"Tüm Silahlı Pikaplar üç rütbe yukarıda üretilir"
+"Tüm Silahlı Pikaplar kıdemli olarak üretilir"
 END
 
 CONTROLBAR:ToolTipGLAScienceRebelAmbush
@@ -13198,7 +13234,7 @@ CONTROLBAR:ToolTipChinaScienceTankHunterTraining
 END
 
 CONTROLBAR:ToolTipChinaScienceBattlemasterTraining
-"Tüm Battlemaster'lar altı rütbe yukarıda üretilir"
+"Tüm Battlemaster'lar seçkin olarak üretilir"
 END
 
 CONTROLBAR:ToolTipChinaScienceOverlordTraining
@@ -13882,7 +13918,7 @@ SCIENCE:Infa_ChinaRedGuardTraining
 END
 
 CONTROLBAR:Infa_ToolTipChinaScienceRedGuardTraining
-"Tüm Minigun Erleri kıdemliden üç rütbe yukarıda üretilir"
+"Tüm Minigun Erleri Seçkin olarak üretilir"
 END
 
 CONTROLBAR:ToolTipChinaBuildNuclearMissileLauncherBoss
@@ -14342,7 +14378,7 @@ GUI:BioFeatures_Pos3
 END
 
 GUI:BioFeatures_Pos4
-"Emperor Tankı \n Tank İndirme \n Tüm tanklar üç rütbe yukarıda başlar \n Tanklar daha ucuz \n Hava araçları daha pahalı \n Nükleer Top ve Cehennem Topu yok"
+"Emperor Tankı \n Tank İndirme \n Tüm tanklar kıdemli başlar \n Tanklar daha ucuz \n Hava araçları daha pahalı \n Nükleer Top ve Cehennem Topu yok"
 END
 
 GUI:BioFeatures_Pos5
@@ -14354,7 +14390,7 @@ GUI:BioFeatures_Pos6
 END
 
 GUI:BioFeatures_Pos7
-"Taarruz Birlik Taşıyıcısı \n Taarruz Helix'i \n Saldırı Karakolu \n Tahkimli Sığınaklar \n Minigun Eri \n Black Lotus daha hızlı hackler \n Hacker'lar daha hızlı hackler \n Minigun Eri İndirme \n Tüm piyadeler üç rütbe yukarıda başlar"
+"Taarruz Birlik Taşıyıcısı \n Taarruz Helix'i \n Saldırı Karakolu \n Tahkimli Sığınaklar \n Minigun Eri \n Black Lotus daha hızlı hackler \n Hacker'lar daha hızlı hackler \n Minigun Eri İndirme \n Tüm piyadeler kıdemli başlar"
 END
 
 GUI:BioFeatures_Pos8
@@ -15342,7 +15378,15 @@ GUI:OrderLines
 END
 
 TOOLTIP:OrderLines
-"Seçili her birimden gittiği yere, oradan da sıraya aldığı her noktaya bir çizgi çeker. Kapalıyken çizgiler gider, o noktalardaki işaretler kalır."
+"Seçili her birimden gittiği yere, oradan da sıraya aldığı her noktaya bir çizgi çeker. Kapalıyken tek bir emir çizgisiz ve işaretsiz kalır, tıklanan yerde halka da çıkmaz; sıraya alınmış rota çizgisini ve işaretlerini korur."
+END
+
+GUI:AircraftAltitudeLine
+"Uçak Yükseklik Çizgileri"
+END
+
+TOOLTIP:AircraftAltitudeLine
+"Havadaki her uçaktan altındaki yere dümdüz ince bir çizgi iner. Çizginin değdiği yer uçağın asıl yeri, boyu da ne kadar yüksekte uçtuğu. Yerde duran uçakta çizgi olmaz."
 END
 
 GUI:PlayerColors
@@ -15533,10 +15577,6 @@ GUI:CantBuildTooManyDerrickDefenses
 "Bu petrol kuyularının çevresinde zaten iki savunmanız var."
 END
 
-TOOLTIP:StatTime
-"Üretim süresi"
-END
-
 TOOLTIP:StatSeconds
 "%d sn"
 END
@@ -15589,28 +15629,200 @@ TOOLTIP:StatNewWeaponFigures
 "%d hasar, %d menzil"
 END
 
-TOOLTIP:StatHealthHint
-"(zırhtan sonra kaldırabileceği hasar)"
+TOOLTIP:ArmorNo
+"Yok"
 END
 
-TOOLTIP:StatDamageHint
-"(ana silah, atış başına, zırhtan önce)"
+TOOLTIP:ArmorVulnerableAll
+"Yok"
 END
 
-TOOLTIP:StatAttackSpeedHint
-"(saniyedeki atış, şarjör doldurma dahil)"
+TOOLTIP:ArmorInvulnerable
+"Hasar almaz"
 END
 
-TOOLTIP:StatDamagePerSecondHint
-"(hasar × atış hızı)"
+TOOLTIP:ArmorInvulnerableAll
+"Hasar almaz"
 END
 
-TOOLTIP:StatRangeHint
-"(10, yerleştirme ızgarasının bir karesi)"
+TOOLTIP:ArmorHuman
+"Piyade"
 END
 
-TOOLTIP:StatTimeHint
-"(şu anki enerjiniz ve fabrikalarınızla)"
+TOOLTIP:ArmorHazMatHuman
+"Piyade"
+END
+
+TOOLTIP:ArmorChemSuitHuman
+"Piyade"
+END
+
+TOOLTIP:ArmorInfGen_Human
+"Piyade"
+END
+
+TOOLTIP:ArmorChemReb_Human
+"Piyade"
+END
+
+TOOLTIP:ArmorDemoGenTerrorist
+"Piyade"
+END
+
+TOOLTIP:ArmorStingerSoldier
+"Piyade"
+END
+
+TOOLTIP:ArmorTruck
+"Araç"
+END
+
+TOOLTIP:ArmorHumvee
+"Araç"
+END
+
+TOOLTIP:ArmorDozer
+"Araç"
+END
+
+TOOLTIP:ArmorToxinTruck
+"Araç"
+END
+
+TOOLTIP:ArmorAntiAirVehicle
+"Araç"
+END
+
+TOOLTIP:ArmorQuadCannon
+"Araç"
+END
+
+TOOLTIP:ArmorAvenger
+"Araç"
+END
+
+TOOLTIP:ArmorBattleBusTruck
+"Araç"
+END
+
+TOOLTIP:ArmorBattleBusTruckPlusOne
+"Araç"
+END
+
+TOOLTIP:ArmorBattleBusTruckPlusTwo
+"Araç"
+END
+
+TOOLTIP:ArmorTank
+"Tank"
+END
+
+TOOLTIP:ArmorUpgradedTank
+"Tank"
+END
+
+TOOLTIP:ArmorDragonTank
+"Tank"
+END
+
+TOOLTIP:ArmorAssaultCrawler
+"Tank"
+END
+
+TOOLTIP:ArmorAvalanche
+"Tank"
+END
+
+TOOLTIP:ArmorAirplane
+"Uçak"
+END
+
+TOOLTIP:ArmorCountermeasuresAirplane
+"Uçak"
+END
+
+TOOLTIP:ArmorSpectreGunship
+"Uçak"
+END
+
+TOOLTIP:ArmorCountermeasuresSpectreGunship
+"Uçak"
+END
+
+TOOLTIP:ArmorComanche
+"Helikopter"
+END
+
+TOOLTIP:ArmorAFG_Comanche
+"Helikopter"
+END
+
+TOOLTIP:ArmorCountermeasuresComanche
+"Helikopter"
+END
+
+TOOLTIP:ArmorAFG_CountermeasuresComanche
+"Helikopter"
+END
+
+TOOLTIP:ArmorChinook
+"Helikopter"
+END
+
+TOOLTIP:ArmorSentryDrone
+"Dron"
+END
+
+TOOLTIP:ArmorMine
+"Mayın"
+END
+
+TOOLTIP:ArmorStructure
+"Bina"
+END
+
+TOOLTIP:ArmorStructureInternetCenter
+"Bina"
+END
+
+TOOLTIP:ArmorStructureTough
+"Tahkimli"
+END
+
+TOOLTIP:ArmorGLAUpgradedStructure
+"Tahkimli"
+END
+
+TOOLTIP:ArmorGLAUpgradedStructureTough
+"Tahkimli"
+END
+
+TOOLTIP:ArmorBattleBusStructureTough
+"Tahkimli"
+END
+
+TOOLTIP:ArmorBattleBusStructureToughPlusOne
+"Tahkimli"
+END
+
+TOOLTIP:ArmorBattleBusStructureToughPlusTwo
+"Tahkimli"
+END
+
+TOOLTIP:ArmorBaseDefense
+"Savunma"
+END
+
+TOOLTIP:ArmorFireBase
+"Savunma"
+END
+
+TOOLTIP:ArmorStingerSite
+"Savunma"
+END
+
+TOOLTIP:ArmorWall
+"Duvar"
 END
 
 TOOLTIP:Upgrades
@@ -15635,6 +15847,66 @@ END
 
 GUI:HudStatArmy
 "Ordu değeri"
+END
+
+GUI:HudNetWorth
+"Net değer"
+END
+
+GUI:HudStatCash
+"Nakit"
+END
+
+GUI:HudStatIncome
+"Dakikalık gelir"
+END
+
+GUI:HudStatKills
+"Öldürme / kayıp"
+END
+
+GUI:HudStatRank
+"General rütbesi"
+END
+
+GUI:HudStatPower
+"Elektrik"
+END
+
+GUI:HudStatIncomeValue
+"%ls/dk"
+END
+
+GUI:HudStatRankValue
+"Rütbe %d"
+END
+
+GUI:HudWatch
+"İzle"
+END
+
+GUI:HudCameraFree
+"Serbest"
+END
+
+GUI:HudCameraDirector
+"Direktör"
+END
+
+GUI:HudCameraPlayer
+"Oyuncu"
+END
+
+GUI:HudFog
+"Sis"
+END
+
+GUI:HudArmies
+"Ordular"
+END
+
+GUI:HudStandings
+"Sıralama"
 END
 
 GUI:CheatPanelTitle
@@ -16089,10 +16361,6 @@ GUI:HotkeysPressLetter
 "Bir harfe basın, vazgeçmek için Esc"
 END
 
-GUI:HotkeysPressForceAttack
-"Bir tuşa ya da tek başına Ctrl veya Alt tuşuna basın. Shift basılı tutma tuşu olamaz. Esc vazgeçer."
-END
-
 GUI:HotkeysPressHold
 "Bir tuşa ya da tek başına Ctrl, Alt veya Shift tuşuna basın. Esc vazgeçer."
 END
@@ -16119,10 +16387,6 @@ END
 
 GUI:HotkeysButtonMoved
 "Oyun ona sabit bir tuşun harfini vermişti, başlatıcı taşıdı."
-END
-
-GUI:HotkeysForceAttack
-"Basılı tutunca imlecin altındakine ateş eder. Bu tuşla Shift, birlik kutusu çizer. Varsayılan Ctrl."
 END
 
 GUI:HotkeysPick
@@ -16335,6 +16599,34 @@ END
 
 GUI:HotkeysCommandBEGIN_PREFER_SELECTION
 "Seçime ekle (basılı tut)"
+END
+
+GUI:HotkeysCommandAUTO_GARRISON
+"Yakındaki binalara mevzilen"
+END
+
+GUI:HotkeysCommandAUTO_REPAIR
+"Tamir olmaya ya da iyileşmeye git"
+END
+
+GUI:HotkeysCommandTOGGLE_ATTACKMOVE
+"Saldırarak ilerle (sonraki tıklama)"
+END
+
+GUI:HotkeysCommandTOGGLE_FORCEATTACK
+"Zorla saldır (sonraki tıklama)"
+END
+
+GUI:HotkeysCommandTOGGLE_GUARD
+"Koru (sonraki tıklama)"
+END
+
+GUI:HotkeysCommandTOGGLE_MOVE
+"Hareket et (sonraki tıklama)"
+END
+
+GUI:HotkeysCommandHOLD_POSITION
+"Yerini koru"
 END
 
 // Maç yükleme ekranı (LoadScreen.cpp içindeki LoadScreenBoard)
@@ -16550,6 +16842,15 @@ END
 
 GUI:AIPersona
 "Kişilik"
+END
+
+// Lobideki handikap sütunu, koltuk başına bir kutu
+GUI:Handicap
+"Handikap"
+END
+
+TOOLTIP:Handicap
+"Bu oyuncuyu orantılı olarak zayıflatır. Yüzde 50'de birim ve binalarda can ve hasar yarıya, iyileşme yarıya iner; yapım, araştırma ve özel güç süreleri iki katına çıkar."
 END
 
 // Kişilikli bir bilgisayar oyuncusunun sohbete yazdıkları: bir dalga çıkarken (iki satır), üssü
@@ -16907,402 +17208,6 @@ GUI:GraphNoData
 "Bu maçta hiçbir şey kaydedilmedi."
 END
 
-RANK:NextRank
-"Sonraki rütbe %d/%d XP"
-END
-
-RANK:PerkSIGHT
-"Görüş +%d%%"
-END
-
-RANK:PerkSTILL_GUARD
-"Dururken %d%% daha az hasar alır"
-END
-
-RANK:PerkMEND
-"Çatışma dışında saniyede %d.%02d%% iyileşir"
-END
-
-RANK:PerkSPOTTER
-"Topçuya gözcülük yapar"
-END
-
-RANK:PerkSCATTER
-"Topçu saçılması -%d%%"
-END
-
-RANK:PerkDEATH_RALLY
-"Düştüğünde yakındaki dostlar 10 saniye %d%% daha az hasar alır"
-END
-
-RANK:PerkDETECT
-"%d içindeki gizli birimleri görür"
-END
-
-RANK:PerkAURA_RADIUS
-"Aura menzili +%d%%"
-END
-
-RANK:PerkAURA_RATE_OF_FIRE
-"Aura: atış hızı +%d%%"
-END
-
-RANK:PerkAURA_SIGHT
-"Aura: görüş +%d%%"
-END
-
-RANK:PerkAURA_GUARD
-"Aura: %d%% daha az hasar"
-END
-
-RANK:PerkAURA_RANGE
-"Aura: topçu menzili +%d%%"
-END
-
-RANK:PerkRATE_OF_FIRE
-"Atış hızı +%d%%"
-END
-
-RANK:PerkRANGE
-"Menzil +%d%%"
-END
-
-RANK:PerkHEALTH
-"Can +%d%%"
-END
-
-RANK:PerkSPEED
-"Hız +%d%%"
-END
-
-RANK:PerkLAST_STAND
-"Canı 35%%'in altındayken atış hızı +%d%%"
-END
-
-RANK:PerkSCAVENGE
-"Öldürdükleri, kurbanın bedelinin %d%%'ini öder"
-END
-
-RANK:PerkDESIGNATE
-"Vurduğunu %d saniye işaretler: herkes ona 50%% daha hızlı ateş eder"
-END
-
-RANK:PerkDESIGNATE_REVEAL
-"İşareti gizli hedefleri açığa çıkarır"
-END
-
-RANK:PerkSALVAGE_CRATE
-"Düştüğünde hurda sandığı bırakır"
-END
-
-RANK:PerkAURA_MEND
-"Aura: saniyede %d.%02d%% iyileştirir"
-END
-
-RANK:PerkAURA_PACE
-"Aura: hız +%d%%"
-END
-
-RANK:PerkAURA_DRILL
-"Aura: birimleri %d. rütbeye kadar eğitir"
-END
-
-RANK:PerkAURA_STEADY
-"Aura: felç, EMP ve bastırma %d%% daha kısa"
-END
-
-RANK:PerkAURA_CAPTURE
-"Aura: binaları %d%% daha hızlı ele geçirir"
-END
-
-RANK:PerkAURA_SPOILS
-"Aura: yakındaki öldürmeler kurbanın bedelinin %d%%'ini öder"
-END
-
-RANK:America0
-"E-1 Er"
-END
-
-RANK:America1
-"E-2 Er"
-END
-
-RANK:America2
-"E-3 Birinci Sınıf Er"
-END
-
-RANK:America3
-"E-4 Uzman Er"
-END
-
-RANK:America4
-"E-4 Onbaşı"
-END
-
-RANK:America5
-"E-5 Çavuş"
-END
-
-RANK:America6
-"E-6 Kıdemli Çavuş"
-END
-
-RANK:America7
-"E-7 Birinci Sınıf Çavuş"
-END
-
-RANK:America8
-"E-8 Usta Çavuş"
-END
-
-RANK:America9
-"E-8 Bölük Başçavuşu"
-END
-
-RANK:America10
-"E-9 Başçavuş"
-END
-
-RANK:America11
-"E-9 Komuta Başçavuşu"
-END
-
-RANK:America12
-"E-9 Kara Kuvvetleri Başçavuşu"
-END
-
-RANK:America13
-"W-1 Teknik Subay"
-END
-
-RANK:America14
-"W-2 Kıdemli Teknik Subay"
-END
-
-RANK:America15
-"W-3 Kıdemli Teknik Subay"
-END
-
-RANK:America16
-"W-4 Kıdemli Teknik Subay"
-END
-
-RANK:America17
-"W-5 Kıdemli Teknik Subay"
-END
-
-RANK:America18
-"O-1 Teğmen"
-END
-
-RANK:America19
-"O-2 Üsteğmen"
-END
-
-RANK:America20
-"O-3 Yüzbaşı"
-END
-
-RANK:America21
-"O-4 Binbaşı"
-END
-
-RANK:America22
-"O-5 Yarbay"
-END
-
-RANK:America23
-"O-6 Albay"
-END
-
-RANK:America24
-"O-7 Tuğgeneral"
-END
-
-RANK:America25
-"O-8 Tümgeneral"
-END
-
-RANK:America26
-"O-9 Korgeneral"
-END
-
-RANK:America27
-"O-10 Orgeneral"
-END
-
-RANK:America28
-"Mareşal"
-END
-
-RANK:China0
-"Rütbesiz"
-END
-
-RANK:China1
-"Er"
-END
-
-RANK:China2
-"Birinci Sınıf Er"
-END
-
-RANK:China3
-"Onbaşı"
-END
-
-RANK:China4
-"Çavuş"
-END
-
-RANK:China5
-"İkinci Sınıf Kıdemli Çavuş"
-END
-
-RANK:China6
-"Birinci Sınıf Kıdemli Çavuş"
-END
-
-RANK:China7
-"Üçüncü Sınıf Usta Çavuş"
-END
-
-RANK:China8
-"İkinci Sınıf Usta Çavuş"
-END
-
-RANK:China9
-"Birinci Sınıf Usta Çavuş"
-END
-
-RANK:China10
-"Teğmen"
-END
-
-RANK:China11
-"Üsteğmen"
-END
-
-RANK:China12
-"Yüzbaşı"
-END
-
-RANK:China13
-"Binbaşı"
-END
-
-RANK:China14
-"Yarbay"
-END
-
-RANK:China15
-"Albay"
-END
-
-RANK:China16
-"Kıdemli Albay"
-END
-
-RANK:China17
-"Tümgeneral"
-END
-
-RANK:China18
-"Korgeneral"
-END
-
-RANK:China19
-"Orgeneral"
-END
-
-RANK:GLA0
-"Rütbesiz"
-END
-
-RANK:GLA1
-"Acemi"
-END
-
-RANK:GLA2
-"Düzensiz"
-END
-
-RANK:GLA3
-"Savaşçı"
-END
-
-RANK:GLA4
-"Akıncı"
-END
-
-RANK:GLA5
-"Pişkin Akıncı"
-END
-
-RANK:GLA6
-"Tim Eri"
-END
-
-RANK:GLA7
-"Tim Lideri"
-END
-
-RANK:GLA8
-"Hücre Lideri"
-END
-
-RANK:GLA9
-"Kıdemli Hücre Lideri"
-END
-
-RANK:GLA10
-"Baskın Yüzbaşısı"
-END
-
-RANK:GLA11
-"Kol Yüzbaşısı"
-END
-
-RANK:GLA12
-"Vuruş Komutanı"
-END
-
-RANK:GLA13
-"Saha Komutanı"
-END
-
-RANK:GLA14
-"Sektör Komutanı"
-END
-
-RANK:GLA15
-"Savaş Ağası"
-END
-
-RANK:GLA16
-"Bölgesel Savaş Ağası"
-END
-
-RANK:GLA17
-"Baş Savaş Ağası"
-END
-
-RANK:GLA18
-"General"
-END
-
-RANK:GLA19
-"Büyük General"
-END
-
-RANK:GLA20
-"Yüce Kurtarıcı"
-END
-
-RANK:Turkiye0
-"Rütbesiz"
-END
-
 INI:FactionTurkiye
 "Türkiye (Deneysel)"
 END
@@ -17572,15 +17477,15 @@ CONTROLBAR:ToolTipUpgradeTurkiyeExtendedRange
 END
 
 UPGRADE:TurkiyePrecisionGuidance
-"Hassas Güdüm"
+"Atalet Güdüm"
 END
 
 CONTROLBAR:UpgradeTurkiyePrecisionGuidance
-"&Hassas Güdüm"
+"Ata&let Güdüm"
 END
 
 CONTROLBAR:ToolTipUpgradeTurkiyePrecisionGuidance
-"Kimsenin görmediği yere atışın dağılımı dörtte birine iner."
+"Radar menzili dışına atılan roketlerin isabeti beşte birden beşte ikiye çıkar."
 END
 
 UPGRADE:TurkiyeArmorPack
@@ -17663,76 +17568,200 @@ CONTROLBAR:ConstructTurkiyePatriotBattery
 "Hisar &Bataryası"
 END
 
-SCIENCE:TurkiyeMinefield
-"Mayın Tarlası"
+SCIENCE:TurkiyeLaserDesignation
+"Lazer İşaretleme"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceMinefield
-"Bir kargo uçağı gösterdiğiniz yere mayın döşer. \n \n Çağrıldığı yer: Karargah"
+CONTROLBAR:ToolTipTurkiyeScienceLaserDesignation
+"Gözcü timleri ve Bayraktarlar saldırdıkları hedefi işaretler. İşaretli hedef nerede olursa olsun radar kapsamında sayılır, radar güdümlü her roket kilidini onda tutar."
 END
 
-CONTROLBAR:TurkiyeMinefield
-"Mayın Ta&rlası"
+UPGRADE:TurkiyeLaserDesignation
+"Lazer İşaretleme"
 END
 
-CONTROLBAR:TooltipTurkiyeMinefield
-"Mayın Tarlası \n Geri Sayım: 4:00"
+SCIENCE:TurkiyeEarlyWarning
+"Erken İhbar"
 END
 
-SCIENCE:TurkiyeFuelResupply
-"Yakıt İkmali"
+CONTROLBAR:ToolTipTurkiyeScienceEarlyWarning
+"Türkiye'nin bütün radarları dörtte bir daha uzağa erişir: Karargah, Radar Kulesi, Koral, Akıncı ve Mobil Radar."
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceFuelResupply
-"Bayraktar her uçuşta bir mühimmat fazla taşır."
+UPGRADE:TurkiyeEarlyWarning
+"Erken İhbar"
+END
+
+SCIENCE:TurkiyeUavRecon
+"SİHA Keşfi"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceUavRecon
+"Bir SİHA hedef alanın üstünde 30 saniye döner ve oradaki her düşman birimini, duran da yürüyen de, ne olduğuyla bildirir. Sis kalkmaz ama alan radar kapsamında sayılır. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeUavRecon
+"SİHA &Keşfi"
+END
+
+CONTROLBAR:TooltipTurkiyeUavRecon
+"SİHA Keşfi \n Geri Sayım: 2:00"
+END
+
+GUI:HudReconSiha
+"SİHA KEŞİF"
+END
+
+SCIENCE:TurkiyeMobileRadar
+"Mobil Radar"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceMobileRadar
+"Fabrika Mobil Radar üretir: dururken çevresinde 900'ü kapsayan bir radar kamyonu."
+END
+
+OBJECT:TurkiyeVehicleMobileRadar
+"Mobil Radar"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleMobileRadar
+"&Mobil Radar"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleMobileRadar
+"Tekerlekli radar: park halinde çevresinde 900'ü kapsar, yürürken hiçbir şeyi. Silahı yok. \n \n Gerekenler: Mobil Radar (3. rütbe)"
+END
+
+SCIENCE:TurkiyeAkinciAesa
+"Akıncı AESA"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceAkinciAesa
+"Akıncı'nın radarı 750 yerine 1000'e erişir."
+END
+
+UPGRADE:TurkiyeAkinciAesa
+"Akıncı AESA"
 END
 
 SCIENCE:TurkiyeSwarmMunition
-"Gezgin Mühimmat"
+"SİHA Sürüsü 1"
+END
+
+SCIENCE:TurkiyeSwarmMunition2
+"SİHA Sürüsü 2"
+END
+
+SCIENCE:TurkiyeSwarmMunition3
+"SİHA Sürüsü 3"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceSwarmMunition
-"Bir gezgin mühimmat gösterdiğin yerde döner ve bulduğu en pahalı hedefe dalar. \n \n Kullanıldığı yer: Karargah"
+"Gezgin mühimmatlar gösterdiğin yerde döner, her biri bulduğu en pahalı hedefe dalar: 1. seviyede bir, 2. seviyede üç, 3. seviyede beş. \n \n Kullanıldığı yer: Karargah"
 END
 
 CONTROLBAR:TurkiyeSwarmMunition
-"Gezgin &Mühimmat"
+"SİHA &Sürüsü"
 END
 
 CONTROLBAR:TooltipTurkiyeSwarmMunition
-"Gezgin Mühimmat \n Geri Sayım: 3:00"
+"SİHA Sürüsü \n Geri Sayım: 3:00"
 END
 
 SCIENCE:TurkiyeElectronicBlinding
-"Elektronik Körleme"
+"Elektronik Harp"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceElectronicBlinding
-"Hedef alanda binası olan her düşmanın radarı 30 saniye kapanır. \n \n Kullanıldığı yer: Karargah"
+"Hedef alanda binası olan her düşmanın radarı 30 saniye kapanır ve alan o süre karıştırılır: içindeki düşman İHA'ları ve gözcüleri hiçbir şey görmez, alandan geçen güdümlü füzeler kilidini kaybeder. \n \n Kullanıldığı yer: Karargah"
 END
 
 CONTROLBAR:TurkiyeElectronicBlinding
-"Elektronik &Körleme"
+"Elektronik &Harp"
 END
 
 CONTROLBAR:TooltipTurkiyeElectronicBlinding
-"Elektronik Körleme \n Geri Sayım: 4:00"
+"Elektronik Harp \n Geri Sayım: 4:00"
 END
 
-SCIENCE:TurkiyeSwarmStrike
-"Sürü Akını"
+SCIENCE:TurkiyeSatelliteGuidance
+"Uydu Güdüm"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceSwarmStrike
-"Bir mühimmat sürüsü geniş bir alandaki en değerli on hedefi tek tek bulur, her birine bir mühimmat. Sıkışık bir üs bunu az hisseder, dağınık bir ordu çok. \n \n Kullanıldığı yer: Karargah"
+CONTROLBAR:ToolTipTurkiyeScienceSatelliteGuidance
+"45 saniye boyunca bütün harita Türkiye'nin radar kapsamında sayılır: radar güdümlü her roket kilidini tutar, yürüyen düşmanlar sisin altında görünür. \n \n Kullanıldığı yer: Karargah"
 END
 
-CONTROLBAR:TurkiyeSwarmStrike
-"Sürü Akı&nı"
+CONTROLBAR:TurkiyeSatelliteGuidance
+"&Uydu Güdüm"
 END
 
-CONTROLBAR:TooltipTurkiyeSwarmStrike
-"Sürü Akını \n Geri Sayım: 6:00"
+CONTROLBAR:TooltipTurkiyeSatelliteGuidance
+"Uydu Güdüm \n Geri Sayım: 5:00"
+END
+
+SCIENCE:TurkiyeTayfun
+"Tayfun Füzesi"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceTayfun
+"Bir Tayfun balistik füzesi hedefe iner. Radar kapsamında her zaman vurur; kapsam dışında beşte bir noktaya düşer, kalanında geniş ıskalar. \n \n Kullanıldığı yer: Karargah"
+END
+
+CONTROLBAR:TurkiyeTayfun
+"&Tayfun Füzesi"
+END
+
+CONTROLBAR:TooltipTurkiyeTayfun
+"Tayfun Füzesi \n Geri Sayım: 4:00"
+END
+
+UPGRADE:TurkiyeTargetClassification
+"Hedef Sınıflandırma"
+END
+
+CONTROLBAR:UpgradeTurkiyeTargetClassification
+"&Hedef Sınıflandırma"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeTargetClassification
+"Radar temasları ne olduklarını gösterir: piyade, araç, hava savunma, topçu, uçak ya da savunma yapısı."
+END
+
+UPGRADE:TurkiyeAkkor
+"AKKOR Aktif Koruma"
+END
+
+CONTROLBAR:UpgradeTurkiyeAkkor
+"AKKOR Aktif &Koruma"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeAkkor
+"Her Altay'daki aktif koruma, üç saniyede bir yaklaşan bir füzeyi ya da roketi havada patlatır."
+END
+
+UPGRADE:TurkiyeGokdogan
+"Gökdoğan Füzeleri"
+END
+
+CONTROLBAR:UpgradeTurkiyeGokdogan
+"&Gökdoğan Füzeleri"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeGokdogan
+"Kızılelma Gökdoğan atar: 280 yerine 360 menzil, 100 yerine 130 hasar."
+END
+
+UPGRADE:TurkiyeSiperReinforced
+"Takviyeli Siper"
+END
+
+CONTROLBAR:UpgradeTurkiyeSiperReinforced
+"&Takviyeli Siper"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeSiperReinforced
+"Beton ve üst örtü: her Siper yıkılmadan önce yarısı kadar daha fazla dayanır."
 END
 
 UPGRADE:TurkiyeThermal
@@ -17771,40 +17800,28 @@ CONTROLBAR:ToolTipUpgradeTurkiyeSwarmSoftware
 "Bayraktar'ın mühimmatı hedefini kendi seçer: menzildeki en pahalı düşman."
 END
 
-UPGRADE:TurkiyeFuelResupply
-"Yakıt İkmali"
+SCIENCE:TurkiyeRapidDeployment
+"Gökbey İndirmesi 1"
 END
 
-SCIENCE:TurkiyeRapidDeployment
-"Hızlı İntikal"
+SCIENCE:TurkiyeRapidDeployment2
+"Gökbey İndirmesi 2"
+END
+
+SCIENCE:TurkiyeRapidDeployment3
+"Gökbey İndirmesi 3"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceRapidDeployment
-"Bir kargo uçağı gösterdiğin yere altı Mehmetçik ve iki Sungur nişancısı bırakır. \n \n Kullanıldığı yer: Karargah"
+"Mehmetçikler ve Sungur nişancıları gösterdiğin yere paraşütle iner: 1. seviyede altı, 2. seviyede on, 3. seviyede on dört asker ve bir Kirpi. \n \n Kullanıldığı yer: Karargah"
 END
 
 CONTROLBAR:TurkiyeRapidDeployment
-"&Hızlı İntikal"
+"&Gökbey İndirmesi"
 END
 
 CONTROLBAR:TooltipTurkiyeRapidDeployment
-"Hızlı İntikal \n Geri Sayım: 3:00"
-END
-
-SCIENCE:TurkiyeFireMission
-"Atış Desteği"
-END
-
-CONTROLBAR:ToolTipTurkiyeScienceFireMission
-"Harita dışından hedefe otuz altı ağır mermi düşer. \n \n Kullanıldığı yer: Karargah"
-END
-
-CONTROLBAR:TurkiyeFireMission
-"&Atış Desteği"
-END
-
-CONTROLBAR:TooltipTurkiyeFireMission
-"Atış Desteği \n Geri Sayım: 4:00"
+"Gökbey İndirmesi \n Geri Sayım: 3:00"
 END
 
 SCIENCE:TurkiyeCommandoRaid
@@ -17945,4 +17962,8 @@ END
 
 GUI:SocketRedirected
 "LAN IP adresi %ls, ama sistem oyunun bağlantısını %ls üzerine koydu. Bir VPN'in bölünmüş tüneli (split tunnel) ya da bir güvenlik duvarı bağlantıyı yönlendirdi, bu yüzden ağınızdaki kimse sizi duyamıyor. Oyun için bölünmüş tüneli kapatıp yeniden deneyin."
+END
+
+CONTROLBAR:ToolTipEvacuateAt
+"Seçtiğiniz yere gidip tüm birliklere çıkma emri verin\nAlt: burada indir"
 END

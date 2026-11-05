@@ -204,6 +204,10 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_STOP;
 	else if (token == "clickstop")
 		*action = SCENARIO_ACTION_CLICKSTOP;
+	else if (token == "autogarrison")
+		*action = SCENARIO_ACTION_AUTOGARRISON;
+	else if (token == "autorepair")
+		*action = SCENARIO_ACTION_AUTOREPAIR;
 	else if (token == "arrive")
 		*action = SCENARIO_ACTION_ARRIVE;
 	else if (token == "particles")
@@ -252,8 +256,6 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_REPEAT;
 	else if (token == "givemoney")
 		*action = SCENARIO_ACTION_GIVEMONEY;
-	else if (token == "rank")
-		*action = SCENARIO_ACTION_RANK;
 	else if (token == "reachproof")
 		*action = SCENARIO_ACTION_REACHPROOF;
 	else if (token == "topup")
@@ -358,10 +360,11 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_PRODUCE:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_REPEAT:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_GIVEMONEY:		return SCENARIO_TOKENS_STANCE;
-		case SCENARIO_ACTION_RANK:				return SCENARIO_TOKENS_STANCE;
 		case SCENARIO_ACTION_REACHPROOF:	return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_CLICKSTOP:		return SCENARIO_TOKENS_STOP;
+		case SCENARIO_ACTION_AUTOGARRISON:	return SCENARIO_TOKENS_STOP;
+		case SCENARIO_ACTION_AUTOREPAIR:	return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_TALLY:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_PURCHASE:		return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_ARRIVE:			return SCENARIO_TOKENS_ARRIVE;
@@ -506,21 +509,6 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 				return SCENARIO_PARSE_BAD_ACTION;
 			break;
 
-		case SCENARIO_ACTION_RANK:
-			action->name = tokens[ SCENARIO_STANCE_NAME_TOKEN ];
-			// xp N: N same-class kills of experience; grade N: the ladder's grade N
-			if (action->name == "xp" || action->name == "grade")
-			{
-				if (count <= SCENARIO_STANCE_NAME_TOKEN + 1)
-					return SCENARIO_PARSE_MISSING_ARGS;
-				if (!parseWholeNumber( tokens[ SCENARIO_STANCE_NAME_TOKEN + 1 ], &action->count ))
-					return SCENARIO_PARSE_BAD_COUNT;
-				break;
-			}
-			if (action->name != "veteran" && action->name != "elite" && action->name != "heroic")
-				return SCENARIO_PARSE_BAD_ACTION;
-			break;
-
 		case SCENARIO_ACTION_PRODUCE:
 		{
 			action->targetSelector = tokens[ 4 ];	// what to make
@@ -551,6 +539,8 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 
 		case SCENARIO_ACTION_STOP:
 		case SCENARIO_ACTION_CLICKSTOP:
+		case SCENARIO_ACTION_AUTOGARRISON:
+		case SCENARIO_ACTION_AUTOREPAIR:
 		case SCENARIO_ACTION_PURCHASE:
 			break;
 	}
@@ -1483,6 +1473,8 @@ static Bool executePower( const ScenarioAction &action, Player *player, const Co
 			continue;
 		power->doSpecialPowerAtLocation( &target, INVALID_ANGLE, COMMAND_FIRED_BY_SCRIPT );
 		++fired;
+		DEBUG_LOG(("SCENARIO: frame %d power slot %d '%s' %s: logic frame %u, ready on %u\n", action.frame, action.slot,
+							 action.selector.str(), power->getPowerName().str(), TheGameLogic->getFrame(), power->getReadyFrame()));
 	}
 
 	DEBUG_LOG(("SCENARIO: frame %d power slot %d '%s' fired %d at (%.0f,%.0f)\n",
@@ -1927,6 +1919,20 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_WEAPONAT:
 			return executeWeaponAt( action, player, dest, group, taken );		// the dispatcher again
 
+		case SCENARIO_ACTION_AUTOGARRISON:
+		case SCENARIO_ACTION_AUTOREPAIR:
+		{
+			// the key's message, through the dispatcher, which destroys the group
+			GameMessage *msg = newInstance( GameMessage )( action.action == SCENARIO_ACTION_AUTOGARRISON ? GameMessage::MSG_DO_AUTO_GARRISON : GameMessage::MSG_DO_AUTO_REPAIR );
+			msg->friend_setPlayerIndex( player->getPlayerIndex() );
+			TheGameLogic->logicMessageDispatcher( msg, group );
+			msg->deleteInstance();
+			DEBUG_LOG(("SCENARIO: frame %d %s slot %d '%s' x%d\n", action.frame,
+								 action.action == SCENARIO_ACTION_AUTOGARRISON ? "autogarrison" : "autorepair",
+								 action.slot, action.selector.str(), taken));
+			return TRUE;
+		}
+
 		case SCENARIO_ACTION_FORCEGROUND:
 		{
 			// the attack key's click on open ground, through the dispatcher, which destroys the group
@@ -1953,32 +1959,6 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 			DEBUG_LOG(("SCENARIO: frame %d reaim slot %d '%s' x%d at (%.0f,%.0f)\n",
 								 action.frame, action.slot, action.selector.str(), taken, dest.x, dest.y));
 			return TRUE;
-		}
-
-		case SCENARIO_ACTION_RANK:
-		{
-			const VeterancyLevel level = action.name == "veteran" ? LEVEL_VETERAN
-																 : action.name == "elite" ? LEVEL_ELITE : LEVEL_HEROIC;
-			const VecObjectID &ids = group->getAllIDs();
-			for (VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it)
-			{
-				Object *obj = TheGameLogic->findObjectByID( *it );
-				ExperienceTracker *tracker = obj->getExperienceTracker();
-				const RankLadder *ladder = TheGlobalData->getRankLadder( obj->getTemplate() );
-				const Int unitValue = RankLadder::unitValue( obj->getTemplate() );
-				if (action.name == "xp")
-					tracker->setExperienceAndLevel( action.count * unitValue );
-				else if (action.name == "grade" && ladder)
-					tracker->setExperienceAndLevel( ladder->threshold( unitValue, action.count ) );
-				else if (action.name != "grade")
-					tracker->setVeterancyLevel( level );
-				DEBUG_LOG(("SCENARIO: frame %d rank slot %d '%s' %s xp=%d grade=%d level=%d\n", action.frame, action.slot,
-									 obj->getTemplate()->getName().str(), action.name.str(), tracker->getCurrentExperience(),
-									 tracker->getGrade(), (Int)tracker->getVeterancyLevel()));
-			}
-			DEBUG_LOG(("SCENARIO: frame %d rank slot %d '%s' x%d %s %d\n",
-								 action.frame, action.slot, action.selector.str(), taken, action.name.str(), action.count));
-			break;
 		}
 
 		case SCENARIO_ACTION_STOP:

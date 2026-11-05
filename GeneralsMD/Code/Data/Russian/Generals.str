@@ -489,6 +489,26 @@ Color:Pink
 "Розовый"
 END
 
+Color:Crimson
+"Багровый"
+END
+
+Color:Azure
+"Лазурный"
+END
+
+Color:Salmon
+"Лососевый"
+END
+
+Color:Teal
+"Бирюзовый"
+END
+
+Color:Lavender
+"Лавандовый"
+END
+
 MSG:Testing
 "Mary had a little lamb, it's fleece as white as snow"
 END
@@ -16314,7 +16334,7 @@ GUI:OrderLines
 END
 
 TOOLTIP:OrderLines
-"Линия от каждого выбранного юнита к цели и далее через все точки в очереди. Выключено: маркеры на этих точках остаются."
+"Линия от каждого выбранного юнита к цели и далее через все точки в очереди. Выключено: одиночный приказ без линии и маркера, и щелчок не оставляет кольца на земле; маршрут в очереди сохраняет и линию, и маркеры."
 END
 
 GUI:PlayerColors
@@ -16363,10 +16383,6 @@ END
 
 TOOLTIP:SupplyPileFull
 "\n Занято: лимит на кучу не пускает ваших сборщиков"
-END
-
-TOOLTIP:StatTime
-"Время постройки"
 END
 
 TOOLTIP:StatSeconds
@@ -16729,14 +16745,6 @@ TOOLTIP:CloudStyle
 "Классический использует оригинальные эффекты токсинов и радиации. Объёмный добавляет движущийся дым, более тёмную ядерную дымку и марево. Применяется при нажатии «Принять», в том числе к облакам, уже находящимся на поле."
 END
 
-LAN:ErrorModMismatch
-"В этой игре запущены другие моды. Моды хоста: %s. Чтобы присоединиться, запустите игру с теми же модами в том же порядке."
-END
-
-LAN:NoMod
-"нет"
-END
-
 GUI:SaveFromOlderGame
 "Это сохранение сделано в оригинальной игре или в более старой версии Reforged и не может быть загружено. Сохранения \"Начало миссии\" по-прежнему загружаются и продолжают кампанию с начала этой миссии, а любую миссию кампании можно выбрать в меню кампании."
 END
@@ -16977,10 +16985,6 @@ GUI:HotkeysPressLetter
 "Нажмите букву или Esc для отмены"
 END
 
-GUI:HotkeysPressForceAttack
-"Нажмите клавишу или Ctrl либо Alt отдельно. Shift нельзя использовать для удержания. Esc отменяет."
-END
-
 GUI:HotkeysPressHold
 "Нажмите клавишу или Ctrl, Alt либо Shift отдельно. Esc отменяет."
 END
@@ -17007,10 +17011,6 @@ END
 
 GUI:HotkeysButtonMoved
 "Игра дала ей букву фиксированной клавиши, поэтому лаунчер её переместил."
-END
-
-GUI:HotkeysForceAttack
-"Удерживайте, чтобы стрелять по всему, что под курсором. Shift плюс эта клавиша по-прежнему рисует рамку выделения. По умолчанию Ctrl."
 END
 
 GUI:HotkeysPick
@@ -17219,6 +17219,34 @@ END
 
 GUI:HotkeysCommandBEGIN_PREFER_SELECTION
 "Добавить к выделению (удерживать)"
+END
+
+GUI:HotkeysCommandAUTO_GARRISON
+"Занять здания поблизости"
+END
+
+GUI:HotkeysCommandAUTO_REPAIR
+"Идти на ремонт или лечение"
+END
+
+GUI:HotkeysCommandTOGGLE_ATTACKMOVE
+"Атака на ходу (следующий щелчок)"
+END
+
+GUI:HotkeysCommandTOGGLE_FORCEATTACK
+"Принудительная атака (следующий щелчок)"
+END
+
+GUI:HotkeysCommandTOGGLE_GUARD
+"Охрана (следующий щелчок)"
+END
+
+GUI:HotkeysCommandTOGGLE_MOVE
+"Движение (следующий щелчок)"
+END
+
+GUI:HotkeysCommandHOLD_POSITION
+"Удерживать позицию"
 END
 
 GUI:LoadModeSkirmish
@@ -17785,426 +17813,6 @@ GUI:GraphNoData
 "В этом матче ничего не записано."
 END
 
-RANK:NextRank
-"Следующее звание %d/%d XP"
-END
-
-RANK:PerkSIGHT
-"Обзор +%d%%"
-END
-
-RANK:PerkSTILL_GUARD
-"Стоя на месте: получает на %d%% меньше урона"
-END
-
-RANK:PerkMEND
-"Вне боя: лечится на %d.%02d%% в секунду"
-END
-
-RANK:PerkSPOTTER
-"Корректирует огонь артиллерии"
-END
-
-RANK:PerkSCATTER
-"Разброс артиллерии -%d%%"
-END
-
-RANK:PerkDEATH_RALLY
-"Когда он гибнет, союзники рядом получают на %d%% меньше урона в течение 10 секунд"
-END
-
-RANK:PerkDETECT
-"Обнаруживает скрытых в радиусе %d"
-END
-
-RANK:PerkAURA_RADIUS
-"Радиус ауры +%d%%"
-END
-
-RANK:PerkAURA_RATE_OF_FIRE
-"Аура: скорострельность +%d%%"
-END
-
-RANK:PerkAURA_SIGHT
-"Аура: обзор +%d%%"
-END
-
-RANK:PerkAURA_GUARD
-"Аура: на %d%% меньше получаемого урона"
-END
-
-RANK:PerkAURA_RANGE
-"Аура: дальность артиллерии +%d%%"
-END
-
-RANK:America0
-"E-1 Рядовой"
-END
-
-RANK:America1
-"E-2 Рядовой"
-END
-
-RANK:America2
-"E-3 Рядовой первого класса"
-END
-
-RANK:America3
-"E-4 Специалист"
-END
-
-RANK:America4
-"E-4 Капрал"
-END
-
-RANK:America5
-"E-5 Сержант"
-END
-
-RANK:America6
-"E-6 Штаб-сержант"
-END
-
-RANK:America7
-"E-7 Сержант первого класса"
-END
-
-RANK:America8
-"E-8 Мастер-сержант"
-END
-
-RANK:America9
-"E-8 Первый сержант"
-END
-
-RANK:America10
-"E-9 Сержант-майор"
-END
-
-RANK:America11
-"E-9 Командир-сержант-майор"
-END
-
-RANK:America12
-"E-9 Сержант-майор армии"
-END
-
-RANK:America13
-"W-1 Уорент-офицер"
-END
-
-RANK:America14
-"W-2 Старший уорент-офицер"
-END
-
-RANK:America15
-"W-3 Старший уорент-офицер"
-END
-
-RANK:America16
-"W-4 Старший уорент-офицер"
-END
-
-RANK:America17
-"W-5 Старший уорент-офицер"
-END
-
-RANK:America18
-"O-1 Второй лейтенант"
-END
-
-RANK:America19
-"O-2 Первый лейтенант"
-END
-
-RANK:America20
-"O-3 Капитан"
-END
-
-RANK:America21
-"O-4 Майор"
-END
-
-RANK:America22
-"O-5 Подполковник"
-END
-
-RANK:America23
-"O-6 Полковник"
-END
-
-RANK:America24
-"O-7 Бригадный генерал"
-END
-
-RANK:America25
-"O-8 Генерал-майор"
-END
-
-RANK:America26
-"O-9 Генерал-лейтенант"
-END
-
-RANK:America27
-"O-10 Генерал"
-END
-
-RANK:America28
-"Генерал армии"
-END
-
-RANK:China0
-"Без звания"
-END
-
-RANK:China1
-"Рядовой"
-END
-
-RANK:China2
-"Рядовой первого класса"
-END
-
-RANK:China3
-"Капрал"
-END
-
-RANK:China4
-"Сержант"
-END
-
-RANK:China5
-"Штаб-сержант второго класса"
-END
-
-RANK:China6
-"Штаб-сержант первого класса"
-END
-
-RANK:China7
-"Мастер-сержант третьего класса"
-END
-
-RANK:China8
-"Мастер-сержант второго класса"
-END
-
-RANK:China9
-"Мастер-сержант первого класса"
-END
-
-RANK:China10
-"Второй лейтенант"
-END
-
-RANK:China11
-"Первый лейтенант"
-END
-
-RANK:China12
-"Капитан"
-END
-
-RANK:China13
-"Майор"
-END
-
-RANK:China14
-"Подполковник"
-END
-
-RANK:China15
-"Полковник"
-END
-
-RANK:China16
-"Старший полковник"
-END
-
-RANK:China17
-"Генерал-майор"
-END
-
-RANK:China18
-"Генерал-лейтенант"
-END
-
-RANK:China19
-"Генерал"
-END
-
-RANK:GLA0
-"Без звания"
-END
-
-RANK:GLA1
-"Новобранец"
-END
-
-RANK:GLA2
-"Ополченец"
-END
-
-RANK:GLA3
-"Боец"
-END
-
-RANK:GLA4
-"Рейдер"
-END
-
-RANK:GLA5
-"Закалённый рейдер"
-END
-
-RANK:GLA6
-"Помощник командира отряда"
-END
-
-RANK:GLA7
-"Командир отряда"
-END
-
-RANK:GLA8
-"Командир ячейки"
-END
-
-RANK:GLA9
-"Старший командир ячейки"
-END
-
-RANK:GLA10
-"Капитан рейдов"
-END
-
-RANK:GLA11
-"Капитан колонны"
-END
-
-RANK:GLA12
-"Командир ударных сил"
-END
-
-RANK:GLA13
-"Полевой командир"
-END
-
-RANK:GLA14
-"Командир сектора"
-END
-
-RANK:GLA15
-"Полевой военачальник"
-END
-
-RANK:GLA16
-"Региональный военачальник"
-END
-
-RANK:GLA17
-"Верховный военачальник"
-END
-
-RANK:GLA18
-"Генерал"
-END
-
-RANK:GLA19
-"Великий генерал"
-END
-
-RANK:GLA20
-"Верховный освободитель"
-END
-
-RANK:Turkiye0
-"Без звания"
-END
-
-RANK:Turkiye1
-"Er"
-END
-
-RANK:Turkiye2
-"Onbaşı"
-END
-
-RANK:Turkiye3
-"Çavuş"
-END
-
-RANK:Turkiye4
-"Uzman Çavuş"
-END
-
-RANK:Turkiye5
-"Astsubay Çavuş"
-END
-
-RANK:Turkiye6
-"Astsubay Kıdemli Çavuş"
-END
-
-RANK:Turkiye7
-"Astsubay Üstçavuş"
-END
-
-RANK:Turkiye8
-"Astsubay Kıdemli Üstçavuş"
-END
-
-RANK:Turkiye9
-"Astsubay Başçavuş"
-END
-
-RANK:Turkiye10
-"Astsubay Kıdemli Başçavuş"
-END
-
-RANK:Turkiye11
-"Teğmen"
-END
-
-RANK:Turkiye12
-"Üsteğmen"
-END
-
-RANK:Turkiye13
-"Yüzbaşı"
-END
-
-RANK:Turkiye14
-"Binbaşı"
-END
-
-RANK:Turkiye15
-"Yarbay"
-END
-
-RANK:Turkiye16
-"Albay"
-END
-
-RANK:Turkiye17
-"Tuğgeneral"
-END
-
-RANK:Turkiye18
-"Tümgeneral"
-END
-
-RANK:Turkiye19
-"Korgeneral"
-END
-
-RANK:Turkiye20
-"Orgeneral"
-END
-
-RANK:Turkiye21
-"Mareşal"
-END
-
 INI:FactionTurkiye
 "Turkiye (экспериментальная)"
 END
@@ -18474,15 +18082,15 @@ CONTROLBAR:ToolTipUpgradeTurkiyeExtendedRange
 END
 
 UPGRADE:TurkiyePrecisionGuidance
-"Точное наведение"
+"Инерциальное наведение"
 END
 
 CONTROLBAR:UpgradeTurkiyePrecisionGuidance
-"&Точное наведение"
+"&Инерциальное наведение"
 END
 
 CONTROLBAR:ToolTipUpgradeTurkiyePrecisionGuidance
-"Выстрелы по земле, которую никто не видит, разбрасывает в четыре раза меньше."
+"Ракеты, выпущенные вне зоны радаров, попадают дважды из пяти, а не один раз."
 END
 
 UPGRADE:TurkiyeArmorPack
@@ -18565,76 +18173,200 @@ CONTROLBAR:ConstructTurkiyePatriotBattery
 "&Батарея Hisar"
 END
 
-SCIENCE:TurkiyeMinefield
-"Минное поле"
+SCIENCE:TurkiyeLaserDesignation
+"Лазерное целеуказание"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceMinefield
-"Транспортный самолёт засевает минами указанную вами местность. \n \n Применяется из: Штаба"
+CONTROLBAR:ToolTipTurkiyeScienceLaserDesignation
+"Группы корректировщиков и Bayraktar подсвечивают то, что атакуют. Подсвеченная цель считается в зоне радара, где бы она ни стояла, и каждая ракета с радарным наведением держит на ней захват."
 END
 
-CONTROLBAR:TurkiyeMinefield
-"&Минное поле"
+UPGRADE:TurkiyeLaserDesignation
+"Лазерное целеуказание"
 END
 
-CONTROLBAR:TooltipTurkiyeMinefield
-"Минное поле \n Перезарядка: 4:00"
+SCIENCE:TurkiyeEarlyWarning
+"Раннее оповещение"
 END
 
-SCIENCE:TurkiyeFuelResupply
-"Дозаправка"
+CONTROLBAR:ToolTipTurkiyeScienceEarlyWarning
+"Каждый радар Турции бьёт на четверть дальше: Штаб, радарная вышка, Koral, Akinci и мобильный радар."
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceFuelResupply
-"Дроны Bayraktar несут на одну боеприпасную единицу больше за вылет."
+UPGRADE:TurkiyeEarlyWarning
+"Раннее оповещение"
+END
+
+SCIENCE:TurkiyeUavRecon
+"Разведка БПЛА"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceUavRecon
+"БПЛА 30 секунд кружит над зоной и сообщает о каждом вражеском юните в ней, стоящем или движущемся, и о том, что это. Туман остаётся, но зона считается в зоне радара. \n \n Применяется из: Штаба"
+END
+
+CONTROLBAR:TurkiyeUavRecon
+"&Разведка БПЛА"
+END
+
+CONTROLBAR:TooltipTurkiyeUavRecon
+"Разведка БПЛА \n Перезарядка: 2:00"
+END
+
+GUI:HudReconSiha
+"РАЗВЕДКА БПЛА"
+END
+
+SCIENCE:TurkiyeMobileRadar
+"Мобильный радар"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceMobileRadar
+"Завод выпускает мобильный радар: радарный грузовик, который охватывает 900 вокруг себя, пока стоит."
+END
+
+OBJECT:TurkiyeVehicleMobileRadar
+"Мобильный радар"
+END
+
+CONTROLBAR:ConstructTurkiyeVehicleMobileRadar
+"&Мобильный радар"
+END
+
+CONTROLBAR:ToolTipTurkiyeVehicleMobileRadar
+"Радар на колёсах: стоя, охватывает 900 вокруг себя, в движении - ничего. Без оружия. \n \n Требуется: Мобильный радар (звание 3)"
+END
+
+SCIENCE:TurkiyeAkinciAesa
+"АФАР Akinci"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceAkinciAesa
+"Радар Akinci бьёт на 1000 вместо 750."
+END
+
+UPGRADE:TurkiyeAkinciAesa
+"АФАР Akinci"
 END
 
 SCIENCE:TurkiyeSwarmMunition
-"Барражирующий боеприпас"
+"Рой БПЛА 1"
+END
+
+SCIENCE:TurkiyeSwarmMunition2
+"Рой БПЛА 2"
+END
+
+SCIENCE:TurkiyeSwarmMunition3
+"Рой БПЛА 3"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceSwarmMunition
-"Один барражирующий боеприпас кружит над указанным местом и пикирует на самую дорогую найденную цель. \n \n Применяется из: Штаба"
+"Барражирующие боеприпасы кружат над указанным местом, и каждый пикирует на самую дорогую найденную цель: один на уровне 1, три на уровне 2, пять на уровне 3. \n \n Применяется из: Штаба"
 END
 
 CONTROLBAR:TurkiyeSwarmMunition
-"&Барражирующий боеприпас"
+"&Рой БПЛА"
 END
 
 CONTROLBAR:TooltipTurkiyeSwarmMunition
-"Барражирующий боеприпас \n Перезарядка: 3:00"
+"Рой БПЛА \n Перезарядка: 3:00"
 END
 
 SCIENCE:TurkiyeElectronicBlinding
-"Электронное ослепление"
+"Радиоэлектронная борьба"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceElectronicBlinding
-"Каждый враг, у которого есть здание в зоне поражения, теряет радар на 30 секунд. \n \n Применяется из: Штаба"
+"Каждый враг, у которого есть здание в зоне поражения, теряет радар на 30 секунд, и всё это время зона заглушена: вражеские дроны и наводчики в ней ничего не видят, а управляемые ракеты, пролетающие через неё, теряют захват. \n \n Применяется из: Штаба"
 END
 
 CONTROLBAR:TurkiyeElectronicBlinding
-"&Электронное ослепление"
+"&Радиоэлектронная борьба"
 END
 
 CONTROLBAR:TooltipTurkiyeElectronicBlinding
-"Электронное ослепление \n Перезарядка: 4:00"
+"Радиоэлектронная борьба \n Перезарядка: 4:00"
 END
 
-SCIENCE:TurkiyeSwarmStrike
-"Удар роя"
+SCIENCE:TurkiyeSatelliteGuidance
+"Спутниковое наведение"
 END
 
-CONTROLBAR:ToolTipTurkiyeScienceSwarmStrike
-"Рой боеприпасов выслеживает десять самых ценных целей на большой площади, по одному боеприпасу на цель. Плотная база это переживёт, рассредоточенная армия - нет. \n \n Применяется из: Штаба"
+CONTROLBAR:ToolTipTurkiyeScienceSatelliteGuidance
+"45 секунд вся карта считается в зоне радара Турции: каждая ракета с радарным наведением держит захват, а движущиеся враги видны под туманом. \n \n Применяется из: Штаба"
 END
 
-CONTROLBAR:TurkiyeSwarmStrike
-"&Удар роя"
+CONTROLBAR:TurkiyeSatelliteGuidance
+"&Спутниковое наведение"
 END
 
-CONTROLBAR:TooltipTurkiyeSwarmStrike
-"Удар роя \n Перезарядка: 6:00"
+CONTROLBAR:TooltipTurkiyeSatelliteGuidance
+"Спутниковое наведение \n Перезарядка: 5:00"
+END
+
+SCIENCE:TurkiyeTayfun
+"Ракета Tayfun"
+END
+
+CONTROLBAR:ToolTipTurkiyeScienceTayfun
+"Баллистическая ракета Tayfun падает на цель. В зоне радара она всегда попадает; вне её попадает в точку один раз из пяти, а в остальных случаях ложится далеко. \n \n Применяется из: Штаба"
+END
+
+CONTROLBAR:TurkiyeTayfun
+"Ракета &Tayfun"
+END
+
+CONTROLBAR:TooltipTurkiyeTayfun
+"Ракета Tayfun \n Перезарядка: 4:00"
+END
+
+UPGRADE:TurkiyeTargetClassification
+"Классификация целей"
+END
+
+CONTROLBAR:UpgradeTurkiyeTargetClassification
+"&Классификация целей"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeTargetClassification
+"Радарные отметки показывают, что это: пехота, техника, ПВО, артиллерия, авиация или оборона."
+END
+
+UPGRADE:TurkiyeAkkor
+"Активная защита AKKOR"
+END
+
+CONTROLBAR:UpgradeTurkiyeAkkor
+"&Активная защита AKKOR"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeAkkor
+"Каждый Altay несёт заряд активной защиты, который раз в три секунды подрывает подлетающую ракету или реактивный снаряд."
+END
+
+UPGRADE:TurkiyeGokdogan
+"Ракеты Gokdogan"
+END
+
+CONTROLBAR:UpgradeTurkiyeGokdogan
+"Ракеты &Gokdogan"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeGokdogan
+"Kizilelma стреляют Gokdogan: дальность 360 вместо 280, урон 130 вместо 100."
+END
+
+UPGRADE:TurkiyeSiperReinforced
+"Укреплённый Siper"
+END
+
+CONTROLBAR:UpgradeTurkiyeSiperReinforced
+"&Укреплённый Siper"
+END
+
+CONTROLBAR:ToolTipUpgradeTurkiyeSiperReinforced
+"Бетон и перекрытие: каждый Siper выдерживает в полтора раза больше."
 END
 
 UPGRADE:TurkiyeThermal
@@ -18673,40 +18405,28 @@ CONTROLBAR:ToolTipUpgradeTurkiyeSwarmSoftware
 "Боеприпасы Bayraktar сами выбирают цель: самого дорогого врага в досягаемости."
 END
 
-UPGRADE:TurkiyeFuelResupply
-"Дозаправка"
+SCIENCE:TurkiyeRapidDeployment
+"Десант Gokbey 1"
 END
 
-SCIENCE:TurkiyeRapidDeployment
-"Быстрая переброска"
+SCIENCE:TurkiyeRapidDeployment2
+"Десант Gokbey 2"
+END
+
+SCIENCE:TurkiyeRapidDeployment3
+"Десант Gokbey 3"
 END
 
 CONTROLBAR:ToolTipTurkiyeScienceRapidDeployment
-"Транспортный самолёт сбрасывает шестерых Mehmetcik и двух ракетчиков Sungur в указанном месте. \n \n Применяется из: Штаба"
+"Стрелки Mehmetcik и ракетчики Sungur десантируются в указанном месте: шесть на уровне 1, десять на уровне 2, четырнадцать и Kirpi на уровне 3. \n \n Применяется из: Штаба"
 END
 
 CONTROLBAR:TurkiyeRapidDeployment
-"&Быстрая переброска"
+"&Десант Gokbey"
 END
 
 CONTROLBAR:TooltipTurkiyeRapidDeployment
-"Быстрая переброска \n Перезарядка: 3:00"
-END
-
-SCIENCE:TurkiyeFireMission
-"Огневая задача"
-END
-
-CONTROLBAR:ToolTipTurkiyeScienceFireMission
-"Тридцать шесть тяжёлых снарядов падают на цель из-за пределов карты. \n \n Применяется из: Штаба"
-END
-
-CONTROLBAR:TurkiyeFireMission
-"&Огневая задача"
-END
-
-CONTROLBAR:TooltipTurkiyeFireMission
-"Огневая задача \n Перезарядка: 4:00"
+"Десант Gokbey \n Перезарядка: 3:00"
 END
 
 SCIENCE:TurkiyeCommandoRaid
@@ -18771,4 +18491,8 @@ END
 
 GUI:SuperweaponTurkiyeKarguSwarm
 "Рой Kargu"
+END
+
+CONTROLBAR:ToolTipEvacuateAt
+"Отправиться в выбранную точку и приказать всем юнитам выйти\nAlt: высадить здесь"
 END

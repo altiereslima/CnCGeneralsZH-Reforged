@@ -37,7 +37,6 @@
 
 #define DEFINE_IMAGE_STATUS_NAMES
 #include "Lib/BaseType.h"
-#include "Common/ArchiveFileSystem.h"
 #include "Common/LocalFileSystem.h"
 #include "Common/Debug.h"
 #include "Common/INI.h"
@@ -45,8 +44,12 @@
 #include "GameClient/Image.h"
 #include "Common/NameKeyGenerator.h"
 
+static void parseRetiredField( INI *, void *, void *, const void * )
+{
+}
+
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
-const FieldParse Image::m_imageFieldParseTable[] = 
+const FieldParse Image::m_imageFieldParseTable[] =
 {
 
 	{ "Texture",				INI::parseAsciiString,							NULL, 		offsetof( Image, m_filename ) },
@@ -54,7 +57,7 @@ const FieldParse Image::m_imageFieldParseTable[] =
 	{ "TextureHeight",	INI::parseInt,											NULL, 		offsetof( Image, m_textureSize.y ) },
 	{ "Coords",					Image::parseImageCoords,						NULL, 		offsetof( Image, m_UVCoords ) },
 	{ "Status",					Image::parseImageStatus,						NULL, 		offsetof( Image, m_status ) },
-	{ "DisplayHeight",	INI::parseInt,											NULL, 		offsetof( Image, m_displayHeight ) },
+	{ "DisplayHeight",	parseRetiredField,									NULL, 		0 },	// a stale rank insignia .ini on a player's disk still names it; an unknown field throws
 
 	{ NULL,							NULL,																NULL, 		0 }
 
@@ -159,7 +162,6 @@ Image::Image( void )
 	m_imageSize.y = 0;
 	m_rawTextureData = NULL;
 	m_status = IMAGE_STATUS_NONE;
-	m_displayHeight = 0;
 
 }  // end Image
 
@@ -230,8 +232,7 @@ const Image *ImageCollection::findImageByName( const AsciiString& name )
   std::map<unsigned,Image *>::iterator i=m_imageMap.find(TheNameKeyGenerator->nameToLowercaseKey(name));
   if (i!=m_imageMap.end())
     return i->second;
-  AsciiString retailName;
-  return TheModNamespace.findRetailName(name, MODNAME_MAPPEDIMAGE, &retailName) ? findImageByName(retailName) : NULL;
+  return NULL;
 }  // end findImageByName
 
 //-------------------------------------------------------------------------------------------------
@@ -260,23 +261,11 @@ void ImageCollection::load( Int textureSize )
 	// construct path to the mapped images folder of the correct texture size
 	sprintf( buffer, "Data\\INI\\MappedImages\\TextureSize_%d", textureSize );
 
-	// a merged mod's own copies of our interface sheets first: the images only it has (its cameos) are
-	// read from them, and ours, loaded after, take back every name both define (FileSystem::isForkUIPath)
-	std::vector<AsciiString> modCopies;
-	TheArchiveFileSystem->getModUICopies( AsciiString( buffer ), modCopies );
-	TheArchiveFileSystem->getModUICopies( AsciiString( "Data\\INI\\MappedImages\\HandCreated" ), modCopies );
-	for (size_t i = 0; i < modCopies.size(); ++i)
-		ini.load( modCopies[ i ], INI_LOAD_OVERWRITE, NULL );
-
 	// load all the ine files in that directory
 
 	ini.loadDirectory( AsciiString( buffer ), TRUE, INI_LOAD_OVERWRITE, NULL );
 
 	ini.loadDirectory("Data\\INI\\MappedImages\\HandCreated", TRUE, INI_LOAD_OVERWRITE, NULL );
-
-	// -modfactions: each mod's cameos and HUD art under its own "M<n>~" names
-	INI::loadModPasses( buffer, NULL, TRUE );
-	INI::loadModPasses( "Data\\INI\\MappedImages\\HandCreated", NULL, TRUE );
 
 
 }  // end load

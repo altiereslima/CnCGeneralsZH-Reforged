@@ -76,6 +76,7 @@ public:
 	{
 		BUILDCOST,
 		BUILDTIME,
+		MAXHEALTH,		// the lobby's handicap p; damage, healing and cooldowns take the same p, BUILDTIME 1/p
 
 		HANDICAP_TYPE_COUNT
 	};
@@ -99,6 +100,9 @@ public:
 		to determine what value to return. 
 	*/
 	Real getHandicap(HandicapType t, const ThingTemplate *tmpl) const;
+
+	/// the multiplier for anything that is not a building
+	Real getGenericHandicap(HandicapType t) const { return m_handicaps[t][GENERIC]; }
 
 protected:
 private:

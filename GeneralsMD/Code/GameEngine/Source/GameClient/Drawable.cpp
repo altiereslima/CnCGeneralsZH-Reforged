@@ -242,11 +242,6 @@ DrawableLocoInfo::DrawableLocoInfo()
 	m_groundPitch = 0.0f;
 	m_groundRoll = 0.0f;
 	m_groundZ = 0.0f;
-	m_headingLag = 0.0f;
-	m_headingLagRate = 0.0f;
-	m_headingLogic = 0.0f;
-	m_headingFrame = 0;
-	m_headingSeeded = FALSE;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -309,15 +304,6 @@ const Int MAX_ENABLED_MODULES								= 16;
 /*static*/ Int							Drawable::s_modelLockCount = 0;
 #endif
 
-/// Each ladder grade's insignia, Rank<Side>_<n> in ReforgedRanks<Side>.ini; NULL for a grade drawn bare
-/// (America's E-1)
-static const Image* s_rankInsignia[VETERANCY_SIDE_COUNT][RANK_GRADES_MAX + 1];
-
-/// An insignia drawn beside a health bar holds its DisplayHeight (12 unless its cell says otherwise)
-/// and lets its width follow, up to half again that height: wider marks made the bar look heavy
-static const Int RANK_INSIGNIA_DEFAULT_HEIGHT = 12;
-static const Real RANK_INSIGNIA_MAX_ASPECT = 1.5f;
-
 // ------------------------------------------------------------------------------------------------
 /*static*/ void Drawable::initStaticImages()
 {
@@ -328,15 +314,6 @@ static const Real RANK_INSIGNIA_MAX_ASPECT = 1.5f;
  	s_veterancyImage[1] = TheMappedImageCollection->findImageByName("SCVeter1");
 	s_veterancyImage[2] = TheMappedImageCollection->findImageByName("SCVeter2");
 	s_veterancyImage[3] = TheMappedImageCollection->findImageByName("SCVeter3");
-	for( Int side = 0; side < VETERANCY_SIDE_COUNT; ++side )
-	{
-		for( Int insignia = 0; insignia <= RANK_GRADES_MAX; ++insignia )
-		{
-			AsciiString name;
-			name.format( "Rank%s_%d", TheVeterancySideNames[ side ], insignia );
-			s_rankInsignia[ side ][ insignia ] = TheMappedImageCollection->findImageByName( name );
-		}
-	}
 
 	s_fullAmmo	= TheMappedImageCollection->findImageByName("SCPAmmoFull");
 	s_emptyAmmo	= TheMappedImageCollection->findImageByName("SCPAmmoEmpty");
@@ -1784,17 +1761,11 @@ void Drawable::applyPhysicsXform(Matrix3D* mtx)
  	Bool frozen = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
  	frozen = frozen || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
 	if( !obj ||	obj->isDisabledByType( DISABLED_HELD ) || !TheGlobalData->m_showClientPhysics || frozen )
-	{
-		// drawn on its logic heading, which is what the turret is drawn against (getDrawnHeadingLag)
-		if (m_locoInfo)
-			m_locoInfo->m_headingLag = 0.0f;
 		return;
-	}
 	PhysicsXformInfo info;
 	if (calcPhysicsXform(info))
 	{
 		mtx->Translate(0.0f, 0.0f, info.m_totalZ);
-		mtx->Rotate_Z( info.m_headingYaw );
 		mtx->Rotate_Y( info.m_totalPitch );
 		mtx->Rotate_X( -info.m_totalRoll );
 		mtx->Rotate_Z( info.m_totalYaw );
@@ -1809,7 +1780,6 @@ Bool Drawable::calcPhysicsXform(PhysicsXformInfo& info)
 	const Object* obj = getObject();
 	const AIUpdateInterface *ai = obj ? obj->getAIUpdateInterface() : NULL;
 	Bool hasPhysicsXform = false;
-	Bool ground = false;
 	if (ai)
 	{
 		const Locomotor *locomotor = ai->getCurLocomotor();
@@ -1822,7 +1792,6 @@ Bool Drawable::calcPhysicsXform(PhysicsXformInfo& info)
 				case LOCO_TREADS:
 					calcPhysicsXformGround(locomotor, info);
 					hasPhysicsXform = true;
-					ground = true;
 					break;
 				case LOCO_HOVER:
 				case LOCO_WINGS:
@@ -1836,9 +1805,6 @@ Bool Drawable::calcPhysicsXform(PhysicsXformInfo& info)
 			}
 		}
 	}
-	// off its ground locomotor the hull is drawn on its logic heading, and so is its turret
-	if (!ground && m_locoInfo)
-		m_locoInfo->m_headingLag = 0.0f;
 
   if (hasPhysicsXform)
   {
@@ -2244,12 +2210,7 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 	* has gone by about half a second, and a slower pull away leans less for longer. That one frame
 	* start is how a tank or car pulls away again (Locomotor::isGroundVehicle), so the share of top
 	* speed and of the turn is held to one: a diagonal start, at up to 1.41 times Speed, or a shove
-	* leans no further than a straight start.
-	*
-	* The drawn heading of a tank or car trails the logic one through a critically damped spring,
-	* HEADING_LAG_FRAMES behind on a steady turn, so EA's pivot, which starts and stops dead at full
-	* TurnRate, swings the hull up to speed and settles it. It is the picture only: the turret is drawn
-	* against the logic heading (W3DModelDraw::handleClientTurretPositioning). */
+	* leans no further than a straight start. */
 //-------------------------------------------------------------------------------------------------
 void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformInfo& info )
 {
@@ -2260,49 +2221,12 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 	const Real LEAN_EASE_FRAMES = 3.0f;					// each of the three smoothing stages, in retail frames
 	const Real START_GAIN = 11.0f;							// a one frame start from rest to top speed peaks at tanh(1.2) of the limit
 	const Real DEFAULT_LEAN_LIMIT = 0.07f;			// 4 degrees, for a locomotor that reacts but names no limit, like the Humvee's
-	const Real HEADING_LAG_FRAMES = 5.0f;				// logic frames the drawn hull trails a steady turn by
-	const Real HEADING_MAX_LAG = PI / 4.0f;			// never further behind than this: a heading a script sets is drawn there soon
-	const UnsignedInt HEADING_CATCH_UP_FRAMES = 8;	// more logic frames than this unseen and the hull is drawn on its heading
-
-	/* The spring is stepped once a logic frame, the rate the heading itself changes at. The heading and
-		 the frame are read once: with -logicthread 1 the logic can move on between two reads. */
-	const Object *owner = getObject();
-	UnsignedInt logicFrame = TheGameLogic->getFrame();
-	Real logicAngle = getOrientation();
-	UnsignedInt gap = logicFrame - m_locoInfo->m_headingFrame;
-	if (!m_locoInfo->m_headingSeeded || gap > HEADING_CATCH_UP_FRAMES || owner->isKindOf(KINDOF_AIRCRAFT) || TheGlobalData->m_classicGraphics)
-	{
-		// first drawn, long unseen, or a taxiing jet or landed helicopter, which eases its own turn in the logic
-		m_locoInfo->m_headingLag = 0.0f;
-		m_locoInfo->m_headingLagRate = 0.0f;
-		m_locoInfo->m_headingSeeded = TRUE;
-	}
-	else if (gap != 0)
-	{
-		const Real omega = 2.0f / HEADING_LAG_FRAMES;	// a ramp's lag is 2 / omega
-		Real turned = stdAngleDiff(logicAngle, m_locoInfo->m_headingLogic) / gap;
-		for (UnsignedInt i = 0; i < gap; ++i)
-		{
-			m_locoInfo->m_headingLag -= turned;
-			m_locoInfo->m_headingLagRate += -omega * omega * m_locoInfo->m_headingLag - 2.0f * omega * m_locoInfo->m_headingLagRate;
-			m_locoInfo->m_headingLag += m_locoInfo->m_headingLagRate;
-		}
-		if (fabs(m_locoInfo->m_headingLag) > HEADING_MAX_LAG)
-		{
-			m_locoInfo->m_headingLag = (m_locoInfo->m_headingLag > 0.0f) ? HEADING_MAX_LAG : -HEADING_MAX_LAG;
-			m_locoInfo->m_headingLagRate = 0.0f;
-		}
-	}
-	m_locoInfo->m_headingLogic = logicAngle;
-	m_locoInfo->m_headingFrame = logicFrame;
-	// turned first, under the lean, so the lean tips along the hull as drawn (applyPhysicsXform)
-	info.m_headingYaw = m_locoInfo->m_headingLag;
 
 	/* Stepped on the retail clock, every second logic frame, so the springs, the locomotor's
 		 stiffness and damping and the ease frames below keep the timing they were tuned at.  Speeds are
 		 per logic frame and only ever divided by the locomotor's own top speed, which cancels; the turn
 		 rate does not, so it is taken per retail frame. */
-	UnsignedInt now = logicFrame / LOGICFRAMES_PER_RETAIL_FRAME;
+	UnsignedInt now = TheGameLogic->getFrame() / LOGICFRAMES_PER_RETAIL_FRAME;
 	UnsignedInt steps = now - m_locoInfo->m_groundFrame;
 	if (steps != 0)
 	{
@@ -2313,7 +2237,7 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 			return;
 		BodyDamageType bdt = obj->getBodyModule()->getDamageState();
 		Real speed = physics->getForwardSpeed2D();
-		Real angle = logicAngle + m_locoInfo->m_headingLag;	// the turn as drawn
+		Real angle = getOrientation();
 		if (steps > MAX_CATCH_UP_FRAMES)
 		{
 			// long unseen, or just loaded: let the springs settle without a lurch from the gap
@@ -2336,7 +2260,7 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 		if (locomotor->getForwardAccelCoef() != 0.0f || locomotor->getLateralAccelCoef() != 0.0f)
 		{
 			Real maxSpeed = locomotor->getMaxSpeedForCondition(bdt);
-			Real maxLateral = maxSpeed * locomotor->getMaxTurnRate(bdt) * LOGICFRAMES_PER_RETAIL_FRAME;
+			Real maxLateral = maxSpeed * locomotor->getMaxTurnRate(bdt, obj) * LOGICFRAMES_PER_RETAIL_FRAME;
 			pitchIn = maxSpeed > 0.0f ? -START_GAIN * clamp(-1.0f, forwardAccel / maxSpeed, 1.0f) : 0.0f;
 			rollIn = maxLateral > 0.0f ? -clamp(-1.0f, lateralAccel / maxLateral, 1.0f) : 0.0f;
 		}
@@ -3603,6 +3527,78 @@ Bool Drawable::drawsAnyUIText( void )
 
 
 // ------------------------------------------------------------------------------------------------
+/** A thin line from an aircraft in the air straight down to the ground under it, because a plane
+	* over a ridge and a plane over your base can sit on the same pixel.  drawablePostDraw has already
+	* turned away what the local player may not see. */
+// ------------------------------------------------------------------------------------------------
+void Drawable::drawAltitudeLine( void )
+{
+	if( !TheGlobalData->m_aircraftAltitudeLine )
+		return;
+
+	const Object *obj = getObject();
+	if( obj == NULL || obj->isEffectivelyDead() )
+		return;
+
+	// The shell map and a mission's cutscene have no interface up.  Asked of the script and not of
+	// getInputEnabled, which setGamePaused also turns off: a paused match keeps its lines.
+	if( TheGameLogic->isInShellGame() || TheScriptEngine->isInputHeldByScript() )
+		return;
+
+	// The height over terrain says nothing on a carrier's deck, which stands far above the sea bed.  The
+	// airborne flag does: a taxi locomotor has no AirborneTargetingHeight, so nothing parked ever sets
+	// it.  KINDOF_AIRCRAFT stays, because boats over deep water, drones, flares and missiles set it too.
+	if( !obj->isKindOf( KINDOF_AIRCRAFT ) || !obj->isAirborneTarget() )
+		return;
+
+	// China's artillery barrage flies a plane with no draw module at all
+	if( *getDrawModulesNonDirty() == NULL )
+		return;
+
+	const Color LINE_COLOR = GameMakeColor( 255, 255, 255, 120 );
+
+	Coord3D top = *obj->getPosition();
+	Coord3D bottom = top;
+	bottom.z = TheTerrainLogic->getLayerHeight( top.x, top.y, obj->getLayer() );
+	Real waterZ;
+	if( TheTerrainLogic->isUnderwater( top.x, top.y, &waterZ ) )
+		bottom.z = MAX( bottom.z, waterZ );		// the surface and not the sea bed; a bridge deck over it stays
+
+	ICoord2D topScreen, bottomScreen;
+	const Bool topOn = TheTacticalView->worldToScreen( &top, &topScreen );
+	const Bool bottomOn = TheTacticalView->worldToScreen( &bottom, &bottomScreen );
+	// ponytail: both ends off draws nothing, so a line taller than the screen goes at full zoom; sample along it if that shows
+	if( !topOn && !bottomOn )
+		return;
+
+	// An end off the screen has no position worth clipping: past the clip planes it projects to (0,0),
+	// and just in front of the near plane far enough to overflow ClipLine2D's Int products.  The frustum
+	// is convex and the line crosses its edge once, so halve the way there.
+	if( topOn != bottomOn )
+	{
+		Real insideZ = topOn ? top.z : bottom.z;
+		Real outsideZ = topOn ? bottom.z : top.z;
+		ICoord2D &edge = topOn ? bottomScreen : topScreen;
+		edge = topOn ? topScreen : bottomScreen;
+		for( Int i = 0; i < 10; ++i )
+		{
+			Coord3D middle = top;
+			middle.z = ( insideZ + outsideZ ) * 0.5f;
+			ICoord2D middleScreen;
+			if( TheTacticalView->worldToScreen( &middle, &middleScreen ) )
+			{
+				insideZ = middle.z;
+				edge = middleScreen;
+			}
+			else
+				outsideZ = middle.z;
+		}
+	}
+
+	TheDisplay->drawLine( topScreen.x, topScreen.y, bottomScreen.x, bottomScreen.y, 1.0f, LINE_COLOR );
+}
+
+// ------------------------------------------------------------------------------------------------
 /** This is called as part of the "post draw" phase when drawable a drawable.  It is there
 	* that we should overlay on the screen any 2D elements for purposes of user interface
 	* information (such as a heatlh bar, veterency levels, etc.) */
@@ -3640,6 +3636,8 @@ void Drawable::drawIconUI( void )
 		drawCaption( healthBarRegion );
 		drawConstructPercent( healthBarRegion );
 		drawSupplyCash( healthBarRegion );
+
+		drawAltitudeLine();		// ahead of the bail: the planes a general's power sends over are IGNORED_IN_GUI
 
 		//All Icons Below only draw on ALIVE things, so  bail here -------------------------
 		if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_IGNORED_IN_GUI )) // object explicitly wants nothing to do with these icons, so...
@@ -4803,11 +4801,8 @@ void Drawable::drawVeterancy( const IRegion2D *healthBarRegion )
 		return;
 	}
 
-	// a unit on a rank ladder wears its grade's insignia, a grade with no insignia nothing; anyone else
-	// EA's chevron for the level
-	const RankLadder *ladder = TheGlobalData->getRankLadder( obj->getTemplate() );
 	VeterancyLevel level = obj->getVeterancyLevel();
-	const Image* image = ( ladder && !TheGlobalData->m_classicGraphics ) ? getRankInsignia( obj ) : s_veterancyImage[level];
+	const Image* image = s_veterancyImage[level];
 	if (!image)
 		return;
 
@@ -4839,85 +4834,10 @@ void Drawable::drawVeterancy( const IRegion2D *healthBarRegion )
 
 	screenCenter.x += healthBoxWidth * scale * 0.5f;
 
-	// the insignia in line with the bar, just past its right end and centred on it: the ammo and
-	// passenger pips start from the left end, and hanging under the bar it read as part of the unit
-	if( ladder && !TheGlobalData->m_classicGraphics )
-	{
-		Int left = screenCenter.x + 2;
-		Int middle = screenCenter.y;
-		if( healthBarRegion )
-		{
-			left = healthBarRegion->hi.x + 2;
-			middle = ( healthBarRegion->lo.y + healthBarRegion->hi.y ) / 2;
-		}
-		// image is the grade's insignia already (getRankInsignia), so it is drawn as drawRankInsignia would
-		Int width, height;
-		rankInsigniaSize( image, 1.0f, &width, &height );
-		const Int top = middle - height / 2;
-		TheDisplay->drawImage( image, left, top, left + width, top + height, GameMakeColor( 255, 255, 255, 255 ) );
-		return;
-	}
-
 	// draw the image
 	TheDisplay->drawImage(image, screenCenter.x + 1, screenCenter.y + 1, screenCenter.x + 1 + vetBoxWidth, screenCenter.y + 1 + vetBoxHeight);
 
 }  // end drawVeterancy
-
-// ------------------------------------------------------------------------------------------------
-/*static*/ const Image *Drawable::getRankInsignia( const ThingTemplate *thing, Int insignia )
-{
-	const VeterancySide side = GlobalData::veterancySideOf( thing );
-	if( side == VETERANCY_SIDE_NONE || insignia < 0 || insignia > RANK_GRADES_MAX )
-		return NULL;
-	return s_rankInsignia[ side ][ insignia ];
-}
-
-// ------------------------------------------------------------------------------------------------
-/** The insignia an object wears now, NULL for none: every unit starts unranked and bare, so grade 0
-	* draws nothing on any side, and neither does anything that cannot climb (a structure, or an object
-	* without a trainable tracker). The bar, the portrait and the promotion float all ask here. */
-// ------------------------------------------------------------------------------------------------
-/*static*/ const Image *Drawable::getRankInsignia( const Object *obj )
-{
-	const RankLadder *ladder = TheGlobalData->getRankLadder( obj->getTemplate() );
-	const ExperienceTracker *tracker = obj->getExperienceTracker();
-	if( ladder == NULL || tracker == NULL || !tracker->isTrainable() || obj->isKindOf( KINDOF_STRUCTURE ) || obj->getRankGrade() <= 0 )
-		return NULL;
-	return getRankInsignia( obj->getTemplate(), ladder->insigniaIndex( obj->getRankGrade(), obj->isKindOf( KINDOF_HERO ) ) );
-}
-
-// ------------------------------------------------------------------------------------------------
-/*static*/ void Drawable::rankInsigniaSize( const Image *image, Real scale, Int *width, Int *height )
-{
-	const Real high = ( image->getDisplayHeight() > 0 ? image->getDisplayHeight() : RANK_INSIGNIA_DEFAULT_HEIGHT ) * scale;
-	Real wide = high * image->getImageWidth() / image->getImageHeight();
-	Real tall = high;
-	if( wide > high * RANK_INSIGNIA_MAX_ASPECT )
-	{
-		tall = high * high * RANK_INSIGNIA_MAX_ASPECT / wide;
-		wide = high * RANK_INSIGNIA_MAX_ASPECT;
-	}
-	*width = REAL_TO_INT( wide );
-	*height = REAL_TO_INT( tall );
-}
-
-// ------------------------------------------------------------------------------------------------
-/** One grade's insignia, cropped to its ink in the atlas: drawn beside the health bar and floating up
-	* over a unit the moment it gains the grade. */
-// ------------------------------------------------------------------------------------------------
-/*static*/ Bool Drawable::drawRankInsignia( const ThingTemplate *thing, Int insignia, Int x, Int top, Bool centred, Real scale, Color color )
-{
-	const Image *image = getRankInsignia( thing, insignia );
-	if( image == NULL )
-		return FALSE;
-
-	Int width, height;
-	rankInsigniaSize( image, scale, &width, &height );
-	if( centred )
-		x -= width / 2;
-	TheDisplay->drawImage( image, x, top, x + width, top + height, color );
-	return TRUE;
-}
 
 // ------------------------------------------------------------------------------------------------
 /** The capture clock, drawn under the health bar of the building being taken.
@@ -5391,7 +5311,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				if( needed != SCIENCE_INVALID && (owner == NULL || !owner->hasScience( needed )) )
 					continue;
 
-				Real full = INT_TO_REAL( tmpl->getReloadTime() );
+				Real full = INT_TO_REAL( owner ? owner->getSpecialPowerReloadTime( tmpl ) : tmpl->getReloadTime() );
 				if( full <= 0.0f )
 					continue;
 

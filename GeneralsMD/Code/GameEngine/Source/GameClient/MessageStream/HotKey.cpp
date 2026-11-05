@@ -66,10 +66,12 @@
 #include "Common/GlobalData.h"
 #include "Common/INI.h"
 #include "Common/ThingTemplate.h"
+#include "GameClient/CommandXlat.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/Shell.h"
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
@@ -79,6 +81,103 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
+/** The letter the player's key with this scan code types, the one a label's '&' and the bar's keys
+	* mean.  The game's own key tables know four layouts and name every key by its US position, so on
+	* a Turkish keyboard the key marked i read as an apostrophe; on Windows the player's layout says. */
+static WideChar typedLetter( UnsignedByte scanCode )
+{
+	WideChar typed = TheKeyboard->getPrintableKey(scanCode, 0);
+#if defined(_WIN32)
+	HKL layout = GetKeyboardLayout(0);
+	const UINT virtualKey = MapVirtualKeyExW(scanCode, MAPVK_VSC_TO_VK, layout);
+	BYTE keys[256] = { 0 };
+	WCHAR out[4] = { 0 };
+	// a Cyrillic or other non-Latin letter never names a hotkey, so that player keeps the US position
+	if( virtualKey != 0 && ToUnicodeEx(virtualKey, scanCode, keys, out, 4, 0x4, layout) == 1 && out[0] < 0x0250 )
+		typed = (WideChar)out[0];
+#endif
+	return typed;
+}
+
+//-----------------------------------------------------------------------------
+/** One keystroke does one thing (issue 128).  MetaEventTranslator fires a command map key on its
+	* press and this translator a command bar button on its release, so a letter both held used to do
+	* both: W selected every aircraft, the empty selection put a worker's bar up, and the release
+	* started his War Factory.  The press decides now (HotKeyManager::strokeDown): a showing button on
+	* the letter takes the stroke and the command stands aside; otherwise the command keeps it as
+	* before and the release presses nothing.  By scan code, the key both translators are handed. */
+enum { STROKE_KEYS = 256 };
+static Bool s_strokeToBar[ STROKE_KEYS ];
+static Bool s_strokeToCommand[ STROKE_KEYS ];
+
+void HotKeyManager::strokeDown( Int key, Bool barHolds )
+{
+	if( key < 0 || key >= STROKE_KEYS )
+		return;
+	s_strokeToBar[ key ] = barHolds;
+	s_strokeToCommand[ key ] = FALSE;
+}
+
+Bool HotKeyManager::strokeToBar( Int key )
+{
+	return key >= 0 && key < STROKE_KEYS && s_strokeToBar[ key ];
+}
+
+void HotKeyManager::strokeToCommand( Int key )
+{
+	if( key >= 0 && key < STROKE_KEYS )
+		s_strokeToCommand[ key ] = TRUE;
+}
+
+Bool HotKeyManager::strokePressesBar( Int key )
+{
+	if( key < 0 || key >= STROKE_KEYS )
+		return TRUE;
+	const Bool command = s_strokeToCommand[ key ];
+	s_strokeToBar[ key ] = s_strokeToCommand[ key ] = FALSE;
+	return !command;
+}
+
+// Alt and the Evacuate button's key empty a transport where it stands instead of asking where
+// (ControlBar::processCommandUI), so that chord is the bar's
+static Bool isEvacuateButton( GameWindow *win )
+{
+	const CommandButton *command = win ? (const CommandButton *)GadgetButtonGetData( win ) : NULL;
+	return command && command->getCommandType() == GUI_COMMAND_EVACUATE;
+}
+
+Bool HotKeyManager::barHoldsKey( Int key, Int modState )
+{
+	// the release presses a button bare or with shift (a batch); a chord with Ctrl or Alt is the
+	// command's, but for Alt with the Evacuate button's key
+	const Bool alt = modState == ALT;
+	if( TheHotKeyManager == NULL || TheKeyboard == NULL || key < 0 || key >= STROKE_KEYS ||
+			( ( modState & ~SHIFT ) != 0 && !alt ) )
+		return FALSE;
+	if( TheShell && TheShell->isShellActive() )
+		return FALSE;	// the menus have no command bar, whatever the map still names
+	const WideChar letter = typedLetter( (UnsignedByte)key );
+	if( letter == 0 )
+		return FALSE;
+	Bool pressable = FALSE;
+	GameWindow *win = TheHotKeyManager->findHotKey( nameOf( letter ), &pressable );
+	return win != NULL && !BitTest( win->winGetStatus(), WIN_STATUS_HIDDEN ) && ( !alt || isEvacuateButton( win ) );
+}
+
+Bool HotKeyManager::commandMapHolds( const AsciiString& key )
+{
+	if( TheMetaMap == NULL || TheKeyboard == NULL || key.isEmpty() )
+		return FALSE;
+	// the replay's fast forward lets its key through to the bar (MetaEventTranslator), so it holds none
+	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
+		if( rec->m_modState == NONE && BitTest( rec->m_usableIn, COMMANDUSABLE_GAME ) && rec->m_key != MK_NONE
+				&& rec->m_meta != GameMessage::MSG_META_TOGGLE_FAST_FORWARD_REPLAY
+				&& nameOf( typedLetter( (UnsignedByte)rec->m_key ) ) == key )
+			return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage *msg)
 {
 	GameMessageDisposition disp = KEEP_MESSAGE;
@@ -86,7 +185,11 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 
 	if ( t == GameMessage::MSG_RAW_KEY_UP)
 	{
-		
+		// a press the command map took presses no button on its release, whatever the bar shows now
+		const Bool barHeld = HotKeyManager::strokeToBar( msg->getArgument(0)->integer );
+		if( !HotKeyManager::strokePressesBar( msg->getArgument(0)->integer ) )
+			return disp;
+
 		//char key = msg->getArgument(0)->integer;
 		Int keyState = msg->getArgument(1)->integer;
 
@@ -108,6 +211,25 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 		{
 			newModState |= ALT;
 		}
+		// Alt and the Evacuate button's key (barHoldsKey), whichever was let go first: the transport
+		// empties where it stands, as an Alt-click on the button does (ControlBar::processCommandUI)
+		if( barHeld && ( keyState & ( KEY_STATE_ALT | KEY_STATE_PRESSED_WITH_CTRL_ALT ) ) && !( keyState & KEY_STATE_CONTROL ) )
+		{
+			Bool pressable = FALSE;
+			GameWindow *win = TheHotKeyManager ? TheHotKeyManager->findHotKey(
+				HotKeyManager::nameOf( typedLetter( (UnsignedByte)msg->getArgument(0)->integer ) ), &pressable ) : NULL;
+			if( pressable && isEvacuateButton( win ) )
+			{
+				TheInGameUI->setGUICommand( NULL );
+				pickAndPlayUnitVoiceResponse( TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_EVACUATE );
+				TheMessageStream->appendMessage( GameMessage::MSG_EVACUATE );
+				AudioEventRTS buttonClick( "GUIClick" );
+				if( TheAudio )
+					TheAudio->addAudioEvent( &buttonClick );
+				return DESTROY_MESSAGE;
+			}
+		}
+
 		// Ctrl+Alt and a build button's key puts its unit on repeat or takes it off
 		const Bool repeatChord = newModState == ( CTRL | ALT );
 		// shift is allowed through: a shift-click on a build button queues a batch of units, and
@@ -118,21 +240,7 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 		if( !repeatChord && ( keyState & KEY_STATE_PRESSED_WITH_CTRL_ALT ) )
 			return disp;
 		const UnsignedByte scanCode = (UnsignedByte)msg->getArgument(0)->integer;
-		WideChar typed = TheKeyboard->getPrintableKey(scanCode, 0);
-#if defined(_WIN32)
-		// The game's own key tables know four layouts and name every key by its US position, so on a
-		// Turkish keyboard the key marked i read as an apostrophe.  The letter the player's layout
-		// puts on that key is the one a label's '&' means.
-		{
-			HKL layout = GetKeyboardLayout(0);
-			const UINT virtualKey = MapVirtualKeyExW(scanCode, MAPVK_VSC_TO_VK, layout);
-			BYTE keys[256] = { 0 };
-			WCHAR out[4] = { 0 };
-			// a Cyrillic or other non-Latin letter never names a hotkey, so that player keeps the US position
-			if( virtualKey != 0 && ToUnicodeEx(virtualKey, scanCode, keys, out, 4, 0x4, layout) == 1 && out[0] < 0x0250 )
-				typed = (WideChar)out[0];
-		}
-#endif
+		const WideChar typed = typedLetter( scanCode );
 		if( repeatChord )
 		{
 			// straight to the bar rather than as a click: a repeated unit the bank cannot pay for
@@ -165,6 +273,7 @@ HotKey::HotKey()
 	//Initializations missing and needed
 	m_key.clear();
 	//
+	m_claim = 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -191,25 +300,30 @@ void HotKeyManager::reset( void )
 	m_hotKeyMap.clear();
 }
 
-static Int keyClaim( GameWindow *win, const AsciiString& key );
+static Int keyClaim( GameWindow *win, const AsciiString& key, Int barSlot );
 
 //-----------------------------------------------------------------------------
-void HotKeyManager::addHotKey( GameWindow *win, const AsciiString& keyIn)
+Bool HotKeyManager::addHotKey( GameWindow *win, const AsciiString& keyIn, Int barSlot, GameWindow **displaced )
 {
 	AsciiString key = keyIn;
 	key.toLower();
 	HotKeyMap::iterator it = m_hotKeyMap.find(key);
 	// two buttons on one letter, which the Hotkeys page marks: a fixed order on its own letter keeps
-	// it, a letter the player gave beats a label's, and between equals the first keeps it
-	if( it != m_hotKeyMap.end() && keyClaim( win, key ) <= keyClaim( it->second.m_win, key ) )
+	// it, a letter the player gave beats a label's or the grid's, and between equals the first keeps it
+	const Int claim = keyClaim( win, key, barSlot );
+	if( it != m_hotKeyMap.end() && it->second.m_win != win && claim <= it->second.m_claim )
 	{
 		DEBUG_LOG(( "HOTKEYS: %s already on %s, not on %s\n", key.str(), it->second.m_win->winGetInstanceData()->m_decoratedNameString.str(), win->winGetInstanceData()->m_decoratedNameString.str() ));
-		return;
+		return FALSE;
 	}
+	if( displaced )
+		*displaced = ( it != m_hotKeyMap.end() && it->second.m_win != win ) ? it->second.m_win : NULL;
 	HotKey newHK;
 	newHK.m_key.set(key);
 	newHK.m_win = win;
+	newHK.m_claim = claim;
 	m_hotKeyMap[key] = newHK;
+	return TRUE;
 }
 
 //-----------------------------------------------------------------------------
@@ -345,6 +459,13 @@ static const WideChar FIXED_KEYS[] = { 'A', 'S', 'G', 'Y', 'V', 'N', 'C', 'H' };
 	* orders included, wears its label's letter or the player's, as in the game as shipped.  Read with
 	* the button keys, back to on before each read. */
 static Bool s_fixedOrderKeys = TRUE;
+/** CommandBarGrid in Hotkeys.ini: a command bar button takes its window slot's letter
+	* (HotKeyManager::commandBarGridKey) in place of its fixed and label letters.  Read with the button
+	* keys, back to off before each read.  The launcher holds the same tables (hotkeys.js, GRID_ROWS
+	* and GRID_UPGRADE_KEYS). */
+static Bool s_commandBarGrid = FALSE;
+static const char GRID_ROWS[ 2 ][ 10 ] = { "QWERTYUIO", "ASDFGHJKL" };
+static const char GRID_UPGRADE_KEYS[] = "XCVBN";
 static const char *const FIXED_H_BUTTONS[] =
 {
 	"command_upgradechinamines", "command_upgradeempmines", "command_upgradecamonetting", "command_upgradeglacamonetting",
@@ -374,83 +495,46 @@ static WideChar fixedButtonKey( const AsciiString& lowerName, Int commandType )
 	return 0;
 }
 
-/** The scope Hotkeys.ini names mod `mod`'s buttons by, "<scope>:<button>": the -mod folder's name,
-	* lower case and without spaces.  The launcher's Hotkeys page uses the same (hotkeys.js, modScope). */
-static std::string modScope( Int mod )
+/** The player's key for a button, into *letter; FALSE leaves it alone. */
+static Bool findPlayerKey( const std::map< std::string, WideChar >& keys, const std::string& bare, WideChar *letter )
 {
-	std::string path( TheGlobalData->m_mods[ mod ].str() );
-	while( !path.empty() && ( path[ path.size() - 1 ] == '\\' || path[ path.size() - 1 ] == '/' ) )
-		path.erase( path.size() - 1 );
-	const size_t slash = path.find_last_of( "\\/" );
-	if( slash != std::string::npos )
-		path.erase( 0, slash + 1 );
-	std::string scope;
-	for( size_t at = 0; at < path.size(); at++ )
-		if( !isspace( (unsigned char)path[ at ] ) )
-			scope += (char)tolower( (unsigned char)path[ at ] );
-	return scope;
-}
-
-/** A lower case button name without the "m<n>~" -modfactions puts on a mod's own names; *mod gets
-	* that mod's index, or -1 for a name with no prefix. */
-static std::string withoutModPrefix( const char *lowerName, Int *mod )
-{
-	*mod = -1;
-	const char *tilde = strchr( lowerName, '~' );
-	if( lowerName[ 0 ] != 'm' || tilde == NULL || tilde == lowerName + 1 )
-		return lowerName;
-	for( const char *digit = lowerName + 1; digit < tilde; digit++ )
-		if( !isdigit( (unsigned char)*digit ) )
-			return lowerName;
-	*mod = atoi( lowerName + 1 ) - 1;
-	return tilde + 1;
-}
-
-static Bool findPlayerKey( const std::map< std::string, WideChar >& keys, const std::string& bare, Int ownMod, WideChar *letter );
-
-/** How strongly the command button win holds key, the map's lower case name: 2 when it is the
-	* button's fixed letter (fixedButtonKey) and the player left the button alone, 1 when the player
-	* gave it that letter in Hotkeys.ini, 0 for the label's. */
-static Int keyClaim( GameWindow *win, const AsciiString& key )
-{
-	const CommandButton *command = (const CommandButton *)GadgetButtonGetData( win );
-	AsciiString lower = command->getName();
-	lower.toLower();
-	Int mod = -1;
-	const std::string bare = withoutModPrefix( lower.str(), &mod );
-	WideChar letter = 0;
-	if( findPlayerKey( s_playerButtonKeys, bare, mod, &letter ) )
-		return letter != 0 && HotKeyManager::nameOf( letter ) == key ? 1 : 0;
-	const WideChar fixed = fixedButtonKey( AsciiString( bare.c_str() ), command->getCommandType() );
-	return fixed != 0 && HotKeyManager::nameOf( fixed ) == key ? 2 : 0;
-}
-
-/** The player's key for a button, into *letter; FALSE leaves it alone.  A mod's own button (ownMod,
-	* under -modfactions) takes only its mod's "<scope>:<button>" entry.  A plain name, which under a
-	* plain -mod may be any loaded mod's, takes the last loaded mod's scoped entry that exists, then
-	* the unscoped one, which is retail's. */
-static Bool findPlayerKey( const std::map< std::string, WideChar >& keys, const std::string& bare, Int ownMod, WideChar *letter )
-{
-	std::map< std::string, WideChar >::const_iterator it;
-	const Int modCount = TheGlobalData ? (Int)TheGlobalData->m_mods.size() : 0;
-	for( Int mod = modCount - 1; mod >= 0; mod-- )
-	{
-		if( ownMod >= 0 && mod != ownMod )
-			continue;
-		it = keys.find( modScope( mod ) + ":" + bare );
-		if( it != keys.end() )
-		{
-			*letter = it->second;
-			return TRUE;
-		}
-	}
-	if( ownMod >= 0 )
-		return FALSE;
-	it = keys.find( bare );
+	std::map< std::string, WideChar >::const_iterator it = keys.find( bare );
 	if( it == keys.end() )
 		return FALSE;
 	*letter = it->second;
 	return TRUE;
+}
+
+/** The player's key for a button standing in command bar slot barSlot (-1 off the bar), into *letter:
+	* his "<button>@<barSlot + 1>" there, else his "<button>".  FALSE leaves *letter alone. */
+static Bool findPlayerSlotKey( const std::map< std::string, WideChar >& keys, const std::string& bare, Int barSlot, WideChar *letter )
+{
+	if( barSlot >= 0 )
+	{
+		char at[ 16 ];
+		snprintf( at, sizeof( at ), "@%d", barSlot + 1 );
+		if( findPlayerKey( keys, bare + at, letter ) )
+			return TRUE;
+	}
+	return findPlayerKey( keys, bare, letter );
+}
+
+/** How strongly the command button win, in command bar slot barSlot or -1, holds key, the map's
+	* lower case name: 2 when it is the button's fixed letter (fixedButtonKey) and the player left the
+	* button alone, 1 when the player gave it that letter in Hotkeys.ini, 0 for the label's or the
+	* grid's.  With the grid on a bar button has no fixed letter. */
+static Int keyClaim( GameWindow *win, const AsciiString& key, Int barSlot )
+{
+	const CommandButton *command = (const CommandButton *)GadgetButtonGetData( win );
+	AsciiString lower = command->getName();
+	lower.toLower();
+	WideChar letter = 0;
+	if( findPlayerSlotKey( s_playerButtonKeys, std::string( lower.str() ), barSlot, &letter ) )
+		return letter != 0 && HotKeyManager::nameOf( letter ) == key ? 1 : 0;
+	if( s_commandBarGrid && barSlot >= 0 )
+		return 0;
+	const WideChar fixed = fixedButtonKey( lower, command->getCommandType() );
+	return fixed != 0 && HotKeyManager::nameOf( fixed ) == key ? 2 : 0;
 }
 
 static Bool isOneOf( WideChar letter, const WideChar *letters, Int count )
@@ -462,9 +546,42 @@ static Bool isOneOf( WideChar letter, const WideChar *letters, Int count )
 }
 
 //-----------------------------------------------------------------------------
-WideChar HotKeyManager::playerButtonKey( const AsciiString& button, WideChar labelKey, Int commandType )
+WideChar HotKeyManager::playerButtonKey( const AsciiString& button, WideChar labelKey, Int commandType,
+	Int barSlot, Int upgradeRank )
 {
-	return buttonKeyIn( button, labelKey, commandType, s_playerButtonKeys );
+	return buttonKeyIn( button, labelKey, commandType, s_playerButtonKeys, barSlot, upgradeRank );
+}
+
+//-----------------------------------------------------------------------------
+WideChar HotKeyManager::commandBarGridKey( Int barSlot, Int upgradeRank )
+{
+	if( barSlot < 0 || barSlot >= 2 * (Int)strlen( GRID_ROWS[ 0 ] ) )
+		return 0;
+	if( upgradeRank >= 0 && upgradeRank < (Int)strlen( GRID_UPGRADE_KEYS ) )
+		return GRID_UPGRADE_KEYS[ upgradeRank ];
+	return GRID_ROWS[ barSlot % 2 ][ barSlot / 2 ];
+}
+
+//-----------------------------------------------------------------------------
+void HotKeyManager::commandBarUpgradeRanks( const Int *types, Int count, Int *ranks )
+{
+	Int upgrades = 0;
+	for( Int slot = 0; slot < count; slot++ )
+	{
+		const Bool upgrade = types[ slot ] == GUI_COMMAND_PLAYER_UPGRADE || types[ slot ] == GUI_COMMAND_OBJECT_UPGRADE;
+		ranks[ slot ] = upgrade ? upgrades++ : -1;
+	}
+}
+
+//-----------------------------------------------------------------------------
+Bool HotKeyManager::commandBarGrid( void )
+{
+	return s_commandBarGrid;
+}
+
+void HotKeyManager::setCommandBarGrid( Bool grid )
+{
+	s_commandBarGrid = grid;
 }
 
 //-----------------------------------------------------------------------------
@@ -472,42 +589,30 @@ WideChar HotKeyManager::fixedKey( const AsciiString& button, Int commandType )
 {
 	AsciiString lower = button;
 	lower.toLower();
-	Int ownMod = -1;
-	return fixedButtonKey( AsciiString( withoutModPrefix( lower.str(), &ownMod ).c_str() ), commandType );
-}
-
-//-----------------------------------------------------------------------------
-std::string HotKeyManager::fileButtonName( const AsciiString& button )
-{
-	AsciiString lower = button;
-	lower.toLower();
-	Int ownMod = -1;
-	withoutModPrefix( lower.str(), &ownMod );
-	std::string name( button.str() );
-	if( ownMod >= 0 )
-		return modScope( ownMod ) + ":" + name.substr( name.find( '~' ) + 1 );
-	if( !TheGlobalData->m_mods.empty() && !TheGlobalData->m_modFactions )
-		return modScope( (Int)TheGlobalData->m_mods.size() - 1 ) + ":" + name;
-	return name;
+	return fixedButtonKey( lower, commandType );
 }
 
 //-----------------------------------------------------------------------------
 WideChar HotKeyManager::buttonKeyIn( const AsciiString& button, WideChar labelKey, Int commandType,
-	const std::map< std::string, WideChar >& keys )
+	const std::map< std::string, WideChar >& keys, Int barSlot, Int upgradeRank )
 {
 	// Force Attack is Ctrl.  The English label's F is not the key and may not bind the button.
 	if( commandType == GUI_COMMAND_FORCE_ATTACK )
 		return 0;
 	AsciiString lower = button;
 	lower.toLower();
-	Int ownMod = -1;
-	const std::string bare = withoutModPrefix( lower.str(), &ownMod );
-	// the player's letter first, a fixed order's included: the fixed letter is only its default
+	// the player's letter first, his for this slot before his for the button, a fixed order's
+	// included: the fixed letter is only its default.  With the grid on, the bar's place is next
 	WideChar letter = labelKey;
-	const Bool chosen = findPlayerKey( keys, bare, ownMod, &letter );
+	const Bool chosen = findPlayerSlotKey( keys, std::string( lower.str() ), barSlot, &letter );
+	if( !chosen && s_commandBarGrid && barSlot >= 0 )
+	{
+		const Bool upgrade = commandType == GUI_COMMAND_PLAYER_UPGRADE || commandType == GUI_COMMAND_OBJECT_UPGRADE;
+		return commandBarGridKey( barSlot, upgrade ? upgradeRank : -1 );
+	}
 	if( !chosen )
 	{
-		const WideChar fixed = fixedButtonKey( AsciiString( bare.c_str() ), commandType );
+		const WideChar fixed = fixedButtonKey( lower, commandType );
 		if( fixed != 0 )
 			return fixed;
 	}
@@ -547,8 +652,9 @@ void HotKeyManager::setFixedOrderKeys( Bool fixed )
 }
 
 //-----------------------------------------------------------------------------
-/** CommandBarGrid, Enabled = Yes or No, End: the grid keys a launcher before 2026-10-15 wrote into
-	* Hotkeys.ini.  Grid keys are gone, so the block is read and ignored. */
+/** CommandBarGrid, Enabled = Yes or No, End: whether command bar buttons take their window slot's
+	* letter (s_commandBarGrid).  A launcher before 2026-10-15 wrote the same block for the place-based
+	* grid it had then; that file now turns this one on. */
 /*static*/ void INI::parseCommandBarGridDefinition( INI *ini )
 {
 	static const FieldParse fields[] =
@@ -556,12 +662,14 @@ void HotKeyManager::setFixedOrderKeys( Bool fixed )
 		{ "Enabled", INI::parseBool, NULL, 0 },
 		{ NULL, NULL, NULL, 0 }
 	};
-	Bool ignored = FALSE;
-	ini->initFromINI( &ignored, fields );
+	Bool enabled = FALSE;
+	ini->initFromINI( &enabled, fields );
+	s_commandBarGrid = enabled;
+	DEBUG_LOG(( "HOTKEYS: command bar grid %s\n", enabled ? "on" : "off" ));
 }
 
 //-----------------------------------------------------------------------------
-/** CommandButtonHotKey <button name>, Key = one letter or NONE, End.  Only the player's own
+/** CommandButtonHotKey <button name>, Key = one letter or digit, or NONE, End.  Only the player's own
 	* Hotkeys.ini carries these, and nothing in it reaches the INI CRC. */
 /*static*/ void INI::parseCommandButtonHotKeyDefinition( INI *ini )
 {
@@ -577,7 +685,7 @@ void HotKeyManager::setFixedOrderKeys( Bool fixed )
 	ini->initFromINI( &key, fields );
 
 	WideChar letter = 0;
-	if( key.getLength() == 1 && isalpha( (unsigned char)key.getCharAt( 0 ) ) )
+	if( key.getLength() == 1 && isalnum( (unsigned char)key.getCharAt( 0 ) ) )
 		letter = (WideChar)toupper( (unsigned char)key.getCharAt( 0 ) );
 	else if( key.compareNoCase( "NONE" ) != 0 )
 		throw INI_INVALID_DATA;
@@ -591,6 +699,7 @@ void HotKeyManager::loadPlayerKeys( void )
 {
 	s_playerButtonKeys.clear();
 	s_fixedOrderKeys = TRUE;
+	s_commandBarGrid = FALSE;
 	AsciiString hotkeys = TheGlobalData->getPath_UserData();
 	hotkeys.concat( "Hotkeys.ini" );
 	if( !TheFileSystem->doesFileExist( hotkeys.str() ) )
@@ -820,6 +929,14 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 	unbound.push_back( commandRow( "SIGNAL_DEFEND", "INFORMATION" ) );
 	unbound.push_back( commandRow( "SIGNAL_ATTENTION", "INFORMATION" ) );
 	unbound.push_back( commandRow( "REQUEST_MONEY", "INFORMATION" ) );
+	unbound.push_back( commandRow( "AUTO_GARRISON", "CONTROL" ) );
+	unbound.push_back( commandRow( "AUTO_REPAIR", "CONTROL" ) );
+	// the orders the bar's fixed places press (orderAtPlace in ControlBar.cpp). Their buttons take
+	// a letter from the button's label, which the CommandSet names, so without these rows a set
+	// whose guard button sat elsewhere or had no letter left guard with no key a player could set
+	static const char *const ORDERS[] = { "TOGGLE_ATTACKMOVE", "TOGGLE_FORCEATTACK", "TOGGLE_GUARD", "TOGGLE_MOVE", "HOLD_POSITION" };
+	for( size_t each = 0; each < sizeof( ORDERS ) / sizeof( ORDERS[ 0 ] ); each++ )
+		unbound.push_back( commandRow( ORDERS[ each ], "CONTROL" ) );
 	char name[ 32 ];
 	for( Int slot = 1; slot <= 8; slot++ )
 	{
@@ -831,11 +948,11 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 		snprintf( name, sizeof( name ), "COMMAND_SLOT%02d", slot );
 		unbound.push_back( commandRow( name, "GRID" ) );
 	}
-	// LAUNCHER_DEFAULTS: I, free in the shipped map, for the next idle worker, and Alt with Z, X, C
-	// and V, which nothing in the shipped map holds, for the requests to the allies
+	// LAUNCHER_DEFAULTS: I, free in the shipped map, for the next idle worker, and Alt with Z, X and C,
+	// which nothing in the shipped map holds, for the signals to the allies. Request money has no key:
+	// Alt+V is evacuate in place.
 	static const char *const DEFAULTS[][ 3 ] = { { "SELECT_NEXT_IDLE_WORKER", "KEY_I", "NONE" },
-		{ "SIGNAL_ATTACK", "KEY_Z", "ALT" }, { "SIGNAL_DEFEND", "KEY_X", "ALT" }, { "SIGNAL_ATTENTION", "KEY_C", "ALT" },
-		{ "REQUEST_MONEY", "KEY_V", "ALT" } };
+		{ "SIGNAL_ATTACK", "KEY_Z", "ALT" }, { "SIGNAL_DEFEND", "KEY_X", "ALT" }, { "SIGNAL_ATTENTION", "KEY_C", "ALT" } };
 	for( size_t each = 0; each < unbound.size(); each++ )
 		for( size_t row = 0; row < sizeof( DEFAULTS ) / sizeof( DEFAULTS[ 0 ] ); row++ )
 			if( unbound[ each ].id == DEFAULTS[ row ][ 0 ] )
@@ -845,7 +962,7 @@ std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandM
 			}
 
 	// HOLD_COMMANDS: KEY_NONE and a modifier in the shipped file, which the rows above leave out.
-	// Force Attack's is set from its command bar button, the other two on the commands list.
+	// Force Attack's moves on the launcher's page only, the other two on the options menu's as well.
 	static const char *const HOLDS[][ 2 ] = { { "FORCEATTACK", "CTRL" }, { "WAYPOINTS", "ALT" }, { "PREFER_SELECTION", "SHIFT" } };
 	for( size_t each = 0; each < sizeof( HOLDS ) / sizeof( HOLDS[ 0 ] ); each++ )
 	{
@@ -884,9 +1001,11 @@ HotkeysFile Hotkeys_parse( const std::string& text, const std::vector< HotkeyCom
 			const std::string enabled = lowered( block.field( "Enabled", "yes" ) );
 			file.fixedOrderKeys = !( enabled == "no" || enabled == "false" );
 		}
+		else if( block.type == "CommandBarGrid" )
+			file.commandBarGrid = lowered( block.field( "Enabled", "no" ) ) == "yes";
 		else if( block.type == "CommandButtonHotKey" )
 		{
-			const Bool letter = key.size() == 1 && isalpha( (unsigned char)key[ 0 ] );
+			const Bool letter = key.size() == 1 && isalnum( (unsigned char)key[ 0 ] );
 			file.buttons[ block.name ] = letter ? std::string( 1, (char)toupper( (unsigned char)key[ 0 ] ) ) : std::string();
 		}
 		else if( block.type == "CommandMap" && !startsWith( block.name, "END_" ) )
@@ -948,7 +1067,7 @@ void Hotkeys_launcherKeys( const std::string& launcherPart, std::map< std::strin
 		const HotkeyIniBlock& block = blocks[ each ];
 		const std::string key = block.field( "Key", "" );
 		if( block.type == "CommandButtonHotKey" )
-			( *buttons )[ block.name ] = ( key.size() == 1 && isalpha( (unsigned char)key[ 0 ] ) ) ? key : std::string();
+			( *buttons )[ block.name ] = ( key.size() == 1 && isalnum( (unsigned char)key[ 0 ] ) ) ? key : std::string();
 		else if( block.type == "CommandMap" && !startsWith( block.name, "END_" ) )
 			( *commands )[ block.name ] = lowered( block.field( "UseableIn", "" ) ) == "none"
 				? HotkeyBinding( "", "NONE" ) : HotkeyBinding( Hotkeys_isKeyName( key ) ? key : "", block.field( "Modifiers", "NONE" ) );
@@ -1007,6 +1126,8 @@ std::string Hotkeys_format( const HotkeysFile& file, const std::vector< HotkeyCo
 		"\r\n";
 	if( !file.fixedOrderKeys )
 		out += "FixedOrderKeys\r\n  Enabled = No\r\nEnd\r\n\r\n";
+	if( file.commandBarGrid )
+		out += "CommandBarGrid\r\n  Enabled = Yes\r\nEnd\r\n\r\n";
 	std::map< std::string, Bool > named;
 	std::vector< std::string > ids = sortedNames( file.commands );
 	for( size_t each = 0; each < ids.size(); each++ )

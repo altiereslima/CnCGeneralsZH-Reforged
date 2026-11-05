@@ -268,7 +268,7 @@ static void AIUpdate_traceMove( const Object *obj, const Coord3D& framePos, Bool
 		const LocomotorTemplate* lt = TheLocomotorStore->findLocomotorTemplate(locoKey);
 		if (!lt && ini->getLoadType() == INI_LOAD_MULTIFILE)
 		{
-			// a patch INI loaded over a mod can name a locomotor the mod renamed or removed
+			// a patch INI can name a locomotor the loaded data renamed or removed
 			DEBUG_LOG(("[LINE: %d in '%s'] locomotor '%s' does not exist; the reference is skipped.\n", ini->getLineNum(), ini->getFilename().str(), locoName));
 			continue;
 		}
@@ -384,6 +384,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_tunnelTripGoal.zero();
 	m_hasTunnelTrip = FALSE;
 	m_tunnelTripEnd = TUNNEL_TRIP_MOVE;
+	m_isSeekingGarrison = FALSE;
+	m_garrisonSearchCenter.zero();
 	m_locomotorSet.clear();
 	m_curLocomotor = NULL;
 	m_curLocomotorSet = LOCOMOTORSET_INVALID;
@@ -1056,19 +1058,9 @@ Bool AIUpdateInterface::chooseLocomotorSetExplicit(LocomotorSetType wst)
 		}
 		m_locomotorSet.setSpeedScale(obj->getTemplate()->getSpeedScale());
 		m_curLocomotorSet = wst;
-		refreshVeterancySpeed();
 		return TRUE;
 	}
 	return FALSE;
-}
-
-//-------------------------------------------------------------------------------------------------
-void AIUpdateInterface::refreshVeterancySpeed()
-{
-	// the grade's speed, its own SPEED perk and a leader's pace aura, each multiplying
-	const Object* obj = getObject();
-	m_locomotorSet.setSpeedFactor(TheGlobalData->getRankStat(obj->getTemplate(), obj->getRankGrade(), RANK_STAT_SPEED)
-		* (1.0f + obj->getRankPerk(RANK_PERK_SPEED)) * (1.0f + obj->getRankAura(RANK_AURA_PACE)));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1360,6 +1352,22 @@ UpdateSleepTime AIUpdateInterface::update( void )
 			else
 				privateMoveToPosition( &goal, CMD_FROM_AI );
 		}
+		stRet = STATE_CONTINUE;
+	}
+
+	// An auto garrison: idle inside means the seat is taken and the search is over; idle outside means
+	// the building turned the unit away, full, gone, taken or out of reach, and the next one gets its turn.
+	if (m_isSeekingGarrison && getAIStateType() == AI_IDLE)
+	{
+		const Object *building = getObject()->getContainedBy();
+		if (building != NULL)
+		{
+			DEBUG_LOG(("AUTO GARRISON: frame %d '%s' %d is in '%s' %d\n", TheGameLogic->getFrame(), getObject()->getTemplate()->getName().str(),
+				getObject()->getID(), building->getTemplate()->getName().str(), building->getID()));
+			m_isSeekingGarrison = FALSE;
+		}
+		else
+			enterNextFreeGarrison();
 		stRet = STATE_CONTINUE;
 	}
 
@@ -2815,7 +2823,7 @@ void AIUpdateInterface::updateProgress( void )
 	}
 
 	Real turnBar = STUCK_TURN_EPSILON;
-	const Real rate = m_curLocomotor->getMaxTurnRate( damage );
+	const Real rate = m_curLocomotor->getMaxTurnRate( damage, self );
 	if (rate * 0.5f > turnBar)
 		turnBar = rate * 0.5f;
 
@@ -4731,6 +4739,10 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 	if (parms->m_cmdSource != CMD_FROM_AI)
 		m_hasTunnelTrip = FALSE;
 
+	// So does an auto garrison, which walks on player's enters of its own and sets itself again after each.
+	if (parms->m_cmdSource != CMD_FROM_AI)
+		m_isSeekingGarrison = FALSE;
+
 #ifdef ALLOW_SURRENDER
 	// surrendered items have very limited options, and only via AI cmds
 	if (isSurrendered())
@@ -5544,6 +5556,59 @@ void AIUpdateInterface::endTunnelTrip()
 {
 	if (getObject()->getContainedBy() == NULL)
 		m_hasTunnelTrip = FALSE;
+}
+
+/** How far from where a soldier stood when the auto garrison key was pressed he looks for a seat. */
+static const Real AUTO_GARRISON_RADIUS = 300.0f;
+
+//----------------------------------------------------------------------------------------
+void AIUpdateInterface::startGarrisonSearch()
+{
+	m_garrisonSearchCenter = *getObject()->getPosition();
+	m_garrisonSearchTried.clear();
+
+	// A man still on his exit path, or a hacker at his gear, would only have the order held for later,
+	// off everybody's seat count and with the search forgotten when it is carried out.  So he is got
+	// ready, and the search starts from update()'s idle block once he stands there.
+	const HackInternetAIInterface *hacker = getHackInternetAIInterface();
+	if (hacker != NULL && hacker->isHackingPackingOrUnpacking())
+		aiIdle( CMD_FROM_AI );
+	else if (!isExitingProducer())
+	{
+		enterNextFreeGarrison();
+		return;
+	}
+	friend_dropOrdersAfterExit();
+	m_isSeekingGarrison = TRUE;
+	DEBUG_LOG(("AUTO GARRISON: frame %d '%s' %d waits until it stands idle\n", TheGameLogic->getFrame(),
+		getObject()->getTemplate()->getName().str(), getObject()->getID()));
+}
+
+//----------------------------------------------------------------------------------------
+/**
+ * Walk to the next building with a seat, or end the search.  Uses a player's order, so a fogged building
+ * is judged as the player last saw it all the way to the door.  A building goes on the tried list whatever
+ * becomes of the walk, so a door nobody can reach costs one try and the search always ends.
+ */
+void AIUpdateInterface::enterNextFreeGarrison()
+{
+	Object *me = getObject();
+	Object *building = aiFindFreeGarrison( me, &m_garrisonSearchCenter, AUTO_GARRISON_RADIUS, m_garrisonSearchTried );
+	if (building == NULL)
+	{
+		DEBUG_LOG(("AUTO GARRISON: frame %d '%s' %d finds no seat left after %d buildings\n", TheGameLogic->getFrame(),
+			me->getTemplate()->getName().str(), me->getID(), (Int)m_garrisonSearchTried.size()));
+		m_isSeekingGarrison = FALSE;
+		return;
+	}
+
+	// a player's enter ends any search (aiDoCommand), so the search is set after it
+	aiEnter( building, CMD_FROM_PLAYER );
+	m_garrisonSearchTried.push_back( building->getID() );
+	m_isSeekingGarrison = TRUE;
+	DEBUG_LOG(("AUTO GARRISON: frame %d '%s' %d heads for '%s' %d, building %d of this search\n", TheGameLogic->getFrame(),
+		me->getTemplate()->getName().str(), me->getID(), building->getTemplate()->getName().str(), building->getID(),
+		(Int)m_garrisonSearchTried.size()));
 }
 
 //----------------------------------------------------------------------------------------
@@ -6995,7 +7060,8 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 	}
 
 	// Turkiye's artillery sees 100 and shoots 600: it takes what a spotter shows its player, out to its
-	// weapon's reach.  The fog filter below is what keeps that to targets the team actually sees.
+	// weapon's reach.  The fog filter below is what keeps that to targets the team actually sees, or
+	// that a radar of its player or an ally tracks moving in the fog (RadarCoverageBehavior::isTracked).
 	const Bool beyondVision = obj->getTemplate()->acquiresBeyondVision();
 	if (beyondVision)
 		rangeToFindWithin = max(rangeToFindWithin, obj->getLargestWeaponRange());
@@ -7090,15 +7156,11 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 	}
 
 	//
-	// A caller that closes with what it finds picks the biggest threat in range instead of the
-	// nearest thing (see AI_threatScore).  Walking up to a dozer while the artillery next to it
-	// keeps firing is only sensible for a unit that cannot move to a better target - and this
-	// caller can.
+	// Every caller picks what its weapons kill best for the time it takes rather than the nearest
+	// thing (see aiTargetTier): a Humvee the Technical, a tank the tank, and whoever is shooting it
+	// before anything it would have to drive to.
 	//
-	if (allowOutOfWeaponRangeTargets)
-	{
-		flags |= AI::PREFER_HIGH_THREAT;
-	}
+	flags |= AI::PREFER_BEST_TARGET;
 
 	//
 	// ... and an aircraft only makes that long look forward - see PartitionFilterForwardArc.
@@ -7521,12 +7583,13 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 18: the target a helicopter keeps shooting while it moves away
 	* 19: the radius a player's guard order set
 	* 20: the aggressive stance
-	* 21: the player's orders held until the exit path is done */
+	* 21: the player's orders held until the exit path is done
+	* 22: the auto garrison search */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 21;
+  const XferVersion currentVersion = 22;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -7874,6 +7937,14 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 		m_ordersAfterExit.resize(count);
 		for (Int i = 0; i < count; ++i)
 			m_ordersAfterExit[i].doXfer(xfer);
+	}
+
+	if (version >= 22)
+	{
+		// a save made while a soldier is on his way to a building owes him the rest of the search
+		xfer->xferBool(&m_isSeekingGarrison);
+		xfer->xferCoord3D(&m_garrisonSearchCenter);
+		xfer->xferSTLObjectIDVector(&m_garrisonSearchTried);
 	}
 
 }  // end xfer

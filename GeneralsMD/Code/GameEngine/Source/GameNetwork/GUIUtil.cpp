@@ -54,8 +54,6 @@
 #include "GameNetwork/LANAPICallbacks.h" // for acceptTrueColor, etc
 #include "GameClient/ChallengeGenerals.h"
 #include "GameClient/FactionPicker.h"
-#include "Common/GlobalData.h"
-#include "Lib/WideCharFns.h"
 #include "Lib/Clock.h"
 #include "Common/RandomMapGenerator.h"
 #include "Common/RandomMapTemplate.h"
@@ -324,18 +322,8 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 
 	std::set<AsciiString> seenSides;
 
-	// retail's armies, then each mod's own block; the fork's own factions load after the mods' and still
-	// belong with retail's
-	std::vector<Int> order(numPlayerTemplates);
 	for (Int c=0; c<numPlayerTemplates; ++c)
-		order[c] = c;
-	std::stable_sort(order.begin(), order.end(), [](Int a, Int b) {
-		return ThePlayerTemplateStore->getNthPlayerTemplate(a)->getModIndex() < ThePlayerTemplateStore->getNthPlayerTemplate(b)->getModIndex();
-	});
-
-	for (Int n=0; n<numPlayerTemplates; ++n)
 	{
-		const Int c = order[n];
 		const PlayerTemplate *fac = ThePlayerTemplateStore->getNthPlayerTemplate(c);
 		if (!fac)
 			continue;
@@ -358,35 +346,12 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 
 		AsciiString side;
 		side.format("SIDE:%s", fac->getSide().str());
-		// each mod's America is a side of its own, "<mod name> - USA"
-		AsciiString seenKey;
-		seenKey.format("%d:%s", fac->getModIndex(), side.str());
-		if (seenSides.find(seenKey) != seenSides.end())
+		if (seenSides.find(side) != seenSides.end())
 			continue;
 
-		seenSides.insert(seenKey);
+		seenSides.insert(side);
 
-		UnicodeString label = TheGameText->fetch(side);
-		if (fac->getModIndex() >= 0)
-		{
-			WideChar modName[128];
-			WideCharFromUtf8(TheGlobalData->m_modNames[fac->getModIndex()].str(), modName, ARRAY_SIZE(modName));
-			// the mod's own name for the faction: The End of Days' Russia sits on our China Nuke General's side
-			static const WideChar MissingLabel[] = u"MISSING";
-			const Int missingLength = ARRAY_SIZE(MissingLabel) - 1;
-			UnicodeString sideLabel = fac->getDisplayName();
-			if (sideLabel.isEmpty() || (sideLabel.getLength() >= missingLength
-				&& std::char_traits<WideChar>::compare(sideLabel.str(), MissingLabel, missingLength) == 0))
-			{
-				AsciiString modSide;
-				modSide.format("M%d~%s", fac->getModIndex() + 1, side.str());
-				sideLabel = TheGameText->fetch(modSide);
-			}
-			label = UnicodeString(modName);
-			label.concat(UnicodeString(u" - "));
-			label.concat(sideLabel);
-		}
-		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], label, def->getColor());
+		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch(side), def->getColor());
 		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)(intptr_t)c);
 	}
 	seenSides.clear();
@@ -1010,6 +975,98 @@ Bool HandleAIPersonaSelection(GameInfo *myGame, GameWindow *comboPersona[], Name
 		return TRUE;
 	}
 	return FALSE;
+}
+
+// -----------------------------------------------------------------------------
+
+// the box's lines run 100, 90 ... 10
+static Int handicapComboPos(Int handicap)
+{
+	return (HANDICAP_FULL - handicap) / HANDICAP_STEP;
+}
+
+void InitHandicapComboBoxes(GameWindow *parent, const char *layoutFilename,
+														GameWindow *comboHandicap[], NameKeyType comboHandicapID[])
+{
+	const Int lines = HANDICAP_FULL / HANDICAP_STEP;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		AsciiString name;
+		name.format("%s:ComboBoxHandicap%d", layoutFilename, i);
+		comboHandicapID[i] = NAMEKEY(name);
+		comboHandicap[i] = TheWindowManager->winGetWindowFromId(parent, comboHandicapID[i]);
+		if (!comboHandicap[i])
+			continue;	// a layout from before the column
+
+		GameWindow *listBox = GadgetComboBoxGetListBox(comboHandicap[i]);
+		ListboxData *listData = (ListboxData *)listBox->winGetUserData();
+		if (listData->listLength < lines)
+			GadgetListBoxSetListLength(listBox, lines);
+		GadgetComboBoxSetMaxDisplay(comboHandicap[i], min(lines, 8));	// as the personality box, for the lower seats
+
+		GadgetComboBoxReset(comboHandicap[i]);
+		const Color color = comboHandicap[i]->winGetEnabledTextColor();
+		for (Int handicap = HANDICAP_FULL; handicap >= HANDICAP_STEP; handicap -= HANDICAP_STEP)
+		{
+			UnicodeString label;
+			label.format(u"%d%%", handicap);
+			Int index = GadgetComboBoxAddEntry(comboHandicap[i], label, color);
+			GadgetComboBoxSetItemData(comboHandicap[i], index, (void *)(intptr_t)handicap);
+		}
+		GadgetComboBoxSetSelectedPos(comboHandicap[i], handicapComboPos(HANDICAP_FULL), TRUE);
+		comboHandicap[i]->winEnable(FALSE);	// until UpdateHandicapComboBoxes knows whose seat it is
+	}
+}
+
+void UpdateHandicapComboBoxes(GameInfo *myGame, GameWindow *comboHandicap[], GameWindow *comboTeam[])
+{
+	if (!AreSlotListUpdatesEnabled())
+		return;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		if (!comboHandicap[i])
+			continue;
+		comboHandicap[i]->winEnable(comboTeam[i] && BitTest(comboTeam[i]->winGetStatus(), WIN_STATUS_ENABLED));
+		const Int wanted = handicapComboPos(myGame->getConstSlot(i)->getHandicap());
+		Int pos = -1;
+		GadgetComboBoxGetSelectedPos(comboHandicap[i], &pos);
+		if (pos != wanted)
+			GadgetComboBoxSetSelectedPos(comboHandicap[i], wanted, TRUE);
+	}
+}
+
+Int HandleHandicapSelection(GameInfo *myGame, GameWindow *comboHandicap[], NameKeyType comboHandicapID[],
+														NameKeyType controlID)
+{
+	// setting a box's selection sends this too, and filling the boxes at init is no pick
+	if (!AreSlotListUpdatesEnabled())
+		return 0;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		if (!comboHandicap[i] || controlID != comboHandicapID[i])
+			continue;
+		Int pos = -1;
+		GadgetComboBoxGetSelectedPos(comboHandicap[i], &pos);
+		GameSlot *slot = myGame->getSlot(i);
+		const Int was = slot->getHandicap();
+		const Int handicap = (Int)(intptr_t)GadgetComboBoxGetItemData(comboHandicap[i], pos);
+		if (handicap == was)
+			return 0;
+		// A guest's slot takes it from the host's list. Written here, a start already on its way would
+		// have this seat play a handicap nobody else ever saw.
+		if (!myGame->amIHost())
+			return handicap;
+		slot->setHandicap(handicap);
+		// an options string past the LAN budget comes back empty and is never sent
+		if (GameInfoToAsciiString(myGame).isEmpty())
+		{
+			slot->setHandicap(was);
+			GadgetComboBoxSetSelectedPos(comboHandicap[i], handicapComboPos(was), TRUE);
+			return 0;
+		}
+		return handicap;
+	}
+	return 0;
 }
 
 // -----------------------------------------------------------------------------

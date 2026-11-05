@@ -609,7 +609,7 @@ TEST(zero_hour_language_is_the_one_its_language_archive_names)
    unknown blocks, so an INI written for a newer build breaks an older one
    outright.  The throw is an INIException naming the file and the block: a
    bare INI_UNKNOWN_TOKEN reached GameEngine::init as "Uncaught Exception
-   during initialization." (v3.3.0 crash reports, a mod's Rank.ini). */
+   during initialization." (v3.3.0 crash reports, a third-party Rank.ini). */
 TEST(ini_unknown_block_aborts_the_file)
 {
 	CHECK( bootOnce() );
@@ -724,7 +724,7 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	CHECK_NEAR( gun->getPrimaryDamage( noBonus ), 45.0f, 0.01f );
 	CHECK_NEAR( gun->getUnmodifiedAttackRange(), 150.0f, 0.01f );
 
-	/* a patch that names a weapon the loaded data lacks (a mod's Weapon.ini without it) is read and
+	/* a patch that names a weapon the loaded data lacks (a Weapon.ini without it) is read and
 		 dropped: no weapon is made for the name, and the block after it still applies */
 	writeFile( TEST_INI,
 		"Weapon BalancePatchProbeGunTypo\r\n"
@@ -753,11 +753,11 @@ TEST(balance_patch_edits_a_weapon_in_place)
 #include "../Stubs/NullAudioManager.h"
 
 /* The Paladin's infantry laser, the second point defense module BalanceReforged.ini gives it, once
-	 borrowed EA's WatchTowerMachineGun.  Contra's Weapon.ini leaves that weapon out, the MULTIFILE
-	 block for it was dropped as the test above wants, the module got a null template and
+	 borrowed EA's WatchTowerMachineGun.  A Weapon.ini that leaves that weapon out had the MULTIFILE
+	 block for it dropped as the test above wants, the module got a null template and
 	 PointDefenseLaserUpdate::scanClosestTarget crashed on it.  The weapon is the fork's own now, in
 	 WeaponReforged.ini, loaded the way GameEngine::init loads it: it has to come out whole from a
-	 store that holds none of EA's weapons, which is what a mod's Weapon.ini can leave. */
+	 store that holds none of EA's weapons. */
 TEST(weapon_reforged_ini_makes_the_paladin_infantry_laser_without_eas_weapons)
 {
 	CHECK( bootOnce() );
@@ -767,7 +767,7 @@ TEST(weapon_reforged_ini_makes_the_paladin_infantry_laser_without_eas_weapons)
 	if( TheFXListStore == NULL )
 		TheFXListStore = NEW FXListStore;
 
-	/* the fire FX the weapon names; retail has it, Contra does not, and a missing one reads as none */
+	/* the fire FX the weapon names; a missing one reads as none */
 	writeFile( TEST_INI,
 		"FXList WeaponFX_PaladinPointDefenseLaser\r\n"
 		"End\r\n" );
@@ -824,7 +824,7 @@ TEST(weapon_reforged_ini_makes_the_paladin_infantry_laser_without_eas_weapons)
 }
 
 /* WeaponReforged.ini also keeps copies of EA weapons FixesReforged.ini hands out, under EA's names,
-	 for a mod whose Weapon.ini dropped them.  Where the weapon is already defined the copy is read and
+	 for data whose Weapon.ini dropped them.  Where the weapon is already defined the copy is read and
 	 dropped and the first definition stands; this used to return mid-block, and the next field line
 	 threw as an unknown block. */
 TEST(weapon_defined_twice_keeps_the_first_and_reads_on)
@@ -866,8 +866,8 @@ TEST(weapon_defined_twice_keeps_the_first_and_reads_on)
 #include "GameLogic/ArmorSet.h"
 
 /* FixesReforged.ini's Toxin Tunnel Defender and Stinger sets name EA's Chem_ rockets and its Ranger
-	 armor set names ChemSuitHumanArmor; Contra keeps those objects and drops the weapons and the armor.
-	 Applied anyway, the set left a null in each slot: Contra's two went unarmed and its Rangers took
+	 armor set names ChemSuitHumanArmor.  On data that keeps those objects and drops the weapons and
+	 the armor, the set applied anyway left a null in each slot: the two went unarmed and the Rangers took
 	 every hit at full damage after Chemical Suits.  A patch set naming a missing weapon or armor is
 	 skipped now and the object keeps its own; a set that names what exists still applies. */
 TEST(patch_set_naming_a_missing_weapon_or_armor_is_skipped)
@@ -962,8 +962,8 @@ TEST(patch_set_naming_a_missing_weapon_or_armor_is_skipped)
 	}
 }
 
-/* BalanceReforged.ini replaces Tank_ChinaBunker's ModuleTag_05 with a StructureBody.  Under the
-	 Shockwave mod that tag holds another module, and the type check in ThingTemplate::parseModuleName
+/* BalanceReforged.ini replaces Tank_ChinaBunker's ModuleTag_05 with a StructureBody.  Where data
+	 gives that tag another module, the type check in ThingTemplate::parseModuleName
 	 threw and stopped the game at start.  The block is skipped now: the template keeps the module it
 	 had, and the lines after the block still parse. */
 TEST(replace_module_of_another_type_is_skipped)
@@ -1048,7 +1048,7 @@ TEST(replace_module_of_another_type_is_skipped)
 	}
 }
 
-/* BalanceReforged.ini prices Nuke_ChinaGattlingCannon, and an install whose mod archives had no such
+/* BalanceReforged.ini prices Nuke_ChinaGattlingCannon, and an install whose archives had no such
 	 object threw in ThingFactory::parseObjectDefinition and stopped the game at start.  The block is
 	 read and dropped now: no template is made for the name, and the object after it is still edited. */
 TEST(patch_of_a_missing_object_is_skipped)
@@ -1110,8 +1110,8 @@ TEST(patch_of_a_missing_object_is_skipped)
 	}
 }
 
-/* FixesReforged.ini gives every China Command Center the Nuke_ and Early_ carpet bombers.  Contra has
-	 no such special powers, the module kept a NULL template, and placing the start building faulted in
+/* FixesReforged.ini gives every China Command Center the Nuke_ and Early_ carpet bombers.  With data that
+	 has no such special powers the module kept a NULL template, and placing the start building faulted in
 	 SpecialPowerModule's constructor.  A patch's module naming a missing power is read and dropped. */
 TEST(patch_module_with_a_missing_special_power_is_skipped)
 {
@@ -1174,12 +1174,12 @@ TEST(patch_module_with_a_missing_special_power_is_skipped)
 	}
 }
 
-/* Under Contra FixesReforged.ini gave the Laser Turret's anti-air weapon Zero Hour's
-	 Lazr_PatriotLaserBeam, which Contra does not have, so the beam vanished, and gave the Emperor an
-	 upgrade naming Tank_OCL_OverlordGattlingCannon, which it does not have either.  A patch naming
-	 something the loaded data lacks keeps what was there: the weapon its own beam, and a replaced
-	 module the module it replaced. */
-TEST(patch_naming_a_missing_laser_or_list_keeps_the_mods_own)
+/* FixesReforged.ini gives the Laser Turret's anti-air weapon Zero Hour's Lazr_PatriotLaserBeam;
+	 on data without it the beam vanished.  It gives the Emperor an upgrade naming
+	 Tank_OCL_OverlordGattlingCannon, which such data lacks too.  A patch naming something the loaded
+	 data lacks keeps what was there: the weapon its own beam, and a replaced module the module it
+	 replaced. */
+TEST(patch_naming_a_missing_laser_or_list_keeps_what_was_there)
 {
 	CHECK( bootOnce() );
 
@@ -1262,8 +1262,8 @@ TEST(patch_naming_a_missing_laser_or_list_keeps_the_mods_own)
 	}
 }
 
-/* The Power of the West's Armor.ini has "Armor = INFANTRY_MISSIL 100%".  EA's parse let it through,
-	 264e2180 made it throw and the mod stopped at start.  An unknown damage type skips its line; a
+/* A third-party Armor.ini had "Armor = INFANTRY_MISSIL 100%".  EA's parse let it through,
+	 264e2180 made it throw and the game stopped at start.  An unknown damage type skips its line; a
 	 line with no percentage is still a syntax error. */
 TEST(armor_skips_an_unknown_damage_type)
 {
@@ -1385,6 +1385,70 @@ TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 
 	CHECK_EQ( blocks, 135 );
 	CHECK_EQ( lit, blocks );
+}
+
+#include "Common/MultiplayerSettings.h"
+
+/* A slot, a replay and a preference hold a colour by its place in the list, so the fork's five have
+   to follow EA's eight and leave them as they were.  EA's list is in INIZH.big, so it is copied here. */
+TEST(multiplayer_reforged_ini_appends_five_colours_after_eas_eight)
+{
+	static const struct { const char *tooltip; Int r, g, b, nightR, nightG, nightB; } colours[] =
+	{
+		{ "Color:Gold",     221, 226,  13,  221, 226,  13 },
+		{ "Color:Red",      255,   0,   0,  255,   0,   0 },
+		{ "Color:Blue",      67, 104, 254,   67, 104, 254 },
+		{ "Color:Green",     62, 209,  46,   62, 209,  46 },
+		{ "Color:Orange",   255, 160,  25,  255, 160,  25 },
+		{ "Color:SkyBlue",   50, 215, 230,   50, 215, 230 },
+		{ "Color:Purple",   150,   0, 200,  223,   0, 156 },
+		{ "Color:Pink",     255, 150, 255,  255, 130, 248 },
+		{ "Color:Crimson",  165,  15,  45,  205,  45,  80 },
+		{ "Color:Azure",      0, 165, 255,    0, 165, 255 },
+		{ "Color:Salmon",   240, 120, 135,  240, 120, 135 },
+		{ "Color:Teal",       0, 175, 140,    0, 175, 140 },
+		{ "Color:Lavender", 165, 165, 255,  165, 165, 255 },
+	};
+
+	CHECK( bootOnce() );
+
+	std::string eaList;
+	for( Int i = 0; i < 8; ++i )
+	{
+		char block[ 256 ];
+		snprintf( block, sizeof( block ),
+			"MultiplayerColor Color%s\r\n  RGBColor = R:%d G:%d B:%d\r\n  RGBNightColor = R:%d G:%d B:%d\r\n  TooltipName = %s\r\nEnd\r\n\r\n",
+			colours[ i ].tooltip + 6, colours[ i ].r, colours[ i ].g, colours[ i ].b,
+			colours[ i ].nightR, colours[ i ].nightG, colours[ i ].nightB, colours[ i ].tooltip );
+		eaList += block;
+	}
+	writeFile( TEST_INI, eaList.c_str() );
+
+	MultiplayerSettings *savedSettings = TheMultiplayerSettings;
+	TheMultiplayerSettings = NEW MultiplayerSettings;
+
+	CHECK( loadIni( TEST_INI ) );
+	CHECK_EQ( TheMultiplayerSettings->getNumColors(), 8 );
+	CHECK( loadIni( MULTIPLAYER_REFORGED_INI ) );
+	CHECK_EQ( TheMultiplayerSettings->getNumColors(), 13 );
+
+	for( Int i = 0; i < 13 && TheMultiplayerSettings->getNumColors() == 13; ++i )
+	{
+		MultiplayerColorDefinition *def = TheMultiplayerSettings->getColor( i );
+		const RGBColor day = def->getRGBValue();
+		const RGBColor night = def->getRGBNightValue();
+		CHECK_STR( def->getTooltipName().str(), colours[ i ].tooltip );
+		CHECK_NEAR( day.red * 255.0f, colours[ i ].r, 0.01f );
+		CHECK_NEAR( day.green * 255.0f, colours[ i ].g, 0.01f );
+		CHECK_NEAR( day.blue * 255.0f, colours[ i ].b, 0.01f );
+		CHECK_NEAR( night.red * 255.0f, colours[ i ].nightR, 0.01f );
+		CHECK_NEAR( night.green * 255.0f, colours[ i ].nightG, 0.01f );
+		CHECK_NEAR( night.blue * 255.0f, colours[ i ].nightB, 0.01f );
+	}
+
+	delete TheMultiplayerSettings;
+	TheMultiplayerSettings = savedSettings;
+	remove( TEST_INI );
 }
 
 /* ReleaseCrashInfo.txt's stack trace is the only stack this port gets - there is
@@ -1581,6 +1645,16 @@ TEST(crc_computecrc_leaves_the_callee_saved_registers_alone)
 TEST(are_music_files_on_cd_accepts_the_local_no_cd_layout)
 {
 	CHECK( bootOnce() );
+
+	/* Run from GeneralsMD/Run the real archive is there. It is the game's proof of media, so it is
+	   neither overwritten nor removed: a run that did left every headless match quitting silently
+	   right after it loaded, with no HEADLESS lines and no crash. */
+	if (FILE *real = fopen( "genseczh.big", "rb" ))
+	{
+		fclose( real );
+		CHECK_EQ( TheFileSystem->areMusicFilesOnCD(), TRUE );
+		return;
+	}
 
 	/* No local big and the test's CD manager is the NULL stub: no media. */
 	CHECK_EQ( TheFileSystem->areMusicFilesOnCD(), FALSE );
@@ -2024,10 +2098,6 @@ static const char HOTKEYS_FROM_LAUNCHER[] =
 	"  Key = Q\r\n"
 	"End\r\n"
 	"\r\n"
-	"CommandButtonHotKey mymod:Command_Sell\r\n"
-	"  Key = K\r\n"
-	"End\r\n"
-	"\r\n"
 	"; the launcher's own keys from here on\r\n"
 	"\r\n"
 	"CommandMap SELECT_NEXT_IDLE_WORKER\r\n"
@@ -2067,9 +2137,9 @@ TEST(hotkeys_file_reads_the_launchers_rows_and_leaves_its_defaults_out)
 	// KEY_NONE is not a key the launcher shows, so the shipped hold comes back as its own bar-only row
 	CHECK( hold != NULL && hold->barOnly && hold->binding == HotkeyBinding( "", "CTRL" ) && hold->pair == "END_FORCEATTACK" );
 	CHECK( idle != NULL && idle->launcherDefault && idle->binding.key == "KEY_I" );
-	// the requests to the allies start on Alt and Z, X, C and V, as the launcher writes them (issue 129)
+	// the signals to the allies start on Alt and Z, X and C, as the launcher writes them (issue 129)
 	static const char *const ASKS[][ 2 ] = { { "SIGNAL_ATTACK", "KEY_Z" }, { "SIGNAL_DEFEND", "KEY_X" },
-		{ "SIGNAL_ATTENTION", "KEY_C" }, { "REQUEST_MONEY", "KEY_V" } };
+		{ "SIGNAL_ATTENTION", "KEY_C" } };
 	for( size_t ask = 0; ask < sizeof( ASKS ) / sizeof( ASKS[ 0 ] ); ask++ )
 	{
 		Bool found = FALSE;
@@ -2078,6 +2148,12 @@ TEST(hotkeys_file_reads_the_launchers_rows_and_leaves_its_defaults_out)
 				&& rows[ each ].binding == HotkeyBinding( ASKS[ ask ][ 1 ], "ALT" ) && rows[ each ].category == "INFORMATION" );
 		CHECK( found );
 	}
+	// request money has no key: Alt+V is evacuate in place
+	Bool money = FALSE;
+	for( size_t each = 0; each < rows.size(); each++ )
+		money = money || ( rows[ each ].id == "REQUEST_MONEY" && !rows[ each ].launcherDefault
+			&& rows[ each ].binding == HotkeyBinding() && rows[ each ].category == "INFORMATION" );
+	CHECK( money );
 
 	// the launcher's own defaults in the player's part are no change of his
 	const HotkeysFile mine = Hotkeys_parse(
@@ -2099,17 +2175,40 @@ TEST(hotkeys_every_row_the_page_lists_is_a_command_the_game_knows)
 {
 	static const char *const IDLE[] = { "SELECT_NEXT_IDLE_AIRCRAFT", "SELECT_NEXT_IDLE_VEHICLE", "SELECT_NEXT_IDLE_INFANTRY",
 		"SELECT_ALL_IDLE_UNITS", "SELECT_ALL_IDLE_AIRCRAFT", "SELECT_ALL_IDLE_VEHICLES" };
+	static const char *const ORDERS[] = { "TOGGLE_ATTACKMOVE", "TOGGLE_FORCEATTACK", "TOGGLE_GUARD", "TOGGLE_MOVE", "HOLD_POSITION" };
 	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
 	MetaNameProbe names;
 	Int idle = 0;
+	Int autoOrders = 0;
+	Int orders = 0;
 	for( size_t each = 0; each < rows.size(); each++ )
 	{
 		CHECK( names.findGameMessageMetaType( rows[ each ].id.c_str() ) != GameMessage::MSG_INVALID );
 		for( size_t name = 0; name < sizeof( IDLE ) / sizeof( IDLE[ 0 ] ); name++ )
 			if( rows[ each ].id == IDLE[ name ] && rows[ each ].category == "SELECTION" && rows[ each ].binding.key.empty() )
 				idle++;
+		if( ( rows[ each ].id == "AUTO_GARRISON" || rows[ each ].id == "AUTO_REPAIR" ) && rows[ each ].category == "CONTROL" && rows[ each ].binding.key.empty() )
+			autoOrders++;
+		// the bar's fixed orders, guard among them, are keys a player sets whatever the bar says
+		for( size_t name = 0; name < sizeof( ORDERS ) / sizeof( ORDERS[ 0 ] ); name++ )
+			if( rows[ each ].id == ORDERS[ name ] && rows[ each ].category == "CONTROL" && rows[ each ].binding.key.empty() && !rows[ each ].barOnly )
+				orders++;
 	}
 	CHECK_EQ( idle, 6 );
+	CHECK_EQ( autoOrders, 2 );
+	CHECK_EQ( orders, 5 );
+}
+
+/* OptionsHotkeysKey gives a bar button a digit as well as a letter, so the file has to keep one:
+   a digit read back as no key made the next write drop it. */
+TEST(hotkeys_file_keeps_a_digit_on_a_button)
+{
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	const HotkeysFile file = Hotkeys_parse( "CommandButtonHotKey Command_Guard\r\n  Key = 4\r\nEnd\r\n"
+		"CommandButtonHotKey Command_Stop\r\n  Key = ,\r\nEnd\r\n", rows );
+	CHECK_STR( file.buttons.find( "Command_Guard" )->second.c_str(), "4" );
+	CHECK_STR( file.buttons.find( "Command_Stop" )->second.c_str(), "" );
+	CHECK( Hotkeys_format( file, rows ).find( "CommandButtonHotKey Command_Guard\r\n  Key = 4\r\n" ) != std::string::npos );
 }
 
 TEST(hotkeys_file_the_launcher_wrote_comes_back_byte_for_byte)
@@ -2121,8 +2220,7 @@ TEST(hotkeys_file_the_launcher_wrote_comes_back_byte_for_byte)
 	CHECK( file.commands.find( "VIEW_LAST_RADAR_EVENT" )->second == HotkeyBinding( "", "NONE" ) );
 	CHECK( file.commands.find( "SELECT_TEAM1" )->second == HotkeyBinding( "KEY_KP1", "SHIFT_ALT_CTRL" ) );
 	CHECK( file.commands.find( "VIEW_COMMAND_CENTER" ) == file.commands.end() );	// the launcher's, not his
-	CHECK_EQ( (Int)file.buttons.size(), 5 );
-	CHECK_STR( file.buttons.find( "mymod:Command_Sell" )->second.c_str(), "K" );
+	CHECK_EQ( (Int)file.buttons.size(), 4 );
 	CHECK_STR( file.buttons.find( "command_lowercase" )->second.c_str(), "" );
 	CHECK( Hotkeys_format( file, rows ) == std::string( HOTKEYS_FROM_LAUNCHER ) );
 
@@ -2169,7 +2267,6 @@ TEST(hotkeys_names_sort_and_chords_read_as_the_launcher_has_them)
 	// String.localeCompare: case aside, '_' before the letters, then lower case first
 	CHECK( Hotkeys_nameLess( "command_lowercase", "Command_Sell" ) );
 	CHECK( Hotkeys_nameLess( "Command_Sell", "Command_UpgradeChinaMines" ) );
-	CHECK( Hotkeys_nameLess( "Command_UpgradeChinaMines", "mymod:Command_Sell" ) );
 	CHECK( Hotkeys_nameLess( "SELECT_ALL", "SELECT_ALL_MILITARY" ) );
 	CHECK( Hotkeys_nameLess( "SELECT_ALL_MILITARY", "SELECT_TEAM1" ) );
 	CHECK( Hotkeys_nameLess( "command_sell", "Command_Sell" ) );
@@ -2314,6 +2411,56 @@ TEST(income_sharing_splits_evenly_and_keeps_the_remainder)
 	CHECK_EQ( IncomeAllyShare( 100, 3 ), 33u );
 	/* nobody to share with keeps it all */
 	CHECK_EQ( IncomeAllyShare( 200, 1 ), 0u );
+}
+
+/* Player.cpp: a skirmish computer banks its rung's income percent (150 on every rung), rounded down. */
+TEST(skirmish_ai_earnings_by_rung_percent)
+{
+	/* anyone who is not a computer */
+	CHECK_EQ( EarnedAmount( 200, 100 ), 200u );
+	/* a computer: the derrick's 1000 is 1500, a truckload of 75 banks 112, the odd half dropped */
+	CHECK_EQ( EarnedAmount( 1000, 150 ), 1500u );
+	CHECK_EQ( EarnedAmount( 75, 150 ), 112u );
+}
+
+/* Player.cpp: the falling-behind bonus, points over the rung's percent, and its step at one weighing. */
+TEST(skirmish_ai_earnings_bonus_when_behind)
+{
+	/* level or ahead, or no enemy left: none */
+	CHECK_EQ( IncomeBonusTarget( 1000, 1000 ), 0 );
+	CHECK_EQ( IncomeBonusTarget( 3000, 1000 ), 0 );
+	CHECK_EQ( IncomeBonusTarget( 1000, 0 ), 0 );
+	/* three quarters of the enemy: 200 percent on a 150 rung; half of it: 250 */
+	CHECK_EQ( IncomeBonusTarget( 750, 1000 ), 50 );
+	CHECK_EQ( IncomeBonusTarget( 500, 1000 ), 100 );
+	/* a quarter of it and below: the ceiling, 300 percent */
+	CHECK_EQ( IncomeBonusTarget( 250, 1000 ), 150 );
+	CHECK_EQ( IncomeBonusTarget( 0, 1000 ), 150 );
+	/* 25 points a weighing, either way, and straight onto a target that close */
+	CHECK_EQ( IncomeBonusStep( 0, 150 ), 25 );
+	CHECK_EQ( IncomeBonusStep( 140, 150 ), 150 );
+	CHECK_EQ( IncomeBonusStep( 150, 0 ), 125 );
+	CHECK_EQ( IncomeBonusStep( 5, 0 ), 0 );
+}
+
+/* Player.cpp: the bonus weighs sides, a player at a time, not one seat against another. */
+TEST(skirmish_ai_earnings_bonus_weighs_sides)
+{
+	Int own = -1, enemy = -1;
+	/* four teams of two, seats 0-1, 2-3, 4-5, 6-7; the computer is seat 1 and its partner carries it */
+	const Int worth[ 8 ] = { 1000, 0, 3000, 1000, 4000, 0, 500, 500 };
+	const UnsignedInt allies[ 8 ] = { 1u << 1, 1u << 0, 1u << 3, 1u << 2, 1u << 5, 1u << 4, 1u << 7, 1u << 6 };
+	IncomeSideWorths( worth, allies, 8, 1, &own, &enemy );
+	CHECK_EQ( own, 500 );
+	CHECK_EQ( enemy, 2000 );
+	/* a quarter of the strongest side's average: the ceiling */
+	CHECK_EQ( IncomeBonusTarget( own, enemy ), 150 );
+	/* free for all: every enemy is a side of one, the richest counts */
+	const Int ffa[ 3 ] = { 300, 100, 200 };
+	const UnsignedInt none[ 3 ] = { 0, 0, 0 };
+	IncomeSideWorths( ffa, none, 3, 1, &own, &enemy );
+	CHECK_EQ( own, 100 );
+	CHECK_EQ( enemy, 300 );
 }
 
 /* ExperienceTracker.cpp: a kill's experience split by the damage each attacker dealt. */
@@ -2785,7 +2932,7 @@ TEST(troop_crawler_scans_at_least_as_far_as_its_troops_shoot)
 	/* a rifle outranges the INI knob: look as far as the man can shoot. */
 	CHECK_NEAR( AssaultTransport_clearScanRange( 50.0f, 150.0f ), 150.0f, 0.001f );
 
-	/* the knob is the wider of the two (a modded value): honour it. */
+	/* the knob is the wider of the two (a tuned value): honour it. */
 	CHECK_NEAR( AssaultTransport_clearScanRange( 200.0f, 150.0f ), 200.0f, 0.001f );
 
 	/* no weapon at all - getLargestWeaponRange returns -1; never scan a negative radius. */
@@ -3189,53 +3336,146 @@ TEST(attack_move_still_shoots_what_it_can_already_reach)
 	CHECK(  AIAttackMove_mayTakeTarget( true, true, false, 1030, 1030 ) );
 }
 
-/* AI.cpp: on attack move the scan ranks what it finds by threat instead of handing
-   back the nearest thing. */
-extern Int AI_threatScore( Int templateThreatValue, Int buildCost, Bool threatensMe,
-													 Real dist, Real distanceModifier );
-
-TEST(attack_move_shoots_the_biggest_threat_first)
+/* AI.cpp: a unit choosing its own target goes for the armour its weapon is made for, then for
+   what it kills best for the time it costs, not the nearest thing (idle) or the most expensive one
+   (attack move).  The numbers are the shipped INI's: HumveeGun 10 a shot every 12 frames,
+   CrusaderTankGun 60 every 120; the armour rows are Armor.ini's (HumanArmor with the fork's 30%
+   for tank shells) over AI.cpp's combat damage types: explosion, crush, armour piercing, small
+   arms, gattling, radiation, flame, sniper, poison, particle beam, infantry missile, Aurora bomb,
+   land mine, jet missiles, stealth jet missiles, molotov, Comanche vulcan. */
+static AITargetRating targetRating( Int tier, Real affinity, Real rate, Real distSqr, ObjectID id )
 {
-	const Real MOD = 100.0f;		/* AttackPriorityDistanceModifier, shipped value */
-	const Real HERE = 0.0f;
+	AITargetRating r;
+	r.m_tier = tier;
+	r.m_affinity = affinity;
+	r.m_rate = rate;
+	r.m_distSqr = distSqr;
+	r.m_id = id;
+	return r;
+}
 
-	/* a mod that sets ThreatValue decides outright; build cost only stands in for it. */
-	CHECK( AI_threatScore( 50, 4000, false, HERE, MOD ) > AI_threatScore( 40, 5000, false, HERE, MOD ) );
+TEST(a_unit_goes_for_the_armour_its_weapon_is_made_for)
+{
+	enum { PIERCING = 2, VULCAN = 16, MISSILE = 10, COUNT = 17 };
+	const Real HUMAN[ COUNT ] = { 1.0f, 2.0f, 0.3f, 1.0f, 1.0f, 1.0f, 1.5f, 2.0f, 1.0f, 1.5f, 0.1f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+	const Real TRUCK[ COUNT ] = { 1.0f, 0.5f, 1.0f, 0.5f, 0.5f, 1.0f, 1.0f, 0.0f, 0.5f, 1.0f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.5f };
+	const Real TANK[ COUNT ]  = { 1.0f, 0.5f, 1.0f, 0.25f, 0.1f, 0.5f, 0.25f, 0.0f, 0.25f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.25f };
 
-	/* the shipped INI sets ThreatValue nowhere, so cost has to do the ranking:
-	   an Overlord-priced tank over a Humvee-priced one. */
-	CHECK( AI_threatScore( 0, 1200, true, HERE, MOD ) > AI_threatScore( 0, 700, true, HERE, MOD ) );
+	/* a tank shell does full damage to a Technical and a Battlemaster alike, but tank armour stops
+	   most other weapons and truck armour does not: the shell is made for the tank */
+	CHECK_NEAR( 1.5315f, aiArmourAffinity( TANK[ PIERCING ], TANK, COUNT ), 0.001f );
+	CHECK_NEAR( 1.3077f, aiArmourAffinity( TRUCK[ PIERCING ], TRUCK, COUNT ), 0.001f );
+	CHECK( aiArmourAffinity( TANK[ PIERCING ], TANK, COUNT ) > aiArmourAffinity( TRUCK[ PIERCING ], TRUCK, COUNT ) );
+	CHECK( aiArmourAffinity( TRUCK[ PIERCING ], TRUCK, COUNT ) > aiArmourAffinity( HUMAN[ PIERCING ], HUMAN, COUNT ) );
 
-	/* anything that can shoot back outranks anything that cannot, whatever it cost -
-	   a Command Center is worth more than a Gattling tank and is still not what is
-	   killing us - and no distance may move a target out of its group, or a unit would
-	   walk past the artillery firing at it to reach a far off barracks. */
-	CHECK( AI_threatScore( 0, 1, true, HERE, MOD ) > AI_threatScore( 0, 5000, false, HERE, MOD ) );
-	CHECK( AI_threatScore( 1, 0, true, HERE, MOD ) > AI_threatScore( 9999, 0, false, HERE, MOD ) );
-	CHECK( AI_threatScore( 0, 1, true, 9999.0f, MOD ) > AI_threatScore( 0, 5000, false, HERE, MOD ) );
+	/* a Humvee gun is made for soldiers, then trucks, last tanks */
+	CHECK( aiArmourAffinity( HUMAN[ VULCAN ], HUMAN, COUNT ) > aiArmourAffinity( TRUCK[ VULCAN ], TRUCK, COUNT ) );
+	CHECK( aiArmourAffinity( TRUCK[ VULCAN ], TRUCK, COUNT ) > aiArmourAffinity( TANK[ VULCAN ], TANK, COUNT ) );
 
-	/* free civilian junk still scores, otherwise a scan that found only that would
-	   report "nothing here" and the unit would walk past what it was told to clear. */
-	CHECK( AI_threatScore( 0, 0, false, HERE, MOD ) > 0 );
-	CHECK( AI_threatScore( 0, 0, false, 9999.0f, MOD ) > 0 );
+	/* a rocket soldier's missile is made for vehicles, tanks first */
+	CHECK( aiArmourAffinity( TANK[ MISSILE ], TANK, COUNT ) > aiArmourAffinity( TRUCK[ MISSILE ], TRUCK, COUNT ) );
+	CHECK( aiArmourAffinity( TRUCK[ MISSILE ], TRUCK, COUNT ) > aiArmourAffinity( HUMAN[ MISSILE ], HUMAN, COUNT ) );
 
-	/* worth halves every modifier of distance. */
-	CHECK_EQ( AI_threatScore( 0, 1000, false, MOD, MOD ), 500 );
-	CHECK_EQ( AI_threatScore( 0, 1000, false, 3.0f*MOD, MOD ), 250 );
+	/* an armour that lets nothing through is no weapon's */
+	const Real NOTHING[ COUNT ] = { 0.0f };
+	CHECK_NEAR( 0.0f, aiArmourAffinity( 0.0f, NOTHING, COUNT ), 0.0001f );
 
-	/* so the same unit closer up wins, and a big enough threat still outranks a cheap
-	   one underfoot: an Overlord a modifier away beats a Ranger at our feet. */
-	CHECK( AI_threatScore( 0, 1200, true, 10.0f, MOD ) > AI_threatScore( 0, 1200, true, 200.0f, MOD ) );
-	CHECK( AI_threatScore( 0, 2000, true, MOD, MOD ) > AI_threatScore( 0, 225, true, HERE, MOD ) );
+	/* so a Crusader takes the Battlemaster over the Technical, though the Technical (3 shots) dies
+	   in less than half the Battlemaster's time (7): the armour comes before the rate */
+	AIShotPattern tank;
+	tank.m_delayFrames = 120.0f;
+	tank.m_damagePerShot = 60.0f;
+	const Real onBattlemaster = aiTargetKillRate( 800.0f, aiFramesToKill( 400.0f, tank ), 0.0f, 2.0f );
+	const Real onTechnical = aiTargetKillRate( 500.0f, aiFramesToKill( 180.0f, tank ), 0.0f, 2.0f );
+	CHECK( onTechnical > onBattlemaster );
+	CHECK( aiTargetBeats( targetRating( 1, aiArmourAffinity( TANK[ PIERCING ], TANK, COUNT ), onBattlemaster, 900.0f, (ObjectID)9 ),
+												targetRating( 1, aiArmourAffinity( TRUCK[ PIERCING ], TRUCK, COUNT ), onTechnical, 100.0f, (ObjectID)2 ) ) );
+}
 
-	/* equal threats at equal range must tie exactly: the scan is sorted near to far and
-	   keeps the first of a tie, which is how "then the closest one" gets honoured. */
-	CHECK_EQ( AI_threatScore( 0, 900, true, 50.0f, MOD ), AI_threatScore( 0, 900, true, 50.0f, MOD ) );
+TEST(a_unit_shoots_what_its_weapon_kills_best)
+{
+	AIShotPattern humvee;
+	humvee.m_delayFrames = 12.0f;
+	AIShotPattern tank;
+	tank.m_delayFrames = 120.0f;
+	const Real SPEED = 2.0f;
 
-	/* the modifier is 0 until the AI INI is read, and a target can measure as behind us
-	   from a bounding sphere: neither may divide by zero or invert the ranking. */
-	CHECK_EQ( AI_threatScore( 0, 1000, false, 500.0f, 0.0f ), 1000 );
-	CHECK_EQ( AI_threatScore( 0, 1000, false, -5.0f, MOD ), 1000 );
+	/* a Humvee: the Technical (500, 180 health) over the Battlemaster (800, 400), and a Red Guard
+	   (300, 120) over the Battlemaster too */
+	humvee.m_damagePerShot = 2.5f;
+	const Real humveeOnTank = aiTargetKillRate( 800.0f, aiFramesToKill( 400.0f, humvee ), 0.0f, SPEED );
+	humvee.m_damagePerShot = 5.0f;
+	const Real humveeOnTruck = aiTargetKillRate( 500.0f, aiFramesToKill( 180.0f, humvee ), 0.0f, SPEED );
+	humvee.m_damagePerShot = 10.0f;
+	const Real humveeOnSoldier = aiTargetKillRate( 300.0f, aiFramesToKill( 120.0f, humvee ), 0.0f, SPEED );
+	CHECK( humveeOnTruck > humveeOnTank );
+	CHECK( humveeOnSoldier > humveeOnTank );
+
+	/* a Crusader: the Battlemaster over the Red Guard */
+	tank.m_damagePerShot = 60.0f;
+	const Real tankOnTank = aiTargetKillRate( 800.0f, aiFramesToKill( 400.0f, tank ), 0.0f, SPEED );
+	tank.m_damagePerShot = 6.0f;
+	const Real tankOnSoldier = aiTargetKillRate( 300.0f, aiFramesToKill( 120.0f, tank ), 0.0f, SPEED );
+	CHECK( tankOnTank > tankOnSoldier );
+
+	/* a wounded enemy is a quicker kill than a fresh one of the same kind */
+	tank.m_damagePerShot = 60.0f;
+	CHECK( aiTargetKillRate( 800.0f, aiFramesToKill( 100.0f, tank ), 0.0f, SPEED ) > tankOnTank );
+
+	/* the drive into reach counts: the same Battlemaster 600 units out of reach is worth less, and
+	   one out of reach of a unit that cannot move is worth nothing */
+	const Real tankFrames = aiFramesToKill( 400.0f, tank );
+	CHECK_NEAR( 800.0f / ( tankFrames + 300.0f ), aiTargetKillRate( 800.0f, tankFrames, 600.0f, SPEED ), 0.0001f );
+	CHECK_NEAR( 0.0f, aiTargetKillRate( 800.0f, tankFrames, 600.0f, 0.0f ), 0.0001f );
+	CHECK_NEAR( tankOnTank, aiTargetKillRate( 800.0f, tankFrames, 0.0f, 0.0f ), 0.0001f );
+
+	/* nothing it can hurt rates 0, which still beats having no target: a unit with nothing it
+	   counters fires at whatever is there, the nearest first */
+	CHECK_NEAR( 0.0f, aiTargetKillRate( 800.0f, AI_CANNOT_KILL, 0.0f, SPEED ), 0.0001f );
+	CHECK( aiTargetBeats( targetRating( 1, 1.0f, 0.0f, 100.0f, (ObjectID)9 ), targetRating( 1, 1.0f, 0.0f, 400.0f, (ObjectID)2 ) ) );
+
+	/* the tiers: whoever just shot us is 2 wherever it stands; while something shoots us, an armed
+	   enemy in reach that dies within the quick-kill window is 2 too; any other armed one 1; one
+	   that cannot shoot back 0, however quickly it dies.  Not under fire, a quick kill is no tier of
+	   its own, so the armour decides: a Crusader does not take a Technical for dying fast */
+	const Real QUICK = INT_TO_REAL( AI_QUICK_KILL_FRAMES );
+	CHECK_EQ( aiTargetTier( TRUE, TRUE, TRUE, FALSE, 5000.0f ), 2 );
+	CHECK_EQ( aiTargetTier( TRUE, TRUE, FALSE, FALSE, AI_CANNOT_KILL ), 2 );
+	CHECK_EQ( aiTargetTier( FALSE, TRUE, TRUE, TRUE, QUICK ), 2 );
+	CHECK_EQ( aiTargetTier( FALSE, FALSE, TRUE, TRUE, QUICK ), 1 );
+	CHECK_EQ( aiTargetTier( FALSE, TRUE, TRUE, TRUE, QUICK + 1.0f ), 1 );
+	CHECK_EQ( aiTargetTier( FALSE, TRUE, TRUE, FALSE, 60.0f ), 1 );
+	CHECK_EQ( aiTargetTier( FALSE, TRUE, TRUE, TRUE, AI_CANNOT_KILL ), 1 );
+	CHECK_EQ( aiTargetTier( FALSE, TRUE, FALSE, TRUE, 60.0f ), 0 );
+
+	/* so the Battlemaster shooting the Humvee beats a Technical it would have to drive to, and
+	   loses to one already in reach that it finishes in seconds, whose truck armour its gun is
+	   more made for than the tank's (affinities from the armour test above) */
+	const Real HUMVEE_ON_TANK = 0.383f;
+	const Real HUMVEE_ON_TRUCK = 0.654f;
+	humvee.m_damagePerShot = 2.5f;
+	const Real humveeTankFrames = aiFramesToKill( 400.0f, humvee );
+	humvee.m_damagePerShot = 5.0f;
+	const Real humveeTruckFrames = aiFramesToKill( 180.0f, humvee );
+	CHECK_NEAR( 1920.0f, humveeTankFrames, 0.001f );
+	CHECK_NEAR( 432.0f, humveeTruckFrames, 0.001f );
+	CHECK( aiTargetBeats( targetRating( aiTargetTier( TRUE, TRUE, TRUE, TRUE, humveeTankFrames ), HUMVEE_ON_TANK, humveeOnTank, 0.0f, (ObjectID)9 ),
+												targetRating( aiTargetTier( FALSE, TRUE, TRUE, FALSE, humveeTruckFrames ), HUMVEE_ON_TRUCK, humveeOnTruck, 0.0f, (ObjectID)2 ) ) );
+	CHECK( aiTargetBeats( targetRating( aiTargetTier( FALSE, TRUE, TRUE, TRUE, humveeTruckFrames ), HUMVEE_ON_TRUCK, humveeOnTruck, 0.0f, (ObjectID)9 ),
+												targetRating( aiTargetTier( TRUE, TRUE, TRUE, TRUE, humveeTankFrames ), HUMVEE_ON_TANK, humveeOnTank, 0.0f, (ObjectID)2 ) ) );
+
+	/* armed beats unarmed whatever the armour or rate: no stopping for the dozer under the artillery */
+	CHECK( aiTargetBeats( targetRating( 1, 0.1f, 0.01f, 0.0f, (ObjectID)9 ), targetRating( 0, 2.0f, 100.0f, 0.0f, (ObjectID)2 ) ) );
+
+	/* a total order: tier, armour, rate, distance, then the lower ObjectID, the same whichever is
+	   asked first, so the pick never depends on the order the partition hands candidates out in */
+	const AITargetRating a = targetRating( 1, 1.0f, 0.5f, 100.0f, (ObjectID)2 );
+	const AITargetRating b = targetRating( 1, 1.0f, 0.5f, 100.0f, (ObjectID)9 );
+	CHECK( aiTargetBeats( a, b ) );
+	CHECK( !aiTargetBeats( b, a ) );
+	CHECK( !aiTargetBeats( a, a ) );
+	CHECK( aiTargetBeats( targetRating( 1, 1.0f, 0.6f, 900.0f, (ObjectID)9 ), a ) );
+	CHECK( aiTargetBeats( targetRating( 1, 1.1f, 0.1f, 900.0f, (ObjectID)9 ), a ) );
 }
 
 /* AI.cpp: the scripted-priority search a hunter runs over the whole map picks in one pass over
@@ -4038,6 +4278,12 @@ TEST(smoke_cap_grows_with_the_thickness_and_stops_at_the_ceiling)
 	CHECK_EQ(particleSmokeParticleCap(2500, 2.0f), 5000);
 	CHECK(particleSmokeParticleCap(2500, 4.0f) > particleSmokeParticleCap(2500, 2.0f));
 	CHECK_EQ(particleSmokeParticleCap(20000, 8.0f), 20000);
+	CHECK_EQ(particleSmokeParticleCap(15000, 2.0f), 20000);
+}
+
+TEST(smoke_cap_never_lowers_a_cap_the_player_set_above_the_ceiling)
+{
+	CHECK_EQ(particleSmokeParticleCap(1000000, 2.0f), 1000000);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -5355,116 +5601,25 @@ TEST(controlbar_command_places_go_in_rows_by_what_they_are_for)
 		CHECK_EQ( places[ slot ], manyPlaces[ slot ] );
 }
 
-TEST(controlbar_mod_slots_past_the_bar_fit_its_windows)
+TEST(hotkeys_force_attack_button_gone_from_the_bar_still_loads_from_a_file)
 {
-	enum { SLOTS = MAX_COMMANDS_PER_SET, WINDOWS = 14 };
-	const Int N = GUI_COMMAND_NONE, U = GUI_COMMAND_OBJECT_UPGRADE, W = GUI_COMMAND_SWITCH_WEAPON;
-	Bool windowed[ SLOTS ];
-	for( Int slot = 0; slot < SLOTS; slot++ )
-		windowed[ slot ] = slot < WINDOWS;
-	Int shown[ SLOTS ];
-
-	/* Contra's Cybr_AmericaInfantryRangerCommandSet: five drones, capture, two weapon switches, and
-	   attack move, guard and stop in 15, 17 and 18, which our fourteen windows lack.  The orders go to
-	   Zero Hour's 11, 13 and 14, the rest stay put */
-	const Int ranger[ SLOTS ] = { U, U, U, U, U, N, GUI_COMMAND_SPECIAL_POWER, W, N, W, N, N, N, N,
-		GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
-	ControlBar_fitCommandSlots( ranger, windowed, SLOTS, shown );
-	const Int rangerShown[ SLOTS ] = { 0, 1, 2, 3, 4, -1, 6, 7, -1, 9, 14, -1, 16, 17, -1, -1, -1, -1 };
-	for( Int slot = 0; slot < SLOTS; slot++ )
-		CHECK_EQ( shown[ slot ], rangerShown[ slot ] );
-
-	/* 11 taken by the mod's own button: attack move takes the first empty window, and a stray button
-	   past the bar comes after the orders */
-	const Int busy[ SLOTS ] = { U, N, N, N, N, N, N, N, N, N, U, N, N, N, U, GUI_COMMAND_ATTACK_MOVE, N, N };
-	ControlBar_fitCommandSlots( busy, windowed, SLOTS, shown );
-	CHECK_EQ( shown[ 0 ], 0 );
-	CHECK_EQ( shown[ 10 ], 10 );
-	CHECK_EQ( shown[ 1 ], 15 );
-	CHECK_EQ( shown[ 2 ], 14 );
-
-	/* a retail set never goes past fourteen and comes back slot for slot */
-	const Int humvee[ SLOTS ] = { U, U, U, N, N, N, N, N, GUI_COMMAND_EVACUATE, N, GUI_COMMAND_ATTACK_MOVE, N,
-		GUI_COMMAND_GUARD, GUI_COMMAND_STOP, N, N, N, N };
-	ControlBar_fitCommandSlots( humvee, windowed, SLOTS, shown );
-	for( Int slot = 0; slot < SLOTS; slot++ )
-		CHECK_EQ( shown[ slot ], humvee[ slot ] != N && slot < WINDOWS ? slot : -1 );
-}
-
-TEST(controlbar_wide_grid_only_for_a_set_past_fourteen)
-{
-	enum { SLOTS = MAX_COMMANDS_PER_SET };
-	const Int N = GUI_COMMAND_NONE, B = GUI_COMMAND_DOZER_CONSTRUCT, P = GUI_COMMAND_PURCHASE_SCIENCE;
-
-	/* Stealth's Arms Dealer: twelve buttons, one of them in 15, which the fourteen windows still hold */
-	const Int armsDealer[ SLOTS ] = { N, B, B, B, B, B, N, B, N, B, B, B, B, B, B, N, N, N };
-	CHECK( !ControlBar_needsWideCommandGrid( armsDealer, SLOTS ) );
-
-	/* a promotion screen's set has its own screen, however many slots it fills */
-	Int science[ SLOTS ];
-	for( Int slot = 0; slot < SLOTS; slot++ )
-		science[ slot ] = P;
-	CHECK( !ControlBar_needsWideCommandGrid( science, SLOTS ) );
-
-	/* fourteen fit, fifteen do not */
-	Int full[ SLOTS ];
-	for( Int slot = 0; slot < SLOTS; slot++ )
-		full[ slot ] = slot < 14 ? B : N;
-	CHECK( !ControlBar_needsWideCommandGrid( full, SLOTS ) );
-	full[ 16 ] = B;
-	CHECK( ControlBar_needsWideCommandGrid( full, SLOTS ) );
-}
-
-TEST(controlbar_force_attack_slot_is_under_attack_move)
-{
-	enum { SLOTS = MAX_COMMANDS_PER_SET, WINDOWS = 14 };
-	const Int N = GUI_COMMAND_NONE, U = GUI_COMMAND_OBJECT_UPGRADE, W = GUI_COMMAND_SWITCH_WEAPON;
-	Int types[ SLOTS ];
-	for( Int slot = 0; slot < SLOTS; slot++ )
-		types[ slot ] = N;
-	types[ 10 ] = GUI_COMMAND_ATTACK_MOVE;
-	types[ 12 ] = GUI_COMMAND_GUARD;
-	types[ 13 ] = GUI_COMMAND_STOP;
-	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, FALSE ), 11 );
-
-	types[ 11 ] = GUI_COMMAND_OBJECT_UPGRADE;
-	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, FALSE ), -1 );
-
-	types[ 11 ] = N;
-	types[ 10 ] = N;
-	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, FALSE ), -1 );
-
-	/* A base defence that shoots, or a Combat Chinook, has no Attack Move. Patriot (Stop 13, Sell 14)
-	   and the Chinook take 12; Gattling Cannon and Bunker (mines 12) take 11 above them; GLA Tunnel
-	   Network and the Infantry General's Bunker fill 1 to 14 and get none */
-	types[ 12 ] = GUI_COMMAND_STOP;
-	types[ 13 ] = GUI_COMMAND_SELL;
-	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, TRUE ), 11 );
-	types[ 11 ] = GUI_COMMAND_PLAYER_UPGRADE;
-	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, TRUE ), 10 );
-	for( Int slot = 0; slot < 14; slot++ )
-		types[ slot ] = GUI_COMMAND_EXIT_CONTAINER;
-	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, TRUE ), -1 );
-
-	/* Contra ranger: Attack Move in 15, slot 12 empty. Inject then fit keeps Force Attack in 12
-	   and still maps Attack Move, Guard and Stop to 11, 13 and 14 */
-	Bool windowed[ SLOTS ];
-	Int shown[ SLOTS ];
-	for( Int slot = 0; slot < SLOTS; slot++ )
-		windowed[ slot ] = slot < WINDOWS;
-	Int ranger[ SLOTS ] = { U, U, U, U, U, N, GUI_COMMAND_SPECIAL_POWER, W, N, W, N, N, N, N,
-		GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
-	CHECK_EQ( ControlBar_forceAttackSlot( ranger, SLOTS, FALSE ), 11 );
-	ranger[ 11 ] = GUI_COMMAND_FORCE_ATTACK;
-	ControlBar_fitCommandSlots( ranger, windowed, SLOTS, shown );
-	CHECK_EQ( shown[ 10 ], 14 );
-	CHECK_EQ( shown[ 11 ], 11 );
-	CHECK_EQ( shown[ 12 ], 16 );
-	CHECK_EQ( shown[ 13 ], 17 );
-
 	/* Force Attack is Ctrl: the English label's F stays off the button */
 	CHECK_EQ( HotKeyManager::playerButtonKey( AsciiString( "Command_ForceAttack" ), 'F',
 		GUI_COMMAND_FORCE_ATTACK ), 0 );
+
+	/* A file written while the button stood on the bar reads and writes back as it was, hold included */
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	const HotkeysFile file = Hotkeys_parse(
+		"CommandMap BEGIN_FORCEATTACK\r\n  Key = KEY_NONE\r\n  Modifiers = ALT\r\n  UseableIn = GAME\r\nEnd\r\n"
+		"CommandButtonHotKey Command_ForceAttack\r\n  Key = W\r\nEnd\r\n"
+		"CommandButtonHotKey Command_ForceAttack@12\r\n  Key = Q\r\nEnd\r\n", rows );
+	CHECK( file.commands.find( "BEGIN_FORCEATTACK" )->second == HotkeyBinding( "", "ALT" ) );
+	CHECK_STR( file.buttons.find( "Command_ForceAttack" )->second.c_str(), "W" );
+	CHECK_STR( file.buttons.find( "Command_ForceAttack@12" )->second.c_str(), "Q" );
+	const HotkeysFile again = Hotkeys_parse( Hotkeys_format( file, rows ), rows );
+	CHECK( again.commands.find( "BEGIN_FORCEATTACK" )->second == HotkeyBinding( "", "ALT" ) );
+	CHECK_STR( again.buttons.find( "Command_ForceAttack" )->second.c_str(), "W" );
+	CHECK_STR( again.buttons.find( "Command_ForceAttack@12" )->second.c_str(), "Q" );
 }
 
 /* FixedOrderKeys, Enabled = No: the keys as shipped.  The German Guard is W and its rally point U, and
@@ -5495,6 +5650,115 @@ TEST(hotkeys_fixed_order_keys_switch_off_gives_the_labels_letters)
 	CHECK( !Hotkeys_parse( text, rows ).fixedOrderKeys );
 	file.fixedOrderKeys = TRUE;
 	CHECK( Hotkeys_format( file, rows ).find( "FixedOrderKeys" ) == std::string::npos );
+}
+
+/* CommandBarGrid, Enabled = Yes: a bar button's key is its window slot, ButtonCommand01 Q over 02 A
+   down the columns, the bar's upgrades X C V B N in slot order, and the player's Name@slot over his
+   Name over the grid */
+TEST(hotkeys_command_bar_grid_keys_by_window_slot)
+{
+	// two rows read down the columns, seven on the bar, nine on the wide one
+	static const char TOP[] = "QWERTYUIO", BOTTOM[] = "ASDFGHJKL";
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
+		CHECK_EQ( HotKeyManager::commandBarGridKey( slot, -1 ), (WideChar)( slot % 2 == 0 ? TOP : BOTTOM )[ slot / 2 ] );
+	CHECK_EQ( HotKeyManager::commandBarGridKey( 13, -1 ), (WideChar)'J' );		// ButtonCommand14, the narrow bar's last
+	CHECK_EQ( HotKeyManager::commandBarGridKey( 14, -1 ), (WideChar)'I' );		// 15, the wide bar's eighth column
+	CHECK_EQ( HotKeyManager::commandBarGridKey( 17, -1 ), (WideChar)'L' );		// 18, its ninth, bottom
+	CHECK_EQ( HotKeyManager::commandBarGridKey( 18, -1 ), 0 );
+	CHECK_EQ( HotKeyManager::commandBarGridKey( -1, -1 ), 0 );
+
+	// upgrades in slot order, whatever else stands between; the sixth keeps its slot's letter
+	const Int N = GUI_COMMAND_NONE, U = GUI_COMMAND_PLAYER_UPGRADE, O = GUI_COMMAND_OBJECT_UPGRADE, B = GUI_COMMAND_UNIT_BUILD;
+	const Int types[ MAX_COMMANDS_PER_SET ] = { B, U, N, O, B, U, U, N, O, N, U, N, N, N, N, N, N, N };
+	Int ranks[ MAX_COMMANDS_PER_SET ];
+	HotKeyManager::commandBarUpgradeRanks( types, MAX_COMMANDS_PER_SET, ranks );
+	static const Int RANKS[ MAX_COMMANDS_PER_SET ] = { -1, 0, -1, 1, -1, 2, 3, -1, 4, -1, 5, -1, -1, -1, -1, -1, -1, -1 };
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
+		CHECK_EQ( ranks[ slot ], RANKS[ slot ] );
+	static const char KEYS[] = "QXWCEVBFNGYHUJIKOL";
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
+		CHECK_EQ( HotKeyManager::commandBarGridKey( slot, ranks[ slot ] ), (WideChar)KEYS[ slot ] );
+
+	std::map< std::string, WideChar > keys;
+	const AsciiString guard( "Command_Guard" ), exit( "Command_TransportExit" ), mines( "Command_UpgradeChinaMines" );
+	CHECK( !HotKeyManager::commandBarGrid() );
+	HotKeyManager::setCommandBarGrid( TRUE );
+	// the fixed keys are off on the bar: guard in slot 13 is U; off the bar it is still G
+	CHECK_EQ( HotKeyManager::buttonKeyIn( guard, 'G', GUI_COMMAND_GUARD, keys, 12, -1 ), (WideChar)'U' );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( guard, 'G', GUI_COMMAND_GUARD, keys ), (WideChar)'G' );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( mines, 'M', GUI_COMMAND_PLAYER_UPGRADE, keys, 4, 1 ), (WideChar)'C' );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( mines, 'M', GUI_COMMAND_PLAYER_UPGRADE, keys, 4, 5 ), (WideChar)'E' );
+	// a rank on anything but an upgrade means nothing; Force Attack is Ctrl
+	CHECK_EQ( HotKeyManager::buttonKeyIn( exit, 0, GUI_COMMAND_EXIT_CONTAINER, keys, 2, 0 ), (WideChar)'W' );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( AsciiString( "Command_ForceAttack" ), 'F', GUI_COMMAND_FORCE_ATTACK, keys, 11, -1 ), 0 );
+
+	// the player's Name beats the grid, his Name@slot beats Name in that slot only, and NONE is none
+	keys[ "command_transportexit" ] = 'Z';
+	keys[ "command_transportexit@4" ] = 'M';
+	keys[ "command_transportexit@6" ] = 0;
+	CHECK_EQ( HotKeyManager::buttonKeyIn( exit, 0, GUI_COMMAND_EXIT_CONTAINER, keys, 0, -1 ), (WideChar)'Z' );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( exit, 0, GUI_COMMAND_EXIT_CONTAINER, keys, 3, -1 ), (WideChar)'M' );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( exit, 0, GUI_COMMAND_EXIT_CONTAINER, keys, 5, -1 ), 0 );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( exit, 0, GUI_COMMAND_EXIT_CONTAINER, keys ), (WideChar)'Z' );
+	HotKeyManager::setCommandBarGrid( FALSE );
+	// a slot's own key holds without the grid too; the rest is as before
+	CHECK_EQ( HotKeyManager::buttonKeyIn( exit, 0, GUI_COMMAND_EXIT_CONTAINER, keys, 3, -1 ), (WideChar)'M' );
+	CHECK_EQ( HotKeyManager::buttonKeyIn( guard, 'W', GUI_COMMAND_GUARD, keys, 12, -1 ), (WideChar)'G' );
+
+	// the options page's Accept keeps the switch and every slot's key
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	static const char FILE_TEXT[] =
+		"CommandBarGrid\r\n  Enabled = Yes\r\nEnd\r\n\r\n"
+		"CommandButtonHotKey Command_TransportExit@4\r\n  Key = M\r\nEnd\r\n\r\n"
+		"CommandButtonHotKey Command_TransportExit@8\r\n  Key = NONE\r\nEnd\r\n\r\n";
+	HotkeysFile file = Hotkeys_parse( FILE_TEXT, rows );
+	CHECK( file.commandBarGrid );
+	CHECK_STR( file.buttons[ "Command_TransportExit@4" ].c_str(), "M" );
+	CHECK( file.buttons.count( "Command_TransportExit@8" ) == 1 );
+	const std::string text = Hotkeys_format( file, rows );
+	CHECK( text.find( FILE_TEXT ) != std::string::npos );
+	CHECK( Hotkeys_format( Hotkeys_parse( text, rows ), rows ) == text );
+	file.commandBarGrid = FALSE;
+	CHECK( Hotkeys_format( file, rows ).find( "CommandBarGrid" ) == std::string::npos );
+}
+
+/* Issue 128: one keystroke does one thing, decided on the press.  W selected every aircraft on its
+   press, the empty selection put a worker's bar up, and the release started his War Factory from W */
+TEST(hotkeys_one_keystroke_does_one_thing)
+{
+	enum { W = 0x11, Q = 0x10, E = 0x12 };
+
+	// a showing button holds W as the key goes down: the command map stands aside, the release presses it
+	HotKeyManager::strokeDown( W, TRUE );
+	CHECK( HotKeyManager::strokeToBar( W ) );
+	CHECK( HotKeyManager::strokePressesBar( W ) );
+	CHECK( !HotKeyManager::strokeToBar( W ) );			// the release ends the stroke
+
+	// nothing holds W on the press, so the command fires; the bar its selection brought up presses nothing
+	HotKeyManager::strokeDown( W, FALSE );
+	CHECK( !HotKeyManager::strokeToBar( W ) );
+	HotKeyManager::strokeToCommand( W );
+	CHECK( !HotKeyManager::strokePressesBar( W ) );
+	// and the next stroke starts clean
+	HotKeyManager::strokeDown( W, FALSE );
+	CHECK( HotKeyManager::strokePressesBar( W ) );
+
+	// a key with no command and no button on its press still presses what the bar shows on release
+	HotKeyManager::strokeDown( E, FALSE );
+	CHECK( HotKeyManager::strokePressesBar( E ) );
+
+	// strokes are per key: Q held for the bar while W went to a command
+	HotKeyManager::strokeDown( Q, TRUE );
+	HotKeyManager::strokeDown( W, FALSE );
+	HotKeyManager::strokeToCommand( W );
+	CHECK( HotKeyManager::strokeToBar( Q ) );
+	CHECK( HotKeyManager::strokePressesBar( Q ) );
+	CHECK( !HotKeyManager::strokePressesBar( W ) );
+
+	// no hotkey manager, no bar: a key out of range or with Ctrl never belongs to it
+	CHECK( !HotKeyManager::barHoldsKey( W, 0 ) );
+	CHECK( !HotKeyManager::strokeToBar( -1 ) );
+	CHECK( HotKeyManager::strokePressesBar( 4096 ) );
 }
 
 TEST(metamap_format_chord_names_the_hold)
@@ -9983,6 +10247,42 @@ TEST(a_hill_hides_the_ground_behind_it_not_the_aircraft_over_it)
 	CHECK( PartitionManager_sightCellFlags( TRUE, 6, 0, 4 ) == SIGHT_CELL_GROUND );
 }
 
+/** A tree or a bump in the ground hid single cells and one-cell streaks inside a unit's sight, and
+	 the fog came out dotted. A hidden cell with nearly all of its neighbours in sight is in sight;
+	 a strip two cells wide, and the edge of the sight itself, stay as they were. */
+TEST(sight_has_no_one_cell_holes)
+{
+	const Int side = 7;
+	UnsignedByte cells[ side * side ];
+
+	for( Int cell = 0; cell < side * side; ++cell )
+		cells[ cell ] = SIGHT_CELL_GROUND;
+	cells[ 2 * side + 2 ] = 0;
+	for( Int x = 0; x < side; ++x )
+		cells[ 4 * side + x ] = 0;
+	PartitionManager_closeSightGaps( cells, side );
+	CHECK( cells[ 2 * side + 2 ] == SIGHT_CELL_GROUND );
+	CHECK( cells[ 4 * side + 3 ] == SIGHT_CELL_GROUND );
+	CHECK( cells[ 4 * side + 0 ] == 0 );
+
+	for( Int cell = 0; cell < side * side; ++cell )
+		cells[ cell ] = SIGHT_CELL_GROUND;
+	for( Int x = 0; x < side; ++x )
+	{
+		cells[ 3 * side + x ] = 0;
+		cells[ 4 * side + x ] = 0;
+	}
+	PartitionManager_closeSightGaps( cells, side );
+	CHECK( cells[ 3 * side + 3 ] == 0 );
+	CHECK( cells[ 4 * side + 3 ] == 0 );
+
+	// a shadow's corner keeps its shape
+	for( Int cell = 0; cell < side * side; ++cell )
+		cells[ cell ] = ( cell / side >= 3 && cell % side >= 3 ) ? 0 : SIGHT_CELL_GROUND;
+	PartitionManager_closeSightGaps( cells, side );
+	CHECK( cells[ 3 * side + 3 ] == 0 );
+}
+
 /** Since the plan reveals nothing, the fog it was placed in would swallow it - and there would be
 	 nothing left on screen to click on and cancel.  Your own plan is drawn through the fog; anything
 	 else fogged, including an enemy's, is still hidden. */
@@ -10163,6 +10463,9 @@ struct RMGParse
 	AsciiString m_textureName;
 	std::vector<AsciiString> m_textureNames;
 	std::vector<Int> m_firstTiles;
+	std::vector<Int> m_classTiles, m_classWidths;	///< each class's tile count and sheet width
+	std::vector<Short> m_cliffIndexes;			///< per cell, into m_cliffInfos; 0 is the planar tiling
+	std::vector<RMGCliffInfo> m_cliffInfos;		///< the table, entry 0 the default the file never holds
 	std::vector<AsciiString> m_waypointNames;
 	std::vector<Coord3D> m_waypointPositions;
 	std::vector<AsciiString> m_pathWaypointNames;		///< the approach paths' waypoints, "Center2_from1_0"
@@ -10226,8 +10529,17 @@ static Bool RMGParseBlendTile( DataChunkInput &file, DataChunkInfo *info, void *
 	theRMGParse.m_extraBlendIndexes.resize( len );
 	file.readArrayOfBytes( (char *)&theRMGParse.m_extraBlendIndexes[0], len * sizeof(Short) );
 
-	std::vector<Short> scratch( len );
-	file.readArrayOfBytes( (char *)&scratch[0], len * sizeof(Short) );	// cliff info
+	theRMGParse.m_cliffIndexes.resize( len );
+	file.readArrayOfBytes( (char *)&theRMGParse.m_cliffIndexes[0], len * sizeof(Short) );
+
+	// a cliff bit a cell from version 7 on (version 7 itself wrote rows one byte short): without
+	// skipping them the counts below were read out of the bits and came out whatever they held
+	if( info->version >= 7 )
+	{
+		Int rowBytes = info->version == 7 ? ( theRMGParse.m_width + 1 ) / 8 : ( theRMGParse.m_width + 7 ) / 8;
+		std::vector<char> cliffBits( rowBytes * theRMGParse.m_height + 1 );
+		file.readArrayOfBytes( &cliffBits[0], rowBytes * theRMGParse.m_height );
+	}
 
 	theRMGParse.m_numBitmapTiles = file.readInt();
 	theRMGParse.m_numBlendedTiles = file.readInt();
@@ -10243,6 +10555,8 @@ static Bool RMGParseBlendTile( DataChunkInput &file, DataChunkInfo *info, void *
 
 		AsciiString name = file.readAsciiString();
 		theRMGParse.m_firstTiles.push_back( firstTile );
+		theRMGParse.m_classTiles.push_back( theRMGParse.m_numTiles );
+		theRMGParse.m_classWidths.push_back( theRMGParse.m_tileWidth );
 		theRMGParse.m_textureNames.push_back( name );
 
 		if( i == 0 )
@@ -10270,6 +10584,22 @@ static Bool RMGParseBlendTile( DataChunkInput &file, DataChunkInfo *info, void *
 		entry.m_customBlendEdgeClass = file.readInt();
 		entry.m_flag = file.readInt();
 		theRMGParse.m_blends.push_back( entry );
+	}
+
+	// and the cliff mappings after it, version 5 on, entry 0 again the default
+	theRMGParse.m_cliffInfos.assign( 1, RMGCliffInfo() );
+	for( Int cliff = 1; cliff < theRMGParse.m_numCliffInfo && info->version >= 5; cliff++ )
+	{
+		RMGCliffInfo entry;
+		entry.m_tileIndex = file.readInt();
+		for( Int k = 0; k < 4; k++ )
+		{
+			entry.m_u[k] = file.readReal();
+			entry.m_v[k] = file.readReal();
+		}
+		entry.m_flip = file.readByte() != 0;
+		file.readByte();								// mutant
+		theRMGParse.m_cliffInfos.push_back( entry );
 	}
 
 	theRMGParse.m_blendBytesLeftOver = file.atEndOfChunk() ? 0 : 1;
@@ -10423,6 +10753,50 @@ static void parseGeneratedMap( std::vector<char>& bytes )
 	CHECK( input.parse( NULL ) == TRUE );
 }
 
+/// The parsed map's texture class index of a tile index (BlendTileData's tile, or a blend entry's).
+static Int RMGClassOfTile( Int tile )
+{
+	Int best = 0;
+	for( Int c = 0; c < (Int)theRMGParse.m_firstTiles.size(); c++ )
+		if( theRMGParse.m_firstTiles[c] <= ( tile >> 2 ) && theRMGParse.m_firstTiles[c] >= theRMGParse.m_firstTiles[best] )
+			best = c;
+	return best;
+}
+
+/** The parsed map's cliff mapping against what the renderer can use: indexes past the table, entries
+	of another class than their cell's (getUVForTileIndex ignores those), coordinates outside the
+	class's block of the terrain texture (they draw a neighbouring class), and the cells mapped. */
+struct RMGCliffCensus
+{
+	Int badIndexes, foreignEntries, outsideSheet, mapped;
+};
+
+static RMGCliffCensus RMGCliffCount( void )
+{
+	RMGCliffCensus census = { 0, 0, 0, 0 };
+	for( Int i = 0; i < (Int)theRMGParse.m_cliffIndexes.size(); i++ )
+	{
+		const Int index = theRMGParse.m_cliffIndexes[i];
+		if( index == 0 )
+			continue;
+		if( index < 0 || index >= (Int)theRMGParse.m_cliffInfos.size() )
+		{
+			census.badIndexes++;
+			continue;
+		}
+		census.mapped++;
+		const RMGCliffInfo& entry = theRMGParse.m_cliffInfos[index];
+		const Int c = RMGClassOfTile( theRMGParse.m_tiles[i] );
+		if( RMGClassOfTile( entry.m_tileIndex ) != c )
+			census.foreignEntries++;
+		const Real extent = (Real)theRMGParse.m_classWidths[c] / 32.0f;
+		for( Int k = 0; k < 4; k++ )
+			if( entry.m_u[k] < 0.0f || entry.m_u[k] > extent || entry.m_v[k] > 0.0f || entry.m_v[k] < -extent )
+				census.outsideSheet++;
+	}
+	return census;
+}
+
 //-------------------------------------------------------------------------------------------------
 /** The whole point of generating a map from a seed instead of shipping a file: every machine in
 	the game has to build identical bytes, or the map CRC that guards the lobby is worthless.
@@ -10481,19 +10855,30 @@ TEST(a_generated_map_reads_back_through_the_engines_own_chunk_reader)
 	// ParseBlendTileData throws ERROR_CORRUPT_FILE_FORMAT unless these two agree.
 	CHECK_EQ( theRMGParse.m_blendDataSize, theRMGParse.m_dataSize );
 
+	// Each class as big as its image, as the shipped maps declare it: SandLargeType1 is six tiles by
+	// six, the other three two by two, one after another.
 	CHECK_EQ( theRMGParse.m_numTextureClasses, 4 );
 	CHECK_EQ( theRMGParse.m_firstTile, 0 );
+	CHECK_EQ( theRMGParse.m_classTiles[1], 36 );
+	CHECK_EQ( theRMGParse.m_classWidths[1], 6 );
 	CHECK_EQ( theRMGParse.m_numTiles, 4 );
 	CHECK_EQ( theRMGParse.m_tileWidth, 2 );
-	CHECK_EQ( theRMGParse.m_numBitmapTiles, 4 * 4 );	// four classes of four tiles
+	CHECK_EQ( theRMGParse.m_numBitmapTiles, 4 + 36 + 4 + 4 );
 	CHECK( theRMGParse.m_numBlendedTiles > 1 );			// entry 0 is the default; the rest are real
-	CHECK_EQ( theRMGParse.m_numCliffInfo, 1 );			// entry 0 is the default, no cliff faces
-	CHECK_EQ( theRMGParse.m_blendBytesLeftOver, 0 );	// the blend table ends where the chunk does
+	CHECK( theRMGParse.m_numCliffInfo >= 1 );			// entry 0 is the default
+	CHECK( theRMGParse.m_numCliffInfo <= 32384 );		// NUM_CLIFF_INFO, or the reader throws
+	CHECK_EQ( theRMGParse.m_blendBytesLeftOver, 0 );	// the cliff table ends where the chunk does
 	CHECK_STR( theRMGParse.m_textureName.str(), "GrassType1" );
 	CHECK_STR( theRMGParse.m_textureNames[1].str(), "SandLargeType1" );
 	CHECK_STR( theRMGParse.m_textureNames[2].str(), "DirtType1" );
 	CHECK_STR( theRMGParse.m_textureNames[3].str(), "RocksType1" );
-	CHECK_EQ( theRMGParse.m_firstTiles[3], 12 );
+	CHECK_EQ( theRMGParse.m_firstTiles[3], 44 );
+
+	// Every cliff index names an entry, of its cell's class, inside that class's block.
+	const RMGCliffCensus census = RMGCliffCount();
+	CHECK_EQ( census.badIndexes, 0 );
+	CHECK_EQ( census.foreignEntries, 0 );
+	CHECK_EQ( census.outsideSheet, 0 );
 
 	CHECK_EQ( theRMGParse.m_weather, 0 );
 	CHECK_EQ( theRMGParse.m_compression, 0 );
@@ -10536,6 +10921,83 @@ TEST(a_generated_map_reads_back_through_the_engines_own_chunk_reader)
 	CHECK( theRMGParse.m_timeOfDay < (Int)TIME_OF_DAY_COUNT );
 	CHECK_EQ( theRMGParse.m_lightingBytesLeftOver, 0 );
 	CHECK( theRMGParse.m_terrainAmbient[TIME_OF_DAY_AFTERNOON - TIME_OF_DAY_FIRST][0] > 0.2f );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The twilight style's rim rises about 29 height bytes a cell, which the planar tiling drew with
+	its rock stretched to twice its length down the face, out of a quarter of CliffLargeType10's
+	image. Its rock class is the whole 4 by 4 sheet now, and a rock cell that rises down its fall
+	takes a cliff entry: one the reader holds, of the rock's own class, inside its block of the
+	texture, drawn by height, so a face's texture runs as far as the face does. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_style_maps_cliff_faces_carry_a_cliff_mapping_of_their_own_rock)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 7;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = 300;
+	settings.m_style = 1;
+
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+
+	CHECK_STR( theRMGParse.m_textureNames[3].str(), "CliffLargeType10" );
+	CHECK_EQ( theRMGParse.m_classTiles[3], 16 );
+	CHECK_EQ( theRMGParse.m_classWidths[3], 4 );
+	CHECK_EQ( theRMGParse.m_blendBytesLeftOver, 0 );
+
+	// No mapped edge is drawn more stretched than the plane drew it, past 1.6 times: an edge a cell's
+	// height mapping gives no length (a cell flat down one side of its fall) would be a smear of one texel.
+	const Int W = theRMGParse.m_width, H = theRMGParse.m_height;
+	Int steepRock = 0, worseThanThePlane = 0, planarPastTwo = 0, drawnPastTwo = 0;
+	for( Int y = 0; y + 1 < H; y++ )
+	{
+		for( Int x = 0; x + 1 < W; x++ )
+		{
+			const Int i = y * W + x;
+			const Int h[4] = { theRMGParse.m_heights[i], theRMGParse.m_heights[i + 1], theRMGParse.m_heights[i + W + 1], theRMGParse.m_heights[i + W] };
+			if( RMGClassOfTile( theRMGParse.m_tiles[i] ) != 3 )
+				continue;
+			const Int index = theRMGParse.m_cliffIndexes[i];
+			const Bool mapped = index > 0 && index < (Int)theRMGParse.m_cliffInfos.size();
+			Real planarWorst = 0.0f, drawnWorst = 0.0f;
+			for( Int k = 0; k < 4; k++ )
+			{
+				const Int n = ( k + 1 ) & 3;
+				// in cells: one across, a height byte a sixteenth of one up
+				const Real world = sqrtf( 1.0f + sqr( (Real)( h[k] - h[n] ) / 16.0f ) );
+				Real drawn = world;
+				if( mapped )
+				{
+					const RMGCliffInfo& entry = theRMGParse.m_cliffInfos[index];
+					const Real texture = sqrtf( sqr( entry.m_u[k] - entry.m_u[n] ) + sqr( entry.m_v[k] - entry.m_v[n] ) ) * 64.0f;
+					drawn = texture > 0.0f ? world / texture : 1000.0f;
+					if( drawn > std::max( world, 1.6f ) )
+						worseThanThePlane++;
+				}
+				planarWorst = std::max( planarWorst, world );
+				drawnWorst = std::max( drawnWorst, drawn );
+			}
+			if( planarWorst <= sqrtf( 1.0f + sqr( 12.0f / 16.0f ) ) )
+				continue;
+			steepRock++;
+			planarPastTwo += planarWorst > 2.0f;
+			drawnPastTwo += drawnWorst > 2.0f;
+		}
+	}
+	const RMGCliffCensus census = RMGCliffCount();
+	CHECK( steepRock > 1000 );
+	CHECK( census.mapped > steepRock / 2 );
+	CHECK_EQ( worseThanThePlane, 0 );
+	CHECK( planarPastTwo > steepRock / 5 );
+	CHECK( drawnPastTwo * 2 < planarPastTwo );		// 28.5% of the steep rock past twice its length, now 8.5%
+	CHECK_EQ( census.badIndexes, 0 );
+	CHECK_EQ( census.foreignEntries, 0 );
+	CHECK_EQ( census.outsideSheet, 0 );
+	CHECK_EQ( (Int)theRMGParse.m_cliffInfos.size(), theRMGParse.m_numCliffInfo );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -10650,7 +11112,7 @@ TEST(every_generated_tile_index_names_a_tile_the_map_declared)
 	}
 
 	CHECK( worstSource >= 0 );
-	CHECK( worstSource < theRMGParse.m_numTextureClasses * theRMGParse.m_numTiles );
+	CHECK( worstSource < theRMGParse.m_numBitmapTiles );
 	CHECK_EQ( quadrantsSeen, 0xf );		// all four quadrants of the sheet get used
 }
 
@@ -10912,6 +11374,25 @@ TEST(start_positions_land_inside_the_map_with_room_between_them)
 			}
 		}
 	}
+
+	/* A lake map with water on three sides of the seats: a thin pool of dry flats used to run the
+		ring search out of seats or stack two bases. Every seat, and two base discs and a gap apart. */
+	settings.m_seed = 121;
+	settings.m_numPlayers = 8;
+	settings.m_playableCells = 280;
+	std::vector<char> lakeBytes;
+	RandomMapGenerator::generate( settings, lakeBytes );
+	parseGeneratedMap( lakeBytes );
+	CHECK_EQ( (Int)theRMGParse.m_waypointPositions.size(), 8 );
+	Real closest = 1.0e9f;
+	for( size_t i = 0; i < theRMGParse.m_waypointPositions.size(); i++ )
+		for( size_t j = i + 1; j < theRMGParse.m_waypointPositions.size(); j++ )
+		{
+			Real dx = theRMGParse.m_waypointPositions[i].x - theRMGParse.m_waypointPositions[j].x;
+			Real dy = theRMGParse.m_waypointPositions[i].y - theRMGParse.m_waypointPositions[j].y;
+			closest = std::min( closest, sqrtf( dx * dx + dy * dy ) );
+		}
+	CHECK( closest >= ( 2.0f * 13.0f + 6.0f ) * MAP_XY_FACTOR );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -11058,7 +11539,7 @@ TEST(every_texture_boundary_is_blended_rather_than_cut)
 
 		std::vector<Int> ground( width * height );
 		for( i = 0; i < width * height; i++ )
-			ground[i] = (theRMGParse.m_tiles[i] >> 2) / 4;
+			ground[i] = RMGClassOfTile( theRMGParse.m_tiles[i] );
 
 		Int boundaries = 0;
 		Int extraLayers = 0;
@@ -11114,7 +11595,7 @@ TEST(every_texture_boundary_is_blended_rather_than_cut)
 						extraLayers++;
 
 					const RMGBlendEntry& entry = theRMGParse.m_blends[layers[layer] - 1];
-					Int layerClass = (entry.m_blendTileIndex >> 2) / 4;
+					Int layerClass = RMGClassOfTile( entry.m_blendTileIndex );
 					if( layerClass <= previousClass )
 						badIndexes++;			// a layer has to be a higher ground than what it covers
 					previousClass = layerClass;
@@ -11539,6 +12020,295 @@ TEST(a_generated_lake_follows_the_valley)
 	}
 
 	CHECK( elongated > 0 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A base levelled beside a lake used to level the lake bed with it: the water polygon stayed where
+	the lake was carved and dry ground stood up through it, the start's height under the water's.
+	Seed 206 at two seats had over a hundred such cells, all in the ring round one base. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_base_beside_a_lake_leaves_the_lake_bed_under_the_water)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 206;
+	settings.m_numPlayers = 2;
+	settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 2 );
+
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+	CHECK( !theRMGParse.m_waterPolygons.empty() );
+	if( theRMGParse.m_waterPolygons.empty() )
+		return;
+
+	// two cells inside the polygon every way: the bank itself slopes through the waterline
+	const Real waterZ = theRMGParse.m_waterPolygons[0][0].z;
+	const Real two = 2.0f * MAP_XY_FACTOR;
+	Int deep = 0, raised = 0;
+	for( Int y = theRMGParse.m_border; y < theRMGParse.m_height - theRMGParse.m_border; y++ )
+	{
+		for( Int x = theRMGParse.m_border; x < theRMGParse.m_width - theRMGParse.m_border; x++ )
+		{
+			Real worldX = (Real)(x - theRMGParse.m_border) * MAP_XY_FACTOR;
+			Real worldY = (Real)(y - theRMGParse.m_border) * MAP_XY_FACTOR;
+			if( !insideAWaterArea( worldX, worldY ) || !insideAWaterArea( worldX + two, worldY ) ||
+					!insideAWaterArea( worldX - two, worldY ) || !insideAWaterArea( worldX, worldY + two ) ||
+					!insideAWaterArea( worldX, worldY - two ) )
+				continue;
+			deep++;
+			if( (Real)theRMGParse.m_heights[y * theRMGParse.m_width + x] * MAP_HEIGHT_SCALE > waterZ )
+				raised++;
+		}
+	}
+	CHECK( deep > 0 );
+	CHECK_EQ( raised, 0 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A style's bowl skips the soft floor the plain maps are eased onto, so its deepest pits went below
+	nought before the height was stored as a byte. That conversion is undefined; x64 wrapped -3 to 253
+	and left a field of cliff spikes in the pit, and another compiler or CPU may store something else
+	under the same map name. No stored height is ever 0 or 255, so either one is a wrapped pit. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_style_maps_deepest_pit_is_ground_not_a_wrapped_spike)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 11;
+	settings.m_numPlayers = 6;
+	settings.m_playableCells = 383;
+	settings.m_style = 1;
+
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+
+	Int wrapped = 0;
+	for( size_t c = 0; c < theRMGParse.m_heights.size(); c++ )
+	{
+		if( theRMGParse.m_heights[c] == 0 || theRMGParse.m_heights[c] == 255 )
+			wrapped++;
+	}
+	CHECK( !theRMGParse.m_heights.empty() );
+	CHECK_EQ( wrapped, 0 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Each seat places one contested dock, toward the next seat round the map, and it stands on the
+	placer's side as the crow flies. The four-way walk the docks were placed by, and the lowest
+	index winning a tie between two ring neighbours, gave seed 22 two contested docks by seat 0 and
+	none by seat 3. Counted as the crow flies, every seat is nearest its home dock and one other. */
+//-------------------------------------------------------------------------------------------------
+TEST(every_gap_between_two_seats_gets_one_contested_dock)
+{
+	CHECK( bootOnce() );
+
+	static const Int theMaps[][3] = { { 22, 4, 304 }, { 13, 3, 260 }, { 5, 4, 280 } };
+	for( Int s = 0; s < 3; s++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = theMaps[s][0];
+		settings.m_numPlayers = theMaps[s][1];
+		settings.m_playableCells = theMaps[s][2];
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+
+		const Int players = (Int)theRMGParse.m_waypointPositions.size();
+		CHECK_EQ( players, settings.m_numPlayers );
+		std::vector<Int> nearestTo( players, 0 );
+		for( Int k = 0; k < (Int)theRMGParse.m_objectNames.size(); k++ )
+		{
+			if( theRMGParse.m_objectNames[k].compare( "SupplyDock" ) != 0 )
+				continue;
+			// octile, as the pathfinder counts a straight run: a straight line can differ by a cell
+			Int best = 0;
+			Real bestDistance = 1.0e9f;
+			for( Int i = 0; i < players; i++ )
+			{
+				Real dx = fabsf( theRMGParse.m_objectPositions[k].x - theRMGParse.m_waypointPositions[i].x );
+				Real dy = fabsf( theRMGParse.m_objectPositions[k].y - theRMGParse.m_waypointPositions[i].y );
+				Real d = std::max( dx, dy ) + 0.4f * std::min( dx, dy );
+				if( d < bestDistance )
+				{
+					bestDistance = d;
+					best = i;
+				}
+			}
+			nearestTo[best]++;
+		}
+		for( Int i = 0; i < players; i++ )
+		{
+			if( nearestTo[i] != 2 )
+				printf( "  seed %d: seat %d is nearest %d docks\n", settings.m_seed, i, nearestTo[i] );
+			CHECK_EQ( nearestTo[i], 2 );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The woods used to be planted at every second cell in a solid grid: the chance a cell was taken
+	was read off eight bits of a hash as a per-mille, which never came to more than a quarter, so any
+	chance past that planted every cell. A wood thins towards its edge now, and a tree with six of its
+	eight neighbours on the planting grid taken - a third of the trees on seed 44 - is the exception. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_wood_is_planted_thick_and_thin_not_as_a_solid_grid)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 44;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 4 );
+
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+
+	std::set< std::pair<Int, Int> > trees;
+	for( Int k = 0; k < (Int)theRMGParse.m_objectNames.size(); k++ )
+	{
+		if( !theRMGParse.m_objectNames[k].startsWith( "Tree" ) )
+			continue;
+		trees.insert( std::make_pair( (Int)floorf( theRMGParse.m_objectPositions[k].x / MAP_XY_FACTOR + 0.5f ),
+			(Int)floorf( theRMGParse.m_objectPositions[k].y / MAP_XY_FACTOR + 0.5f ) ) );
+	}
+	Int packed = 0;
+	for( std::set< std::pair<Int, Int> >::const_iterator it = trees.begin(); it != trees.end(); ++it )
+	{
+		Int neighbours = 0;
+		for( Int dy = -2; dy <= 2; dy += 2 )
+		{
+			for( Int dx = -2; dx <= 2; dx += 2 )
+			{
+				if( ( dx || dy ) && trees.count( std::make_pair( it->first + dx, it->second + dy ) ) )
+					neighbours++;
+			}
+		}
+		if( neighbours >= 6 )
+			packed++;
+	}
+	printf( "  %d trees, %d with six of eight neighbours\n", (Int)trees.size(), packed );
+	CHECK( trees.size() > 200 );
+	CHECK( packed * 100 < (Int)trees.size() * 15 );
+
+	/* A black forest plants up to its tree count. Its chances were tuned against the old per-mille
+		test, which planted four times what they read as; read straight they left this map's woods at
+		84% of the count and others at a third. 1520 is the count the map type, biome and seed give
+		(area / RMG_TREE_CELLS_EACH times the wooded share); about 22 trees a seat stand off the field. */
+	RandomMapSettings forest;
+	forest.m_seed = 27;
+	forest.m_numPlayers = 8;
+	forest.m_playableCells = 330;
+	std::vector<char> forestBytes;
+	RandomMapGenerator::generate( forest, forestBytes );
+	parseGeneratedMap( forestBytes );
+	Int forestTrees = 0;
+	for( Int k = 0; k < (Int)theRMGParse.m_objectNames.size(); k++ )
+		forestTrees += theRMGParse.m_objectNames[k].startsWith( "Tree" ) ? 1 : 0;
+	printf( "  black forest: %d trees, %d off the field, against a count of 1520\n", forestTrees, forestTrees - 22 * 8 );
+	CHECK( ( forestTrees - 22 * 8 ) * 100 >= 1520 * 95 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A river stretch cut off between a ford and the river's end, or between two fords, was left as a
+	square pond capping the line: seed 77 had one at each end of its river and seed 120 one between
+	two fords. The stretch goes dry with its ford now, so every water area on those maps is river. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_ford_takes_the_short_stretch_beside_it_rather_than_leave_a_pond)
+{
+	CHECK( bootOnce() );
+
+	static const Int theSeeds[] = { 77, 120 };
+	for( Int s = 0; s < 2; s++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = theSeeds[s];
+		settings.m_numPlayers = 4;
+		settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 4 );
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+		CHECK( !theRMGParse.m_waterPolygons.empty() );
+
+		// the stubs came out at 270 to 380 square cells; the shortest real stretch here is over 1500
+		for( Int area = 0; area < (Int)theRMGParse.m_waterPolygons.size(); area++ )
+		{
+			const std::vector<Coord3D>& polygon = theRMGParse.m_waterPolygons[area];
+			Real twice = 0.0f;
+			for( Int p = 0, last = (Int)polygon.size() - 1; p < (Int)polygon.size(); last = p++ )
+				twice += polygon[last].x * polygon[p].y - polygon[p].x * polygon[last].y;
+			Real cells = fabsf( twice ) * 0.5f / ( MAP_XY_FACTOR * MAP_XY_FACTOR );
+			if( cells < 800.0f )
+				printf( "  seed %d: a water area of %.0f cells\n", settings.m_seed, cells );
+			CHECK( cells >= 800.0f );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A town's radius is what keeps it off the map's edge, the money and the bases, and it used to be
+	half the longer side of the grid, so the corner plots stood past it: on a pile, a derrick, outside
+	the playable area. And a plan that found no room was never made smaller, so seed 122 at four seats
+	ended with no town at all though a small one had room. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_town_keeps_its_buildings_inside_its_own_clearance_and_always_finds_room)
+{
+	CHECK( bootOnce() );
+
+	// 122 had no town, 100 a building fourteen cells from a start, 126 one four cells from a derrick
+	static const Int theMaps[][3] = { { 122, 4, 304 }, { 100, 4, 304 }, { 126, 6, 240 } };
+	for( Int m = 0; m < 3; m++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = theMaps[m][0];
+		settings.m_numPlayers = theMaps[m][1];
+		settings.m_playableCells = theMaps[m][2];
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+
+		const Real edge = (Real)settings.m_playableCells * MAP_XY_FACTOR;
+		Int buildings = 0;
+		Real nearestStart = 1.0e9f, nearestMoney = 1.0e9f, nearestEdge = 1.0e9f;
+		for( Int k = 0; k < (Int)theRMGParse.m_objectNames.size(); k++ )
+		{
+			const AsciiString& name = theRMGParse.m_objectNames[k];
+			if( !name.startsWith( "Stan" ) && !name.startsWith( "Asian" ) && !name.startsWith( "CivilianHighrise" ) )
+				continue;
+			buildings++;
+			const Coord3D& at = theRMGParse.m_objectPositions[k];
+			nearestEdge = std::min( nearestEdge, std::min( std::min( at.x, at.y ), std::min( edge - at.x, edge - at.y ) ) );
+			for( Int i = 0; i < (Int)theRMGParse.m_waypointPositions.size(); i++ )
+			{
+				Real dx = at.x - theRMGParse.m_waypointPositions[i].x;
+				Real dy = at.y - theRMGParse.m_waypointPositions[i].y;
+				nearestStart = std::min( nearestStart, sqrtf( dx * dx + dy * dy ) );
+			}
+			for( Int j = 0; j < (Int)theRMGParse.m_objectNames.size(); j++ )
+			{
+				const AsciiString& money = theRMGParse.m_objectNames[j];
+				if( money.compare( "SupplyDock" ) != 0 && money.compare( "TechOilDerrick" ) != 0 &&
+						money.compare( "SupplyPileSmall" ) != 0 )
+					continue;
+				Real dx = at.x - theRMGParse.m_objectPositions[j].x;
+				Real dy = at.y - theRMGParse.m_objectPositions[j].y;
+				nearestMoney = std::min( nearestMoney, sqrtf( dx * dx + dy * dy ) );
+			}
+		}
+		printf( "  seed %d: %d buildings, nearest a start %.1f, money %.1f, the edge %.1f cells\n", settings.m_seed,
+			buildings, nearestStart / MAP_XY_FACTOR, nearestMoney / MAP_XY_FACTOR, nearestEdge / MAP_XY_FACTOR );
+		CHECK( buildings > 0 );
+		CHECK( nearestStart >= 26.0f * MAP_XY_FACTOR );	// RMG_BLEND_RADIUS: out of every base's ring
+		CHECK( nearestMoney >= 4.0f * MAP_XY_FACTOR );	// RMG_PILE_CLEARANCE, the smallest money keeps
+		CHECK( nearestEdge >= 4.0f * MAP_XY_FACTOR );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -12279,15 +13049,15 @@ TEST(the_generator_still_turns_a_seed_into_the_bytes_it_used_to)
 {
 	CHECK( bootOnce() );
 
-	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 17 );
+	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 18 );
 
 	struct RMGFingerprint { Int m_seed, m_players, m_cells, m_style; UnsignedInt m_crc; };
 	static const RMGFingerprint theFingerprints[] =
 	{
-		{ 0, 2, 64, 0, 0x47856863 },
-		{ 12345, 4, 96, 0, 0x2863C7F9 },
-		{ 7, 8, 128, 0, 0x357288D3 },
-		{ 7, 4, 200, 1, 0x100AD67B },
+		{ 0, 2, 64, 0, 0x1BF70484 },
+		{ 12345, 4, 96, 0, 0x114BBAEA },
+		{ 7, 8, 128, 0, 0xFB27A0BB },
+		{ 7, 4, 200, 1, 0x1F261D65 },
 	};
 	const Int numFingerprints = sizeof(theFingerprints) / sizeof(theFingerprints[0]);
 
@@ -12323,6 +13093,8 @@ TEST(the_generator_still_turns_a_seed_into_the_bytes_it_used_to)
 	UnsignedInt inADriversMode = RandomMapGenerator::fingerprint( settings );
 	_controlfp( entry, _MCW_PC | _MCW_RC );
 
+	if( inADriversMode != theFingerprints[0].m_crc )
+		printf( "  in a driver's FPU mode the first is 0x%08X\n", inADriversMode );
 	CHECK( inADriversMode == theFingerprints[0].m_crc );
 
 	// and the caller's mode is handed back rather than left at the simulation's
@@ -12530,7 +13302,7 @@ TEST(a_template_map_comes_out_the_same_twice_and_every_start_walks_to_every_othe
 	RandomMapGenerator::generate( exemplarSettings, exemplar );
 
 	// the bytes themselves, pinned like the generator's: a change here is a change to every template map's name
-	static const UnsignedInt theTemplateFingerprints[2] = { 0xF9D5107Cu, 0x4035FBF7u };
+	static const UnsignedInt theTemplateFingerprints[2] = { 0x26A63ABEu, 0x6D469E48u };
 	for( Int players = 2; players <= 8; players += 6 )
 	{
 		RandomMapSettings settings;
@@ -12589,6 +13361,1452 @@ TEST(a_template_map_comes_out_the_same_twice_and_every_start_walks_to_every_othe
 	RandomMapGenerator::clampSettings( missing );
 	CHECK( missing.m_template.isEmpty() );
 	CHECK_EQ( missing.m_templateCRC, 0u );
+}
+
+struct RMGAddedObject { Real x, y; Int flags; const char *name; };
+
+/// Objects appended to a raw map's ObjectsList, each with an empty dict, the chunk sizes grown to match.
+static Bool RMGAddObjects( std::vector<char>& map, const std::vector<RMGAddedObject>& added )
+{
+	if( map.size() < 8 || memcmp( &map[0], "CkMp", 4 ) != 0 )
+		return FALSE;
+	Int count, pos = 8;
+	memcpy( &count, &map[4], 4 );
+	UnsignedInt listId = 0, objectId = 0;
+	for( Int i = 0; i < count; i++ )
+	{
+		Int length = (UnsignedByte)map[pos];
+		std::string name( &map[pos + 1], length );
+		UnsignedInt id;
+		memcpy( &id, &map[pos + 1 + length], 4 );
+		pos += 1 + length + 4;
+		if( name == "ObjectsList" ) listId = id;
+		if( name == "Object" ) objectId = id;
+	}
+	while( pos + 10 <= (Int)map.size() )
+	{
+		UnsignedInt id;
+		Int size;
+		memcpy( &id, &map[pos], 4 );
+		memcpy( &size, &map[pos + 6], 4 );
+		if( id != listId )
+		{
+			pos += 10 + size;
+			continue;
+		}
+		Short version;
+		memcpy( &version, &map[pos + 14], 2 );		// the first object's
+		std::vector<char> body;
+		for( size_t k = 0; k < added.size(); k++ )
+		{
+			std::vector<char> one( 16 + 4 + 2 + strlen( added[k].name ) + 2, 0 );
+			const Real at[4] = { added[k].x, added[k].y, 0.0f, 0.0f };
+			memcpy( &one[0], at, 16 );
+			memcpy( &one[16], &added[k].flags, 4 );
+			UnsignedShort nameLength = (UnsignedShort)strlen( added[k].name );
+			memcpy( &one[20], &nameLength, 2 );
+			memcpy( &one[22], added[k].name, nameLength );
+			char head[10];
+			Int oneSize = (Int)one.size();
+			memcpy( head, &objectId, 4 );
+			memcpy( head + 4, &version, 2 );
+			memcpy( head + 6, &oneSize, 4 );
+			body.insert( body.end(), head, head + 10 );
+			body.insert( body.end(), one.begin(), one.end() );
+		}
+		size += (Int)body.size();
+		memcpy( &map[pos + 6], &size, 4 );
+		map.insert( map.begin() + pos + 10 + size - (Int)body.size(), body.begin(), body.end() );
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/// A water area added to a raw map: corners in playable cells (x, y), its surface in height bytes.
+struct RMGAddedWater { std::vector<Coord2D> corners; Real surfaceBytes; };
+
+/** A generated map turned into another kind of exemplar, the one way a test has a sea or a river's
+	branch without the game's archives: reshape( heights, W, H, border ) changes the heights in place,
+	and the water areas are appended to PolygonTriggers, the chunk sizes grown to match. */
+template <class Reshape>
+static Bool RMGReshapeMap( std::vector<char>& map, Reshape reshape, const std::vector<RMGAddedWater>& water )
+{
+	if( map.size() < 8 || memcmp( &map[0], "CkMp", 4 ) != 0 )
+		return FALSE;
+	Int count, pos = 8;
+	memcpy( &count, &map[4], 4 );
+	UnsignedInt heightsId = 0, triggersId = 0;
+	for( Int i = 0; i < count; i++ )
+	{
+		Int length = (UnsignedByte)map[pos];
+		std::string name( &map[pos + 1], length );
+		UnsignedInt id;
+		memcpy( &id, &map[pos + 1 + length], 4 );
+		pos += 1 + length + 4;
+		if( name == "HeightMapData" ) heightsId = id;
+		if( name == "PolygonTriggers" ) triggersId = id;
+	}
+	Bool reshaped = FALSE, watered = water.empty();
+	while( pos + 10 <= (Int)map.size() )
+	{
+		UnsignedInt id;
+		Short version;
+		Int size;
+		memcpy( &id, &map[pos], 4 );
+		memcpy( &version, &map[pos + 4], 2 );
+		memcpy( &size, &map[pos + 6], 4 );
+		if( id == heightsId )
+		{
+			Int head[4];
+			memcpy( head, &map[pos + 10], sizeof(head) );		// width, height, border, boundaries
+			Int at = pos + 10 + 16 + 8 * head[3];
+			Int cells;
+			memcpy( &cells, &map[at], 4 );
+			std::vector<UnsignedByte> heights( (UnsignedByte *)&map[at + 4], (UnsignedByte *)&map[at + 4] + cells );
+			reshape( heights, head[0], head[1], head[2] );
+			memcpy( &map[at + 4], &heights[0], cells );
+			reshaped = TRUE;
+		}
+		else if( id == triggersId && !water.empty() )
+		{
+			std::vector<char> body;
+			auto putInt = [&]( Int v ) { body.insert( body.end(), (char *)&v, (char *)&v + 4 ); };
+			for( size_t k = 0; k < water.size(); k++ )
+			{
+				char name[32];
+				snprintf( name, sizeof(name), "TestWater%d", (Int)k + 1 );
+				UnsignedShort nameLength = (UnsignedShort)strlen( name ), none = 0;
+				body.insert( body.end(), (char *)&nameLength, (char *)&nameLength + 2 );
+				body.insert( body.end(), name, name + nameLength );
+				if( version >= 4 )
+					body.insert( body.end(), (char *)&none, (char *)&none + 2 );
+				putInt( 9000 + (Int)k );
+				if( version >= 2 )
+					body.push_back( 1 );
+				if( version >= 3 )
+				{
+					body.push_back( 0 );
+					putInt( 0 );
+				}
+				putInt( (Int)water[k].corners.size() );
+				for( size_t p = 0; p < water[k].corners.size(); p++ )
+				{
+					putInt( (Int)( water[k].corners[p].x * MAP_XY_FACTOR ) );
+					putInt( (Int)( water[k].corners[p].y * MAP_XY_FACTOR ) );
+					putInt( (Int)( water[k].surfaceBytes * MAP_HEIGHT_SCALE + 0.5f ) );
+				}
+			}
+			Int areas;
+			memcpy( &areas, &map[pos + 10], 4 );
+			areas += (Int)water.size();
+			memcpy( &map[pos + 10], &areas, 4 );
+			Int grown = size + (Int)body.size();
+			memcpy( &map[pos + 6], &grown, 4 );
+			map.insert( map.begin() + pos + 10 + size, body.begin(), body.end() );
+			size = grown;
+			watered = TRUE;
+		}
+		pos += 10 + size;
+	}
+	return reshaped && watered;
+}
+
+static Bool isTestRiverHouse( const char *name )
+{
+	return strcmp( name, "TestRiverHouse" ) == 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A town that stands on its river comes over as a crossing, the river's piece of the exemplar cut
+	down to fit. Heartland Shield's came over with a bridge whose end stood on the cut's fading edge,
+	where the generated riverbed shows through, so the deck dived into the water; and the houses the
+	cut left were gone without a word. The exemplar is a generated river map with a town and a
+	bridge laid across its river, the one way a test has a river town without the game's archives. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_river_town_crossing_keeps_its_bridge_ends_dry_and_says_what_it_left)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings exemplarSettings;
+	exemplarSettings.m_seed = 2;
+	exemplarSettings.m_numPlayers = 4;
+	exemplarSettings.m_playableCells = 304;
+	RandomMapGenerator::clampSettings( exemplarSettings );
+	std::vector<char> exemplar;
+	RandomMapGenerator::generate( exemplarSettings, exemplar );
+	parseGeneratedMap( exemplar );
+	const Int W = theRMGParse.m_width, H = theRMGParse.m_height, B = theRMGParse.m_border;
+	auto wetAt = [&]( Int x, Int y ) -> Bool
+	{
+		return insideAWaterArea( (Real)( x - B ) * MAP_XY_FACTOR, (Real)( y - B ) * MAP_XY_FACTOR );
+	};
+
+	// the run of river across a row or a column nearest the middle with dry banks either side: the
+	// bridge's place; the rest of the test works in that row or column's frame, u across, v along
+	Int siteV = -1, siteU0 = 0, siteU1 = 0, siteAxis = 0;
+	Real nearest = 1.0e9f;
+	for( Int axis = 0; axis < 2; axis++ )
+	{
+		auto wet = [&]( Int u, Int v ) -> Bool { return axis ? wetAt( v, u ) : wetAt( u, v ); };
+		for( Int v = B + 40; v < H - B - 40; v += 2 )
+		{
+			Int run = -1;
+			for( Int u = B + 30; u < W - B - 30; u++ )
+			{
+				Bool here = wet( u, v );
+				if( here && run < 0 ) run = u;
+				if( here || run < 0 ) continue;
+				Int length = u - run;
+				Bool banks = length >= 6 && length <= 24;
+				for( Int d = 1; d <= 20 && banks; d++ )
+					banks = !wet( run - d, v ) && !wet( u - 1 + d, v );
+				Real centre = hypotf( (Real)( v - H / 2 ), (Real)( run + length / 2 - W / 2 ) );
+				if( banks && centre < nearest )
+				{
+					nearest = centre;
+					siteV = v; siteU0 = run; siteU1 = u; siteAxis = axis;
+				}
+				run = -1;
+			}
+		}
+	}
+	CHECK( siteV >= 0 );
+	if( siteV < 0 )
+		return;
+	auto wetUV = [&]( Int u, Int v ) -> Bool { return siteAxis ? wetAt( v, u ) : wetAt( u, v ); };
+	auto worldUV = [&]( Int u, Int v, Int flags, const char *name ) -> RMGAddedObject
+	{
+		RMGAddedObject o = { (Real)( ( siteAxis ? v : u ) - B ) * MAP_XY_FACTOR, (Real)( ( siteAxis ? u : v ) - B ) * MAP_XY_FACTOR, flags, name };
+		return o;
+	};
+
+	// a bridge across it and a town of houses on both banks round the bridge
+	std::vector<RMGAddedObject> added;
+	const Int TOWN_HALF = 24, HOUSE_STEP = 6;
+	Int houses = 0;
+	const Int siteU = ( siteU0 + siteU1 ) / 2, halfRiver = ( siteU1 - siteU0 ) / 2;
+	for( Int dv = -TOWN_HALF; dv <= TOWN_HALF; dv += HOUSE_STEP )
+		for( Int du = -TOWN_HALF - halfRiver; du <= TOWN_HALF + halfRiver; du += HOUSE_STEP )
+		{
+			Bool dry = TRUE;
+			for( Int nv = -3; nv <= 3 && dry; nv++ )
+				for( Int nu = -3; nu <= 3 && dry; nu++ )
+					dry = !wetUV( siteU + du + nu, siteV + dv + nv );
+			if( !dry || ( dv == 0 && abs( du ) < halfRiver + 6 ) )
+				continue;
+			added.push_back( worldUV( siteU + du, siteV + dv, 0, "TestRiverHouse" ) );
+			houses++;
+		}
+	added.push_back( worldUV( siteU0 - 3, siteV, FLAG_BRIDGE_POINT1, "TestRiverBridge" ) );
+	added.push_back( worldUV( siteU1 + 2, siteV, FLAG_BRIDGE_POINT2, "TestRiverBridge" ) );
+	CHECK( RMGAddObjects( exemplar, added ) );
+
+	Int crossings = 0;
+	for( Int trial = 0; trial < 2; trial++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = trial ? 6 : 7;
+		settings.m_numPlayers = 2;
+		settings.m_playableCells = trial ? 256 : 208;
+		std::vector<char> map;
+		RMGTemplateReport report;
+		CHECK( rmgSynthesise( settings, exemplar, isTestRiverHouse, map, NULL, &report ) );
+		if( map.empty() )
+			continue;
+		parseGeneratedMap( map );
+		const Int w = theRMGParse.m_width, b = theRMGParse.m_border;
+
+		Int carried = 0, bridgeEnds = 0;
+		for( Int i = 0; i < theRMGParse.m_numObjects; i++ )
+		{
+			if( theRMGParse.m_objectNames[i] == "TestRiverHouse" )
+				carried++;
+			if( theRMGParse.m_objectNames[i] == "TestRiverBridge" )
+				bridgeEnds++;
+			if( !( theRMGParse.m_objectFlags[i] & FLAG_BRIDGE_FLAGS ) )
+				continue;
+			// a bridge end stands above every water polygon round it
+			const Coord3D& end = theRMGParse.m_objectPositions[i];
+			Int cx = (Int)( end.x / MAP_XY_FACTOR + 0.5f ) + b, cy = (Int)( end.y / MAP_XY_FACTOR + 0.5f ) + b;
+			Real ground = theRMGParse.m_heights[cy * w + cx] * MAP_HEIGHT_SCALE;
+			for( size_t area = 0; area < theRMGParse.m_waterPolygons.size(); area++ )
+			{
+				const std::vector<Coord3D>& polygon = theRMGParse.m_waterPolygons[area];
+				Bool inside = FALSE;
+				for( size_t p = 0, last = polygon.size() - 1; p < polygon.size(); last = p++ )
+					if( ( polygon[p].y > end.y ) != ( polygon[last].y > end.y ) &&
+							end.x < polygon[p].x + ( end.y - polygon[p].y ) * ( polygon[last].x - polygon[p].x ) / ( polygon[last].y - polygon[p].y ) )
+						inside = !inside;
+				if( inside && ground < polygon[0].z )
+					printf( "  seed %d: %s end at (%d, %d) %.1f under the water at %.1f\n", settings.m_seed,
+						theRMGParse.m_objectNames[i].str(), cx, cy, ground, polygon[0].z );
+				CHECK( !inside || ground >= polygon[0].z );
+			}
+		}
+		crossings += carried > 0;
+		/* The crossing keeps its bridge however small a cut of it fitted: a cut too small to hold it
+			grows over it, rather than hand it back to a river with no room left for it. */
+		if( carried > 0 && bridgeEnds < 2 )
+			printf( "  seed %d: crossing laid with %d bridge ends, notes:\n%s", settings.m_seed, bridgeEnds, report.m_notes.str() );
+		CHECK( carried == 0 || bridgeEnds >= 2 );
+		// a town the crossing cut short is in the notes with what it carried
+		if( carried > 0 && carried < houses )
+		{
+			if( strstr( report.m_notes.str(), "on the crossing)" ) == NULL )
+				printf( "  seed %d: %d of %d houses on the crossing, notes:\n%s", settings.m_seed, carried, houses, report.m_notes.str() );
+			CHECK( strstr( report.m_notes.str(), "on the crossing)" ) != NULL );
+		}
+	}
+	// the test is about a crossing: one was laid
+	CHECK( crossings > 0 );
+}
+
+/// The generated exemplar the sea tests reshape: seed 31's four seats, its starts and money in grid cells.
+static void RMGSeaExemplar( std::vector<char>& exemplar, std::vector<Coord2D>& starts, std::vector<Coord2D>& money )
+{
+	RandomMapSettings exemplarSettings;
+	exemplarSettings.m_seed = 31;
+	exemplarSettings.m_numPlayers = 4;
+	exemplarSettings.m_style = 1;
+	RandomMapGenerator::clampSettings( exemplarSettings );
+	RandomMapGenerator::generate( exemplarSettings, exemplar );
+	parseGeneratedMap( exemplar );
+	starts.clear();
+	money.clear();
+	for( size_t i = 0; i < theRMGParse.m_waypointNames.size(); i++ )
+		if( theRMGParse.m_waypointNames[i].startsWith( "Player_" ) )
+		{
+			Coord2D p = { theRMGParse.m_waypointPositions[i].x / MAP_XY_FACTOR, theRMGParse.m_waypointPositions[i].y / MAP_XY_FACTOR };
+			starts.push_back( p );
+		}
+	for( Int i = 0; i < theRMGParse.m_numObjects; i++ )
+		if( strstr( theRMGParse.m_objectNames[i].str(), "SupplyDock" ) || theRMGParse.m_objectNames[i] == "TechOilDerrick" )
+		{
+			Coord2D p = { theRMGParse.m_objectPositions[i].x / MAP_XY_FACTOR, theRMGParse.m_objectPositions[i].y / MAP_XY_FACTOR };
+			money.push_back( p );
+		}
+}
+
+/** The parsed map's sea, the water area with the widest box: its surface in bytes, the share of play
+	under any water, and of the land the share standing 0-3 bytes over the sea. */
+static Real RMGSeaShare( Real *surfaceBytes, Real *lowLandShare )
+{
+	const Int W = theRMGParse.m_width, H = theRMGParse.m_height, B = theRMGParse.m_border;
+	Real surface = -1.0f, widest = -1.0f;
+	for( size_t a = 0; a < theRMGParse.m_waterPolygons.size(); a++ )
+	{
+		const std::vector<Coord3D>& polygon = theRMGParse.m_waterPolygons[a];
+		Real x0 = 1.0e9f, x1 = -1.0e9f, y0 = 1.0e9f, y1 = -1.0e9f;
+		for( size_t p = 0; p < polygon.size(); p++ )
+		{
+			x0 = std::min( x0, polygon[p].x ); x1 = std::max( x1, polygon[p].x );
+			y0 = std::min( y0, polygon[p].y ); y1 = std::max( y1, polygon[p].y );
+		}
+		if( ( x1 - x0 ) * ( y1 - y0 ) > widest )
+		{
+			widest = ( x1 - x0 ) * ( y1 - y0 );
+			surface = polygon[0].z / MAP_HEIGHT_SCALE;
+		}
+	}
+	Int play = 0, wet = 0, land = 0, low = 0;
+	for( Int y = B; y < H - B; y++ )
+		for( Int x = B; x < W - B; x++ )
+		{
+			play++;
+			const Real wx = (Real)( x - B ) * MAP_XY_FACTOR, wy = (Real)( y - B ) * MAP_XY_FACTOR;
+			Bool under = FALSE;
+			for( size_t a = 0; a < theRMGParse.m_waterPolygons.size() && !under; a++ )
+			{
+				const std::vector<Coord3D>& polygon = theRMGParse.m_waterPolygons[a];
+				Bool inside = FALSE;
+				for( size_t p = 0, last = polygon.size() - 1; p < polygon.size(); last = p++ )
+					if( ( polygon[p].y > wy ) != ( polygon[last].y > wy ) &&
+							wx < polygon[p].x + ( wy - polygon[p].y ) * ( polygon[last].x - polygon[p].x ) / ( polygon[last].y - polygon[p].y ) )
+						inside = !inside;
+				under = inside && theRMGParse.m_heights[y * W + x] * MAP_HEIGHT_SCALE < polygon[0].z;
+			}
+			if( under ) { wet++; continue; }
+			land++;
+			Real over = theRMGParse.m_heights[y * W + x] - surface;
+			low += over >= 0.0f && over <= 3.0f;
+		}
+	*surfaceBytes = surface;
+	*lowLandShare = land ? (Real)low / land : 0.0f;
+	return play ? (Real)wet / play : 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** An island exemplar, Tournament Island's kind: land round each start, its money and the middle,
+	a causeway from each start in, sea bed everywhere else. Its template maps put a dock out of reach
+	in the sea, sat the coast a byte or two over the water, and lost a third of the sea once the
+	players filled the seats on a small map. The exemplar is the generated Twilight-style one with
+	its ground cut down to that shape. */
+//-------------------------------------------------------------------------------------------------
+TEST(an_island_template_keeps_its_money_on_land_its_coast_over_the_water_and_its_sea)
+{
+	CHECK( bootOnce() );
+
+	std::vector<char> exemplar;
+	std::vector<Coord2D> starts, money;
+	RMGSeaExemplar( exemplar, starts, money );
+	const Real SEA_SURFACE = 16.0f;
+	const Int playable = theRMGParse.m_boundaryX;
+	Coord2D middle = { playable * 0.5f, theRMGParse.m_boundaryY * 0.5f };
+	auto island = [&]( std::vector<UnsignedByte>& h, Int W, Int H, Int border )
+	{
+		for( Int y = 0; y < H; y++ )
+			for( Int x = 0; x < W; x++ )
+			{
+				Real px = (Real)( x - border ), py = (Real)( y - border );
+				Bool land = hypotf( px - middle.x, py - middle.y ) < 0.15f * playable;
+				for( size_t s = 0; s < starts.size(); s++ )
+				{
+					land = land || hypotf( px - starts[s].x, py - starts[s].y ) < 0.18f * playable;
+					// a causeway in: the start to middle segment, eight cells wide
+					Real dx = middle.x - starts[s].x, dy = middle.y - starts[s].y;
+					Real t = std::max( 0.0f, std::min( 1.0f, ( ( px - starts[s].x ) * dx + ( py - starts[s].y ) * dy ) / ( dx * dx + dy * dy ) ) );
+					land = land || hypotf( px - starts[s].x - t * dx, py - starts[s].y - t * dy ) < 4.0f;
+				}
+				for( size_t m = 0; m < money.size(); m++ )
+					land = land || hypotf( px - money[m].x, py - money[m].y ) < 14.0f;
+				UnsignedByte& cell = h[y * W + x];
+				cell = land ? (UnsignedByte)( SEA_SURFACE + 8.0f + cell / 16 ) : 0;
+			}
+	};
+	std::vector<RMGAddedWater> water( 1 );
+	const Real outer = (Real)( playable + 40 );
+	Coord2D box[4] = { { -40.0f, -40.0f }, { outer, -40.0f }, { outer, outer }, { -40.0f, outer } };
+	water[0].corners.assign( box, box + 4 );
+	water[0].surfaceBytes = SEA_SURFACE;
+	CHECK( RMGReshapeMap( exemplar, island, water ) );
+	parseGeneratedMap( exemplar );
+	Real exemplarSurface, exemplarLow;
+	Real exemplarShare = RMGSeaShare( &exemplarSurface, &exemplarLow );
+
+	static const Int theCells[] = { 204, 304 };
+	for( Int k = 0; k < 2; k++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = 405;
+		settings.m_numPlayers = 4;
+		settings.m_playableCells = theCells[k];
+		std::vector<char> map;
+		RMGTemplateReport report;
+		CHECK( rmgSynthesise( settings, exemplar, NULL, map, NULL, &report ) );
+		if( map.empty() )
+			continue;
+		parseGeneratedMap( map );
+		Real surface, low;
+		Real share = RMGSeaShare( &surface, &low );
+		if( report.m_cutOffStarts || report.m_cutOffSites || low > 0.1f || share < 0.2f )
+			printf( "  %d cells: sea %.2f (exemplar %.2f) at %.1f, land 0-3 bytes over it %.2f (exemplar %.2f), cut off %d starts %d sites\n%s",
+				theCells[k], share, exemplarShare, surface, low, exemplarLow, report.m_cutOffStarts, report.m_cutOffSites, report.m_notes.str() );
+		// a dock far from the middle and from its start had only its own disc of land: 1 cut off at 304
+		CHECK_EQ( report.m_cutOffStarts, 0 );
+		CHECK_EQ( report.m_cutOffSites, 0 );
+		// the sea set from a bowl half sea bed: 13% of the land 0-3 bytes over it at 204, the exemplar's none
+		CHECK( low <= 0.1f );
+		// the land floors in cells, not shares: 17% sea at 204 against the exemplar's half
+		CHECK( share >= 0.2f );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A coast exemplar, Bombardment Beach's kind: sea along one edge. The skeleton puts a start near
+	every edge, and a coast stopped short of the nearest guarded cell anywhere along it came out as
+	no sea at all at four players. The coast bends round the sites instead. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_coast_template_lays_its_sea_whatever_edge_the_starts_stand_near)
+{
+	CHECK( bootOnce() );
+
+	std::vector<char> exemplar;
+	std::vector<Coord2D> starts, money;
+	RMGSeaExemplar( exemplar, starts, money );
+	const Real SEA_SURFACE = 16.0f;
+	const Int playable = theRMGParse.m_boundaryX;
+	const Real coast = 0.12f * playable;
+	auto beach = [&]( std::vector<UnsignedByte>& h, Int W, Int H, Int border )
+	{
+		for( Int y = 0; y < H; y++ )
+			for( Int x = 0; x < W; x++ )
+			{
+				UnsignedByte& cell = h[y * W + x];
+				cell = x - border < coast ? 0 : (UnsignedByte)( SEA_SURFACE + 8.0f + cell / 16 );
+			}
+	};
+	std::vector<RMGAddedWater> water( 1 );
+	const Real outer = (Real)( playable + 40 );
+	Coord2D box[4] = { { -40.0f, -40.0f }, { coast + 3.0f, -40.0f }, { coast + 3.0f, outer }, { -40.0f, outer } };
+	water[0].corners.assign( box, box + 4 );
+	water[0].surfaceBytes = SEA_SURFACE;
+	CHECK( RMGReshapeMap( exemplar, beach, water ) );
+	parseGeneratedMap( exemplar );
+	Real surface, low;
+	Real exemplarShare = RMGSeaShare( &surface, &low );
+
+	RandomMapSettings settings;
+	settings.m_seed = 6;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = 304;
+	std::vector<char> map;
+	RMGTemplateReport report;
+	CHECK( rmgSynthesise( settings, exemplar, NULL, map, NULL, &report ) );
+	if( map.empty() )
+		return;
+	parseGeneratedMap( map );
+	Real share = RMGSeaShare( &surface, &low );
+	if( share < 0.8f * exemplarShare || report.m_cutOffStarts || report.m_cutOffSites )
+		printf( "  sea %.2f against the exemplar's %.2f, cut off %d starts %d sites\n%s", share, exemplarShare,
+			report.m_cutOffStarts, report.m_cutOffSites, report.m_notes.str() );
+	CHECK( strstr( report.m_notes.str(), "no coast clear" ) == NULL );
+	CHECK( share >= 0.8f * exemplarShare );
+	CHECK_EQ( report.m_cutOffStarts, 0 );
+	CHECK_EQ( report.m_cutOffSites, 0 );
+}
+
+/** A raw map's tiles repainted: paint( tiles, W, H, border ) changes BlendTileData's tile a cell in
+	place, W, H and border the map's own. The template reads a cell's texture class off its tile alone. */
+template <class Paint>
+static Bool RMGPaintTiles( std::vector<char>& map, Int W, Int H, Int border, Paint paint )
+{
+	if( map.size() < 8 || memcmp( &map[0], "CkMp", 4 ) != 0 )
+		return FALSE;
+	Int count, pos = 8;
+	memcpy( &count, &map[4], 4 );
+	UnsignedInt blendId = 0;
+	for( Int i = 0; i < count; i++ )
+	{
+		Int length = (UnsignedByte)map[pos];
+		std::string name( &map[pos + 1], length );
+		UnsignedInt id;
+		memcpy( &id, &map[pos + 1 + length], 4 );
+		pos += 1 + length + 4;
+		if( name == "BlendTileData" ) blendId = id;
+	}
+	while( pos + 10 <= (Int)map.size() )
+	{
+		UnsignedInt id;
+		Int size;
+		memcpy( &id, &map[pos], 4 );
+		memcpy( &size, &map[pos + 6], 4 );
+		if( id == blendId )
+		{
+			Int cells;
+			memcpy( &cells, &map[pos + 10], 4 );
+			if( cells != W * H )
+				return FALSE;
+			std::vector<Short> tiles( cells );
+			memcpy( &tiles[0], &map[pos + 14], cells * sizeof(Short) );
+			paint( tiles, W, H, border );
+			memcpy( &map[pos + 14], &tiles[0], cells * sizeof(Short) );
+			return TRUE;
+		}
+		pos += 10 + size;
+	}
+	return FALSE;
+}
+
+/// The parsed map's texture class name at a cell, by its tile.
+static const AsciiString& RMGClassAt( Int cell )
+{
+	Int tile = theRMGParse.m_tiles[cell] >> 2, best = 0;
+	for( Int c = 0; c < (Int)theRMGParse.m_firstTiles.size(); c++ )
+		if( theRMGParse.m_firstTiles[c] <= tile && theRMGParse.m_firstTiles[c] >= theRMGParse.m_firstTiles[best] )
+			best = c;
+	return theRMGParse.m_textureNames[best];
+}
+
+/// The parsed map's cells under a water area's plane, a byte a cell.
+static void RMGWetCells( std::vector<UnsignedByte>& wet )
+{
+	const Int W = theRMGParse.m_width, H = theRMGParse.m_height, B = theRMGParse.m_border;
+	wet.assign( W * H, 0 );
+	for( Int y = B; y < H - B; y++ )
+		for( Int x = B; x < W - B; x++ )
+		{
+			const Real wx = (Real)( x - B ) * MAP_XY_FACTOR, wy = (Real)( y - B ) * MAP_XY_FACTOR;
+			for( size_t a = 0; a < theRMGParse.m_waterPolygons.size() && !wet[y * W + x]; a++ )
+			{
+				const std::vector<Coord3D>& polygon = theRMGParse.m_waterPolygons[a];
+				Bool inside = FALSE;
+				for( size_t p = 0, last = polygon.size() - 1; p < polygon.size(); last = p++ )
+					if( ( polygon[p].y > wy ) != ( polygon[last].y > wy ) &&
+							wx < polygon[p].x + ( wy - polygon[p].y ) * ( polygon[last].x - polygon[p].x ) / ( polygon[last].y - polygon[p].y ) )
+						inside = !inside;
+				wet[y * W + x] = inside && theRMGParse.m_heights[y * W + x] * MAP_HEIGHT_SCALE < polygon[0].z;
+			}
+		}
+}
+
+/** What the parsed map draws badly in its playable area: the class edges between two cells that
+	neither cell blends across (no layer of the other's class on a corner they share, read as
+	getAlphaUVData reads it), the steep cells painted with no cliff texture, and how many steep cells
+	there are. */
+static void RMGTextureFaults( Int *edges, Int *hard, Int *steep, Int *steepOpen )
+{
+	const Int W = theRMGParse.m_width, H = theRMGParse.m_height, B = theRMGParse.m_border;
+	std::vector<Int> cls( W * H ), cover[2], coverClass[2];
+	for( Int i = 0; i < W * H; i++ )
+		cls[i] = RMGClassOfTile( theRMGParse.m_tiles[i] );
+	for( Int l = 0; l < 2; l++ )
+	{
+		cover[l].assign( W * H, 0 );
+		coverClass[l].assign( W * H, -1 );
+		const std::vector<Short>& index = l == 0 ? theRMGParse.m_blendIndexes : theRMGParse.m_extraBlendIndexes;
+		for( Int i = 0; i < W * H; i++ )
+		{
+			if( index[i] <= 0 || index[i] > (Int)theRMGParse.m_blends.size() )
+				continue;
+			const RMGBlendEntry& entry = theRMGParse.m_blends[index[i] - 1];
+			Bool alpha[4], flip;
+			RMGBlendCorners( entry, alpha, &flip );
+			for( Int c = 0; c < 4; c++ )
+				cover[l][i] |= alpha[c] ? 1 << c : 0;
+			coverClass[l][i] = RMGClassOfTile( entry.m_blendTileIndex );
+		}
+	}
+	// the corners of a cell a class covers
+	auto covers = [&]( Int i, Int k ) -> Int
+	{
+		return ( coverClass[0][i] == k ? cover[0][i] : 0 ) | ( coverClass[1][i] == k ? cover[1][i] : 0 );
+	};
+	*edges = *hard = *steep = *steepOpen = 0;
+	for( Int y = B; y < H - B - 1; y++ )
+	{
+		for( Int x = B; x < W - B - 1; x++ )
+		{
+			const Int i = y * W + x;
+			// east: this cell's corners 1 and 2 against its neighbour's 0 and 3; south: 2 and 3 against 1 and 0
+			const Int next[2] = { i + 1, i + W }, mine[2] = { 0x6, 0xC }, theirs[2] = { 0x9, 0x3 };
+			for( Int d = 0; d < 2; d++ )
+			{
+				const Int n = next[d];
+				if( cls[n] == cls[i] )
+					continue;
+				( *edges )++;
+				if( !( covers( i, cls[n] ) & mine[d] ) && !( covers( n, cls[i] ) & theirs[d] ) )
+					( *hard )++;
+			}
+			const Int a = theRMGParse.m_heights[i], b = theRMGParse.m_heights[i + 1];
+			const Int c = theRMGParse.m_heights[i + W], e = theRMGParse.m_heights[i + W + 1];
+			const Int span = std::max( std::max( a, b ), std::max( c, e ) ) - std::min( std::min( a, b ), std::min( c, e ) );
+			if( span * MAP_HEIGHT_SCALE > 9.8f )		// a cliff, WorldHeightMapData::initCliffFlagsFromHeights
+			{
+				( *steep )++;
+				AsciiString name = theRMGParse.m_textureNames[cls[i]];
+				name.toLower();
+				if( strstr( name.str(), "cliff" ) == NULL )
+					( *steepOpen )++;
+			}
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A template map's texture comes cell by cell from the exemplar, and each cell's blends were drawn
+	for the exemplar's neighbours. Where the quilt, a pad's rim or a town stamp put a cell beside ground
+	from somewhere else, the copied blend pointed at a neighbour that was gone and the new neighbour got
+	none: Heartland Shield's 4-player map had 16.4% of its class edges cut hard against 5.9% on the
+	shipped map, Twilight Flame's 8-player 16.6% against 2.6%. And a cell the heights made a cliff
+	kept the flat ground it was copied from: 61% of Twilight's steep cells were dirt, sand or grass
+	against the exemplar's 14%. The exemplar is the generated Twilight-style one, its blends whole. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_template_maps_texture_edges_are_blended_and_its_cliffs_are_rock)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings exemplarSettings;
+	exemplarSettings.m_seed = 31;
+	exemplarSettings.m_numPlayers = 4;
+	exemplarSettings.m_style = 1;
+	RandomMapGenerator::clampSettings( exemplarSettings );
+	std::vector<char> exemplar;
+	RandomMapGenerator::generate( exemplarSettings, exemplar );
+	parseGeneratedMap( exemplar );
+	Int edges0, hard0, steep0, steepOpen0;
+	RMGTextureFaults( &edges0, &hard0, &steep0, &steepOpen0 );
+
+	RandomMapSettings settings;
+	settings.m_seed = 904;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 4 );
+	std::vector<char> map;
+	CHECK( rmgSynthesise( settings, exemplar, NULL, map, NULL, NULL ) );
+	if( map.empty() )
+		return;
+	parseGeneratedMap( map );
+	CHECK( theRMGParse.m_numBlendedTiles <= 16192 );		// NUM_BLEND_TILES
+	Int edges, hard, steep, steepOpen;
+	RMGTextureFaults( &edges, &hard, &steep, &steepOpen );
+	// copied blends alone: 1347 of 11646 edges hard and 3053 of 6520 steep cells dirt or sand; worked out again, 2 and 0
+	if( hard * 50 > edges || steepOpen * 10 > steep )
+	{
+		printf( "  exemplar: %d of %d class edges hard, %d of %d steep cells not cliff\n", hard0, edges0, steepOpen0, steep0 );
+		printf( "  template: %d of %d class edges hard, %d of %d steep cells not cliff\n", hard, edges, steepOpen, steep );
+	}
+	CHECK( edges > 0 && steep > 0 );
+	CHECK( hard * 50 <= edges );
+	CHECK( steepOpen * 10 <= steep );
+
+	// and its rock faces carry a cliff mapping the reader can use (rmgCliffMapping): the template
+	// wrote every index 0 and declared one entry
+	const RMGCliffCensus census = RMGCliffCount();
+	CHECK( census.mapped * 4 > steep );
+	CHECK_EQ( census.badIndexes, 0 );
+	CHECK_EQ( census.foreignEntries, 0 );
+	CHECK_EQ( census.outsideSheet, 0 );
+	CHECK_EQ( theRMGParse.m_blendBytesLeftOver, 0 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The quilt copies ground by its height alone, so it put what the exemplar has only in one place
+	anywhere else. Bombardment Beach's sea bed came out 57% base dirt, Heartland Shield's bank sand
+	lay in columns 25 cells from any water, its road strips (worn grass, red dirt) ran through open
+	fields with no road on them, and Bombardment's flat start pads, the flattest ground there is and
+	so the best fit for a flat map, were tiled over 43% of it against 12% on the template. The
+	exemplar is the coast one with its relief kept low, its bases levelled and its sea bed, its bank,
+	its start discs and its roads each painted a class of their own, so a class out of place shows. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_template_quilts_sea_bed_banks_road_strips_and_bases_only_where_they_belong)
+{
+	CHECK( bootOnce() );
+
+	std::vector<char> coastMap;
+	std::vector<Coord2D> starts, money;
+	RMGSeaExemplar( coastMap, starts, money );
+	CHECK_EQ( (Int)starts.size(), 4 );
+	if( starts.size() != 4 || theRMGParse.m_textureNames.size() < 4 )
+		return;
+	// PAD_OUTER_CELLS: a pad's reach on open ground and its fade, past which its ground is the quilt's
+	const Real SEA_SURFACE = 16.0f, SEA_BED = 12.0f, BASE_LEVEL = 30.0f, BASE_DISC = 20.0f, PAD_OUTER_CELLS = 50.0f;
+	const Int BANK_CELLS = 5;
+	const Int playable = theRMGParse.m_boundaryX;
+	const Int exemplarW = theRMGParse.m_width, exemplarH = theRMGParse.m_height, exemplarBorder = theRMGParse.m_border;
+	// wider than a patch, so a patch can be all sea, and short of the starts
+	const Real coast = 0.14f * playable;
+	auto nearStart = [&]( Real px, Real py ) -> Bool
+	{
+		for( size_t s = 0; s < starts.size(); s++ )
+			if( hypotf( px - starts[s].x, py - starts[s].y ) <= BASE_DISC )
+				return TRUE;
+		return FALSE;
+	};
+	// low rolling land, a shallow sea bed and every base levelled: Bombardment's start pads at the map's
+	// median, the one ground as flat as a flat map
+	auto beach = [&]( std::vector<UnsignedByte>& h, Int W, Int H, Int border )
+	{
+		for( Int y = 0; y < H; y++ )
+			for( Int x = 0; x < W; x++ )
+			{
+				Real px = (Real)( x - border ), py = (Real)( y - border );
+				UnsignedByte& cell = h[y * W + x];
+				Real roll = 6.0f * sinf( px / 5.0f ) * cosf( py / 5.0f );
+				cell = px < coast ? (UnsignedByte)SEA_BED : nearStart( px, py ) ? (UnsignedByte)BASE_LEVEL : (UnsignedByte)( 22.0f + cell / 8 + roll );
+			}
+	};
+	std::vector<RMGAddedWater> water( 1 );
+	const Real outer = (Real)( playable + 40 );
+	Coord2D box[4] = { { -40.0f, -40.0f }, { coast + 3.0f, -40.0f }, { coast + 3.0f, outer }, { -40.0f, outer } };
+	water[0].corners.assign( box, box + 4 );
+	water[0].surfaceBytes = SEA_SURFACE;
+	CHECK( RMGReshapeMap( coastMap, beach, water ) );
+	std::vector<AsciiString> names( theRMGParse.m_textureNames.begin(), theRMGParse.m_textureNames.begin() + 4 );
+	std::vector<Int> firstTiles( theRMGParse.m_firstTiles.begin(), theRMGParse.m_firstTiles.begin() + 4 );
+	enum { PLAIN, SEA, BANK, BASE };
+	// the parsed map's pads are copies of the exemplar's bases, whatever ground they hold: the quilt's is the rest
+	auto onAPad = [&]( Int px, Int py ) -> Bool
+	{
+		for( size_t i = 0; i < theRMGParse.m_waypointNames.size(); i++ )
+			if( theRMGParse.m_waypointNames[i].startsWith( "Player_" ) &&
+					hypotf( px - theRMGParse.m_waypointPositions[i].x / MAP_XY_FACTOR, py - theRMGParse.m_waypointPositions[i].y / MAP_XY_FACTOR ) <= PAD_OUTER_CELLS )
+				return TRUE;
+		return FALSE;
+	};
+
+	// one: the sea bed, the bank beside it and the start discs
+	{
+		std::vector<char> exemplar = coastMap;
+		auto paint = [&]( std::vector<Short>& tiles, Int W, Int H, Int border )
+		{
+			for( Int y = 0; y < H; y++ )
+				for( Int x = 0; x < W; x++ )
+				{
+					Real px = (Real)( x - border ), py = (Real)( y - border );
+					Int c = px < coast ? SEA : px < coast + BANK_CELLS ? BANK : nearStart( px, py ) ? BASE : PLAIN;
+					tiles[y * W + x] = (Short)( firstTiles[c] << 2 );
+				}
+		};
+		CHECK( RMGPaintTiles( exemplar, exemplarW, exemplarH, exemplarBorder, paint ) );
+
+		RandomMapSettings settings;
+		settings.m_seed = 6;
+		settings.m_numPlayers = 4;
+		settings.m_playableCells = 304;
+		std::vector<char> map;
+		RMGTemplateReport report;
+		CHECK( rmgSynthesise( settings, exemplar, NULL, map, NULL, &report ) );
+		if( map.empty() )
+			return;
+		parseGeneratedMap( map );
+		const Int W = theRMGParse.m_width, H = theRMGParse.m_height, B = theRMGParse.m_border;
+		std::vector<UnsignedByte> wet;
+		RMGWetCells( wet );
+		Int wetCells = 0, wetSea = 0, bankCells = 0, bankFar = 0, play = 0, baseFar = 0;
+		for( Int y = B; y < H - B; y++ )
+			for( Int x = B; x < W - B; x++ )
+			{
+				const Int i = y * W + x;
+				const AsciiString& name = RMGClassAt( i );
+				play++;
+				if( onAPad( x - B, y - B ) )
+					continue;
+				if( wet[i] )
+				{
+					wetCells++;
+					wetSea += name == names[SEA];
+				}
+				if( name == names[BANK] )
+				{
+					bankCells++;
+					Bool byWater = FALSE;
+					for( Int yy = std::max( y - 6, 0 ); yy <= std::min( y + 6, H - 1 ) && !byWater; yy++ )
+						for( Int xx = std::max( x - 6, 0 ); xx <= std::min( x + 6, W - 1 ) && !byWater; xx++ )
+							byWater = wet[yy * W + xx] != 0;
+					bankFar += !byWater;
+				}
+				baseFar += name == names[BASE];
+			}
+		printf( "  off the pads: sea bed %d of %d wet cells, bank %d of %d cells more than 6 off the water, base ground %d of %d cells\n",
+			wetSea, wetCells, bankFar, bankCells, baseFar, play );
+		CHECK( wetCells > 0 );
+		// the sea takes the exemplar's sea bed, not whatever land matched its height: 67% before, 84% since
+		CHECK( wetSea * 4 >= wetCells * 3 );
+		// a bank stays by the water: 15% of it more than 6 cells off before, 6% since
+		CHECK( bankFar * 10 <= bankCells );
+		// a flat base's ground comes only with its pad: 2% of the map before, none since
+		CHECK( baseFar * 100 <= play );
+	}
+
+	// two: a ring road through the starts, the ground along it painted a strip of its own
+	{
+		std::vector<char> exemplar = coastMap;
+		const Real ROAD_STEP = 20.0f, STRIP_CELLS = 1.5f, OFF_ROAD = 4.0f;
+		std::vector<RMGAddedObject> added;
+		std::vector<Coord2D> ends;
+		for( Int s = 0; s < 4; s++ )
+		{
+			const Coord2D& a = starts[s];
+			const Coord2D& z = starts[( s + 1 ) % 4];
+			const Int pieces = std::max( (Int)( hypotf( z.x - a.x, z.y - a.y ) / ROAD_STEP ), 1 );
+			for( Int q = 0; q < pieces; q++ )
+			{
+				Coord2D one = { a.x + ( z.x - a.x ) * q / pieces, a.y + ( z.y - a.y ) * q / pieces };
+				Coord2D two = { a.x + ( z.x - a.x ) * ( q + 1 ) / pieces, a.y + ( z.y - a.y ) * ( q + 1 ) / pieces };
+				RMGAddedObject first = { one.x * MAP_XY_FACTOR, one.y * MAP_XY_FACTOR, FLAG_ROAD_POINT1, "TestRoad" };
+				RMGAddedObject second = { two.x * MAP_XY_FACTOR, two.y * MAP_XY_FACTOR, FLAG_ROAD_POINT2, "TestRoad" };
+				added.push_back( first );
+				added.push_back( second );
+				ends.push_back( one );
+				ends.push_back( two );
+			}
+		}
+		CHECK( RMGAddObjects( exemplar, added ) );
+		// a cell's distance from the nearest of a list of segments, in cells
+		auto roadDistance = [&]( const std::vector<Coord2D>& segments, Real px, Real py ) -> Real
+		{
+			Real best = 1.0e9f;
+			for( size_t k = 0; k + 1 < segments.size(); k += 2 )
+			{
+				const Coord2D& a = segments[k];
+				const Coord2D& z = segments[k + 1];
+				Real dx = z.x - a.x, dy = z.y - a.y, length = dx * dx + dy * dy;
+				Real t = length > 0.0f ? std::max( 0.0f, std::min( 1.0f, ( ( px - a.x ) * dx + ( py - a.y ) * dy ) / length ) ) : 0.0f;
+				best = std::min( best, hypotf( px - a.x - t * dx, py - a.y - t * dy ) );
+			}
+			return best;
+		};
+		auto paint = [&]( std::vector<Short>& tiles, Int W, Int H, Int border )
+		{
+			for( Int y = 0; y < H; y++ )
+				for( Int x = 0; x < W; x++ )
+					tiles[y * W + x] = (Short)( firstTiles[roadDistance( ends, (Real)( x - border ), (Real)( y - border ) ) <= STRIP_CELLS ? SEA : PLAIN] << 2 );
+		};
+		CHECK( RMGPaintTiles( exemplar, exemplarW, exemplarH, exemplarBorder, paint ) );
+
+		RandomMapSettings settings;
+		settings.m_seed = 6;
+		settings.m_numPlayers = 4;
+		settings.m_playableCells = 304;
+		std::vector<char> map;
+		CHECK( rmgSynthesise( settings, exemplar, NULL, map, NULL, NULL ) );
+		if( map.empty() )
+			return;
+		parseGeneratedMap( map );
+		const Int W = theRMGParse.m_width, H = theRMGParse.m_height, B = theRMGParse.m_border;
+		std::vector<Coord2D> roads;
+		for( Int i = 0; i + 1 < theRMGParse.m_numObjects; i++ )
+		{
+			if( !( theRMGParse.m_objectFlags[i] & FLAG_ROAD_POINT1 ) || !( theRMGParse.m_objectFlags[i + 1] & FLAG_ROAD_POINT2 ) )
+				continue;
+			for( Int e = 0; e < 2; e++ )
+			{
+				Coord2D p = { theRMGParse.m_objectPositions[i + e].x / MAP_XY_FACTOR, theRMGParse.m_objectPositions[i + e].y / MAP_XY_FACTOR };
+				roads.push_back( p );
+			}
+		}
+		Int strips = 0, offRoad = 0;
+		for( Int y = B; y < H - B; y++ )
+			for( Int x = B; x < W - B; x++ )
+			{
+				if( !( RMGClassAt( y * W + x ) == names[SEA] ) || onAPad( x - B, y - B ) )
+					continue;
+				strips++;
+				offRoad += roadDistance( roads, (Real)( x - B ), (Real)( y - B ) ) > OFF_ROAD;
+			}
+		printf( "  %d road segments, off the pads road strip %d of %d cells more than 4 off a road\n", (Int)roads.size() / 2, offRoad, strips );
+		CHECK( !roads.empty() );
+		// a road's worn ground goes where a road goes: 1168 of 1366 cells more than 4 off one before, none since
+		CHECK( offRoad * 2 <= strips );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A river exemplar with a branch and two bridges, Winding River's kind. A branch carved after the
+	main river's bridges cut through one's end and sank its deck; a dock or derrick on the line held
+	its ground and dammed the river right across, two pools under one plane; and low ground beside
+	the river sat under its plane outside the polygon, the water hanging over it. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_river_template_keeps_its_bridges_its_river_whole_and_its_banks_over_the_water)
+{
+	CHECK( bootOnce() );
+
+	std::vector<char> exemplar;
+	std::vector<Coord2D> starts, money;
+	RMGSeaExemplar( exemplar, starts, money );
+	const Real SURFACE = 30.0f, BED = 5.0f;
+	const Int playable = theRMGParse.m_boundaryX;
+	const Real HALF = 8.0f, BRANCH_HALF = 5.0f, BANK = 6.0f, branchX = 0.6f * playable;
+	auto riverY = [&]( Real x ) -> Real { return 0.5f * playable + 0.06f * playable * sinf( 6.2832f * x / ( 0.5f * playable ) ); };
+	auto river = [&]( std::vector<UnsignedByte>& h, Int W, Int H, Int border )
+	{
+		for( Int y = 0; y < H; y++ )
+			for( Int x = 0; x < W; x++ )
+			{
+				Real px = (Real)( x - border ), py = (Real)( y - border );
+				// across the main river, and along the branch running off it to the top edge
+				Real d = fabsf( py - riverY( px ) ) - HALF;
+				if( py < riverY( branchX ) )
+					d = std::min( d, fabsf( px - branchX ) - BRANCH_HALF );
+				UnsignedByte& cell = h[y * W + x];
+				Real land = 40.0f + cell / 8;
+				cell = (UnsignedByte)( d <= 0.0f ? BED : d < BANK ? BED + ( land - BED ) * d / BANK : land );
+			}
+	};
+	std::vector<RMGAddedWater> water( 2 );
+	const Real reach = HALF + 3.0f, branchReach = BRANCH_HALF + 3.0f;
+	for( Int x = -8; x <= playable + 8; x += 8 )
+		water[0].corners.push_back( Coord2D() ), water[0].corners.back().x = (Real)x, water[0].corners.back().y = riverY( (Real)x ) - reach;
+	for( Int x = playable + 8; x >= -8; x -= 8 )
+		water[0].corners.push_back( Coord2D() ), water[0].corners.back().x = (Real)x, water[0].corners.back().y = riverY( (Real)x ) + reach;
+	Coord2D branchBox[4] = { { branchX - branchReach, -8.0f }, { branchX + branchReach, -8.0f },
+		{ branchX + branchReach, riverY( branchX ) }, { branchX - branchReach, riverY( branchX ) } };
+	water[1].corners.assign( branchBox, branchBox + 4 );
+	water[0].surfaceBytes = water[1].surfaceBytes = SURFACE;
+	CHECK( RMGReshapeMap( exemplar, river, water ) );
+	std::vector<RMGAddedObject> bridges;
+	for( Int k = 0; k < 2; k++ )
+	{
+		Real x = ( k ? 0.85f : 0.3f ) * playable, y = riverY( x );
+		RMGAddedObject a = { x * MAP_XY_FACTOR, ( y - HALF - BANK ) * MAP_XY_FACTOR, FLAG_BRIDGE_POINT1, "TestRiverBridge" };
+		RMGAddedObject z = { x * MAP_XY_FACTOR, ( y + HALF + BANK ) * MAP_XY_FACTOR, FLAG_BRIDGE_POINT2, "TestRiverBridge" };
+		bridges.push_back( a );
+		bridges.push_back( z );
+	}
+	CHECK( RMGAddObjects( exemplar, bridges ) );
+
+	static const Int theSizes[][3] = { { 5, 4, 304 }, { 5, 2, 140 } };
+	for( Int k = 0; k < 2; k++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = theSizes[k][0];
+		settings.m_numPlayers = theSizes[k][1];
+		settings.m_playableCells = theSizes[k][2];
+		std::vector<char> map;
+		RMGTemplateReport report;
+		CHECK( rmgSynthesise( settings, exemplar, NULL, map, NULL, &report ) );
+		if( map.empty() )
+			continue;
+		parseGeneratedMap( map );
+		const Int W = theRMGParse.m_width, H = theRMGParse.m_height, B = theRMGParse.m_border;
+		// each cell's water: the plane over it, -1 outside every polygon
+		std::vector<Real> plane( W * H, -1.0f );
+		for( size_t a = 0; a < theRMGParse.m_waterPolygons.size(); a++ )
+		{
+			const std::vector<Coord3D>& polygon = theRMGParse.m_waterPolygons[a];
+			for( Int y = B; y < H - B; y++ )
+				for( Int x = B; x < W - B; x++ )
+				{
+					const Real wx = (Real)( x - B ) * MAP_XY_FACTOR, wy = (Real)( y - B ) * MAP_XY_FACTOR;
+					Bool inside = FALSE;
+					for( size_t p = 0, last = polygon.size() - 1; p < polygon.size(); last = p++ )
+						if( ( polygon[p].y > wy ) != ( polygon[last].y > wy ) &&
+								wx < polygon[p].x + ( wy - polygon[p].y ) * ( polygon[last].x - polygon[p].x ) / ( polygon[last].y - polygon[p].y ) )
+							inside = !inside;
+					if( inside ) plane[y * W + x] = std::max( plane[y * W + x], polygon[0].z );
+				}
+		}
+		Int drowned = 0, pits = 0;
+		for( Int i = 0; i < theRMGParse.m_numObjects; i++ )
+		{
+			Int cx, cy;
+			RMGWorldToCell( theRMGParse.m_objectPositions[i], &cx, &cy );
+			if( ( theRMGParse.m_objectFlags[i] & FLAG_BRIDGE_FLAGS ) && cx >= 0 && cy >= 0 && cx < W && cy < H )
+				drowned += theRMGParse.m_heights[cy * W + cx] * MAP_HEIGHT_SCALE < plane[cy * W + cx];
+		}
+		// dry ground just outside a polygon under the plane of the water beside it
+		for( Int y = B + 2; y < H - B - 2; y++ )
+			for( Int x = B + 2; x < W - B - 2; x++ )
+			{
+				if( plane[y * W + x] >= 0.0f ) continue;
+				Real over = -1.0f;
+				for( Int dy = -2; dy <= 2; dy++ )
+					for( Int dx = -2; dx <= 2; dx++ )
+						over = std::max( over, plane[( y + dy ) * W + x + dx] );
+				pits += over >= 0.0f && theRMGParse.m_heights[y * W + x] * MAP_HEIGHT_SCALE < over;
+			}
+		// pieces of water: a river dammed across is two
+		std::vector<char> seen( W * H, 0 );
+		Int pieces = 0;
+		for( Int start = 0; start < W * H; start++ )
+		{
+			auto wet = [&]( Int i ) { return plane[i] >= 0.0f && theRMGParse.m_heights[i] * MAP_HEIGHT_SCALE < plane[i]; };
+			if( seen[start] || !wet( start ) ) continue;
+			std::vector<Int> stack( 1, start );
+			seen[start] = 1;
+			Int size = 0;
+			while( !stack.empty() )
+			{
+				Int i = stack.back();
+				stack.pop_back();
+				size++;
+				const Int next[4] = { i - 1, i + 1, i - W, i + W };
+				for( Int n = 0; n < 4; n++ )
+					if( next[n] >= 0 && next[n] < W * H && !seen[next[n]] && wet( next[n] ) )
+					{
+						seen[next[n]] = 1;
+						stack.push_back( next[n] );
+					}
+			}
+			pieces += size >= 20;
+		}
+		const Bool first = k == 0;
+		if( drowned || ( first && ( pieces != 1 || pits >= 40 ) ) || report.m_cutOffStarts )
+			printf( "  seed %d %dp %dc: %d bridge ends under water, %d pits by the water, %d pieces, %d rivers %d bridges\n%s",
+				settings.m_seed, settings.m_numPlayers, settings.m_playableCells, drowned, pits, pieces, report.m_rivers,
+				report.m_bridges, report.m_notes.str() );
+		CHECK_EQ( drowned, 0 );
+		CHECK_EQ( report.m_cutOffStarts, 0 );
+		if( first )
+		{
+			// the river ranked off the money stays whole: dammed by a dock it was three pools, 620 dry bed cells
+			CHECK_EQ( pieces, 1 );
+			// and its banks stay over its plane: 88 cells under it beside the polygon before the bank's floor
+			CHECK( pits < 40 );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The size buttons never go under a template's Tiny, but a typed cell count or a name read back
+	could, and eight seats on a 64-cell Bitter Winter came out as eight pads in a heap with a quarter
+	of the objects outside play. A template map is clamped to its Tiny, and no size at all takes the
+	template's own Normal, not the plain table's. The template is installed as a loose file in a
+	folder of the test's own, the one way a test has to put a map under maps\. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_template_map_never_comes_smaller_than_its_tiny_size)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings exemplarSettings;
+	exemplarSettings.m_seed = 31;
+	exemplarSettings.m_numPlayers = 4;
+	exemplarSettings.m_style = 1;
+	RandomMapGenerator::clampSettings( exemplarSettings );
+	std::vector<char> exemplar;
+	RandomMapGenerator::generate( exemplarSettings, exemplar );
+	CHECK( !exemplar.empty() );
+
+	const std::filesystem::path home = std::filesystem::current_path();
+	const std::filesystem::path dir = std::filesystem::temp_directory_path() / "zh_rmg_template_floor";
+	std::error_code ec;
+	std::filesystem::remove_all( dir, ec );
+	std::filesystem::create_directories( dir / "maps" / "rmg floor test", ec );
+	FILE *out = fopen( ( dir / "maps" / "rmg floor test" / "rmg floor test.map" ).string().c_str(), "wb" );
+	CHECK( out != NULL );
+	if( out == NULL )
+		return;
+	fwrite( &exemplar[0], 1, exemplar.size(), out );
+	fclose( out );
+	std::filesystem::current_path( dir );
+
+	const AsciiString path( "maps\\rmg floor test\\rmg floor test.map" );
+	RandomMapSettings typed;
+	typed.m_seed = 5;
+	typed.m_numPlayers = 8;
+	typed.m_playableCells = 64;
+	typed.m_template = path;
+	RandomMapGenerator::clampSettings( typed );
+	const Int tiny = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_TINY, 8, path );
+	CHECK( !typed.m_template.isEmpty() );
+	CHECK( tiny > 64 );
+	CHECK_EQ( typed.m_playableCells, tiny );
+
+	RandomMapSettings unsized;
+	unsized.m_numPlayers = 2;
+	unsized.m_template = path;
+	RandomMapGenerator::clampSettings( unsized );
+	CHECK_EQ( unsized.m_playableCells, RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 2, path ) );
+	CHECK( unsized.m_playableCells != RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 2 ) );
+
+	std::filesystem::current_path( home );
+	std::filesystem::remove_all( dir, ec );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A template map's roads came out as pieces that stopped three cells short of the road they ran
+	into, every end cut square, in the 0- and 45-degree doglegs of a grid path and in pieces shorter
+	than the exemplar's, and a pad brought along a stub flagged to join a road the pad left behind.
+	Heartland Shield at 4 seats had no tee, 44 ends in the open, none of them flagged to join, and 60%
+	of its segments on the grid's bearings. The exemplar is the generated one with a ring road laid
+	through its starts and that stub off the first start, the one way a test has roads without the
+	game's archives. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_template_maps_roads_meet_the_roads_they_run_into_and_leave_no_stub)
+{
+	CHECK( bootOnce() );
+
+	std::vector<char> exemplar;
+	std::vector<Coord2D> starts, money;
+	RMGSeaExemplar( exemplar, starts, money );
+	CHECK_EQ( (Int)starts.size(), 4 );
+	if( starts.size() != 4 )
+		return;
+	const Real ROAD_STEP = 20.0f, STUB_FROM = 8.0f, STUB_TO = 14.0f;
+	std::vector<RMGAddedObject> added;
+	auto addRoad = [&]( Real ax, Real ay, Real zx, Real zy, Int joinFirst, const char *name )
+	{
+		RMGAddedObject one = { ax * MAP_XY_FACTOR, ay * MAP_XY_FACTOR, FLAG_ROAD_POINT1 | joinFirst, name };
+		RMGAddedObject two = { zx * MAP_XY_FACTOR, zy * MAP_XY_FACTOR, FLAG_ROAD_POINT2, name };
+		added.push_back( one );
+		added.push_back( two );
+	};
+	for( Int s = 0; s < 4; s++ )
+	{
+		const Coord2D& a = starts[s];
+		const Coord2D& z = starts[( s + 1 ) % 4];
+		const Int pieces = std::max( (Int)( hypotf( z.x - a.x, z.y - a.y ) / ROAD_STEP ), 1 );
+		for( Int q = 0; q < pieces; q++ )
+			addRoad( a.x + ( z.x - a.x ) * q / pieces, a.y + ( z.y - a.y ) * q / pieces,
+				a.x + ( z.x - a.x ) * ( q + 1 ) / pieces, a.y + ( z.y - a.y ) * ( q + 1 ) / pieces, 0, "TestRoad" );
+	}
+	// a road off each side of the map, so the new map has ways off it whose roads run into the ring's
+	const Real playX = (Real)( theRMGParse.m_width - 2 * theRMGParse.m_border ), playY = (Real)( theRMGParse.m_height - 2 * theRMGParse.m_border );
+	addRoad( 2.0f, playY / 2, 2.0f + ROAD_STEP, playY / 2, 0, "TestRoad" );
+	addRoad( playX - 3.0f, playY / 2, playX - 3.0f - ROAD_STEP, playY / 2, 0, "TestRoad" );
+	addRoad( playX / 2, 2.0f, playX / 2, 2.0f + ROAD_STEP, 0, "TestRoad" );
+	addRoad( playX / 2, playY - 3.0f, playX / 2, playY - 3.0f - ROAD_STEP, 0, "TestRoad" );
+	// the stub points away from both legs of the ring at the first start, so no road comes near its end
+	Real awayX = 0.0f, awayY = 0.0f;
+	for( Int s = 1; s <= 3; s += 2 )
+	{
+		Real dx = starts[s].x - starts[0].x, dy = starts[s].y - starts[0].y, length = hypotf( dx, dy );
+		awayX -= dx / length;
+		awayY -= dy / length;
+	}
+	const Real away = hypotf( awayX, awayY );
+	awayX /= away;
+	awayY /= away;
+	addRoad( starts[0].x + awayX * STUB_TO, starts[0].y + awayY * STUB_TO, starts[0].x + awayX * STUB_FROM, starts[0].y + awayY * STUB_FROM,
+		FLAG_ROAD_JOIN, "TestStub" );
+	CHECK( RMGAddObjects( exemplar, added ) );
+
+	RandomMapSettings settings;
+	settings.m_seed = 905;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 4 );
+	std::vector<char> map;
+	RMGTemplateReport report;
+	CHECK( rmgSynthesise( settings, exemplar, NULL, map, NULL, &report ) );
+	if( map.empty() )
+		return;
+	parseGeneratedMap( map );
+
+	// every road pair's ends, counted by exact point: the renderer joins two roads only where they share one
+	std::map< std::pair<Real, Real>, Int > ends, joins;
+	Int pairs = 0, stubs = 0, gridBearing = 0;
+	for( Int i = 0; i + 1 < theRMGParse.m_numObjects; i++ )
+	{
+		if( !( theRMGParse.m_objectFlags[i] & FLAG_ROAD_POINT1 ) || !( theRMGParse.m_objectFlags[i + 1] & FLAG_ROAD_POINT2 ) )
+			continue;
+		pairs++;
+		stubs += theRMGParse.m_objectNames[i] == "TestStub";
+		for( Int e = 0; e < 2; e++ )
+		{
+			std::pair<Real, Real> at( theRMGParse.m_objectPositions[i + e].x, theRMGParse.m_objectPositions[i + e].y );
+			ends[at]++;
+			joins[at] |= ( theRMGParse.m_objectFlags[i + e] & FLAG_ROAD_JOIN ) != 0;
+		}
+		Real degrees = atan2f( theRMGParse.m_objectPositions[i + 1].y - theRMGParse.m_objectPositions[i].y,
+			theRMGParse.m_objectPositions[i + 1].x - theRMGParse.m_objectPositions[i].x ) * 180.0f / PI;
+		degrees = fmodf( degrees + 360.0f, 45.0f );
+		gridBearing += std::min( degrees, 45.0f - degrees ) < 3.0f;
+	}
+	Int tees = 0, bare = 0;
+	for( std::map< std::pair<Real, Real>, Int >::iterator it = ends.begin(); it != ends.end(); ++it )
+	{
+		tees += it->second >= 3;
+		bare += it->second == 1 && !joins[it->first];
+	}
+	printf( "  %d road pairs, %d tees, %d ends cut square, %d on the grid's bearings, %d stubs\n", pairs, tees, bare, gridBearing, stubs );
+	CHECK( pairs > 0 );
+	// a road that runs into another ends on it
+	CHECK( tees > 0 );
+	// an end in the open fades out
+	CHECK_EQ( bare, 0 );
+	// a grid path pulled straight: at most a third of the segments on 0 or 45 degrees
+	CHECK( gridBearing * 3 <= pairs );
+	// a stub whose road stayed behind stays behind too
+	CHECK_EQ( stubs, 0 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every seat of a template map gets the same base: Twilight Flame's eight seats came out on two of
+	its bases taken turn about, 26 bytes apart in height and their docks 30 and 48 cells out. The
+	money a base carries stays on the map (a 140-cell Twilight Flame put both docks past the grid), a
+	kind the bases carry none of is the skeleton's, and the high piles go one to a site, as many
+	between every two seats. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_template_map_gives_every_seat_the_same_base_and_keeps_its_money_on_the_map)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings exemplarSettings;
+	exemplarSettings.m_seed = 31;
+	exemplarSettings.m_numPlayers = 4;
+	exemplarSettings.m_style = 1;
+	RandomMapGenerator::clampSettings( exemplarSettings );
+	std::vector<char> exemplar;
+	RandomMapGenerator::generate( exemplarSettings, exemplar );
+	CHECK( !exemplar.empty() );
+
+	/* An uneven exemplar as well, Twilight Flame's kind: every base a plateau with its money on it and
+		slopes a tank climbs down off it, the west ones over ground 30 bytes lower than the east ones,
+		so they stand that much higher over what they fall to, and the piles on knolls well over the
+		starts. */
+	std::vector<char> uneven( exemplar );
+	parseGeneratedMap( uneven );
+	std::vector<Coord2D> knolls, bases;
+	for( Int k = 0; k < theRMGParse.m_numObjects; k++ )
+	{
+		Coord2D at = { theRMGParse.m_objectPositions[k].x / MAP_XY_FACTOR, theRMGParse.m_objectPositions[k].y / MAP_XY_FACTOR };
+		if( theRMGParse.m_objectNames[k] == "SupplyPileSmall" )
+			knolls.push_back( at );
+	}
+	for( size_t k = 0; k < theRMGParse.m_waypointNames.size(); k++ )
+		if( theRMGParse.m_waypointNames[k].startsWith( "Player_" ) )
+		{
+			Coord2D at = { theRMGParse.m_waypointPositions[k].x / MAP_XY_FACTOR, theRMGParse.m_waypointPositions[k].y / MAP_XY_FACTOR };
+			bases.push_back( at );
+		}
+	auto plateaus = [&]( std::vector<UnsignedByte>& h, Int W, Int H, Int border )
+	{
+		for( Int y = 0; y < H; y++ )
+			for( Int x = 0; x < W; x++ )
+			{
+				UnsignedByte& cell = h[y * W + x];
+				const Real ground = x < W / 2 ? 60.0f : 90.0f;
+				Real high = ground;
+				for( size_t k = 0; k < bases.size(); k++ )
+				{
+					// level to 45 cells out, then a slope down a tank climbs
+					const Real out = hypotf( x - border - bases[k].x, y - border - bases[k].y ) - 45.0f;
+					high = std::max( high, 170.0f - std::max( out, 0.0f ) * 4.0f );
+				}
+				cell = (UnsignedByte)high;
+				for( size_t k = 0; k < knolls.size(); k++ )
+					if( hypotf( x - border - knolls[k].x, y - border - knolls[k].y ) < 5.0f )
+						cell = 230;
+			}
+	};
+	CHECK( RMGReshapeMap( uneven, plateaus, std::vector<RMGAddedWater>() ) );
+
+	struct Case { Int seed, players, cells; Bool uneven; };
+	static const Case theCases[] = { { 7, 8, 0, TRUE }, { 2, 2, 140, FALSE }, { 5, 3, 0, TRUE } };
+	for( Int c = 0; c < 3; c++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = theCases[c].seed;
+		settings.m_numPlayers = theCases[c].players;
+		settings.m_playableCells = theCases[c].cells ? theCases[c].cells : RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, theCases[c].players );
+		std::vector<char> map;
+		RMGTemplateReport report;
+		CHECK( rmgSynthesise( settings, theCases[c].uneven ? uneven : exemplar, NULL, map, NULL, &report ) );
+		if( map.empty() )
+			continue;
+		parseGeneratedMap( map );
+		const Int W = theRMGParse.m_width, b = theRMGParse.m_border, px = theRMGParse.m_boundaryX, py = theRMGParse.m_boundaryY;
+		std::vector<Coord3D> starts;
+		std::vector<Int> tops;
+		for( size_t k = 0; k < theRMGParse.m_waypointNames.size(); k++ )
+		{
+			if( !theRMGParse.m_waypointNames[k].startsWith( "Player_" ) ) continue;
+			const Coord3D& at = theRMGParse.m_waypointPositions[k];
+			starts.push_back( at );
+			tops.push_back( theRMGParse.m_heights[( (Int)( at.y / MAP_XY_FACTOR ) + b ) * W + (Int)( at.x / MAP_XY_FACTOR ) + b] );
+		}
+		Int outside = 0, docks = 0, derricks = 0, treesOnCliffs = 0;
+		std::vector<Int> piles( starts.size(), 0 );
+		for( Int k = 0; k < theRMGParse.m_numObjects; k++ )
+		{
+			const AsciiString& name = theRMGParse.m_objectNames[k];
+			const Real x = theRMGParse.m_objectPositions[k].x / MAP_XY_FACTOR, y = theRMGParse.m_objectPositions[k].y / MAP_XY_FACTOR;
+			const Bool dock = name == "SupplyDock", derrick = name == "TechOilDerrick";
+			docks += dock;
+			derricks += derrick;
+			const Int cx = (Int)x + b, cy = (Int)y + b;
+			if( name.startsWith( "Tree" ) && cx >= 0 && cy >= 0 && cx + 1 < W && cy + 1 < theRMGParse.m_height && RMGCellSpan( cx, cy ) > 9.8f )
+				treesOnCliffs++;
+			if( ( dock || derrick ) && !( x >= 0.0f && y >= 0.0f && x < px && y < py ) )
+				outside++;
+			// a pile counts to the gap between the two seats either side of it round the middle
+			if( name == "SupplyPileSmall" && !starts.empty() )
+			{
+				const Real mine = atan2f( y - 0.5f * py, x - 0.5f * px );
+				size_t gap = 0;
+				Real least = 1.0e9f;
+				for( size_t s = 0; s < starts.size(); s++ )
+				{
+					Real behind = mine - atan2f( starts[s].y / MAP_XY_FACTOR - 0.5f * py, starts[s].x / MAP_XY_FACTOR - 0.5f * px );
+					while( behind < 0.0f ) behind += 2.0f * PI;
+					if( behind < least ) { least = behind; gap = s; }
+				}
+				piles[gap]++;
+			}
+		}
+		Real steepest = 0.0f;
+		for( Int y = b; y + 1 < theRMGParse.m_height - b; y++ )
+			for( Int x = b; x + 1 < W - b; x++ )
+				steepest = std::max( steepest, RMGCellSpan( x, y ) );
+		Bool even = TRUE;
+		for( size_t s = 1; s < tops.size(); s++ ) even = even && tops[s] == tops[0];
+		for( size_t s = 0; s < piles.size() && theCases[c].uneven; s++ ) even = even && piles[s] == 4;
+		if( !even || outside || report.m_cutOffSites || derricks < theCases[c].players || treesOnCliffs || steepest > 40.0f )
+		{
+			printf( "  %dp %dc: tops", theCases[c].players, settings.m_playableCells );
+			for( size_t s = 0; s < tops.size(); s++ ) printf( " %d", tops[s] );
+			printf( "; docks %d derricks %d outside %d; piles", docks, derricks, outside );
+			for( size_t s = 0; s < piles.size(); s++ ) printf( " %d", piles[s] );
+			printf( "; cut off %d starts %d sites; %d trees on cliffs, steepest cell %.1f\n", report.m_cutOffStarts, report.m_cutOffSites,
+				treesOnCliffs, steepest );
+		}
+		CHECK_EQ( (Int)starts.size(), theCases[c].players );
+		// one base for every seat, not an east and a west one taken turn about, 20 to 30 bytes apart
+		for( size_t s = 1; s < tops.size(); s++ )
+			CHECK_EQ( tops[s], tops[0] );
+		// a dock the 140-cell map put past the edge is pulled back in, and the report no longer walks the border to it
+		CHECK_EQ( outside, 0 );
+		CHECK_EQ( report.m_cutOffSites, 0 );
+		CHECK( docks >= theCases[c].players );
+		// the exemplar's derricks stand out in its bowl, past every base: the skeleton's stay, none before
+		CHECK( derricks >= theCases[c].players );
+		// four piles between every two seats, not the few the copies left in the first gap
+		if( theCases[c].uneven )
+			for( size_t s = 0; s < piles.size(); s++ )
+				CHECK_EQ( piles[s], 4 );
+		// the way joining two plateaus falls back to the ground over cells, not in one: 85 world units a
+		// cell at 2p and 43 at 8p with a hard edge, 33 and 28 faded
+		CHECK( steepest <= 40.0f );
+		// no tree on a wall the copy's ramps or levelled discs made (11 at 2p, the exemplar's own cliffs excepted)
+		CHECK_EQ( treesOnCliffs, 0 );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Two copied plateau bases closer than a corridor are joined into one stretch of high ground; two
+	further apart keep the valley between them. The distances are a 3-4 chamfer, so a gap of n cells
+	sums to 3n on the line between the bases. Fading on that sum alone half filled the valley between
+	two bases 36 cells apart. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_template_joins_two_plateau_bases_across_a_corridor_not_a_valley)
+{
+	// 20 cells apart: the way between is raised whole, and its shoulders fall back over the fade
+	CHECK( rmgJoinShare( 3 * 20, 3 * 20 ) == 1.0f );
+	const Real shoulder = rmgJoinShare( 3 * 20, 3 * 36 );
+	CHECK( shoulder > 0.0f && shoulder < 1.0f );
+	CHECK( rmgJoinShare( 3 * 20, 3 * 60 ) == 0.0f );
+	// 30 and 36 cells apart: a valley, the floor on the line between them untouched
+	CHECK( rmgJoinShare( 3 * 30, 3 * 30 ) == 0.0f );
+	CHECK( rmgJoinShare( 3 * 36, 3 * 36 ) == 0.0f );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A LAN game names a template map by four letters of its folder's name, and a machine binds the
+	first folder under maps\ whose letters match, so two shipped maps sharing four letters would put
+	the later one out of LAN games without a word. Every map folder Zero Hour and Generals ship, read
+	out of MapsZH.big and Maps.big, has letters of its own; the day one does not, the wire takes a
+	fifth letter. */
+//-------------------------------------------------------------------------------------------------
+TEST(every_shipped_map_has_wire_letters_of_its_own)
+{
+	static const char *const theShippedMaps[] =
+	{
+		"_art review new units", "allbuildingsallsidesunittest_save", "alpine assault", "armored fury",
+		"barrenbadlands", "bear town beatdown", "bitter winter", "bombardment beach", "bridge busters",
+		"bug_savedgameandenabledfolders", "cairo commandos", "chi01", "chi02", "chi03", "chi04", "chi05",
+		"chi06", "chi07", "chi08", "chifinal", "cliff", "dark mountain", "dark night", "death valley",
+		"defcon6", "desert fury", "destruction station", "dogsofwar", "dust devil", "eastern everglades",
+		"el scorcho", "fallen empire", "final crusade", "flash effect", "flash fire", "floodedplains",
+		"forgottenforestzh", "fortress avalanche", "free fire zone", "gc_airgeneral", "gc_chemgeneral",
+		"gc_chinaboss", "gc_demolitiongeneral", "gc_lasergeneral", "gc_nukegeneral", "gc_stealth",
+		"gc_superweaponsgeneral", "gc_tankgeneral", "gla01", "gla02", "gla04", "gla05", "gla06", "gla07",
+		"gla08", "golden oasis", "green pastures", "heartland shield", "homeland alliance", "hostile dawn",
+		"hovercraft", "iron dragon", "killing fields", "leipzig lowlands", "lights out", "lone eagle",
+		"manic aggression", "md_chi01", "md_chi02", "md_chi03", "md_chi04", "md_chi05", "md_chi05_end",
+		"md_chi05_intro", "md_gla01", "md_gla02", "md_gla02_cine", "md_gla03", "md_gla03_cine",
+		"md_gla03_end", "md_gla04", "md_gla04_intro", "md_gla04_sound", "md_gla05", "md_gla05_end",
+		"md_gla05_intro", "md_shellmap", "md_usa01", "md_usa01_cine", "md_usa02", "md_usa02_intro",
+		"md_usa02_intro_ns", "md_usa03", "md_usa03_cine", "md_usa03_end", "md_usa03_end1", "md_usa03_intro",
+		"md_usa03_mid_cine", "md_usa04", "md_usa04_cine", "md_usa04_intro", "md_usa05", "md_usa06_intro",
+		"mountain fox", "mountain guns", "mountainfox", "northamerica", "overland", "red rock",
+		"rocky rampage", "rogue agent", "sand serpent", "scorched earth", "seaside mutiny", "shellmap1",
+		"shellmap1low", "shellmapmd", "silent river", "swissmp", "thefrontline", "tournament city",
+		"tournament continent", "tournament desert", "tournament island", "tournament lake",
+		"tournament plains", "tournament tundra", "tournament urban", "tournamenta", "tournamentb",
+		"training01", "twilight flame", "usa01", "usa02", "usa03", "usa04", "usa05", "usa05_endsconflict",
+		"usa05_endsconflict_intro", "usa05_endsconflict_intro_n", "usa06", "usa07", "usa07-taskforces",
+		"usa08", "victory valley", "wasteland warlords", "whiteout", "winding river", "winter wolf",
+		"woodcrest circle"
+	};
+	const Int numShippedMaps = sizeof(theShippedMaps) / sizeof(theShippedMaps[0]);
+
+	std::map<std::string, const char *> seen;
+	for( Int i = 0; i < numShippedMaps; i++ )
+	{
+		AsciiString folder, wire;
+		folder.format( "rmg_v17_1_2p_200c_t00000001_%s", theShippedMaps[i] );
+		CHECK( generatedMapWireName( folder, wire ) );
+		const char *letters = strrchr( wire.str(), '~' );
+		CHECK( letters != NULL && letters != wire.str() );
+		if( letters == NULL )
+			continue;
+		std::map<std::string, const char *>::const_iterator twin = seen.find( letters );
+		if( twin != seen.end() )
+			printf( "  '%s' and '%s' both go as %s\n", twin->second, theShippedMaps[i], letters );
+		CHECK( twin == seen.end() );
+		seen[letters] = theShippedMaps[i];
+	}
+	CHECK_EQ( (Int)seen.size(), numShippedMaps );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -12790,7 +15008,8 @@ TEST(the_ground_is_textured_by_what_the_ground_is_doing)
 	for( Int i = 0; i < (Int)theRMGParse.m_tiles.size(); i++ )
 	{
 		Int source = theRMGParse.m_tiles[i] >> 2;
-		Int terrainClass = source / 4;
+		Int terrainClass = RMGClassOfTile( theRMGParse.m_tiles[i] );
+		CHECK( source >= 0 && source < theRMGParse.m_numBitmapTiles );
 		CHECK( terrainClass >= 0 && terrainClass < 4 );
 		cellsPerClass[terrainClass]++;
 	}
@@ -13482,6 +15701,11 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_adaptiveHarvesters >= lower.m_adaptiveHarvesters );
 		CHECK( upper.m_selfTriggeredExpansion >= lower.m_selfTriggeredExpansion );
 		CHECK( upper.m_defendExpansions >= lower.m_defendExpansions );
+
+		// more of the map: another base sooner, more of them, docks further out
+		CHECK( upper.m_secondBaseSeconds < lower.m_secondBaseSeconds );
+		CHECK( upper.m_secondBases >= lower.m_secondBases );
+		CHECK( upper.m_expansionReach >= lower.m_expansionReach );
 	}
 
 	// the ends of the ladder are what they say they are: Easy ignores what it is facing and Brutal
@@ -14314,6 +16538,32 @@ TEST(a_capturable_tech_building_is_income_not_a_target)
 	// everything else is untouched: this rule is about tech buildings and nothing else
 	CHECK( !aiIsIncomeNotATarget( FALSE, TRUE, FALSE ) );
 	CHECK( !aiIsIncomeNotATarget( FALSE, FALSE, FALSE ) );
+}
+
+
+/** An Aurora guarding a circle dropped its one bomb on the nearest thing in it, usually a soldier.
+	 A guarding aircraft now takes buildings, then vehicles, then infantry, nearest within a class, and
+	 the lower ObjectID on an exact tie so every machine picks the same one. */
+TEST(a_guarding_aircraft_bombs_buildings_then_vehicles_then_infantry)
+{
+	const Int building = aiGuardAirTargetClass( TRUE, FALSE, FALSE );
+	const Int vehicle = aiGuardAirTargetClass( FALSE, TRUE, FALSE );
+	const Int soldier = aiGuardAirTargetClass( FALSE, FALSE, TRUE );
+	const Int other = aiGuardAirTargetClass( FALSE, FALSE, FALSE );
+	CHECK( building < vehicle );
+	CHECK( vehicle < soldier );
+	CHECK( soldier < other );
+
+	// a far building beats a soldier under the plane, and a far vehicle beats him too
+	CHECK( aiGuardAirTargetBeats( building, 640000.0f, (ObjectID)9, soldier, 100.0f, (ObjectID)2 ) );
+	CHECK( aiGuardAirTargetBeats( vehicle, 640000.0f, (ObjectID)9, soldier, 100.0f, (ObjectID)2 ) );
+	CHECK( !aiGuardAirTargetBeats( soldier, 100.0f, (ObjectID)2, vehicle, 640000.0f, (ObjectID)9 ) );
+
+	// within a class the nearer one, and on an exact tie the lower id, whichever is asked first
+	CHECK( aiGuardAirTargetBeats( vehicle, 100.0f, (ObjectID)9, vehicle, 400.0f, (ObjectID)2 ) );
+	CHECK( aiGuardAirTargetBeats( vehicle, 100.0f, (ObjectID)2, vehicle, 100.0f, (ObjectID)9 ) );
+	CHECK( !aiGuardAirTargetBeats( vehicle, 100.0f, (ObjectID)9, vehicle, 100.0f, (ObjectID)2 ) );
+	CHECK( !aiGuardAirTargetBeats( vehicle, 100.0f, (ObjectID)2, vehicle, 100.0f, (ObjectID)2 ) );
 }
 
 
@@ -15627,6 +17877,57 @@ TEST(an_allocation_inside_a_job_is_counted)
 	JobSystem::shutdown();
 }
 
+/* Crash report 2655: a block freed twice linked to itself and every later allocation of that size got
+	 that one block.  ReleaseCrash ends the process unless TheGlobalData is gone, as at shutdown, so with
+	 it gone the real path runs and comes back, and what the free list hands out next says whether the
+	 second free got through.  Freed twice in a row, the old code gives the same block forever; with one
+	 free between, a check against the list's head alone hands it out again. */
+TEST(a_pool_block_freed_twice_never_goes_back_on_the_free_list)
+{
+	CHECK( bootOnce() );
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NULL;
+
+	MemoryPool *pool = TheMemoryPoolFactory->createMemoryPool( "testDoubleFree", 64, 8, 8 );
+
+	// healthy order first: the mark must not change which block comes next
+	void *a = pool->allocateBlock( "testDoubleFree" );
+	void *b = pool->allocateBlock( "testDoubleFree" );
+	pool->freeBlock( a );
+	pool->freeBlock( b );
+	void *again = pool->allocateBlock( "testDoubleFree" );
+	CHECK( again == b );
+	again = pool->allocateBlock( "testDoubleFree" );
+	CHECK( again == a );
+
+	pool->freeBlock( a );
+	pool->freeBlock( a );
+	void *first = pool->allocateBlock( "testDoubleFree" );
+	void *second = pool->allocateBlock( "testDoubleFree" );
+	CHECK( first == a );
+	CHECK( second != a );
+	pool->freeBlock( second );
+	pool->freeBlock( first );
+
+	void *c = pool->allocateBlock( "testDoubleFree" );
+	pool->freeBlock( c );
+	pool->freeBlock( b );
+	pool->freeBlock( c );
+	void *third = pool->allocateBlock( "testDoubleFree" );
+	void *fourth = pool->allocateBlock( "testDoubleFree" );
+	void *fifth = pool->allocateBlock( "testDoubleFree" );
+	CHECK( third == b );
+	CHECK( fourth == c );
+	CHECK( fifth != b && fifth != c );
+	pool->freeBlock( third );
+	pool->freeBlock( fourth );
+	pool->freeBlock( fifth );
+
+	CHECK_EQ( 0, pool->getUsedBlockCount() );
+	TheMemoryPoolFactory->destroyMemoryPool( pool );
+	TheWritableGlobalData = saved;
+}
+
 /* A fork made the moment the last one returned finds some workers still on their way back to the
 	 wait; a fork made after a pause finds them all asleep.  A wake lost in either case hangs this test,
 	 and a wake left over from one fork and taken by the next returns before its workers are done,
@@ -15745,6 +18046,27 @@ TEST(a_door_stays_open_while_another_unit_is_still_coming)
 	/* somebody holding the door open by hand still wins over both. */
 	CHECK( !Production_shouldCloseDoorNow( 31, 30, true, false ) );
 	CHECK( !Production_shouldCloseDoorNow( 31, 30, true, true ) );
+}
+
+/* ProductionUpdate.cpp: but only a unit close behind holds it.  Any queued unit used to count, so a
+	 Command Center training an engineer with eighteen seconds still to go stood with its gate open
+	 and empty the whole time.  A unit far enough off that the door can shut and still open early for
+	 him from shut lets it close, as retail's stopwatch did. */
+extern Bool Production_isNextUnitDue( Int framesRemaining, UnsignedInt doorClosingTime, UnsignedInt doorOpeningTime );
+
+TEST(a_door_closes_on_a_unit_still_far_off)
+{
+	/* 90 frames to close and 90 to open, retail's 1.5 s each: 182 frames out he is still due. */
+	CHECK( Production_isNextUnitDue( 182, 90, 90 ) );
+	CHECK( Production_isNextUnitDue( 1, 90, 90 ) );
+
+	/* finished and waiting on the door, or a fresh entry not yet measured: due. */
+	CHECK( Production_isNextUnitDue( 0, 90, 90 ) );
+	CHECK( Production_isNextUnitDue( -5, 90, 90 ) );
+
+	/* one frame further and there is time to shut first; eighteen seconds certainly is. */
+	CHECK( !Production_isNextUnitDue( 183, 90, 90 ) );
+	CHECK( !Production_isNextUnitDue( 1080, 90, 90 ) );
 }
 
 /* ProductionUpdate.h: production repeat.  A factory keeps one unit on repeat.  Turning a second
@@ -17267,6 +19589,28 @@ TEST(empty_building_slots_are_a_check_box_that_starts_on)
 	delete scratch;
 }
 
+TEST(aircraft_altitude_lines_are_a_check_box_that_starts_on)
+{
+	const OptionDef *def = findOptionDef( "AircraftAltitudeLine" );
+	CHECK( def != NULL );
+	if( def == NULL )
+		return;
+	CHECK_EQ( (Int)def->kind, (Int)OPTION_BOOL );
+	CHECK_EQ( (Int)def->apply, (Int)APPLY_LIVE );
+	CHECK( strstr( def->widgetName, "CheckAircraftAltitudeLine" ) != NULL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	CHECK( scratch->m_aircraftAltitudeLine );
+	def->set( 0 );
+	CHECK( !scratch->m_aircraftAltitudeLine );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
 TEST(high_static_lod_keeps_the_picture_settings)
 {
 	StaticGameLODInfo high;
@@ -17740,7 +20084,7 @@ TEST(the_pixel_past_the_last_tab_is_no_tab_at_all)
 }
 
 /** A .wnd that never set the tab size divided by it.  A .wnd that declares more tabs than the array
-	 holds indexed past it.  Both are data, and data is what a mod hands the engine. */
+	 holds indexed past it.  Both are data, and the engine takes data as it comes. */
 TEST(a_tab_control_with_no_size_or_too_many_tabs_answers_nothing)
 {
 	CHECK_EQ( GadgetTabControl_tabAtOffset( 40, 0, 3 ), -1 );
@@ -18678,7 +21022,7 @@ TEST(the_bars_windows_can_be_torn_down_twice_without_taking_the_bar_with_them)
 }
 
 /* CommandSetReforged.ini names EA's Early_Command_ChinaCarpetBomb in slot 2 of a China command center
-	 set.  Contra X Beta 2 has no such button, and CommandSet::parseCommandButton threw and stopped the
+	 set.  On data with no such button CommandSet::parseCommandButton threw and stopped the
 	 game at start.  The slot is skipped now: it stays empty and the slots after it still parse. */
 TEST(command_set_slot_naming_an_unknown_button_is_skipped)
 {
@@ -19442,6 +21786,14 @@ TEST(scenario_parses_the_order_lines)
 	CHECK_STR( action.name.str(), "aggressive" );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 * bold", &action ), (Int)SCENARIO_PARSE_BAD_ACTION );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 *", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	// the auto garrison and auto repair keys
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 autogarrison 0 ChinaInfantryRedguard", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_AUTOGARRISON );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 autorepair 0 *", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_AUTOREPAIR );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 autorepair 0", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 hunt 0 * 900 700", &action ), (Int)SCENARIO_PARSE_BAD_ACTION );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm start0:0:300", &action ),
@@ -20235,447 +22587,6 @@ TEST(unsigned_text_parses_as_windows_32_bit_strtoul)
 	CHECK_EQ(strtoulAsWindows("-"), 0u);
 }
 
-// No -mod replaces what the fork ships.  The set is Code/Data as the build copies it into Run, less
-// the three trees that never ship, so a new master that FileSystem::isForkOwnedPath does not cover
-// fails here instead of letting a mod quietly win over it.  Retail's own loose files stay the mod's.
-TEST(every_shipped_master_is_fork_owned_and_retail_files_are_not)
-{
-	const std::filesystem::path data = std::filesystem::path(ZH_CODE_DIR) / "Data";
-	Int masters = 0;
-	for (std::filesystem::recursive_directory_iterator it(data), end; it != end; ++it)
-	{
-		if (!it->is_regular_file())
-			continue;
-		std::string relative = std::filesystem::relative(it->path(), data).generic_string();
-		if (relative.rfind("Scenarios/", 0) == 0 || relative.rfind("Cinema/", 0) == 0 || relative == "dx11shaders.shipped")
-			continue;
-		// shipped, but the one master a mod may replace: its skirmish AI is written for its own generals
-		if (relative == "Scripts/SkirmishScripts.scb")
-			continue;
-		// the post-build copy keeps Data\ in front of these and puts the rest at the top of Run
-		const char *underData[] = { "INI/", "Scripts/", "Turkish/", "German/", "Ukrainian/", "Russian/", "French/" };
-		Bool keepsData = relative == "Patch.str";
-		for (const char *prefix : underData)
-			keepsData = keepsData || relative.rfind(prefix, 0) == 0;
-		const std::string runPath = keepsData ? "Data/" + relative : relative;
-		if (!FileSystem::isForkOwnedPath(AsciiString(runPath.c_str())))
-			printf("    not fork-owned: %s\n", runPath.c_str());
-		CHECK(FileSystem::isForkOwnedPath(AsciiString(runPath.c_str())));
-		++masters;
-	}
-	CHECK(masters > 20);
-
-	CHECK(FileSystem::isForkOwnedPath(AsciiString("Art\\Textures\\ReforgedBarGLALeft.tga")));
-	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\Scripts\\MultiplayerScripts.scb")));
-	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\Scripts\\SkirmishScripts.scb")));
-	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\Scripts\\Scripts.ini")));
-	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\INI\\GameData.ini")));
-	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\INI\\Object\\AmericaTankReforged.ini")));
-	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\English\\Movies\\EA_LOGO.bik")));
-	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Art\\Textures\\AVPaladin.tga")));
-}
-
-// -modfactions: a mod's own names get its prefix everywhere but the line's first word, a name it does
-// not define stays retail's, and a side name stays text even when the mod also calls a block that.
-TEST(modfactions_prefix_only_the_mods_own_names)
-{
-	bootOnce();
-	ModNamespace names;
-	names.scanLine( 0, "Object AmericaRanger ; the mod's own" );
-	names.scanLine( 0, "Weapon RangerGun" );
-	names.scanLine( 0, "  Weapon = PRIMARY RetailGun" );		// a field, not a definition
-	names.scanLine( 0, "CommandSet GLA CommandSet" );				// The End of Days really has this line
-	names.scanLine( 0, "  Side = GLA" );
-	names.scanLine( 0, "ObjectCreationList OCL_Mine" );
-	names.finishScan( 0 );
-	names.setActive( 0 );
-
-	char line[ 64 ];
-	strcpy( line, "Object AmericaRanger" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "Object M1~AmericaRanger" );
-	// a colon parser's keyword stays the parser's, the name after it is the mod's; a label is neither
-	strcpy( line, "  FactionOCL = Faction:GLA OCL:OCL_Mine" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  FactionOCL = Faction:GLA OCL:M1~OCL_Mine" );
-	strcpy( line, "  DisplayName = OBJECT:OCL_Mine" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  DisplayName = OBJECT:OCL_Mine" );
-	strcpy( line, "  Weapon = PRIMARY RangerGun" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Weapon = PRIMARY M1~RangerGun" );
-	strcpy( line, "  Weapon = SECONDARY RetailGun" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Weapon = SECONDARY RetailGun" );
-	strcpy( line, "  Side = GLA" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Side = GLA" );
-	strcpy( line, "RangerGun = RangerGun" );						// the first word is the field
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "RangerGun = M1~RangerGun" );
-	strcpy( line, "Object AmericaRanger" );
-	CHECK( !names.rewriteLine( line, 23 ) );						// "Object M1~AmericaRanger" needs 24
-	CHECK_STR( line, "Object AmericaRanger" );
-
-	// a finder's miss: the mod's own name stays a miss, anything else is retail's
-	AsciiString retail;
-	CHECK( !names.findRetailName( AsciiString( "M1~AmericaRanger" ), MODNAME_OBJECT, &retail ) );
-	CHECK( names.findRetailName( AsciiString( "M1~RangerGun" ), MODNAME_OBJECT, &retail ) );
-	CHECK_STR( retail.str(), "RangerGun" );
-	CHECK( !names.findRetailName( AsciiString( "M1~RangerGun" ), MODNAME_WEAPON, &retail ) );
-	CHECK( !names.findRetailName( AsciiString( "M2~AmericaRanger" ), MODNAME_OBJECT, &retail ) );	// no second mod
-	CHECK( !names.findRetailName( AsciiString( "AmericaRanger" ), MODNAME_OBJECT, &retail ) );
-	NameKeyType key;
-	CHECK( names.findRetailKey( NAMEKEY( "M1~Upgrade_Retail" ), MODNAME_UPGRADE, &key ) );
-	CHECK_EQ( key, NAMEKEY( "Upgrade_Retail" ) );
-}
-
-// Shockwave Chaos's BlackMarketTank.ini has a 1019-character BuildVariations line of 43 of its own
-// tanks. It fits the file reader, but three characters of "M2~" on each name took it past a buffer of
-// that size, and the game stopped at startup whenever Chaos ran beside another full mod.
-TEST(modfactions_prefixed_line_outgrows_the_raw_line)
-{
-	bootOnce();
-	ModNamespace names;
-	std::string line = "  BuildVariations =";
-	for (Int i = 0; i < 43; ++i)
-	{
-		char name[ 32 ];
-		snprintf( name, sizeof( name ), "ChaosVariationTank_X%02d", i );
-		names.scanLine( 1, (std::string( "Object " ) + name).c_str() );
-		line += " ";
-		line += name;
-	}
-	names.finishScan( 1 );
-	names.setActive( 1 );
-	CHECK( (Int)line.size() < INI_MAX_CHARS_PER_LINE );
-
-	char buffer[ INI_MAX_CHARS_PER_PREFIXED_LINE + 1 ];
-	strcpy( buffer, line.c_str() );
-	CHECK( !names.rewriteLine( buffer, INI_MAX_CHARS_PER_LINE + 1 ) );		// the old buffer
-	CHECK( names.rewriteLine( buffer, sizeof( buffer ) ) );
-	CHECK_EQ( (Int)strlen( buffer ), (Int)line.size() + 43 * 3 );
-	CHECK( (Int)strlen( buffer ) > INI_MAX_CHARS_PER_LINE );
-	CHECK( strstr( buffer, " M2~ChaosVariationTank_X00 " ) != NULL );
-	CHECK( strstr( buffer, " M2~ChaosVariationTank_X42" ) != NULL );
-
-	// the worst a full line can do: a one-letter name in every other character, mod 99's prefix on each
-	ModNamespace worst;
-	worst.scanLine( 98, "Object A" );
-	worst.finishScan( 98 );
-	worst.setActive( 98 );
-	std::string full = "X";
-	while ((Int)full.size() + 2 < INI_MAX_CHARS_PER_LINE)
-		full += " A";
-	strcpy( buffer, full.c_str() );
-	CHECK( worst.rewriteLine( buffer, sizeof( buffer ) ) );
-}
-
-// The Power of the West defines "FXList No", and -modfactions made every "IsGrantable = No" an
-// "M2~No" that parseBool refused: a word the parser reads for itself is never the mod's name.
-TEST(modfactions_never_prefix_a_reserved_word)
-{
-	bootOnce();
-	ModNamespace names;
-	names.scanLine( 0, "FXList No" );
-	names.scanLine( 0, "Upgrade None" );
-	names.scanLine( 0, "FXList FX_Nope" );
-	names.finishScan( 0 );
-	names.setActive( 0 );
-
-	char line[ 64 ];
-	strcpy( line, "  IsGrantable = No" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  IsGrantable = No" );
-	strcpy( line, "  PrerequisiteSciences = None" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  PrerequisiteSciences = None" );
-	strcpy( line, "  FX = FX_Nope" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  FX = M1~FX_Nope" );
-
-	// and a name it gave a block that is also an engine word ("ParticleSystem Explosion") still reads as
-	// that word where only engine words go
-	CHECK( INI::scanBool( "M2~Yes" ) );
-	CHECK_EQ( INI::scanIndexList( "M2~SMALL_ARMS", DamageTypeFlags::getBitNames() ), (Int)DAMAGE_SMALL_ARMS );
-	CHECK_STR( INI::withoutModPrefix( "M~Explosion" ), "M~Explosion" );
-	CHECK_STR( INI::withoutModPrefix( "MX2~Explosion" ), "MX2~Explosion" );
-}
-
-class ModTestArchiveFile : public ArchiveFile
-{
-public:
-	ModTestArchiveFile() { m_file = NULL; }	// the base leaves it to the device's archive to set
-	void add( const char *directory, const char *file )
-	{
-		ArchivedFileInfo info;
-		info.m_filename = file;
-		addFile( AsciiString( directory ), &info );
-	}
-	virtual Bool getFileInfo( const AsciiString&, FileInfo* ) const { return FALSE; }
-	virtual File* openFile( const Char*, Int ) { return NULL; }
-	virtual void closeAllFiles( void ) {}
-	virtual AsciiString getName( void ) { return AsciiString::TheEmptyString; }
-	virtual AsciiString getPath( void ) { return AsciiString::TheEmptyString; }
-	virtual void setSearchPriority( Int ) {}
-	virtual void close( void ) {}
-};
-
-class ModTestArchiveFileSystem : public ArchiveFileSystem
-{
-public:
-	virtual void init( void ) {}
-	virtual void update( void ) {}
-	virtual void reset( void ) {}
-	virtual void postProcessLoad( void ) {}
-	virtual ArchiveFile* openArchiveFile( const Char* ) { return NULL; }
-	virtual void closeArchiveFile( const Char* ) {}
-	virtual void closeAllArchiveFiles( void ) {}
-	virtual void closeAllFiles( void ) {}
-	virtual Bool loadBigFilesFromDirectory( AsciiString, AsciiString, Bool, Bool ) { return FALSE; }
-
-	void addRetail( ArchiveFile *archive, const char *name )
-	{
-		loadIntoDirectoryTree( archive, AsciiString( name ) );
-		m_archiveFileMap[ AsciiString( name ) ] = archive;
-	}
-	using ArchiveFileSystem::keepModsApart;
-	using ArchiveFileSystem::addModArchive;
-};
-
-// -modfactions' focus: retail sees the tree from before any -mod, a mod its own archives, nothing else
-TEST(modfactions_focus_sees_one_set_of_archives)
-{
-	bootOnce();
-	ModTestArchiveFileSystem archives;
-	ModTestArchiveFile *retail = new ModTestArchiveFile, *one = new ModTestArchiveFile, *two = new ModTestArchiveFile;
-	retail->add( "data\\ini\\", "weapon.ini" );
-	retail->add( "data\\ini\\object\\", "a.ini" );
-	one->add( "data\\ini\\", "weapon.ini" );
-	one->add( "data\\ini\\object\\", "b.ini" );
-	two->add( "data\\ini\\object\\", "c.ini" );
-	archives.addRetail( retail, "INIZH.big" );
-	archives.keepModsApart( 2 );
-	archives.addModArchive( 0, one, AsciiString( "Mods\\One\\!one.big" ) );
-	archives.addModArchive( 1, two, AsciiString( "Mods\\Two\\!two.big" ) );
-
-	const AsciiString weapon( "Data\\INI\\Weapon.ini" );
-	CHECK_STR( archives.getArchiveFilenameForFile( weapon ).str(), "INIZH.big" );	// the default view is retail's
-	archives.setFocus( FILE_FOCUS_RETAIL );
-	CHECK_STR( archives.getArchiveFilenameForFile( weapon ).str(), "INIZH.big" );
-	archives.setFocus( 0 );
-	CHECK_STR( archives.getArchiveFilenameForFile( weapon ).str(), "Mods\\One\\!one.big" );
-	archives.setFocus( 1 );
-	CHECK( !archives.doesFileExist( weapon.str() ) );
-
-	FilenameList listed;
-	archives.getFileListInDirectory( AsciiString( "" ), AsciiString( "Data\\INI\\Object\\" ), AsciiString( "*.ini" ), listed, TRUE );
-	CHECK_EQ( (Int)listed.size(), 1 );
-	CHECK( listed.begin()->endsWithNoCase( "c.ini" ) );
-	listed.clear();
-	archives.setFocus( FILE_FOCUS_RETAIL );
-	archives.getFileListInDirectory( AsciiString( "" ), AsciiString( "Data\\INI\\Object\\" ), AsciiString( "*.ini" ), listed, TRUE );
-	CHECK_EQ( (Int)listed.size(), 1 );
-	CHECK( listed.begin()->endsWithNoCase( "a.ini" ) );
-	listed.clear();
-	archives.setFocus( FILE_FOCUS_ALL );
-	archives.getFileListInDirectory( AsciiString( "" ), AsciiString( "Data\\INI\\Object\\" ), AsciiString( "*.ini" ), listed, TRUE );
-	CHECK_EQ( (Int)listed.size(), 1 );
-	CHECK( listed.begin()->endsWithNoCase( "a.ini" ) );
-
-	// a mod's own copy by index, whatever the focus: what an "M<n>~" file name asks for
-	archives.setFocus( 1 );
-	CHECK( archives.doesModFileExist( 0, weapon ) );
-	CHECK( !archives.doesModFileExist( 1, weapon ) );
-	CHECK( archives.doesModFileExist( 1, AsciiString( "Data\\INI\\Object\\c.ini" ) ) );
-	CHECK( !archives.doesModFileExist( 0, AsciiString( "Data\\INI\\Object\\a.ini" ) ) );
-	archives.setFocus( FILE_FOCUS_ALL );
-}
-
-// -modfactions: "M<n>~" on a file name's last part names mod n's copy, only with the switch and a mod n
-TEST(modfactions_split_a_mod_file_name)
-{
-	GlobalData *saved = TheWritableGlobalData;
-	TheWritableGlobalData = NEW GlobalData;
-	TheWritableGlobalData->m_mods.assign( 2, AsciiString( "Mods\\X" ) );
-	Int mod = -1;
-	AsciiString bare;
-	TheWritableGlobalData->m_modFactions = FALSE;
-	CHECK( !FileSystem::splitModName( AsciiString( "Art\\W3D\\M1~AVRanger.w3d" ), &mod, &bare ) );
-	TheWritableGlobalData->m_modFactions = TRUE;
-	CHECK( FileSystem::splitModName( AsciiString( "Art\\W3D\\M1~AVRanger.w3d" ), &mod, &bare ) );
-	CHECK_EQ( mod, 0 );
-	CHECK_STR( bare.str(), "Art\\W3D\\AVRanger.w3d" );
-	CHECK( FileSystem::splitModName( AsciiString( "m2~exsmoke.tga" ), &mod, &bare ) );
-	CHECK_EQ( mod, 1 );
-	CHECK_STR( bare.str(), "exsmoke.tga" );
-	CHECK( !FileSystem::splitModName( AsciiString( "Art\\W3D\\M3~AVRanger.w3d" ), &mod, &bare ) );	// no third mod
-	CHECK( !FileSystem::splitModName( AsciiString( "M1~Art\\W3D\\AVRanger.w3d" ), &mod, &bare ) );	// not the last part
-	CHECK( !FileSystem::splitModName( AsciiString( "Art\\W3D\\Mx~AVRanger.w3d" ), &mod, &bare ) );
-	delete TheWritableGlobalData;
-	TheWritableGlobalData = saved;
-}
-
-// -modfactions: a mod's skirmish scripts name its things as the mod's only where the mod defines that
-// kind of thing under that name
-TEST(modfactions_mod_name_by_type)
-{
-	bootOnce();
-	ModNamespace names;
-	names.scanLine( 0, "Object AmericaTankCrusader" );
-	names.scanLine( 0, "Upgrade Upgrade_AmericaTOWMissile" );
-	names.finishScan( 0 );
-	CHECK_STR( names.modName( 0, MODNAME_OBJECT, AsciiString( "AmericaTankCrusader" ) ).str(), "M1~AmericaTankCrusader" );
-	CHECK_STR( names.modName( 0, MODNAME_UPGRADE, AsciiString( "Upgrade_AmericaTOWMissile" ) ).str(), "M1~Upgrade_AmericaTOWMissile" );
-	CHECK_STR( names.modName( 0, MODNAME_UPGRADE, AsciiString( "AmericaTankCrusader" ) ).str(), "AmericaTankCrusader" );	// not an upgrade
-	CHECK_STR( names.modName( 0, MODNAME_OBJECT, AsciiString( "ChinaTankOverlord" ) ).str(), "ChinaTankOverlord" );		// retail's
-	CHECK_STR( names.modName( 1, MODNAME_OBJECT, AsciiString( "AmericaTankCrusader" ) ).str(), "AmericaTankCrusader" );	// no second mod
-}
-
-// -modfactions: an AI on a mod faction reads its own mod's AIData side, under "M<n>~<side>", and
-// retail's of the side when the mod has none; a retail AI never reads a mod's
-TEST(modfactions_ai_side_lookups_take_the_mods_own_first)
-{
-	bootOnce();
-	CHECK_STR( AI::modSideKey( AsciiString( "America" ), -1 ).str(), "America" );
-	CHECK_STR( AI::modSideKey( AsciiString( "America" ), 1 ).str(), "M2~America" );
-
-	TAiData data;
-	AISideInfo *retail = newInstance(AISideInfo);
-	retail->m_side = "America";
-	data.addSideInfo( retail );
-	AISideInfo *shockwave = newInstance(AISideInfo);
-	shockwave->m_side = AI::modSideKey( AsciiString( "America" ), 0 );
-	data.addSideInfo( shockwave );
-	CHECK( data.findSideInfo( AsciiString( "America" ), -1 ) == retail );
-	CHECK( data.findSideInfo( AsciiString( "America" ), 0 ) == shockwave );
-	CHECK( data.findSideInfo( AsciiString( "America" ), 1 ) == retail );		// a mod without its own entry
-	CHECK( data.findSideInfo( AsciiString( "Russia" ), 1 ) == NULL );
-
-	AISideBuildList *russia = newInstance(AISideBuildList)( AI::modSideKey( AsciiString( "Russia" ), 1 ) );
-	data.addFactionBuildList( russia );
-	CHECK( data.findBuildList( AsciiString( "Russia" ), 1 ) == russia );
-	CHECK( data.findBuildList( AsciiString( "Russia" ), 0 ) == NULL );			// another mod's
-	CHECK( data.findBuildList( AsciiString( "Russia" ), -1 ) == NULL );
-}
-
-// A plain Random stays with retail's armies under any mod: a mod's faction plays only when it is picked
-TEST(modfactions_stay_out_of_a_plain_random)
-{
-	PlayerTemplate faction;
-	CHECK( !faction.isRandomExcluded() );
-	faction.setModIndex( 0 );
-	CHECK( faction.isRandomExcluded() );
-}
-
-// -modfactions: which skirmish player's scripts a computer player runs.  Its own mod's of its side
-// beats retail's, retail's stands in for a mod without any, and another mod's never fits
-TEST(modfactions_skirmish_side_fit)
-{
-	const AsciiString america( "America" );
-	CHECK_EQ( SidesList::skirmishSideFit( america, -1, america, -1 ), 2 );
-	CHECK_EQ( SidesList::skirmishSideFit( america, 0, america, 0 ), 2 );
-	CHECK_EQ( SidesList::skirmishSideFit( america, -1, america, 0 ), 1 );
-	CHECK_EQ( SidesList::skirmishSideFit( america, 1, america, 0 ), 0 );
-	CHECK_EQ( SidesList::skirmishSideFit( america, 0, america, -1 ), 0 );
-	CHECK_EQ( SidesList::skirmishSideFit( AsciiString( "China" ), -1, america, -1 ), 0 );
-}
-
-// -modfactions: a word naming a model, texture or sound the mod ships gets its prefix, so WW3D and the
-// FileSystem serve the mod's copy; art it does not ship stays retail's
-TEST(modfactions_prefix_the_mods_own_art)
-{
-	bootOnce();
-	ModNamespace names;
-	names.addAsset( 0, "Art\\W3D\\AVRanger.W3D" );
-	names.addAsset( 0, "Art\\W3D\\AVRanger_STND.w3d" );
-	names.addAsset( 0, "Art\\Textures\\exsmoke.dds" );
-	names.addAsset( 0, "Data\\Audio\\Sounds\\vrange01a.wav" );
-	names.finishScan( 0 );
-	names.setActive( 0 );
-
-	char line[ 96 ];
-	strcpy( line, "  Model = avranger" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Model = M1~avranger" );
-	strcpy( line, "  Animation = AVRanger_SKL.AVRanger_STND" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Animation = M1~AVRanger_SKL.AVRanger_STND" );
-	strcpy( line, "  ParticleName = EXSmoke.tga" );		// INI says .tga, the mod ships the .dds
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  ParticleName = M1~EXSmoke.tga" );
-	strcpy( line, "  ShadowTexture = EXSmoke" );			// a decal names its texture bare, the engine adds .tga
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  ShadowTexture = M1~EXSmoke" );
-	strcpy( line, "  Sounds = vrange01a vrange01b" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Sounds = M1~vrange01a vrange01b" );
-	strcpy( line, "  Model = AVHumvee" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Model = AVHumvee" );
-	strcpy( line, "  ShowSubObject = AVRanger" );			// a sub-object, not a file
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  ShowSubObject = AVRanger" );
-
-	// a texture named like a number leaves the animation's numbers alone
-	names.addAsset( 0, "Art\\Textures\\6.dds" );
-	strcpy( line, "  IdleAnimation = AVRanger_SKL.AVRanger_STND 0 6" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  IdleAnimation = M1~AVRanger_SKL.AVRanger_STND 0 6" );
-}
-
-// -modfactions: the file in a path-shaped word is its last part, past either slash
-TEST(modfactions_last_path_part)
-{
-	CHECK_EQ( (Int)ModNamespace::lastPathPart( "x.mp3" ), 0 );
-	CHECK_EQ( (Int)ModNamespace::lastPathPart( "Sub\\x.mp3" ), 4 );
-	CHECK_EQ( (Int)ModNamespace::lastPathPart( "A\\B/x.mp3" ), 4 );
-	CHECK_EQ( (Int)ModNamespace::lastPathPart( "Sub\\" ), 4 );
-	CHECK_EQ( (Int)ModNamespace::lastPathPart( "" ), 0 );
-}
-
-// -modfactions: a MusicTrack Filename names the whole file, maybe in a subfolder; the prefix goes on the
-// last part, where FileSystem::splitModName looks for it
-TEST(modfactions_prefix_the_last_part_of_a_file_path)
-{
-	bootOnce();
-	ModNamespace names;
-	names.addAsset( 0, "Data\\Audio\\Tracks\\Sub\\Score01.mp3" );
-	names.addAsset( 0, "Data\\Audio\\Tracks\\Score02.mp3" );
-	names.finishScan( 0 );
-	names.setActive( 0 );
-
-	char line[ 96 ];
-	strcpy( line, "  Filename = Sub\\Score01.mp3" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Filename = Sub\\M1~Score01.mp3" );
-	strcpy( line, "  Filename = Score02.mp3" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Filename = M1~Score02.mp3" );
-	strcpy( line, "  Filename = Sub/Score02.mp3" );
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Filename = Sub/M1~Score02.mp3" );
-	strcpy( line, "  Filename = Sub\\Retail.mp3" );				// not the mod's: untouched
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Filename = Sub\\Retail.mp3" );
-	strcpy( line, "  Sounds = Score01" );						// a sound event still names the base
-	CHECK( names.rewriteLine( line, sizeof( line ) ) );
-	CHECK_STR( line, "  Sounds = M1~Score01" );
-
-	// and the file system takes the prefix back off that part
-	GlobalData *saved = TheWritableGlobalData;
-	TheWritableGlobalData = NEW GlobalData;
-	TheWritableGlobalData->m_mods.assign( 1, AsciiString( "Mods\\X" ) );
-	TheWritableGlobalData->m_modFactions = TRUE;
-	Int mod = -1;
-	AsciiString bare;
-	CHECK( FileSystem::splitModName( AsciiString( "Data\\Audio\\Tracks\\Sub\\M1~Score01.mp3" ), &mod, &bare ) );
-	CHECK_EQ( mod, 0 );
-	CHECK_STR( bare.str(), "Data\\Audio\\Tracks\\Sub\\Score01.mp3" );
-	delete TheWritableGlobalData;
-	TheWritableGlobalData = saved;
-}
-
 #include "Common/GameState.h"
 
 // A save from before 60 Hz logic is refused, except a mission save (the GameState and campaign
@@ -20785,6 +22696,177 @@ TEST(ai_persona_rides_the_slot_entry_and_normal_leaves_it_unchanged)
 	CHECK_EQ( TheGlobalData->autoSkirmishPersona( 3 ), (Int)AIPERSONA_RUSHER );
 	delete TheWritableGlobalData;
 	TheWritableGlobalData = saved;
+}
+
+#include "Common/MultiplayerSettings.h"
+#include "GameNetwork/LANAPICallbacks.h"
+
+/* A seat's handicap is the last field of its slot entry, and only when the seat has one: a string
+	 with none, a replay's header and Skirmish.ini stay byte for byte what they were, and an older one
+	 reads as full health.  An AI seat at Normal has to write its persona as 0 for the handicap to land
+	 in the right field.  The host's copy of a guest's request refuses what the lobby does not offer and
+	 what the 400 bytes of a LAN packet have no room for. */
+TEST(handicap_rides_the_slot_entry_and_full_health_leaves_the_string_unchanged)
+{
+	CHECK( bootOnce() );
+
+	CHECK_STR( HandicapSlotField( HANDICAP_FULL ).str(), "" );
+	CHECK_STR( HandicapSlotField( 50 ).str(), ",50" );
+	for( Int h = HANDICAP_STEP; h <= HANDICAP_FULL; h += HANDICAP_STEP )
+	{
+		CHECK( IsValidHandicap( h ) );
+		AsciiString field = HandicapSlotField( h );
+		CHECK_EQ( HandicapFromSlotField( field.isEmpty() ? NULL : field.str() + 1 ), h );
+	}
+	static const char *const refused[] = { "", "0", "5", "55", "110", "-10", "x" };
+	for( Int r = 0; r < (Int)ARRAY_SIZE( refused ); ++r )
+		CHECK_EQ( HandicapFromSlotField( refused[r] ), (Int)HANDICAP_FULL );
+	CHECK_EQ( HandicapFromSlotField( NULL ), (Int)HANDICAP_FULL );
+
+	UnicodeString playerName;
+	playerName.translate( AsciiString( "Player" ) );
+
+	GameSlot seat;
+	CHECK_EQ( seat.getHandicap(), (Int)HANDICAP_FULL );
+	seat.setState( SLOT_MED_AI );
+	seat.setHandicap( 40 );
+	seat.setState( SLOT_BRUTAL_AI );		// another rung keeps it, as it keeps the faction
+	CHECK_EQ( seat.getHandicap(), 40 );
+	GameSlot copy = seat;								// GameInfo::setSlot copies the parsed slot in whole
+	CHECK_EQ( copy.getHandicap(), 40 );
+	seat.setState( SLOT_PLAYER, playerName );
+	CHECK_EQ( seat.getHandicap(), (Int)HANDICAP_FULL );
+	seat.setHandicap( 40 );
+	seat.setPlayerTemplate( PLAYERTEMPLATE_OBSERVER );	// an observer has no units to weaken
+	CHECK_EQ( seat.getHandicap(), (Int)HANDICAP_FULL );
+
+	// what building and parsing a whole string asks of the engine, and no more
+	GlobalData *savedData = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	GameState *savedState = TheGameState;
+	TheGameState = NEW GameState;
+	MultiplayerSettings *savedSettings = TheMultiplayerSettings;
+	TheMultiplayerSettings = NEW MultiplayerSettings;
+	PlayerTemplateStore *savedStore = ThePlayerTemplateStore;
+	ThePlayerTemplateStore = NEW PlayerTemplateStore;
+	ThePlayerTemplateStore->init();
+	LANAPI *savedLAN = TheLAN;
+
+	const AsciiString mapPath( "Save\\test\\test.map" );
+	SkirmishGameInfo host;
+	host.init();
+	AsciiString mapInSaves = TheGameState->getSaveDirectory();
+	mapInSaves.concat( "test.map" );
+	host.setMap( mapInSaves );
+	host.setSeed( 7 );
+	GameSlot *slot = host.getSlot( 0 );
+	slot->setState( SLOT_PLAYER, playerName, 0xC0A80164u );
+	slot->setPort( 8088 );
+	slot->setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
+	slot->setAccept();
+	slot->setMapAvailability( TRUE );
+	host.getSlot( 1 )->setState( SLOT_BRUTAL_AI );
+	host.getSlot( 1 )->setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
+	host.getSlot( 2 )->setState( SLOT_EASY_AI );
+	host.getSlot( 2 )->setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
+	host.getSlot( 2 )->setAIPersonality( AIPERSONA_TURTLE );
+	// parsing an open or closed seat asks TheGameText, which the harness does not stand up
+	for( Int i = 3; i < MAX_SLOTS; ++i )
+	{
+		host.getSlot( i )->setState( SLOT_MED_AI );
+		host.getSlot( i )->setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
+	}
+
+	// nobody picked: the old string, not one byte more
+	const AsciiString untouched = GameInfoOptionsString( &host, mapPath, 0 );
+	AsciiString humanEntry;
+	humanEntry.format( "HPlayer,C0A80164,8088,TT,-1,-1,-1,-1,%d:", (Int)slot->getNATBehavior() );
+	AsciiString aiEntries;
+	aiEntries.format( "CH,-1,-1,-1,-1:CE,-1,-1,-1,-1,%d:", (Int)AIPERSONA_TURTLE );
+	CHECK( strstr( untouched.str(), humanEntry.str() ) != NULL );
+	CHECK( strstr( untouched.str(), aiEntries.str() ) != NULL );
+
+	// a pick on each kind of seat comes back as itself, and the persona beside it stays put
+	host.getSlot( 0 )->setHandicap( 50 );
+	host.getSlot( 1 )->setHandicap( 30 );
+	host.getSlot( 2 )->setHandicap( 70 );
+	const AsciiString picked = GameInfoOptionsString( &host, mapPath, 0 );
+	humanEntry.format( "HPlayer,C0A80164,8088,TT,-1,-1,-1,-1,%d,50:", (Int)slot->getNATBehavior() );
+	aiEntries.format( "CH,-1,-1,-1,-1,0,30:CE,-1,-1,-1,-1,%d,70:", (Int)AIPERSONA_TURTLE );
+	CHECK( strstr( picked.str(), humanEntry.str() ) != NULL );
+	CHECK( strstr( picked.str(), aiEntries.str() ) != NULL );
+
+	SkirmishGameInfo guest;
+	guest.init();
+	CHECK( ParseAsciiStringToGameInfo( &guest, picked ) );
+	CHECK_EQ( guest.getSlot( 0 )->getHandicap(), 50 );
+	CHECK_EQ( guest.getSlot( 1 )->getHandicap(), 30 );
+	CHECK_EQ( guest.getSlot( 1 )->getAIPersonality(), (Int)AIPERSONA_NORMAL );
+	CHECK_EQ( guest.getSlot( 2 )->getHandicap(), 70 );
+	CHECK_EQ( guest.getSlot( 2 )->getAIPersonality(), (Int)AIPERSONA_TURTLE );
+	CHECK_EQ( guest.getSlot( 3 )->getHandicap(), (Int)HANDICAP_FULL );
+
+	// a string from before the column, and one whose value no build wrote
+	CHECK( ParseAsciiStringToGameInfo( &guest, untouched ) );
+	for( Int i = 0; i < MAX_SLOTS; ++i )
+		CHECK_EQ( guest.getSlot( i )->getHandicap(), (Int)HANDICAP_FULL );
+	CHECK_EQ( guest.getSlot( 2 )->getAIPersonality(), (Int)AIPERSONA_TURTLE );
+	AsciiString odd;
+	odd.format( "US=0;M=00save/test;MC=0;MS=0;SD=7;C=100;SR=0;SC=0;O=N;S=HPlayer,C0A80164,8088,TT,-1,-1,-1,-1,%d,77:CH,-1,-1,-1,-1,0,120:CM,-1,-1,-1,-1:CM,-1,-1,-1,-1:CM,-1,-1,-1,-1:CM,-1,-1,-1,-1:CM,-1,-1,-1,-1:CM,-1,-1,-1,-1:;",
+		(Int)slot->getNATBehavior() );
+	CHECK( ParseAsciiStringToGameInfo( &guest, odd ) );
+	CHECK_EQ( guest.getSlot( 0 )->getHandicap(), (Int)HANDICAP_FULL );
+	CHECK_EQ( guest.getSlot( 1 )->getHandicap(), (Int)HANDICAP_FULL );
+
+	// the host's answer to a guest's request
+	GameSlot *asker = host.getSlot( 0 );
+	CHECK( ApplyHandicapRequest( &host, asker, 60 ) );
+	CHECK_EQ( asker->getHandicap(), 60 );
+	CHECK( !ApplyHandicapRequest( &host, asker, 60 ) );	// nothing changed, nothing to send round
+	CHECK( !ApplyHandicapRequest( &host, asker, 55 ) );
+	CHECK( !ApplyHandicapRequest( &host, asker, 0 ) );
+	CHECK( !ApplyHandicapRequest( &host, asker, 110 ) );
+	CHECK_EQ( asker->getHandicap(), 60 );
+
+	// a room so full of fixed fields that its last few picks have no room: those do not stand, the
+	// string never empties, and the list still goes round so the guest's box comes back
+	host.setPeaceTime( 30 );
+	host.setIncomeSharing( INCOME_SHARING_ALL );
+	host.setTechRespawn( 300 );
+	host.setSupplyPileLimit( 60000 );
+	host.setUnitLimit( TRUE );
+	host.setTurbo( TRUE );
+	host.setMapCRC( 0xFFFFFFFFu );
+	host.setMapSize( 9999999 );
+	host.setSeed( 2147483647 );
+	for( Int i = 0; i < MAX_SLOTS; ++i )
+	{
+		host.getSlot( i )->setState( SLOT_PLAYER, playerName, 0xC0A80164u + i );
+		host.getSlot( i )->setPort( 8088 );
+	}
+	TheLAN = reinterpret_cast<LANAPI *>( &host );	// asked only whether it is there, for the budget
+	CHECK( !GameInfoToAsciiString( &host ).isEmpty() );
+	Int stood = 0;
+	for( Int i = 0; i < MAX_SLOTS; ++i )
+	{
+		CHECK( ApplyHandicapRequest( &host, host.getSlot( i ), 50 ) );
+		CHECK( !GameInfoToAsciiString( &host ).isEmpty() );
+		if( host.getSlot( i )->getHandicap() == 50 )
+			++stood;
+	}
+	printf( "    a full room took %d of %d picks\n", stood, MAX_SLOTS );
+	CHECK( stood > 0 );
+	CHECK( stood < MAX_SLOTS );
+	TheLAN = savedLAN;
+
+	delete ThePlayerTemplateStore;
+	ThePlayerTemplateStore = savedStore;
+	delete TheMultiplayerSettings;
+	TheMultiplayerSettings = savedSettings;
+	delete TheGameState;
+	TheGameState = savedState;
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = savedData;
 }
 
 // The debug log's cap: the head and the last whole lines survive, in one file still open for writing.

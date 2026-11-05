@@ -69,6 +69,7 @@
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/GUIUtil.h"
 #include "GameNetwork/GameSpy/GSConfig.h"
+#include "GameNetwork/Transport.h"
 
 void WOLDisplaySlotList( void );
 
@@ -256,6 +257,13 @@ static GameWindow *comboBoxTeam[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 static GameWindow *comboBoxAIPersona[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 																								NULL,NULL,NULL,NULL };
 static NameKeyType comboBoxAIPersonaID[MAX_SLOTS] = { NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID,
+																										NAMEKEY_INVALID,NAMEKEY_INVALID };
+
+static GameWindow *comboBoxHandicap[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
+																								NULL,NULL,NULL,NULL };
+static NameKeyType comboBoxHandicapID[MAX_SLOTS] = { NAMEKEY_INVALID,NAMEKEY_INVALID,
 																										NAMEKEY_INVALID,NAMEKEY_INVALID,
 																										NAMEKEY_INVALID,NAMEKEY_INVALID,
 																										NAMEKEY_INVALID,NAMEKEY_INVALID };
@@ -796,6 +804,35 @@ static void handleTeamSelection(int index)
 	}
 }
 
+// HandleHandicapSelection has set the host's slot; the same round as a team pick from here
+static void handleHandicapSelection(Int handicap)
+{
+	GameInfo *myGame = TheGameSpyInfo->getCurrentStagingRoom();
+
+	if (TheGameSpyInfo->amIHost())
+	{
+		// send around a new slotlist
+		myGame->resetAccepted();
+		TheGameSpyInfo->setGameOptions();
+		WOLDisplaySlotList();
+	}
+	else
+	{
+		// request the handicap from the host
+		AsciiString options;
+		options.format("Handicap=%d", handicap);
+		AsciiString hostName;
+		hostName.translate(myGame->getSlot(0)->getName());
+		PeerRequest req;
+		req.peerRequestType = PeerRequest::PEERREQUEST_UTMPLAYER;
+		req.UTM.isStagingRoom = TRUE;
+		req.id = "REQ/";
+		req.nick = hostName.str();
+		req.options = options.str();
+		TheGameSpyPeerMessageQueue->addRequest(req);
+	}
+}
+
 static void handleStartingCashSelection()
 {
   GameInfo *myGame = TheGameSpyInfo->getCurrentStagingRoom();
@@ -1272,6 +1309,7 @@ void WOLDisplaySlotList( void )
 	UpdateSlotList( game, comboBoxPlayer, comboBoxColor,
 		comboBoxPlayerTemplate, comboBoxTeam, buttonAccept, buttonStart, buttonMapStartPosition );
 	UpdateAIPersonaComboBoxes( game, comboBoxAIPersona );
+	UpdateHandicapComboBoxes( game, comboBoxHandicap, comboBoxTeam );
 	UpdateLobbySeatVisuals( game );
 
 	WOLDisplayGameOptions();
@@ -1536,6 +1574,7 @@ void InitWOLGameGadgets( void )
 		//GadgetButtonSetEnabledColor(buttonAccept[0], GameSpyColor[GSCOLOR_ACCEPT_TRUE]);
 
 	InitAIPersonaComboBoxes( parentWOLGameSetup, "GameSpyGameOptionsMenu.wnd", comboBoxAIPersona, comboBoxAIPersonaID );
+	InitHandicapComboBoxes( parentWOLGameSetup, "GameSpyGameOptionsMenu.wnd", comboBoxHandicap, comboBoxHandicapID );
 	InitLobbySeatVisuals( parentWOLGameSetup, "GameSpyGameOptionsMenu.wnd" );
 
 	// the settings page and the chat log share one rectangle; this opens on the chat log
@@ -1574,6 +1613,7 @@ void DeinitWOLGameGadgets( void )
 		comboBoxColor[i] = NULL;
 		comboBoxPlayerTemplate[i] = NULL;
 		comboBoxTeam[i] = NULL;
+		comboBoxHandicap[i] = NULL;
 		buttonAccept[i] = NULL;
 //		buttonStartPosition[i] = NULL;
 		buttonMapStartPosition[i] = NULL;
@@ -1937,7 +1977,9 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 
 		Bool isHosting = TheGameSpyInfo->amIHost(); // only while in game setup screen
 		isHosting = isHosting || (TheGameSpyGame && TheGameSpyGame->isInGame() && TheGameSpyGame->amIHost()); // while in game
-		if (!isHosting && !lastSlotlistTime && Clock_Milliseconds() > enterTime + 10000)
+		// the first slot list comes over a player-to-player connection when a route is set, and at 300 ms of
+		// ping that connection can still be coming up after ten seconds
+		if (!isHosting && !lastSlotlistTime && Clock_Milliseconds() > enterTime + (TheTransportRoute ? 30000 : 10000))
 		{
 			// don't do this if we're disconnected
 			if (TheGameSpyPeerMessageQueue->isConnected())
@@ -2649,6 +2691,14 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 										DEBUG_LOG(("Rejecting invalid team %d\n", val));
 									}
 								}
+								else if (key == "Handicap")
+								{
+									if (ApplyHandicapRequest(game, slot, val))
+									{
+										change = true;
+										shouldUnaccept = true;
+									}
+								}
 								else if (key == "IP")
 								{
 									if (uVal != slot->getIP())
@@ -2918,6 +2968,10 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
           TheGameSpyInfo->getCurrentStagingRoom()->resetAccepted();
           TheGameSpyInfo->setGameOptions();
           WOLDisplaySlotList();
+        }
+        else if ( Int handicap = HandleHandicapSelection( TheGameSpyInfo->getCurrentStagingRoom(), comboBoxHandicap, comboBoxHandicapID, (NameKeyType)controlID ) )
+        {
+          handleHandicapSelection( handicap );
         }
         else
         {

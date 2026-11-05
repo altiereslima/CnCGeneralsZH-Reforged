@@ -181,6 +181,26 @@ Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, I
 Bool IncomeSharingSplits( Int incomeSharing, Bool fromTechBuilding );
 UnsignedInt IncomeAllyShare( UnsignedInt amount, Int sharers );
 
+// A skirmish computer player banks its rung's IncomePercent (AIDifficultyProfile) of what it earns by
+// playing.  What one payment comes to in a recipient's bank at that percent, rounded down, integer
+// only so every machine banks the same.  The bonus applies only when a computer earned it and a
+// computer banks it, so a human ally's cut of a computer's income stays plain and a human's income
+// never gets it.  Refunds, script grants and transfers between allies do not come through here:
+// a bonus on a refund is a queue and cancel money loop.  The score keeper counts the plain amount.
+UnsignedInt EarnedAmount( UnsignedInt amount, Int percent );
+
+// The falling-behind bonus a skirmish computer is owed over its rung's percent, in points, with its own
+// strength against its strongest living enemy's: 0 while it holds level, rising in a line to
+// AI_INCOME_BONUS_MAX at a quarter of it and below.  Integers only.
+Int IncomeBonusTarget( Int ownStrength, Int strongestEnemyStrength );
+// The strengths that target is fed: of count living players in list order, worth[i] each and allies[i]
+// a bit for every player mutually allied with i, self's side (itself and its allies) a player at a
+// time, and the highest per-player average of the other sides, each a leader in list order and the
+// players still ungrouped who are its mutual allies.  Free-for-all, every enemy is a side of one.
+void IncomeSideWorths( const Int *worth, const UnsignedInt *allies, Int count, Int self, Int *ownAverage, Int *strongestEnemyAverage );
+// One weighing's move from the bonus it has toward that target, at most AI_INCOME_BONUS_STEP.
+Int IncomeBonusStep( Int bonus, Int target );
+
 // Pro Rules, PRO-RULES.md: what every skirmish and network match refuses whoever plays it.
 // GameLogic::isProRules() says whether a match is under them; these say what they cover, by name
 // or by type, so a test can ask them without a match.
@@ -393,12 +413,20 @@ public:
 	/// return the Player's Handicap sub-object
 	inline const Handicap *getHandicap() const { return &m_handicap; }
 	inline Handicap *getHandicap() { return &m_handicap; }
+	/// the lobby's handicap as a factor, exactly 1 for a seat without one
+	inline Real getLobbyHandicap() const { return m_handicap.getGenericHandicap( Handicap::MAXHEALTH ); }
+	/// a special power's reload in frames for this seat: the template's own at no handicap
+	UnsignedInt getSpecialPowerReloadTime( const SpecialPowerTemplate *temp ) const;
 
 	/// return the Player's Money sub-object
 	inline Money *getMoney() { return &m_money; }
 	inline const Money *getMoney() const { return &m_money; }
-	/// steady income - a supply run, a hacker's payout, a derrick's - banked and scored, and split with the allies when the lobby's income sharing covers it
-	void earnIncome( UnsignedInt amount, Bool fromTechBuilding );
+	/// steady income - a supply run, a hacker's payout, a derrick's - banked and scored, and split with the allies when the lobby's income sharing covers it.  Returns what the payment came to, all banks together
+	UnsignedInt earnIncome( UnsignedInt amount, Bool fromTechBuilding );
+	/// money made by playing that nobody shares - a capture bonus, a crate, a bounty, stolen cash - banked and scored.  Returns what it came to
+	UnsignedInt earnMoney( UnsignedInt amount );
+	/// what this player banks of what it earns by playing, in percent: its rung's IncomePercent plus its falling-behind bonus for a skirmish AI, 100 for anyone else
+	Int incomePercent( void );
 
 	UnsignedInt getSupplyBoxValue();///< Many things can affect the alue of a crate, but at heart it is a GlobalData ratio.
 
@@ -867,7 +895,7 @@ public:
 
 	Real getCashBounty() const { return m_cashBountyPercent; }
 	void setCashBounty(Real percentage) { m_cashBountyPercent = percentage; }
-	void doBountyForKill(const Object* killer, const Object* victim, Real rankShare);	///< the bounty science's share plus the killer's rank share of the victim's cost
+	void doBountyForKill(const Object* killer, const Object* victim);
 
 	AcademyStats* getAcademyStats() { return &m_academyStats; }
 	const AcademyStats* getAcademyStats() const { return &m_academyStats; }

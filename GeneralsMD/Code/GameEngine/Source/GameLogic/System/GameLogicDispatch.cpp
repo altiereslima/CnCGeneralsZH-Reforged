@@ -34,6 +34,7 @@
 
 #include "Lib/WideCharFns.h"
 
+#include "Common/ActionManager.h"
 #include "Common/CRCDebug.h"
 #include "Common/DrawnPath.h"
 #include "Common/GameAudio.h"
@@ -1265,6 +1266,60 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 
 		//---------------------------------------------------------------------------------------------
 		//
+		// Auto garrison (fork).  Each soldier looks around the spot he stands on, in group order, so
+		// the men already sent count against the seats the next one is offered.
+		//
+		case GameMessage::MSG_DO_AUTO_GARRISON:
+		{
+			if (currentlySelectedGroup == NULL)
+				break;
+
+			const VecObjectID ids = currentlySelectedGroup->getAllIDs();
+			for (VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it)
+			{
+				Object *obj = TheGameLogic->findObjectByID( *it );
+				if (!obj || obj->getControllingPlayer() != thisPlayer || !obj->isKindOf( KINDOF_INFANTRY ) || obj->isContained() || !obj->getAIUpdateInterface())
+					continue;
+
+				obj->releaseWeaponLock( LOCKED_TEMPORARILY );	// as MSG_ENTER does
+				obj->getAIUpdateInterface()->startGarrisonSearch();
+			}
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
+		//
+		// Auto repair (fork).  Each unit goes to its own nearest building that mends it; aiFindMender
+		// finds none for a unit at full health.
+		//
+		case GameMessage::MSG_DO_AUTO_REPAIR:
+		{
+			if (currentlySelectedGroup == NULL)
+				break;
+
+			const VecObjectID ids = currentlySelectedGroup->getAllIDs();
+			for (VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it)
+			{
+				Object *obj = TheGameLogic->findObjectByID( *it );
+				if (!obj || obj->getControllingPlayer() != thisPlayer || obj->isContained() || !obj->getAIUpdateInterface())
+					continue;
+
+				Object *mender = aiFindMender( thisPlayer, obj, CMD_FROM_PLAYER );
+				if (mender == NULL)
+					continue;
+
+				DEBUG_LOG(( "AUTO REPAIR: frame %d '%s' %d heads for '%s' %d\n", getFrame(), obj->getTemplate()->getName().str(),
+										obj->getID(), mender->getTemplate()->getName().str(), mender->getID() ));
+				if (TheActionManager->canGetRepairedAt( obj, mender, CMD_FROM_PLAYER ))
+					obj->getAIUpdateInterface()->aiGetRepaired( mender, CMD_FROM_PLAYER );
+				else
+					obj->getAIUpdateInterface()->aiGetHealed( mender, CMD_FROM_PLAYER );
+			}
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
+		//
 		// Formation move (fork).  The player drags a line and the selection spreads itself along
 		// it, one unit per station, which is the one thing the removed group movement work was
 		// trying to do for them and could not: where the units end up is now drawn rather than
@@ -1545,20 +1600,14 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 //			AIGroup *group = TheAI->findGroup( *selectedGroupID );
 			if( currentlySelectedGroup )
 			{
-				//Coord3D pos;
-				//Bool hasArgs = FALSE;
-				//hasArgs = (msg->getArgumentCount() > 0);
-
-				//if (hasArgs)
-				//	pos = msg->getArgument(0)->location;
-
 				currentlySelectedGroup->releaseWeaponLockForGroup(LOCKED_TEMPORARILY);	// release any temporary locks.
 
-				// evacuate message is for the selected group
-				//if (hasArgs)
-				//	currentlySelectedGroup->groupMoveToAndEvacuate( &pos, CMD_FROM_PLAYER );
-				//else
-				currentlySelectedGroup->groupEvacuate( CMD_FROM_PLAYER );
+				// evacuate message is for the selected group.  A location is where a vehicle transport's
+				// Evacuate was pointed: those drive or fly there and unload, the rest empty where they stand
+				const Bool hasSpot = msg->getArgumentCount() > 0
+					&& msg->getArgumentDataType( 0 ) == ARGUMENTDATATYPE_LOCATION;
+				const Coord3D *at = hasSpot ? &msg->getArgument( 0 )->location : NULL;
+				currentlySelectedGroup->groupEvacuate( CMD_FROM_PLAYER, at );
 
 // no, this is bad, don't do here, do when POSTING message
 //			pickAndPlayUnitVoiceResponse( TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_EVACUATE );
