@@ -121,33 +121,34 @@ def main():
         raise RuntimeError("missing postcondition: Data/Install_Final.bmp is not the edition's splash")
     checks["splash_own_size"]="PASS"
 
-    fs=(code/"GameEngine/Source/Common/System/FileSystem.cpp").read_text(encoding="utf-8")
-    need(fs,'starts("data\\\\german\\\\") || starts("data\\\\portuguesebrazil\\\\")',"Data\\PortugueseBrazil is fork-owned")
-    test=(code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8")
-    need(test,'"French/", "PortugueseBrazil/" };',"shipped-masters test keeps Data\\ in front of PortugueseBrazil")
     chat=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/InGameChat.cpp").read_text(encoding="utf-8")
     need(chat,'{ u"ajuda", AIREQ_HELP }, { u"atacar", AIREQ_ATTACK }',"Portuguese chat words for the computer allies")
-    checks["fork_owned_locale"]="PASS"
+    checks["chat_words"]="PASS"
 
-    # the plates' command bar, ControlBar Pro left out
+    # the plates' command bar under Classic Graphics, ControlBar Pro's otherwise
     bar=(code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp").read_text(encoding="utf-8")
     scheme=(code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBarScheme.cpp").read_text(encoding="utf-8")
-    need(bar,"*sx = *sy = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;","panels at one scale")
-    need(bar,'"LeftHUD", "WinUAttack", "BackgroundMarker"',"windows to panels by name")
-    if "the plates are only the tests' to measure now" in bar:
-        raise RuntimeError("missing postcondition: the plates are still switched off")
-    need(scheme,"return m_currentScheme != NULL && m_currentScheme->m_controlBarPro;","EA's schemes leave the bar to the plates")
-    if 'ControlBarProReforged.ini" ), INI_LOAD_OVERWRITE' in scheme:
-        raise RuntimeError("missing postcondition: ControlBar Pro's schemes are still read")
-    if "ControlBarProBlockInputMoney" in (code/"GameEngine/Source/GameClient/GUI/GUICallbacks/ReplayControls.cpp").read_text(encoding="utf-8"):
-        raise RuntimeError("missing postcondition: the replay strip still looks for ControlBar Pro's money pane")
+    need(bar,"return TheGlobalData == NULL || TheGlobalData->m_classicGraphics;","the bar follows ClassicGraphics")
+    need(bar,"*sx = *sy = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;","plates' panels at one scale")
+    need(bar,'"LeftHUD", "WinUAttack", "BackgroundMarker"',"windows to plates' panels by name")
+    need(bar,"if( TheControlBar != NULL && !ControlBarPTBRClassic() )","plates drawn under Classic Graphics")
+    need(scheme,"return m_currentScheme != NULL && ( !ControlBarPTBRClassic() || m_currentScheme->m_controlBarPro );","EA's schemes leave the bar to the plates")
+    need(scheme,"\tif( !ControlBarPTBRClassic() )\n\t{\n\t\tm_loadingControlBarPro = TRUE;","ControlBar Pro's schemes only without Classic Graphics")
+    replay=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/ReplayControls.cpp").read_text(encoding="utf-8")
+    need(replay,'ControlBarPTBRClassic() ? "ControlBar.wnd:MoneyDisplay"',"the replay strip measures the bar on screen")
+    script=(code/"GameEngine/Source/GameClient/GUI/GameWindowManagerScript.cpp").read_text(encoding="utf-8")
+    need(script,'"Window\\\\ModernHud\\\\%s"',"ControlBar Pro's windows from Window\\ModernHud")
     sys.path.insert(0,str(Path(__file__).parent))
     import apply_stage19
     manifest=(code/"BuildFingerprint.manifest").read_text(encoding="utf-8").split("\n")
-    left=[rel for rel in apply_stage19.CONTROL_BAR_PRO_FILES if (code/rel).exists() or rel in manifest]
+    left=[rel for rel in apply_stage19.CONTROL_BAR_PRO_WINDOWS if (code/rel).exists() or rel in manifest]
     if left:
-        raise RuntimeError("missing postcondition: ControlBar Pro still in the build: "+", ".join(left))
-    checks["plates_command_bar"]="PASS"
+        raise RuntimeError("missing postcondition: ControlBar Pro's windows still over EA's in Window: "+", ".join(left))
+    moved=[apply_stage19.MODERN_HUD_DIR+rel[len("Data/Window/"):] for rel in apply_stage19.CONTROL_BAR_PRO_WINDOWS]
+    missing=[rel for rel in moved if not (code/rel).is_file() or rel not in manifest]
+    if missing:
+        raise RuntimeError("missing postcondition: ControlBar Pro's windows not in Window/ModernHud: "+", ".join(missing))
+    checks["command_bar_follows_classic_graphics"]="PASS"
 
     need(opt,'UnicodeString versionString( u"Command & Conquer Generals Zero Hour " );',"version label names the game")
     if 'u"Reforged "' in opt:

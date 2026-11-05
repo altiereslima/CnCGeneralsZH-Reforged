@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "386cf9507a9488fe65dc1c54e7e36405ede98ad5",
+    "head_commit": "e3e1a898d0acfff4f6e7386380ab93d186cdc59b",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "13b51950053f258759ff2515f00f6c10ff67885d",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "efc3afd3c381c109b3fbb7dccdb2d9404c536316",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "22d75f2685d776e45bd1bb7f7bf9813a88a749f1",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "0d7c84128c401b843b512186926337a1acc35724",
-        "GeneralsMD/Code/Data/Patch.str": "23eafe02a2adcf292f69abfde296c7fb78bbad3d",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "b2d2367922aa5091d662cbe284558f075c22d331",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "b50ef0d8366da3a4e8303f936d533d422a25cef2",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "bbc40cb343f21ce770012685e40c2d06fa018f9f",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "6fc69f29b9f9f12e15b51e064ba800900dabb3a9",
+        "GeneralsMD/Code/Data/Patch.str": "caa3c4d368416ea5911eb3ca91755c413d173e77",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "1af8f15c265e1204b74b087bab3f9d16d9821224",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
-        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "717e59dce543150596028264a1950af357b76ed7",
-        "GeneralsMD/Code/CMakeLists.txt": "81b82b12734b931a54062b99cee8ed2f6a1a44a2",
+        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "948c75eea25195d8bae047d9709d52143f78c168",
+        "GeneralsMD/Code/CMakeLists.txt": "c6740d5811a6417bda00c53b276c7f0a9fbfaf33",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "f912431471a640658fdd8309ac9b87bf22f15b83",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "95fb1c7af4d37b4c5b6738bcd02c60d15f98bbfc",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "8df1b0f2aab9766a31245258b77e4093d0dddfa9",
     }
 }
 
@@ -145,13 +145,10 @@ def validate(repo):
         raise RuntimeError("OptionsCatalog.cpp: ShowNetBox sem a caixa de seleção CheckNetBox no menu")
     result["checks"]["net_box_anchors"] = "PASS"
 
-    # Stage 2, step 12: Data\PortugueseBrazil joins the trees a -mod never replaces.
-    from apply_stage2 import FORK_OWNED_LANGUAGES, TEST_UNDER_DATA, CHAT_REQUESTS
+    # Stage 2, step 13: the Portuguese chat words for the computer allies.
+    from apply_stage2 import CHAT_REQUESTS
     need((code/"GameEngine/Source/GameClient/GUI/GUICallbacks/InGameChat.cpp").read_text(encoding="utf-8-sig"), CHAT_REQUESTS, "InGameChat.cpp chat requests to the computer allies")
-    fs = (code/"GameEngine/Source/Common/System/FileSystem.cpp").read_text(encoding="utf-8-sig")
-    need(fs, FORK_OWNED_LANGUAGES, "FileSystem.cpp fork-owned language trees")
-    need((code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig"), TEST_UNDER_DATA, "test_gameengine shipped masters under Data")
-    result["checks"]["fork_owned_anchors"] = "PASS"
+    result["checks"]["chat_words_anchor"] = "PASS"
 
     # Stage 14: lobby AI difficulty names.
     info = (code/"GameEngine/Source/GameNetwork/GameInfo.cpp").read_text(encoding="utf-8-sig")
@@ -193,14 +190,14 @@ def validate(repo):
     need(cmake, CMAKE_SPLASH_COPY, "CMakeLists.txt copies Install_Final.bmp next to the exe")
     result["checks"]["splash_anchors"] = "PASS"
 
-    # Stage 19: the plates' command bar in place of ControlBar Pro.
+    # Stage 19: the plates' command bar under Classic Graphics, ControlBar Pro's otherwise.
     import apply_stage19
     for name, anchors in apply_stage19.ANCHORS.items():
         src = (code/apply_stage19.SOURCES[name]).read_text(encoding="utf-8-sig")
         for i, anchor in enumerate(anchors):
             need(src, anchor, f"{name} plates anchor {i + 1}")
     manifest = (code/"BuildFingerprint.manifest").read_text(encoding="utf-8").split("\n")
-    for rel in apply_stage19.CONTROL_BAR_PRO_FILES:
+    for rel in apply_stage19.CONTROL_BAR_PRO_WINDOWS:
         if not (code/rel).is_file():
             raise RuntimeError(f"{rel}: ausente, o upstream mudou o ControlBar Pro")
         need(manifest, rel, f"BuildFingerprint.manifest {rel}")
@@ -208,6 +205,10 @@ def validate(repo):
         for piece in ("Left", "Center", "Right"):
             if not (code/f"Data/Art/Textures/ReforgedBar{plate}{piece}.tga").is_file():
                 raise RuntimeError(f"ReforgedBar{plate}{piece}.tga: a placa saiu do upstream")
+    if not (code/"Data/INI/ControlBarProReforged.ini").is_file():
+        raise RuntimeError("ControlBarProReforged.ini: o upstream mudou o ControlBar Pro")
+    if '"Window\\\\%s", filename' not in (code/apply_stage19.SOURCES["GameWindowManagerScript.cpp"]).read_text(encoding="utf-8-sig"):
+        raise RuntimeError("GameWindowManagerScript.cpp: winCreateFromScript não monta mais Window\\<nome>")
     result["checks"]["plates_bar_anchors"] = "PASS"
 
     # Stage 20: the Options menu's version label names the game.

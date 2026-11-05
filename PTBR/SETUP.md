@@ -20,9 +20,11 @@ O que a edição PT-BR muda no jogo, e a chave do `Options.ini` que volta ao com
   menu continua valendo, e `-language portuguese` também escolhe;
 - visual clássico: desde a 3.0 o upstream tem uma interface só, sem páginas HTML, com o menu Esc,
   a diplomacia e o piscar de "sob ataque" da EA, e o validador confere que continua assim. A barra
-  de comando dele é a do mod ControlBar Pro; o estágio 19 a tira do build e volta às placas
-  texturizadas da 2.7 sobre as janelas da EA (`LIMPAR_CONTROLBAR_PRO.bat`, no pacote, apaga os
-  arquivos soltos que os builds 40 e 41 deixaram na pasta do jogo);
+  de comando segue os Gráficos Clássicos (estágio 19): com eles, que são o padrão desde a 3.5.1,
+  as placas texturizadas da 2.7 sobre as janelas da EA; sem eles, a barra do mod ControlBar Pro do
+  upstream, com as janelas dela em `Window\ModernHud` (`LIMPAR_CONTROLBAR_PRO.bat`, no pacote, apaga
+  as janelas do ControlBar Pro que builds antigos ou o pacote do Reforged deixaram soltas em
+  `Window`);
 - caixa do relógio e FPS escondida: a opção "Caixa de Informações" do menu (`ShowNetBox = yes`)
   mostra;
 - nomes das IAs do lobby traduzidos;

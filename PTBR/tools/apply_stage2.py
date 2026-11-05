@@ -5,15 +5,13 @@ import sys
 
 MARKER = "ReforgedPTBRLanguageInitialized"
 
-# Âncoras do upstream que o passo 12 estende; o validador confere as duas.
-FORK_OWNED_LANGUAGES = '\t\t|| starts("data\\\\turkish\\\\") || starts("data\\\\german\\\\")\n'
+# Âncora do upstream que o passo 13 estende; o validador confere.
 CHAT_REQUESTS = '\t\t{ u"money", AIREQ_MONEY }, { u"para", AIREQ_MONEY } };\n'
 LANGUAGE_ENUM = (
     "\tTEXT_LANGUAGE_ENGLISH\t= 0,\n\tTEXT_LANGUAGE_TURKISH\t= 1,\n\tTEXT_LANGUAGE_GERMAN\t= 2,\n"
     "\tTEXT_LANGUAGE_UKRAINIAN\t= 3,\n\tTEXT_LANGUAGE_RUSSIAN\t= 4,\n\tTEXT_LANGUAGE_FRENCH\t= 5,\n\n"
     "\tTEXT_LANGUAGE_COUNT\t\t= 6,\n"
 )
-TEST_UNDER_DATA = '\t\tconst char *underData[] = { "INI/", "Scripts/", "Turkish/", "German/", "Ukrainian/", "Russian/", "French/" };\n'
 
 def die(msg):
     raise SystemExit("STAGE02: " + msg)
@@ -225,15 +223,8 @@ def main():
         "/* -language <english|turkish|german|ukrainian|russian|french|portuguese>: "
     )
 
-    # 12) Data\PortugueseBrazil is the edition's, as Data\Turkish and Data\German are upstream's: a -mod
-    #     never replaces the text, the videos or the screens there. Since 3.0 a test walks Code/Data,
-    #     where stage 3 puts that tree, and fails on a file outside FileSystem::isForkOwnedPath.
-    p = code / "GameEngine" / "Source" / "Common" / "System" / "FileSystem.cpp"
-    replace_once(p, FORK_OWNED_LANGUAGES, FORK_OWNED_LANGUAGES.replace(
-        'starts("data\\\\german\\\\")',
-        'starts("data\\\\german\\\\") || starts("data\\\\portuguesebrazil\\\\")'))
-    p = code / "Tests" / "test_gameengine.cpp"
-    replace_once(p, TEST_UNDER_DATA, TEST_UNDER_DATA.replace('"French/" };', '"French/", "PortugueseBrazil/" };'))
+    # 12) Retirado na 3.7: o upstream tirou o suporte a mods, e com ele a lista de pastas que um -mod
+    #     não substituía, onde Data\PortugueseBrazil entrava.
 
     # 13) The chat words that ask the computer allies for help, an attack or money are English and
     #     Turkish upstream (help, attack, money; yardim, saldir, para); the loading tip names the

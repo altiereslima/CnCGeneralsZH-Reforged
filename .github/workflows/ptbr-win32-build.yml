@@ -170,13 +170,15 @@ jobs:
           Requires a legally owned Zero Hour installation: copy these files over a Reforged
           install, or put Zero Hour's *.big next to generals.exe and the base game's *.big
           in ZH_Generals\. Start generals.exe directly: this edition does not go through the
-          Reforged launcher. The interface is Zero Hour's own layout. Of the game's data only the PT-BR text and the Brazilian
+          Reforged launcher. Of the game's data only the PT-BR text and the Brazilian
           edition's videos and victory/defeat screens ship here. Sound and video run through the FFmpeg
           DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
           Install_Final.bmp is the edition's widescreen opening splash; it replaces the one
           next to generals.exe.
-          The command bar is the textured plates over EA's windows, not ControlBar Pro. A folder
-          that held build 40 or 41 still has ControlBar Pro's loose files, which beat EA's:
+          The command bar follows Classic Graphics (Options, the game's default): on, the textured
+          plates over EA's windows; off, Reforged's ControlBar Pro, whose windows ship in
+          Window\ModernHud. A folder that held an older build or the Reforged package may still have
+          ControlBar Pro's windows loose in Window\, which beat EA's even under Classic Graphics:
           run LIMPAR_CONTROLBAR_PRO.bat once, next to generals.exe, to remove them.
           "@ | Set-Content "$out\README_INSTALL.txt" -Encoding UTF8
           python PTBR\tools\apply_stage19.py --cleanup-bat "$out\LIMPAR_CONTROLBAR_PRO.bat"
